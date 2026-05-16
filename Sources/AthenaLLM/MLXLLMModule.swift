@@ -53,6 +53,11 @@ public actor MLXLLMModule: LLMModule {
     private let params: LLMGenerationParameters
     private let estimatedBytes: Int
     private var container: ModelContainer?
+    /// Cached structured-output vocabulary tokens (the ~150k
+    /// `tokenizer.decode` calls are model-fixed and schema-independent —
+    /// build once, reuse every structured request). Sendable, so it
+    /// crosses into the `container.perform` closure safely.
+    private var cachedVocabTokens: (tokens: [VocabToken], eos: UInt32)?
 
     public init(
         modelDirectory: URL,
@@ -157,6 +162,23 @@ public actor MLXLLMModule: LLMModule {
         let promptTokens = lmInput.text.tokens.asArray(Int.self)
         let maxTokens = params.maxTokens
 
+        // Build (or reuse) the structured vocabulary tokens once per
+        // model. The ~150k tokenizer.decode calls are the dominant
+        // structured-request cost and are schema-independent.
+        if schemaJSON != nil, cachedVocabTokens == nil {
+            let built = try await container.perform {
+                (ctx: ModelContext) -> ([VocabToken], UInt32)? in
+                guard let model = ctx.model as? AthenaQwen35Model
+                else { return nil }
+                let (t, e) = StructuredVocab.tokens(
+                    tokenizer: ctx.tokenizer,
+                    vocabSize: model.vocabularySize)
+                return (t, e)
+            }
+            if let built { cachedVocabTokens = (built.0, built.1) }
+        }
+        let vocabTokens = cachedVocabTokens
+
         return try await container.perform {
             (ctx: ModelContext) -> String? in
             guard let model = ctx.model as? AthenaQwen35Model
@@ -170,15 +192,12 @@ public actor MLXLLMModule: LLMModule {
             // (deferred enforcement, Patch 6) is tracked in
             // GoodOlClint/athena#2.
             var guide: StructuredGuide?
-            if let schemaJSON {
-                let (toks, eos) = StructuredVocab.tokens(
-                    tokenizer: ctx.tokenizer,
-                    vocabSize: model.vocabularySize)
+            if let schemaJSON, let vt = vocabTokens {
                 guide = try StructuredGuide(
                     index: StructuredIndex(
                         jsonSchema: schemaJSON,
                         vocabulary: StructuredVocabulary(
-                            tokens: toks, eosTokenId: eos)))
+                            tokens: vt.tokens, eosTokenId: vt.eos)))
             }
 
             let ids: [Int]
