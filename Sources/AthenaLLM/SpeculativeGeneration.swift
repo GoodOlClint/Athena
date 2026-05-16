@@ -81,9 +81,18 @@ enum SpeculativeGeneration {
         asyncEval(backbone)
 
         var out: [Int] = []
-        var prev = argmaxLast(logits)  // first generated (main) token
-        out.append(prev)
-        if prev == eosTokenId { return out }
+        // Emit a token unless it is EOS (non-speculative greedy stops at
+        // EOS WITHOUT surfacing it — to stay bit-identical we must not
+        // append the EOS id). Returns true when generation should stop.
+        func appendOrStop(_ t: Int) -> Bool {
+            if t == eosTokenId { return true }
+            out.append(t)
+            return out.count >= maxTokens
+        }
+
+        let prev0 = argmaxLast(logits)  // first generated (main) token
+        if appendOrStop(prev0) { return out }
+        var prev = prev0
 
         var draft = argmaxLast(
             model.mtpForward(
@@ -110,10 +119,8 @@ enum SpeculativeGeneration {
 
             if draft == verifyPred {
                 // Accept: caches already hold [confirmed, draft] (final).
-                out.append(draft)
-                if draft == eosTokenId || out.count >= maxTokens { break }
-                out.append(bonus)
-                if bonus == eosTokenId || out.count >= maxTokens { break }
+                if appendOrStop(draft) { break }
+                if appendOrStop(bonus) { break }
                 prev = bonus
                 draft = argmaxLast(
                     model.mtpForward(
@@ -124,8 +131,7 @@ enum SpeculativeGeneration {
                 // restore to the post-confirmed snapshot.
                 trimKV()
                 restoreMambaFromRollback()
-                out.append(verifyPred)
-                if verifyPred == eosTokenId { break }
+                if appendOrStop(verifyPred) { break }
                 prev = verifyPred
                 draft = argmaxLast(
                     model.mtpForward(

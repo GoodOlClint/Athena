@@ -11,12 +11,23 @@ final class AthenaModelsConfigTests: XCTestCase {
 
     func testVendoredConfigDecodesRealQwen35() throws {
         // The default checkpoint (MTP-preserving, coherent after the
-        // norm-shift fix). Skips when the external SSD isn't mounted.
-        let configURL = URL(
-            fileURLWithPath:
-                "/Volumes/SB-XTM5/mlx-models/Qwen3.5-27B-4bit-mtp/config.json")
-        guard FileManager.default.fileExists(atPath: configURL.path) else {
-            throw XCTSkip("Qwen3.5 model not present on this machine")
+        // norm-shift fix). Prefers the small local mtp model so this runs
+        // without the external SSD; falls back to the SSD 27B; else skips.
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let candidates = [
+            home.appendingPathComponent(
+                "mlx-models/Qwen3.5-2B-4bit-mtp/config.json"),
+            URL(
+                fileURLWithPath:
+                    "/Volumes/SB-XTM5/mlx-models/Qwen3.5-27B-4bit-mtp/config.json"
+            ),
+        ]
+        guard
+            let configURL = candidates.first(where: {
+                FileManager.default.fileExists(atPath: $0.path)
+            })
+        else {
+            throw XCTSkip("no Qwen3.5 mtp model present on this machine")
         }
         let data = try Data(contentsOf: configURL)
 
