@@ -140,11 +140,17 @@ public actor MLXLLMModule: LLMModule {
     /// caller falls back to the standard substrate stream. Non-streaming:
     /// one decode of the full id sequence keeps the bit-identical-greedy
     /// comparison unambiguous.
+    /// Returns the full decoded text, or nil to fall back to the
+    /// unconstrained substrate stream. A structured request (`schemaJSON`)
+    /// ALWAYS takes a guided path (greedy): the MTP speculative loop when
+    /// eligible (faster), else a plain guided-greedy loop. An
+    /// unstructured request takes the opt-in speculative path only.
     private func runSpeculative(
         prompt: String, schemaJSON: String?
     ) async throws -> String? {
-        guard params.speculativeGreedyEligible, let container
-        else { return nil }
+        guard let container else { return nil }
+        let speculativeEligible = params.speculativeGreedyEligible
+        if schemaJSON == nil && !speculativeEligible { return nil }
 
         let lmInput = try await container.prepare(
             input: UserInput(chat: [.user(prompt)]))
@@ -153,13 +159,9 @@ public actor MLXLLMModule: LLMModule {
 
         return try await container.perform {
             (ctx: ModelContext) -> String? in
-            guard let model = ctx.model as? AthenaQwen35Model,
-                model.hasMTPHead
+            guard let model = ctx.model as? AthenaQwen35Model
             else { return nil }
 
-            // Structured: compile the schema into a Guide over the
-            // model's own tokenizer vocabulary (M3.3b — speculative path
-            // only; non-spec structured is M3.3c).
             var guide: StructuredGuide?
             if let schemaJSON {
                 let (toks, eos) = StructuredVocab.tokens(
@@ -172,12 +174,21 @@ public actor MLXLLMModule: LLMModule {
                             tokens: toks, eosTokenId: eos)))
             }
 
-            let ids = SpeculativeGeneration.generate(
-                model: model,
-                promptTokens: promptTokens,
-                maxTokens: maxTokens,
-                eosTokenId: ctx.tokenizer.eosTokenId,
-                guide: guide)
+            let ids: [Int]
+            if speculativeEligible && model.hasMTPHead {
+                ids = SpeculativeGeneration.generate(
+                    model: model, promptTokens: promptTokens,
+                    maxTokens: maxTokens,
+                    eosTokenId: ctx.tokenizer.eosTokenId, guide: guide)
+            } else if guide != nil {
+                // Structured but no speculative/MTP path available.
+                ids = GuidedGreedy.generate(
+                    model: model, promptTokens: promptTokens,
+                    maxTokens: maxTokens,
+                    eosTokenId: ctx.tokenizer.eosTokenId, guide: guide)
+            } else {
+                return nil  // unstructured + no MTP ⇒ substrate fallback
+            }
             return ctx.tokenizer.decode(tokenIds: ids)
         }
     }

@@ -25,7 +25,7 @@ enum SpeculativeGeneration {
     /// Argmax of `slice` (shape (1, vocab)) under the structured Guide:
     /// add −inf to every token the Guide disallows in its current state,
     /// so the greedy pick is always schema-valid. No guide ⇒ plain argmax.
-    private static func guidedArgmax(
+    static func guidedArgmax(
         _ slice: MLXArray, vocab: Int,
         guide: StructuredGuide?, maskBuf: inout [UInt8]
     ) -> Int {
@@ -41,7 +41,7 @@ enum SpeculativeGeneration {
         return argMax(masked, axis: -1).item(Int.self)
     }
 
-    private static func tokenArray(_ id: Int) -> MLXArray {
+    static func tokenArray(_ id: Int) -> MLXArray {
         MLXArray([Int32(id)], [1, 1])
     }
 
