@@ -541,7 +541,10 @@ public class AthenaQwen35TextModelInner: Module {
         super.init()
     }
 
-    func callAsFunction(_ inputs: MLXArray, cache: [KVCache?]? = nil) -> MLXArray {
+    /// The backbone up to (but NOT including) the final norm — the
+    /// pre-norm hidden the MTP head consumes. `callAsFunction` applies
+    /// `norm` on top, so the non-speculative path is byte-unchanged.
+    func backbone(_ inputs: MLXArray, cache: [KVCache?]? = nil) -> MLXArray {
         var hiddenStates = embedTokens(inputs)
 
         var cacheArray = cache
@@ -561,7 +564,13 @@ public class AthenaQwen35TextModelInner: Module {
                 hiddenStates, attentionMask: attnMask, ssmMask: mask, cache: cacheArray?[i])
         }
 
-        return norm(hiddenStates)
+        return hiddenStates
+    }
+
+    func normalize(_ x: MLXArray) -> MLXArray { norm(x) }
+
+    func callAsFunction(_ inputs: MLXArray, cache: [KVCache?]? = nil) -> MLXArray {
+        norm(backbone(inputs, cache: cache))
     }
 }
 
@@ -601,6 +610,43 @@ public class AthenaQwen35TextModel: Module, LLMModel, KVCacheDimensionProvider {
             out = model.embedTokens.asLinear(out)
         }
         return out
+    }
+
+    // MARK: - MTP (M2.2b) — additive; not wired into generation until M2.2c.
+
+    /// True when this checkpoint carries an MTP head (gate for the
+    /// speculative path).
+    public var hasMTPHead: Bool { mtp != nil }
+
+    private func project(_ normed: MLXArray) -> MLXArray {
+        lmHead.map { $0(normed) } ?? model.embedTokens.asLinear(normed)
+    }
+
+    /// One backbone pass returning both the logits AND the pre-norm
+    /// hidden the MTP head needs (avoids a second forward).
+    public func logitsAndHidden(
+        _ inputs: MLXArray, cache: [KVCache]?
+    ) -> (logits: MLXArray, hidden: MLXArray) {
+        let hidden = model.backbone(inputs, cache: cache)
+        return (project(model.normalize(hidden)), hidden)
+    }
+
+    /// Run the MTP head: predict t+2 from the backbone pre-norm hidden at
+    /// t and the just-sampled token t+1. nil when no MTP head.
+    public func mtpForward(
+        hidden: MLXArray, nextTokenIds: MLXArray, mtpCache: [KVCache?]?
+    ) -> MLXArray? {
+        guard let mtp else { return nil }
+        return project(
+            mtp(
+                hidden, nextTokenIds: nextTokenIds,
+                embedTokens: model.embedTokens, cache: mtpCache))
+    }
+
+    /// Dedicated KV cache for the MTP attention sublayers (empty when no
+    /// MTP head).
+    public func makeMTPCache() -> [KVCache] {
+        (mtp?.layers ?? []).map { _ in KVCacheSimple() }
     }
 
     public func newCache(parameters: GenerateParameters?) -> [KVCache] {
@@ -703,6 +749,27 @@ public class AthenaQwen35Model: Module, LLMModel, KVCacheDimensionProvider {
 
     public func newCache(parameters: GenerateParameters?) -> [KVCache] {
         languageModel.newCache(parameters: parameters)
+    }
+
+    // MARK: - MTP (M2.2b) passthrough — the speculative path uses these.
+
+    public var hasMTPHead: Bool { languageModel.hasMTPHead }
+
+    public func logitsAndHidden(
+        _ inputs: MLXArray, cache: [KVCache]?
+    ) -> (logits: MLXArray, hidden: MLXArray) {
+        languageModel.logitsAndHidden(inputs, cache: cache)
+    }
+
+    public func mtpForward(
+        hidden: MLXArray, nextTokenIds: MLXArray, mtpCache: [KVCache?]?
+    ) -> MLXArray? {
+        languageModel.mtpForward(
+            hidden: hidden, nextTokenIds: nextTokenIds, mtpCache: mtpCache)
+    }
+
+    public func makeMTPCache() -> [KVCache] {
+        languageModel.makeMTPCache()
     }
 
     public func sanitize(weights: [String: MLXArray]) -> [String: MLXArray] {
