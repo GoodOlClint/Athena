@@ -60,6 +60,39 @@ public final class StructuredVocabulary {
     }
 
     deinit { oc_vocab_free(ptr) }
+
+    /// Maps a whitespace-prefixed JSON-opener token id → the bare opener
+    /// token id with the same bytes minus leading ASCII whitespace
+    /// (` {` → `{`, ` {"` → `{"`). Schema-independent — depends only on
+    /// the model vocab, so build once per model. Lets deferred
+    /// enforcement honor the model's opener when it is emitted as a
+    /// single space-prefixed token: outlines-core anchors the JSON root
+    /// at `{`/`[` with no leading whitespace, so the raw token has no
+    /// start transition and the real opener would otherwise be dropped
+    /// (issue #2). Restricted to `{`/`[` openers so the result stays
+    /// tiny and the intent is unambiguous.
+    public static func openerAliases(
+        tokens: [VocabToken]
+    ) -> [UInt32: UInt32] {
+        var byBytes: [[UInt8]: UInt32] = [:]
+        byBytes.reserveCapacity(tokens.count)
+        for t in tokens { byBytes[t.bytes] = t.id }
+        func isWS(_ b: UInt8) -> Bool {
+            b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D
+        }
+        var alias: [UInt32: UInt32] = [:]
+        for t in tokens {
+            let b = t.bytes
+            var i = 0
+            while i < b.count, isWS(b[i]) { i += 1 }
+            guard i > 0, i < b.count, b[i] == 0x7B || b[i] == 0x5B
+            else { continue }
+            if let inner = byBytes[Array(b[i...])], inner != t.id {
+                alias[t.id] = inner
+            }
+        }
+        return alias
+    }
 }
 
 /// Owned compiled DFA index (from a regex or a JSON schema).
@@ -102,6 +135,11 @@ public final class StructuredGuide {
     let ptr: OpaquePointer
     let index: StructuredIndex  // keep alive
 
+    /// Whitespace-prefixed-opener tolerance for the IDLE→ENFORCING
+    /// probe (issue #2). Set by the caller from the model vocab via
+    /// `StructuredVocabulary.openerAliases`; empty ⇒ plain advance.
+    public var openerAlias: [UInt32: UInt32] = [:]
+
     public init(index: StructuredIndex) throws {
         guard let p = oc_guide_new(index.ptr) else {
             throw StructuredError("guide new")
@@ -129,6 +167,19 @@ public final class StructuredGuide {
     @discardableResult
     public func advance(_ token: UInt32) -> Bool {
         oc_guide_advance(ptr, token)
+    }
+
+    /// Like `advance`, but if `token` has no transition AND it is a
+    /// whitespace-prefixed JSON opener, retry with the bare opener id so
+    /// the model's space-prefixed `{` is honored at the IDLE→ENFORCING
+    /// boundary instead of dropped (issue #2). A failed `advance` does
+    /// not mutate FSM state, so the fallback is safe. Only the
+    /// opener-boundary caller should use this.
+    @discardableResult
+    public func advanceOpenerTolerant(_ token: UInt32) -> Bool {
+        if advance(token) { return true }
+        if let bare = openerAlias[token] { return advance(bare) }
+        return false
     }
 
     public var isFinal: Bool { oc_guide_is_final(ptr) }

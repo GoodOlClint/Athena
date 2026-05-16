@@ -73,8 +73,11 @@ struct GuidedDecoder {
             }
             return .jsonBody
         }
-        // IDLE: the JSON opener is the first token the fresh Guide takes.
-        if guide.advance(UInt32(token)) {
+        // IDLE: the JSON opener is the first token the fresh Guide
+        // takes — tolerant of a single space-prefixed opener token
+        // (` {`), which outlines-core's `{`-anchored root would
+        // otherwise reject, dropping the real opener (issue #2).
+        if guide.advanceOpenerTolerant(UInt32(token)) {
             enforcing = true
             jsonStarted = true
             firstJSONRecorded = true

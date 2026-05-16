@@ -57,7 +57,8 @@ public actor MLXLLMModule: LLMModule {
     /// `tokenizer.decode` calls are model-fixed and schema-independent —
     /// build once, reuse every structured request). Sendable, so it
     /// crosses into the `container.perform` closure safely.
-    private var cachedVocabTokens: (tokens: [VocabToken], eos: UInt32)?
+    private var cachedVocabTokens:
+        (tokens: [VocabToken], eos: UInt32, opener: [UInt32: UInt32])?
 
     public init(
         modelDirectory: URL,
@@ -178,7 +179,11 @@ public actor MLXLLMModule: LLMModule {
                     vocabSize: model.vocabularySize)
                 return (t, e)
             }
-            if let built { cachedVocabTokens = (built.0, built.1) }
+            if let built {
+                cachedVocabTokens = (
+                    built.0, built.1,
+                    StructuredVocabulary.openerAliases(tokens: built.0))
+            }
         }
         let vocabTokens = cachedVocabTokens
 
@@ -196,11 +201,13 @@ public actor MLXLLMModule: LLMModule {
             // GoodOlClint/athena#2.
             var guide: StructuredGuide?
             if let schemaJSON, let vt = vocabTokens {
-                guide = try StructuredGuide(
+                let g = try StructuredGuide(
                     index: StructuredIndex(
                         jsonSchema: schemaJSON,
                         vocabulary: StructuredVocabulary(
                             tokens: vt.tokens, eosTokenId: vt.eos)))
+                g.openerAlias = vt.opener
+                guide = g
             }
 
             let ids: [Int]
