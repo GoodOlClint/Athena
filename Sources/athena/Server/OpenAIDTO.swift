@@ -5,9 +5,27 @@ import Foundation
 // tools route into the M3 structured-output path; all new fields are
 // optional so existing requests still decode.
 
+struct FunctionCallOut: Codable {
+    let name: String
+    let arguments: String  // JSON-encoded argument object (OpenAI shape)
+}
+
+struct ToolCallOut: Codable {
+    let id: String
+    let type: String  // "function"
+    let function: FunctionCallOut
+}
+
 struct ChatMessage: Codable {
     let role: String
-    let content: String
+    let content: String?  // null for a tool-call response
+    var tool_calls: [ToolCallOut]?
+
+    init(role: String, content: String?, tool_calls: [ToolCallOut]? = nil) {
+        self.role = role
+        self.content = content
+        self.tool_calls = tool_calls
+    }
 }
 
 struct JSONSchemaSpec: Codable {
@@ -38,13 +56,60 @@ struct ChatCompletionRequest: Codable {
     let stream: Bool?
     let response_format: ResponseFormat?
     let tools: [Tool]?
+    let tool_choice: JSONValue?
 
-    /// The schema string for the structured-output Guide, or nil for
-    /// unconstrained generation.
-    func structuredSchemaJSON() -> String? {
-        StructuredSchema.schemaJSON(
+    /// The function to constrain to: `tool_choice` forcing one, else the
+    /// sole tool. nil when no tools, "none", or multiple tools with
+    /// "auto" (free multi-tool choice is a documented follow-up).
+    private func selectedTool() -> Tool? {
+        guard let tools, !tools.isEmpty else { return nil }
+        if case .string(let s)? = tool_choice,
+            s == "none" { return nil }
+        if case .object(let o)? = tool_choice,
+            case .object(let f)? = o["function"],
+            case .string(let name)? = f["name"]
+        {
+            return tools.first { $0.function.name == name }
+        }
+        return tools.count == 1 ? tools[0] : nil
+    }
+
+    /// All declared tools, lowered to the substrate `ToolSpec` shape
+    /// (`{"type":"function","function":{name,description,parameters}}`),
+    /// for the model's chat template. ALL tools are advertised even when
+    /// the Guide constrains output to one — the model still needs the
+    /// tool-call format and the full menu. nil ⇒ no tools.
+    func toolSpecs() -> [[String: any Sendable]]? {
+        guard let tools, !tools.isEmpty else { return nil }
+        return tools.map { t in
+            var fn: [String: any Sendable] = ["name": t.function.name]
+            if let d = t.function.description { fn["description"] = d }
+            fn["parameters"] =
+                (t.function.parameters
+                    ?? .object(["type": .string("object")]))
+                .foundationValue()
+            return ["type": "function", "function": fn]
+        }
+    }
+
+    /// The constraining schema for the structured-output Guide and
+    /// whether it is a tool call (tools take precedence over
+    /// response_format). nil ⇒ unconstrained.
+    func effectiveSchema() -> (json: String, isToolCall: Bool)? {
+        if let tool = selectedTool(),
+            let s = StructuredSchema.toolCallSchema(
+                functionName: tool.function.name,
+                parameters: tool.function.parameters)
+        {
+            return (s, true)
+        }
+        if let s = StructuredSchema.schemaJSON(
             responseFormatType: response_format?.type,
             jsonSchema: response_format?.json_schema?.schema)
+        {
+            return (s, false)
+        }
+        return nil
     }
 }
 

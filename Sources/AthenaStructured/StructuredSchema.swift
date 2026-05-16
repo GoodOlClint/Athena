@@ -40,6 +40,21 @@ public indirect enum JSONValue: Codable, Sendable, Equatable {
         }
     }
 
+    /// Plain Foundation tree (`[String: any Sendable]` / `[any Sendable]`
+    /// / scalars). The substrate's Jinja chat template walks tool specs as
+    /// native containers, not `JSONValue`, so tool `parameters` must be
+    /// lowered to this before going into `UserInput(tools:)`.
+    public func foundationValue() -> any Sendable {
+        switch self {
+        case .null: return NSNull()
+        case .bool(let b): return b
+        case .number(let n): return n
+        case .string(let s): return s
+        case .array(let a): return a.map { $0.foundationValue() }
+        case .object(let o): return o.mapValues { $0.foundationValue() }
+        }
+    }
+
     /// Compact JSON string (sorted keys ⇒ deterministic).
     public func jsonString() -> String? {
         let enc = JSONEncoder()
@@ -66,5 +81,24 @@ public enum StructuredSchema {
         default:
             return nil
         }
+    }
+
+    /// Constraining schema for a Qwen-style tool call: an object
+    /// `{"name": "<fn>", "arguments": <params>}`. The `<tool_call>`
+    /// wrapper itself is handled by the decoder's IDLE pass-through;
+    /// only this inner object is enforced.
+    public static func toolCallSchema(
+        functionName: String, parameters: JSONValue?
+    ) -> String? {
+        JSONValue.object([
+            "type": .string("object"),
+            "properties": .object([
+                "name": .object(["const": .string(functionName)]),
+                "arguments": parameters
+                    ?? .object(["type": .string("object")]),
+            ]),
+            "required": .array([.string("name"), .string("arguments")]),
+            "additionalProperties": .bool(false),
+        ]).jsonString()
     }
 }

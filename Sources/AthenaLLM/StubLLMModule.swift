@@ -7,17 +7,30 @@ public protocol LLMModule: InferenceModule {
     /// Stream generated text chunks. M0 is a canned stub; M1 replaces the
     /// body with native `TokenIterator` generation.
     nonisolated func generate(prompt: String) -> AsyncStream<String>
-    /// Structured variant: `schemaJSON` (when non-nil) constrains output
-    /// to the JSON schema. Default ignores it (no structured support).
-    nonisolated func generate(prompt: String, schemaJSON: String?)
-        -> AsyncStream<String>
+    /// Structured + tool-aware variant. `schemaJSON` (when non-nil)
+    /// constrains output to the JSON schema; `tools` (OpenAI function
+    /// specs, already lowered to plain Foundation containers) are rendered
+    /// into the model's chat template so it knows the tool-call format.
+    /// Default ignores both (no structured/tool support).
+    nonisolated func generate(
+        prompt: String, schemaJSON: String?,
+        tools: [[String: any Sendable]]?
+    ) -> AsyncStream<String>
 }
 
 extension LLMModule {
     public nonisolated func generate(
-        prompt: String, schemaJSON: String?
+        prompt: String, schemaJSON: String?,
+        tools: [[String: any Sendable]]?
     ) -> AsyncStream<String> {
         generate(prompt: prompt)
+    }
+
+    /// Source-compat overload for callers that don't pass tools.
+    public nonisolated func generate(
+        prompt: String, schemaJSON: String?
+    ) -> AsyncStream<String> {
+        generate(prompt: prompt, schemaJSON: schemaJSON, tools: nil)
     }
 }
 

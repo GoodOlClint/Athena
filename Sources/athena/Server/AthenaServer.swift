@@ -72,35 +72,64 @@ struct AthenaServer {
         let model = body.model ?? "athena-stub"
         let prompt = body.messages
             .filter { $0.role == "user" }
-            .map(\.content)
+            .compactMap(\.content)
             .joined(separator: "\n")
         let created = Int(Date().timeIntervalSince1970)
         let id = "chatcmpl-\(UUID().uuidString)"
-        let schemaJSON = body.structuredSchemaJSON()
+        let effective = body.effectiveSchema()
+        let schemaJSON = effective?.json
+        let toolSpecs = body.toolSpecs()
 
         if body.stream == true {
             return Self.streamSSE(
                 id: id, model: model, created: created,
-                tokens: llm.generate(prompt: prompt, schemaJSON: schemaJSON))
+                tokens: llm.generate(
+                    prompt: prompt, schemaJSON: schemaJSON,
+                    tools: toolSpecs))
         }
 
         var text = ""
         for await chunk in llm.generate(
-            prompt: prompt, schemaJSON: schemaJSON)
+            prompt: prompt, schemaJSON: schemaJSON, tools: toolSpecs)
         {
             text += chunk
         }
+
+        // Tool call: the enforced JSON span is the {"name","arguments"}
+        // object — surface it as OpenAI tool_calls, not content.
+        let choice: ChatChoice
+        if effective?.isToolCall == true,
+            let data = text.data(using: .utf8),
+            let obj = try? JSONSerialization.jsonObject(with: data)
+                as? [String: Any],
+            let name = obj["name"] as? String
+        {
+            let args = obj["arguments"] ?? [String: Any]()
+            let argsJSON =
+                (try? JSONSerialization.data(
+                    withJSONObject: args, options: [.sortedKeys]))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+            choice = ChatChoice(
+                index: 0,
+                message: ChatMessage(
+                    role: "assistant", content: nil,
+                    tool_calls: [
+                        ToolCallOut(
+                            id: "call_\(UUID().uuidString.prefix(8))",
+                            type: "function",
+                            function: FunctionCallOut(
+                                name: name, arguments: argsJSON))
+                    ]),
+                finish_reason: "tool_calls")
+        } else {
+            choice = ChatChoice(
+                index: 0,
+                message: ChatMessage(role: "assistant", content: text),
+                finish_reason: "stop")
+        }
         let response = ChatCompletionResponse(
-            id: id,
-            object: "chat.completion",
-            created: created,
-            model: model,
-            choices: [
-                ChatChoice(
-                    index: 0,
-                    message: ChatMessage(role: "assistant", content: text),
-                    finish_reason: "stop")
-            ],
+            id: id, object: "chat.completion", created: created,
+            model: model, choices: [choice],
             usage: Usage(
                 prompt_tokens: 0, completion_tokens: 0, total_tokens: 0)
         )

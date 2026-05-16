@@ -30,6 +30,47 @@ final class StructuredSchemaTests: XCTestCase {
                 responseFormatType: nil, jsonSchema: schema))
     }
 
+    func testToolCallSchema() throws {
+        let s = try XCTUnwrap(
+            StructuredSchema.toolCallSchema(
+                functionName: "get_weather",
+                parameters: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "city": .object(["type": .string("string")])
+                    ]),
+                ])))
+        let v = try JSONDecoder().decode(JSONValue.self, from: Data(s.utf8))
+        guard case .object(let o) = v,
+            case .object(let props)? = o["properties"],
+            case .object(let nameC)? = props["name"],
+            case .string(let cnst)? = nameC["const"]
+        else { return XCTFail("unexpected shape: \(s)") }
+        XCTAssertEqual(cnst, "get_weather")
+        XCTAssertNotNil(props["arguments"])
+    }
+
+    func testFoundationValueLowersToNativeContainers() throws {
+        let v: JSONValue = .object([
+            "type": .string("object"),
+            "properties": .object([
+                "n": .object(["type": .string("integer")])
+            ]),
+            "flag": .bool(true),
+            "items": .array([.number(1), .string("x")]),
+        ])
+        guard let o = v.foundationValue() as? [String: any Sendable]
+        else { return XCTFail("root not a dict") }
+        XCTAssertEqual(o["type"] as? String, "object")
+        XCTAssertEqual(o["flag"] as? Bool, true)
+        let props = o["properties"] as? [String: any Sendable]
+        let n = props?["n"] as? [String: any Sendable]
+        XCTAssertEqual(n?["type"] as? String, "integer")
+        let items = o["items"] as? [any Sendable]
+        XCTAssertEqual(items?.count, 2)
+        XCTAssertEqual(items?[1] as? String, "x")
+    }
+
     func testCompiledSchemaGuideWalks() throws {
         // Pure end-to-end: routed schema string → Index → Guide.
         let tokens = (0..<10).map {

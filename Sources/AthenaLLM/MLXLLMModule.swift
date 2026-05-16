@@ -104,17 +104,19 @@ public actor MLXLLMModule: LLMModule {
     }
 
     public nonisolated func generate(prompt: String) -> AsyncStream<String> {
-        generate(prompt: prompt, schemaJSON: nil)
+        generate(prompt: prompt, schemaJSON: nil, tools: nil)
     }
 
     public nonisolated func generate(
-        prompt: String, schemaJSON: String?
+        prompt: String, schemaJSON: String?,
+        tools: [[String: any Sendable]]?
     ) -> AsyncStream<String> {
         AsyncStream { continuation in
             let task = Task {
                 do {
                     if let speculative = try await self.runSpeculative(
-                        prompt: prompt, schemaJSON: schemaJSON)
+                        prompt: prompt, schemaJSON: schemaJSON,
+                        tools: tools)
                     {
                         continuation.yield(speculative)
                     } else {
@@ -123,7 +125,7 @@ public actor MLXLLMModule: LLMModule {
                         // that can't take the guided speculative path
                         // falls back to unconstrained generation.
                         let stream = try await self.beginGeneration(
-                            prompt: prompt)
+                            prompt: prompt, tools: tools)
                         for await event in stream {
                             if case .chunk(let text) = event {
                                 continuation.yield(text)
@@ -151,14 +153,15 @@ public actor MLXLLMModule: LLMModule {
     /// eligible (faster), else a plain guided-greedy loop. An
     /// unstructured request takes the opt-in speculative path only.
     private func runSpeculative(
-        prompt: String, schemaJSON: String?
+        prompt: String, schemaJSON: String?,
+        tools: [[String: any Sendable]]?
     ) async throws -> String? {
         guard let container else { return nil }
         let speculativeEligible = params.speculativeGreedyEligible
         if schemaJSON == nil && !speculativeEligible { return nil }
 
         let lmInput = try await container.prepare(
-            input: UserInput(chat: [.user(prompt)]))
+            input: UserInput(chat: [.user(prompt)], tools: tools))
         let promptTokens = lmInput.text.tokens.asArray(Int.self)
         let maxTokens = params.maxTokens
 
@@ -220,13 +223,13 @@ public actor MLXLLMModule: LLMModule {
     }
 
     private func beginGeneration(
-        prompt: String
+        prompt: String, tools: [[String: any Sendable]]?
     ) async throws -> AsyncStream<Generation> {
         guard let container else {
             throw AthenaError.moduleLoadFailed(
                 .llm, reason: "generate called before load")
         }
-        let userInput = UserInput(chat: [.user(prompt)])
+        let userInput = UserInput(chat: [.user(prompt)], tools: tools)
         let lmInput = try await container.prepare(input: userInput)
         let gp = GenerateParameters(
             maxTokens: params.maxTokens,
