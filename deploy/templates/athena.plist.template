@@ -22,6 +22,8 @@
     <string>--port</string>
     <string>@LISTEN_PORT@</string>
     <!--BUDGET--><string>--budget-bytes</string><string>@BUDGET_VALUE@</string>
+    <!--ENGINE--><string>--engine</string><string>@ENGINE_VALUE@</string>
+    <!--MODEL--><string>--model</string><string>@MODEL_VALUE@</string>
   </array>
 
   <key>UserName</key>

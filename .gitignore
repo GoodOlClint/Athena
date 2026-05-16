@@ -15,3 +15,9 @@ rust-shim/Cargo.lock
 
 # Editor/IDE
 .vscode/
+
+# Test coverage artifact
+default.profraw
+
+# Claude/agent local settings
+.claude/

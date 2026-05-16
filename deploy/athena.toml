@@ -11,4 +11,13 @@ listen_port = 7447
 # 75% of physical unified memory.
 # budget_bytes = 36000000000
 
+# LLM engine: "mlx" (real Qwen3.5 from the model store) or "stub"
+# (no model — health/dev only).
+engine = "mlx"
+
+# Model directory path, or a name resolved under the model store root on
+# the external SSD. Leave commented to use the built-in default
+# (Qwen3.5-27B-4bit-mtp, MTP weights preserved).
+# model = "Qwen3.5-27B-4bit-mtp"
+
 log_dir = "/usr/local/var/log/athena"

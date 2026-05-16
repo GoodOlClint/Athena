@@ -53,14 +53,27 @@ LISTEN_HOST="$(toml_get listen_host)"
 LISTEN_PORT="$(toml_get listen_port)"
 LOG_DIR="$(toml_get log_dir)"
 BUDGET_BYTES="$(toml_get budget_bytes)"
+ENGINE="$(toml_get engine)"
+MODEL="$(toml_get model)"
 
 [[ -n "$LISTEN_HOST" && -n "$LISTEN_PORT" && -n "$LOG_DIR" ]] || {
   echo "error: $CFG missing listen_host/listen_port/log_dir" >&2; exit 1; }
 
-# --- build (release; CLT swift is sufficient for the executable) -------
-echo "==> building athena (release)"
-swift build -c release
-BIN_SRC="$REPO_ROOT/.build/release/athena"
+# --- build (release) --------------------------------------------------
+# IMPORTANT: MLX's Metal shaders are NOT built by `swift build` (a
+# documented mlx-swift limitation) — a swift-built binary loads but aborts
+# at first inference with "Failed to load the default metallib". The build
+# MUST go through xcodebuild, which compiles the Metal shaders. Requires a
+# full Xcode (Command Line Tools alone lacks the `metal` compiler).
+echo "==> building athena (release, xcodebuild — compiles Metal shaders)"
+command -v xcodebuild >/dev/null || {
+  echo "error: xcodebuild not found — a full Xcode install is required " \
+       "(Command Line Tools cannot build MLX Metal shaders)" >&2; exit 1; }
+DERIVED="$REPO_ROOT/.build/xcode"
+xcodebuild -scheme athena -configuration Release \
+  -destination 'platform=macOS' -derivedDataPath "$DERIVED" \
+  -skipMacroValidation -skipPackagePluginValidation build
+BIN_SRC="$DERIVED/Build/Products/Release/athena"
 [[ -x "$BIN_SRC" ]] || { echo "error: build produced no binary" >&2; exit 1; }
 
 # --- install binary, config, dirs -------------------------------------
@@ -74,20 +87,28 @@ install -d -o "$SERVICE_USER" -m 0755 /usr/local/var/athena
 install -d -o "$SERVICE_USER" -m 0755 "$LOG_DIR"
 
 # --- render the launchd plist -----------------------------------------
-# The budget arg lives on one sentinel-tagged line: substitute its value and
-# strip the sentinel when a budget is configured, else delete the line so the
-# binary falls back to its 75%-of-RAM default. Pure sed — no multi-line awk.
-if [[ -n "$BUDGET_BYTES" ]]; then
-  BUDGET_SED=(-e "s#@BUDGET_VALUE@#${BUDGET_BYTES}#g" -e "s#<!--BUDGET-->##g")
-else
-  BUDGET_SED=(-e "/<!--BUDGET-->/d")
-fi
+# Each optional arg lives on one sentinel-tagged line: substitute its value
+# and strip the sentinel when configured, else delete the whole line. Pure
+# sed — no multi-line awk. budget → 75%-RAM default; engine → "mlx";
+# model → built-in default model.
+opt_sed() {  # $1=sentinel token, $2=@VALUE@ token, $3=value
+  if [[ -n "$3" ]]; then
+    printf -- '-e\ns#%s#%s#g\n-e\ns#<!--%s-->##g\n' "$2" "$3" "$1"
+  else
+    printf -- '-e\n/<!--%s-->/d\n' "$1"
+  fi
+}
+OPT_SED=()
+while IFS= read -r a; do [[ -n "$a" ]] && OPT_SED+=("$a"); done < <(
+  opt_sed BUDGET @BUDGET_VALUE@ "$BUDGET_BYTES"
+  opt_sed ENGINE @ENGINE_VALUE@ "$ENGINE"
+  opt_sed MODEL  @MODEL_VALUE@  "$MODEL")
 
 PLIST="/Library/LaunchDaemons/${LABEL}.plist"
 TMP_PLIST="$(mktemp)"
 trap 'rm -f "$TMP_PLIST"' EXIT
 
-sed "${BUDGET_SED[@]}" \
+sed "${OPT_SED[@]}" \
   -e "s#@ATHENA_BIN@#/usr/local/bin/athena#g" \
   -e "s#@ATHENA_USER@#${SERVICE_USER}#g" \
   -e "s#@LISTEN_HOST@#${LISTEN_HOST}#g" \
