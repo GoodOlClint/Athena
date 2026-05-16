@@ -19,7 +19,6 @@ enum GuidedGreedy {
         guide: StructuredGuide?
     ) -> [Int] {
         let vocab = model.vocabularySize
-        var maskBuf = [UInt8]()
         let backbone = model.newCache(parameters: nil)
 
         // Prefill all but the last prompt token.
@@ -41,23 +40,26 @@ enum GuidedGreedy {
         asyncEval(backbone)
 
         var out: [Int] = []
+        var decoder = GuidedDecoder(guide: guide, vocab: vocab)
+        var jsonStart: Int?
         func commit(_ t: Int) -> Bool {
             if t == eosTokenId { return true }
             out.append(t)
-            guide?.advance(UInt32(t))
+            if decoder.commit(t) { jsonStart = out.count - 1 }
             return out.count >= maxTokens
+        }
+        func result() -> [Int] {
+            guide == nil ? out : Array(out[(jsonStart ?? out.count)...])
         }
 
         while out.count < maxTokens {
-            let t = SpeculativeGeneration.guidedArgmax(
-                logits[0..., -1, 0...], vocab: vocab, guide: guide,
-                maskBuf: &maskBuf)
+            let t = decoder.pick(logits[0..., -1, 0...])
             if commit(t) { break }
             (logits, _) = model.logitsAndHidden(
                 SpeculativeGeneration.tokenArray(t), cache: backbone)
             asyncEval(backbone)
             if out.count % 256 == 0 { MLX.Memory.clearCache() }
         }
-        return out
+        return result()
     }
 }

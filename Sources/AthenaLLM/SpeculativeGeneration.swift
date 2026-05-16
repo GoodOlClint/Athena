@@ -56,7 +56,6 @@ enum SpeculativeGeneration {
         guide: StructuredGuide? = nil
     ) -> [Int] {
         let vocab = model.vocabularySize
-        var maskBuf = [UInt8]()
         let backbone = model.newCache(parameters: nil)
         let mtpCacheArr = model.makeMTPCache()
         let mtpCache: [KVCache?] = mtpCacheArr.map { $0 }
@@ -99,25 +98,29 @@ enum SpeculativeGeneration {
         asyncEval(backbone)
 
         var out: [Int] = []
-        // Commit a token: stop (no append/advance) at EOS — non-spec
-        // greedy stops at EOS without surfacing it. The structured Guide
-        // only ever advances over COMMITTED tokens, so its state is
-        // monotonic and needs NO rollback: mlx-lm's
-        // _RollbackingLogitsProcessor exists only because a LogitProcessor
-        // can't control commits — this hand-rolled loop can, so the
-        // named no-rejection-callback risk is avoided here by construction.
+        // Deferred-enforcement phase machine (IDLE→ENFORCING). The Guide
+        // only ever advances over COMMITTED tokens and never un-commits,
+        // so its state is monotonic — NO rollback (mlx-lm's
+        // _RollbackingLogitsProcessor exists only because a
+        // LogitProcessor can't control commits; this loop can).
+        var decoder = GuidedDecoder(guide: guide, vocab: vocab)
+        // Index in `out` where the enforced JSON span begins (the
+        // unconstrained <think>/tool prefix before it is dropped from
+        // the structured response). nil ⇒ never started.
+        var jsonStart: Int?
         func commit(_ t: Int) -> Bool {
             if t == eosTokenId { return true }
             out.append(t)
-            guide?.advance(UInt32(t))
+            if decoder.commit(t) { jsonStart = out.count - 1 }
             return out.count >= maxTokens
         }
+        func result() -> [Int] {
+            guide == nil ? out : Array(out[(jsonStart ?? out.count)...])
+        }
 
-        // First (main) token — Guide-masked greedy.
-        let prev0 = guidedArgmax(
-            logits[0..., -1, 0...], vocab: vocab, guide: guide,
-            maskBuf: &maskBuf)
-        if commit(prev0) { return out }
+        // First token — IDLE plain argmax until JSON starts.
+        let prev0 = decoder.pick(logits[0..., -1, 0...])
+        if commit(prev0) { return result() }
         var prev = prev0
 
         // MTP drafts are NOT masked; a guide-invalid draft simply fails
@@ -138,9 +141,7 @@ enum SpeculativeGeneration {
             let (logits2, hidden2) = model.logitsAndHidden(
                 inp, cache: backbone, nConfirmed: 1, rollback: rollback)
             // verifyPred under the Guide state BEFORE this step's commits.
-            let verifyPred = guidedArgmax(
-                logits2[0..., 0, 0...], vocab: vocab, guide: guide,
-                maskBuf: &maskBuf)
+            let verifyPred = decoder.pick(logits2[0..., 0, 0...])
             let hiddenC = hidden2[0..., 0 ..< 1, 0...]
             let hiddenD = hidden2[0..., 1 ..< 2, 0...]
             asyncEval(backbone)
@@ -148,9 +149,7 @@ enum SpeculativeGeneration {
             if draft == verifyPred {
                 if commit(draft) { break }  // advances the Guide
                 // bonus under the Guide state AFTER committing draft.
-                let bonus = guidedArgmax(
-                    logits2[0..., 1, 0...], vocab: vocab, guide: guide,
-                    maskBuf: &maskBuf)
+                let bonus = decoder.pick(logits2[0..., 1, 0...])
                 if commit(bonus) { break }
                 prev = bonus
                 draft = argmaxLast(
@@ -172,6 +171,6 @@ enum SpeculativeGeneration {
 
             if out.count % 256 == 0 { MLX.Memory.clearCache() }
         }
-        return out
+        return result()
     }
 }
