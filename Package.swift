@@ -125,12 +125,18 @@ let package = Package(
                 "AthenaCore",
                 "AthenaDeploy",
                 "AthenaLLM",
+                "AthenaStructured",
                 "AthenaTranscription",
                 "AthenaEmbedding",
                 .product(name: "Hummingbird", package: "hummingbird"),
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ],
-            path: "Sources/athena"),
+            path: "Sources/athena",
+            linkerSettings: [
+                .unsafeFlags([
+                    "-L\(Context.packageDirectory)/rust-shim/target/release"
+                ])
+            ]),
 
         .testTarget(
             name: "AthenaCoreTests",

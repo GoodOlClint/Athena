@@ -1,17 +1,51 @@
+import AthenaStructured
 import Foundation
 
-// Minimal OpenAI-compatible DTOs for `/v1/chat/completions`. Only the fields
-// the M0 path needs; widened as later milestones add tools / json_schema.
+// OpenAI-compatible DTOs for `/v1/chat/completions`. response_format /
+// tools route into the M3 structured-output path; all new fields are
+// optional so existing requests still decode.
 
 struct ChatMessage: Codable {
     let role: String
     let content: String
 }
 
+struct JSONSchemaSpec: Codable {
+    let name: String?
+    let schema: JSONValue?
+    let strict: Bool?
+}
+
+struct ResponseFormat: Codable {
+    let type: String  // "text" | "json_object" | "json_schema"
+    let json_schema: JSONSchemaSpec?
+}
+
+struct FunctionDef: Codable {
+    let name: String
+    let description: String?
+    let parameters: JSONValue?
+}
+
+struct Tool: Codable {
+    let type: String
+    let function: FunctionDef
+}
+
 struct ChatCompletionRequest: Codable {
     let model: String?
     let messages: [ChatMessage]
     let stream: Bool?
+    let response_format: ResponseFormat?
+    let tools: [Tool]?
+
+    /// The schema string for the structured-output Guide, or nil for
+    /// unconstrained generation.
+    func structuredSchemaJSON() -> String? {
+        StructuredSchema.schemaJSON(
+            responseFormatType: response_format?.type,
+            jsonSchema: response_format?.json_schema?.schema)
+    }
 }
 
 struct ChatChoice: Codable {
