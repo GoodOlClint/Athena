@@ -45,6 +45,13 @@ let package = Package(
             name: "AthenaCore",
             path: "Sources/AthenaCore"),
 
+        // Deploy logic, pure and testable: flat-TOML config parsing,
+        // launchd plist generation, and install planning. The `athena
+        // install` command is a thin imperative shell over this.
+        .target(
+            name: "AthenaDeploy",
+            path: "Sources/AthenaDeploy"),
+
         // Inference modules. M0 ships governed stubs that conform to the
         // module protocol and reserve/release real budget; the MLX-backed
         // implementations land in M1 (llm), M4 (transcription/embedding).
@@ -74,6 +81,7 @@ let package = Package(
             name: "athena",
             dependencies: [
                 "AthenaCore",
+                "AthenaDeploy",
                 "AthenaLLM",
                 "AthenaTranscription",
                 "AthenaEmbedding",
@@ -85,8 +93,8 @@ let package = Package(
         .testTarget(
             name: "AthenaCoreTests",
             dependencies: [
-                "AthenaCore", "AthenaLLM", "AthenaTranscription",
-                "AthenaEmbedding",
+                "AthenaCore", "AthenaDeploy", "AthenaLLM",
+                "AthenaTranscription", "AthenaEmbedding",
             ],
             path: "Tests/AthenaCoreTests"),
     ]
