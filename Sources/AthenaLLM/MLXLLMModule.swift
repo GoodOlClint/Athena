@@ -1,4 +1,5 @@
 import AthenaCore
+import AthenaModels
 import Foundation
 import HuggingFace
 import MLXHuggingFace
@@ -12,11 +13,19 @@ public struct LLMGenerationParameters: Sendable {
     public var maxTokens: Int
     public var temperature: Float
     public var topP: Float
+    /// Opt-in MTP speculative decoding. Greedy-only: takes effect only
+    /// when temperature == 0 AND the model has an MTP head; otherwise the
+    /// standard path is used (temp>0 speculative is the M2.3 named risk).
+    public var speculative: Bool
 
-    public init(maxTokens: Int = 1024, temperature: Float = 0.7, topP: Float = 0.95) {
+    public init(
+        maxTokens: Int = 1024, temperature: Float = 0.7,
+        topP: Float = 0.95, speculative: Bool = false
+    ) {
         self.maxTokens = maxTokens
         self.temperature = temperature
         self.topP = topP
+        self.speculative = speculative
     }
 }
 
@@ -83,10 +92,17 @@ public actor MLXLLMModule: LLMModule {
         AsyncStream { continuation in
             let task = Task {
                 do {
-                    let stream = try await self.beginGeneration(prompt: prompt)
-                    for await event in stream {
-                        if case .chunk(let text) = event {
-                            continuation.yield(text)
+                    if let speculative = try await self.runSpeculative(
+                        prompt: prompt)
+                    {
+                        continuation.yield(speculative)
+                    } else {
+                        let stream = try await self.beginGeneration(
+                            prompt: prompt)
+                        for await event in stream {
+                            if case .chunk(let text) = event {
+                                continuation.yield(text)
+                            }
                         }
                     }
                 } catch {
@@ -96,6 +112,35 @@ public actor MLXLLMModule: LLMModule {
                 continuation.finish()
             }
             continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    /// MTP greedy speculative path. Returns the full decoded text, or nil
+    /// when not eligible (speculative off, temp>0, or no MTP head) so the
+    /// caller falls back to the standard substrate stream. Non-streaming:
+    /// one decode of the full id sequence keeps the bit-identical-greedy
+    /// comparison unambiguous.
+    private func runSpeculative(prompt: String) async throws -> String? {
+        guard params.speculative, params.temperature == 0,
+            let container
+        else { return nil }
+
+        let lmInput = try await container.prepare(
+            input: UserInput(chat: [.user(prompt)]))
+        let promptTokens = lmInput.text.tokens.asArray(Int.self)
+        let maxTokens = params.maxTokens
+
+        return try await container.perform {
+            (ctx: ModelContext) -> String? in
+            guard let model = ctx.model as? AthenaQwen35Model,
+                model.hasMTPHead
+            else { return nil }
+            let ids = SpeculativeGeneration.generate(
+                model: model,
+                promptTokens: promptTokens,
+                maxTokens: maxTokens,
+                eosTokenId: ctx.tokenizer.eosTokenId)
+            return ctx.tokenizer.decode(tokenIds: ids)
         }
     }
 

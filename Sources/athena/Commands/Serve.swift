@@ -35,6 +35,9 @@ struct Serve: AsyncParsableCommand {
     @Option(help: "Max generated tokens.")
     var maxTokens: Int = 1024
 
+    @Flag(help: "Enable MTP speculative decoding (greedy/temp 0 only).")
+    var speculative = false
+
     @Option(help: "Model directory path, or a name under the model store.")
     var model: String?
 
@@ -67,7 +70,8 @@ struct Serve: AsyncParsableCommand {
                 modelDirectory: modelURL,
                 parameters: .init(
                     maxTokens: maxTokens,
-                    temperature: Float(temperature ?? 0.7)))
+                    temperature: Float(temperature ?? 0.7),
+                    speculative: speculative))
         }
         await governor.register(llm, evictable: false)
         await governor.register(StubTranscriptionModule(), evictable: true)
