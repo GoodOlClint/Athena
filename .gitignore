@@ -1,0 +1,17 @@
+.DS_Store
+.build/
+.swiftpm/
+*.xcodeproj
+*.xcframework
+# Package.resolved IS committed — Athena is a deployed appliance; pinned
+# dependency versions make launchd installs reproducible.
+
+# Rust structured-output shim (wired in M3)
+rust-shim/target/
+rust-shim/Cargo.lock
+
+# Athena local model store / config (never committed; lives in a well-known dir)
+.athena/
+
+# Editor/IDE
+.vscode/

@@ -1,0 +1,12 @@
+# Athena daemon configuration (example — copy to deploy/athena.toml).
+#
+# Flat scalar schema only — no tables/arrays.
+
+listen_host = "127.0.0.1"
+listen_port = 7447
+
+# Global memory budget in bytes. Leave commented to let Athena default to
+# 75% of physical unified memory.
+# budget_bytes = 36000000000
+
+log_dir = "/usr/local/var/log/athena"

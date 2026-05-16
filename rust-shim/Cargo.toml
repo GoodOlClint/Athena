@@ -1,0 +1,23 @@
+# Athena structured-output shim (wired in M3, not built by M0).
+#
+# A thin `staticlib` over `outlines-core`, exposing over `extern "C"`:
+#   - vocabulary build
+#   - Index compile from json_schema / regex / choice
+#   - a Guide walker (port of outlines-core's ~150-line PyO3 walker:
+#     advance / rollback_state / get_allowed_rollback / accepts_tokens,
+#     32-entry rollback ring) — NO PyO3, NO regex->DFA reimplementation.
+#
+# Built as a cross-compiled xcframework consumed by a future
+# `CStructuredShim` SwiftPM system-library target. Bitmask kernels are
+# reimplemented in Swift/MLX, not here.
+[package]
+name = "athena-structured-shim"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+# outlines-core = "..."  # pinned in M3; the shim tracks its releases

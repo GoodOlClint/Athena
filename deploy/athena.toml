@@ -1,0 +1,14 @@
+# Athena daemon configuration.
+#
+# Read by deploy/athena-install.sh and rendered into the launchd plist.
+# Flat scalar schema only — no tables/arrays — so the installer can parse it
+# with sed and stay dependency-free on a fresh Mac.
+
+listen_host = "127.0.0.1"
+listen_port = 7447
+
+# Global memory budget in bytes. Leave commented to let Athena default to
+# 75% of physical unified memory.
+# budget_bytes = 36000000000
+
+log_dir = "/usr/local/var/log/athena"
