@@ -10,9 +10,13 @@ public struct ModelStore: Sendable {
     public static let defaultRoot = URL(
         fileURLWithPath: "/Volumes/SB-XTM5/mlx-models", isDirectory: true)
 
-    /// Default green-field LLM: 4-bit Qwen3.5-27B with `mtp.*` preserved
-    /// (M1 generation today, M2 speculative decoding without re-pull).
-    public static let defaultModelName = "Qwen3.5-27B-4bit-mtp"
+    /// Default LLM: the substrate-vetted `mlx-community/Qwen3.5-2B-4bit`.
+    /// Known-good (validated coherent at greedy). The local `*-mtp`
+    /// conversions all emit garbage — a broken converter, not Athena
+    /// (proven by a byte-identical substrate-vs-vendored A/B). M2
+    /// speculative decoding needs `mtp.*`, so it stays gated on a fixed
+    /// mtp checkpoint; this default keeps `athena serve` correct today.
+    public static let defaultModelName = "Qwen3.5-2B-4bit"
 
     public let rootDirectory: URL
 

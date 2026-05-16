@@ -10,9 +10,11 @@ import XCTest
 final class AthenaModelsConfigTests: XCTestCase {
 
     func testVendoredConfigDecodesRealQwen35() throws {
+        // The known-good default checkpoint (substrate-vetted, validated
+        // coherent). Skips when the external SSD isn't mounted.
         let configURL = URL(
             fileURLWithPath:
-                "/Volumes/SB-XTM5/mlx-models/Qwen3.5-27B-4bit-mtp/config.json")
+                "/Volumes/SB-XTM5/mlx-models/Qwen3.5-2B-4bit/config.json")
         guard FileManager.default.fileExists(atPath: configURL.path) else {
             throw XCTSkip("Qwen3.5 model not present on this machine")
         }
