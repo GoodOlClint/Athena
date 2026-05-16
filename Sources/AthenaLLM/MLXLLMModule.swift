@@ -162,6 +162,13 @@ public actor MLXLLMModule: LLMModule {
             guard let model = ctx.model as? AthenaQwen35Model
             else { return nil }
 
+            // Structured ⇒ NO-THINK by construction: the Guide masks
+            // from token 0, so the schema is enforced immediately and
+            // the model's <think>…</think> is suppressed (matches
+            // the consuming application's enable_thinking=False production config).
+            // Schema-enforced output that ALSO permits a thinking prefix
+            // (deferred enforcement, Patch 6) is tracked in
+            // GoodOlClint/athena#2.
             var guide: StructuredGuide?
             if let schemaJSON {
                 let (toks, eos) = StructuredVocab.tokens(
