@@ -8,7 +8,8 @@
 
 # Rust structured-output shim (wired in M3)
 rust-shim/target/
-rust-shim/Cargo.lock
+# rust-shim/Cargo.lock IS committed — Athena is a deployed appliance;
+# pinned Rust deps make the structured-output shim build reproducible.
 
 # Athena local model store / config (never committed; lives in a well-known dir)
 .athena/

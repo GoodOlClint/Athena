@@ -51,6 +51,26 @@ let package = Package(
             name: "AthenaCore",
             path: "Sources/AthenaCore"),
 
+        // C ABI of the Rust outlines-core structured-output staticlib.
+        // The module map links `athena_structured_shim`; the search path
+        // (-L rust-shim/target/release) is supplied by AthenaStructured's
+        // linkerSettings. Build the lib first: rust-shim/build.sh.
+        .systemLibrary(
+            name: "CAthenaStructured",
+            path: "Sources/CAthenaStructured"),
+
+        // Safe Swift surface over the structured-output shim (M3.2+);
+        // M3.1 is the FFI bring-up only.
+        .target(
+            name: "AthenaStructured",
+            dependencies: ["CAthenaStructured"],
+            path: "Sources/AthenaStructured",
+            linkerSettings: [
+                .unsafeFlags([
+                    "-L\(Context.packageDirectory)/rust-shim/target/release"
+                ])
+            ]),
+
         // Deploy logic, pure and testable: flat-TOML config parsing,
         // launchd plist generation, and install planning. The `athena
         // install` command is a thin imperative shell over this.
@@ -116,8 +136,13 @@ let package = Package(
             name: "AthenaCoreTests",
             dependencies: [
                 "AthenaCore", "AthenaDeploy", "AthenaLLM", "AthenaModels",
-                "AthenaTranscription", "AthenaEmbedding",
+                "AthenaStructured", "AthenaTranscription", "AthenaEmbedding",
             ],
-            path: "Tests/AthenaCoreTests"),
+            path: "Tests/AthenaCoreTests",
+            linkerSettings: [
+                .unsafeFlags([
+                    "-L\(Context.packageDirectory)/rust-shim/target/release"
+                ])
+            ]),
     ]
 )

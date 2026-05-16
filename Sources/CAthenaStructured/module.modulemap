@@ -1,0 +1,5 @@
+module CAthenaStructured {
+    header "../../rust-shim/include/athena_structured.h"
+    link "athena_structured_shim"
+    export *
+}
