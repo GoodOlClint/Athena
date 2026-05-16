@@ -589,11 +589,19 @@ public class AthenaQwen35TextModel: Module, LLMModel, KVCacheDimensionProvider {
     }
 
     public func sanitize(weights: [String: MLXArray]) -> [String: MLXArray] {
-        let hasMTPWeights = weights.keys.contains { $0.contains("mtp.") }
+        // Qwen3.5 uses (1 + weight) RMSNorm. The +1 is applied once, at
+        // convert-time, gated ONLY on raw-HF conv1d layout. The
+        // GoodOlClint/mlx-lm mtp fork deliberately dropped the
+        // `has_mtp_weights` term: an already-converted MLX checkpoint that
+        // *contains* mtp.* weights must NOT be shifted again. Stock
+        // mlx-swift-lm kept that term, so it double-shifts fork mtp
+        // checkpoints to (2 + w) on every layer norm → garbage. We match
+        // the fork's convention. Deliberate, non-obvious divergence from
+        // the substrate — this is precisely why Athena owns this model.
         let hasUnsanitizedConv1d = weights.contains { key, value in
             key.contains("conv1d.weight") && value.dim(-1) != 1
         }
-        let shouldShiftNormWeights = hasMTPWeights || hasUnsanitizedConv1d
+        let shouldShiftNormWeights = hasUnsanitizedConv1d
 
         var weights = weights.filter { !$0.key.contains("mtp.") }
 

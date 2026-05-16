@@ -9,7 +9,8 @@ final class ModelStoreTests: XCTestCase {
 
     func testDefaultResolvesToExternalSSDModel() {
         let url = ModelStore().resolve(nil)
-        XCTAssertEqual(url.path, "/Volumes/SB-XTM5/mlx-models/Qwen3.5-2B-4bit")
+        XCTAssertEqual(
+            url.path, "/Volumes/SB-XTM5/mlx-models/Qwen3.5-27B-4bit-mtp")
     }
 
     func testEmptyStringResolvesToDefault() {
