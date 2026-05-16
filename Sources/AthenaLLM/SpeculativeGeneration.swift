@@ -1,4 +1,5 @@
 import AthenaModels
+import AthenaStructured
 import Foundation
 import MLX
 import MLXLMCommon
@@ -21,9 +22,23 @@ enum SpeculativeGeneration {
         return argMax(last, axis: -1).item(Int.self)
     }
 
-    private static func argmaxAt(_ logits: MLXArray, _ pos: Int) -> Int {
-        // logits: (1, S, vocab) → position `pos` → argmax token id.
-        argMax(logits[0..., pos, 0...], axis: -1).item(Int.self)
+    /// Argmax of `slice` (shape (1, vocab)) under the structured Guide:
+    /// add −inf to every token the Guide disallows in its current state,
+    /// so the greedy pick is always schema-valid. No guide ⇒ plain argmax.
+    private static func guidedArgmax(
+        _ slice: MLXArray, vocab: Int,
+        guide: StructuredGuide?, maskBuf: inout [UInt8]
+    ) -> Int {
+        guard let guide else {
+            return argMax(slice, axis: -1).item(Int.self)
+        }
+        _ = guide.allowedMask(into: &maskBuf)
+        var add = [Float](repeating: -.infinity, count: vocab)
+        for i in 0..<vocab where (maskBuf[i >> 3] >> UInt8(i & 7)) & 1 == 1 {
+            add[i] = 0
+        }
+        let masked = slice + MLXArray(add)
+        return argMax(masked, axis: -1).item(Int.self)
     }
 
     private static func tokenArray(_ id: Int) -> MLXArray {
@@ -37,8 +52,11 @@ enum SpeculativeGeneration {
         model: AthenaQwen35Model,
         promptTokens: [Int],
         maxTokens: Int,
-        eosTokenId: Int?
+        eosTokenId: Int?,
+        guide: StructuredGuide? = nil
     ) -> [Int] {
+        let vocab = model.vocabularySize
+        var maskBuf = [UInt8]()
         let backbone = model.newCache(parameters: nil)
         let mtpCacheArr = model.makeMTPCache()
         let mtpCache: [KVCache?] = mtpCacheArr.map { $0 }
@@ -81,46 +99,59 @@ enum SpeculativeGeneration {
         asyncEval(backbone)
 
         var out: [Int] = []
-        // Emit a token unless it is EOS (non-speculative greedy stops at
-        // EOS WITHOUT surfacing it — to stay bit-identical we must not
-        // append the EOS id). Returns true when generation should stop.
-        func appendOrStop(_ t: Int) -> Bool {
+        // Commit a token: stop (no append/advance) at EOS — non-spec
+        // greedy stops at EOS without surfacing it. The structured Guide
+        // only ever advances over COMMITTED tokens, so its state is
+        // monotonic and needs NO rollback: mlx-lm's
+        // _RollbackingLogitsProcessor exists only because a LogitProcessor
+        // can't control commits — this hand-rolled loop can, so the
+        // named no-rejection-callback risk is avoided here by construction.
+        func commit(_ t: Int) -> Bool {
             if t == eosTokenId { return true }
             out.append(t)
+            guide?.advance(UInt32(t))
             return out.count >= maxTokens
         }
 
-        let prev0 = argmaxLast(logits)  // first generated (main) token
-        if appendOrStop(prev0) { return out }
+        // First (main) token — Guide-masked greedy.
+        let prev0 = guidedArgmax(
+            logits[0..., -1, 0...], vocab: vocab, guide: guide,
+            maskBuf: &maskBuf)
+        if commit(prev0) { return out }
         var prev = prev0
 
+        // MTP drafts are NOT masked; a guide-invalid draft simply fails
+        // the masked verify and is rejected.
         var draft = argmaxLast(
             model.mtpForward(
                 hidden: hidden, nextTokenIds: tokenArray(prev),
                 mtpCache: mtpCache) ?? logits)
 
         // --- Greedy draft/verify/accept (single-pass verify) ---------
-        // ONE backbone forward over [confirmed, draft] with nConfirmed=1:
-        // attention/MLP run once over both positions (the speedup); the
-        // GDN layers internally split + stash the post-confirmed state.
-        // pos0 logits = prediction after the confirmed token
-        // (== non-spec's next token); pos1 logits = prediction after the
-        // draft (the bonus). Bit-identical to non-spec greedy by the
-        // cached-decode state-carry invariant.
+        // ONE backbone forward over [confirmed, draft] with nConfirmed=1;
+        // pos0 = prediction after the confirmed token, pos1 = after the
+        // draft. Each committed pick is Guide-masked, so the emitted
+        // sequence is exactly Guide-masked greedy (speculation only
+        // accelerates it).
         while out.count < maxTokens {
             let inp = MLXArray([Int32(prev), Int32(draft)], [1, 2])
             let (logits2, hidden2) = model.logitsAndHidden(
                 inp, cache: backbone, nConfirmed: 1, rollback: rollback)
-            let verifyPred = argmaxAt(logits2, 0)
-            let bonus = argmaxAt(logits2, 1)
+            // verifyPred under the Guide state BEFORE this step's commits.
+            let verifyPred = guidedArgmax(
+                logits2[0..., 0, 0...], vocab: vocab, guide: guide,
+                maskBuf: &maskBuf)
             let hiddenC = hidden2[0..., 0 ..< 1, 0...]
             let hiddenD = hidden2[0..., 1 ..< 2, 0...]
             asyncEval(backbone)
 
             if draft == verifyPred {
-                // Accept: caches already hold [confirmed, draft] (final).
-                if appendOrStop(draft) { break }
-                if appendOrStop(bonus) { break }
+                if commit(draft) { break }  // advances the Guide
+                // bonus under the Guide state AFTER committing draft.
+                let bonus = guidedArgmax(
+                    logits2[0..., 1, 0...], vocab: vocab, guide: guide,
+                    maskBuf: &maskBuf)
+                if commit(bonus) { break }
                 prev = bonus
                 draft = argmaxLast(
                     model.mtpForward(
@@ -131,7 +162,7 @@ enum SpeculativeGeneration {
                 // restore to the post-confirmed snapshot.
                 trimKV()
                 restoreMambaFromRollback()
-                if appendOrStop(verifyPred) { break }
+                if commit(verifyPred) { break }
                 prev = verifyPred
                 draft = argmaxLast(
                     model.mtpForward(

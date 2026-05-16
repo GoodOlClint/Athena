@@ -7,6 +7,18 @@ public protocol LLMModule: InferenceModule {
     /// Stream generated text chunks. M0 is a canned stub; M1 replaces the
     /// body with native `TokenIterator` generation.
     nonisolated func generate(prompt: String) -> AsyncStream<String>
+    /// Structured variant: `schemaJSON` (when non-nil) constrains output
+    /// to the JSON schema. Default ignores it (no structured support).
+    nonisolated func generate(prompt: String, schemaJSON: String?)
+        -> AsyncStream<String>
+}
+
+extension LLMModule {
+    public nonisolated func generate(
+        prompt: String, schemaJSON: String?
+    ) -> AsyncStream<String> {
+        generate(prompt: prompt)
+    }
 }
 
 /// M0 governed stub. It holds no model — it exists to prove the thesis path

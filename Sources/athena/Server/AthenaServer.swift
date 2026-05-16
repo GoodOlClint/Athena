@@ -76,15 +76,20 @@ struct AthenaServer {
             .joined(separator: "\n")
         let created = Int(Date().timeIntervalSince1970)
         let id = "chatcmpl-\(UUID().uuidString)"
+        let schemaJSON = body.structuredSchemaJSON()
 
         if body.stream == true {
             return Self.streamSSE(
                 id: id, model: model, created: created,
-                tokens: llm.generate(prompt: prompt))
+                tokens: llm.generate(prompt: prompt, schemaJSON: schemaJSON))
         }
 
         var text = ""
-        for await chunk in llm.generate(prompt: prompt) { text += chunk }
+        for await chunk in llm.generate(
+            prompt: prompt, schemaJSON: schemaJSON)
+        {
+            text += chunk
+        }
         let response = ChatCompletionResponse(
             id: id,
             object: "chat.completion",

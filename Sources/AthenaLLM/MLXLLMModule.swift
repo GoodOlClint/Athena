@@ -1,5 +1,6 @@
 import AthenaCore
 import AthenaModels
+import AthenaStructured
 import Foundation
 import HuggingFace
 import MLXHuggingFace
@@ -98,14 +99,24 @@ public actor MLXLLMModule: LLMModule {
     }
 
     public nonisolated func generate(prompt: String) -> AsyncStream<String> {
+        generate(prompt: prompt, schemaJSON: nil)
+    }
+
+    public nonisolated func generate(
+        prompt: String, schemaJSON: String?
+    ) -> AsyncStream<String> {
         AsyncStream { continuation in
             let task = Task {
                 do {
                     if let speculative = try await self.runSpeculative(
-                        prompt: prompt)
+                        prompt: prompt, schemaJSON: schemaJSON)
                     {
                         continuation.yield(speculative)
                     } else {
+                        // No structured constraint on the non-speculative
+                        // substrate path yet (M3.3c); a schema request
+                        // that can't take the guided speculative path
+                        // falls back to unconstrained generation.
                         let stream = try await self.beginGeneration(
                             prompt: prompt)
                         for await event in stream {
@@ -129,7 +140,9 @@ public actor MLXLLMModule: LLMModule {
     /// caller falls back to the standard substrate stream. Non-streaming:
     /// one decode of the full id sequence keeps the bit-identical-greedy
     /// comparison unambiguous.
-    private func runSpeculative(prompt: String) async throws -> String? {
+    private func runSpeculative(
+        prompt: String, schemaJSON: String?
+    ) async throws -> String? {
         guard params.speculativeGreedyEligible, let container
         else { return nil }
 
@@ -143,11 +156,28 @@ public actor MLXLLMModule: LLMModule {
             guard let model = ctx.model as? AthenaQwen35Model,
                 model.hasMTPHead
             else { return nil }
+
+            // Structured: compile the schema into a Guide over the
+            // model's own tokenizer vocabulary (M3.3b — speculative path
+            // only; non-spec structured is M3.3c).
+            var guide: StructuredGuide?
+            if let schemaJSON {
+                let (toks, eos) = StructuredVocab.tokens(
+                    tokenizer: ctx.tokenizer,
+                    vocabSize: model.vocabularySize)
+                guide = try StructuredGuide(
+                    index: StructuredIndex(
+                        jsonSchema: schemaJSON,
+                        vocabulary: StructuredVocabulary(
+                            tokens: toks, eosTokenId: eos)))
+            }
+
             let ids = SpeculativeGeneration.generate(
                 model: model,
                 promptTokens: promptTokens,
                 maxTokens: maxTokens,
-                eosTokenId: ctx.tokenizer.eosTokenId)
+                eosTokenId: ctx.tokenizer.eosTokenId,
+                guide: guide)
             return ctx.tokenizer.decode(tokenIds: ids)
         }
     }
