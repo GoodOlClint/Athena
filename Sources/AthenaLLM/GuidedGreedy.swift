@@ -40,12 +40,22 @@ enum GuidedGreedy {
         asyncEval(backbone)
 
         var out: [Int] = []
-        var decoder = GuidedDecoder(guide: guide, vocab: vocab)
+        var decoder = GuidedDecoder(
+            guide: guide, vocab: vocab,
+            idleBudget: max(8, maxTokens / 2))
         var jsonStart: Int?
         func commit(_ t: Int) -> Bool {
-            if t == eosTokenId { return true }
+            if t == eosTokenId {
+                if guide != nil, !decoder.enforcing {
+                    decoder.forceEnforce()
+                    return false
+                }
+                return true
+            }
             out.append(t)
-            if decoder.commit(t) { jsonStart = out.count - 1 }
+            if case .jsonStart = decoder.commit(t) {
+                jsonStart = out.count - 1
+            }
             return out.count >= maxTokens
         }
         func result() -> [Int] {

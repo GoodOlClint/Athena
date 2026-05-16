@@ -2,33 +2,44 @@ import AthenaStructured
 import Foundation
 import MLX
 
-/// Deferred structured enforcement (operator-chosen "phase flag in our
-/// loop"; resolves issue #2 and underpins tool-aware Patch 4).
+/// Deferred structured enforcement with an idle budget (operator
+/// decisions: "phase flag in our loop" + "idle budget then force").
 ///
 /// IDLE: the model generates unconstrained (it may emit a
-/// `<think>…</think>` or `<tool_call>` prefix); tokens are picked by
-/// plain argmax and NOT fed to the Guide. The shim's `advance` only
-/// mutates the Guide when the token is a valid transition, so each
-/// committed token is probed: the first token that the fresh Guide
-/// accepts (the JSON value's opener) flips us to ENFORCING.
-/// ENFORCING: picks are Guide-masked and every committed token advances
-/// the Guide (monotonic — still no rollback, the named risk stays
-/// avoided by construction).
+/// `<think>…</think>` / tool preamble); each committed token probes the
+/// Guide via the shim's `advance` (which only mutates on a valid
+/// transition). The first token the Guide accepts — the JSON value's
+/// opener — flips to ENFORCING. To guarantee non-empty schema-valid
+/// output even when the model never voluntarily emits JSON (terse
+/// prompt / small model / EOS in IDLE), enforcement is FORCED once
+/// `idleBudget` non-JSON tokens have passed (or on `forceEnforce()`,
+/// called by the loop when the model tries to stop in IDLE).
 ///
-/// `jsonStarted` lets the caller return ONLY the enforced JSON span as
-/// the response content (the unconstrained prefix is dropped, so
-/// `response_format` output stays spec-compliant even with thinking).
-/// No guide ⇒ fully unconstrained passthrough (unstructured path).
+/// ENFORCING: picks are Guide-masked and every commit advances the
+/// Guide (monotonic — still no rollback). The structured response is the
+/// JSON span only (`.jsonStart` onward); the IDLE prefix is dropped, so
+/// `response_format` stays spec-compliant even with a thinking prefix.
+enum CommitResult {
+    case unconstrained  // no guide — keep everything
+    case idlePrefix  // pre-JSON, dropped from the structured response
+    case jsonStart  // first enforced token (JSON span begins here)
+    case jsonBody  // subsequent enforced token
+}
+
 struct GuidedDecoder {
     let guide: StructuredGuide?
     let vocab: Int
+    let idleBudget: Int
     private(set) var enforcing: Bool
     private(set) var jsonStarted = false
+    private var firstJSONRecorded = false
+    private var idleCount = 0
     private var maskBuf: [UInt8] = []
 
-    init(guide: StructuredGuide?, vocab: Int) {
+    init(guide: StructuredGuide?, vocab: Int, idleBudget: Int) {
         self.guide = guide
         self.vocab = vocab
+        self.idleBudget = max(1, idleBudget)
         self.enforcing = false
     }
 
@@ -41,22 +52,39 @@ struct GuidedDecoder {
         return argMax(slice, axis: -1).item(Int.self)
     }
 
-    /// Record a committed token; advance the Guide / flip the phase.
-    /// Returns true iff this token started the enforced JSON span.
-    @discardableResult
-    mutating func commit(_ token: Int) -> Bool {
-        guard let guide else { return false }
+    /// Force ENFORCING without consuming a token — called by the loop
+    /// when the model emits EOS while still in IDLE (so we constrain
+    /// rather than return empty).
+    mutating func forceEnforce() {
+        if guide != nil, !enforcing {
+            enforcing = true
+            jsonStarted = true
+        }
+    }
+
+    /// Record a committed token; advance the Guide / drive the phase.
+    mutating func commit(_ token: Int) -> CommitResult {
+        guard let guide else { return .unconstrained }
         if enforcing {
             _ = guide.advance(UInt32(token))
-            return false
+            if !firstJSONRecorded {
+                firstJSONRecorded = true
+                return .jsonStart
+            }
+            return .jsonBody
         }
-        // IDLE: `advance` returns true (and consumes) only for a valid
-        // JSON-start transition; false leaves the Guide untouched.
+        // IDLE: the JSON opener is the first token the fresh Guide takes.
         if guide.advance(UInt32(token)) {
             enforcing = true
             jsonStarted = true
-            return true
+            firstJSONRecorded = true
+            return .jsonStart
         }
-        return false
+        idleCount += 1
+        if idleCount >= idleBudget {
+            enforcing = true  // force: next pick is Guide-masked
+            jsonStarted = true
+        }
+        return .idlePrefix
     }
 }

@@ -103,15 +103,27 @@ enum SpeculativeGeneration {
         // so its state is monotonic — NO rollback (mlx-lm's
         // _RollbackingLogitsProcessor exists only because a
         // LogitProcessor can't control commits; this loop can).
-        var decoder = GuidedDecoder(guide: guide, vocab: vocab)
+        var decoder = GuidedDecoder(
+            guide: guide, vocab: vocab,
+            idleBudget: max(8, maxTokens / 2))
         // Index in `out` where the enforced JSON span begins (the
         // unconstrained <think>/tool prefix before it is dropped from
         // the structured response). nil ⇒ never started.
         var jsonStart: Int?
         func commit(_ t: Int) -> Bool {
-            if t == eosTokenId { return true }
+            if t == eosTokenId {
+                // Model tried to stop in IDLE: force enforcement instead
+                // of returning empty (don't append/stop on the EOS).
+                if guide != nil, !decoder.enforcing {
+                    decoder.forceEnforce()
+                    return false
+                }
+                return true
+            }
             out.append(t)
-            if decoder.commit(t) { jsonStart = out.count - 1 }
+            if case .jsonStart = decoder.commit(t) {
+                jsonStart = out.count - 1
+            }
             return out.count >= maxTokens
         }
         func result() -> [Int] {
