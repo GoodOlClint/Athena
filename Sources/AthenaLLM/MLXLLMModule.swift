@@ -57,6 +57,9 @@ public actor MLXLLMModule: LLMModule {
         if ProcessInfo.processInfo.environment[
             "ATHENA_DISABLE_VENDORED_MODEL"] != "1"
         {
+            // Tell the registry which checkpoint is about to load so it
+            // can suppress the MTP head when the weights lack mtp.*.
+            AthenaModelRegistration.currentModelDirectory = modelDirectory
             await AthenaModelRegistration.install()
         }
         guard

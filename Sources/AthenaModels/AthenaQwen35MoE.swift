@@ -34,6 +34,14 @@ public struct AthenaQwen35Configuration: Codable, Sendable {
             self.textConfig = try AthenaQwen35TextConfiguration(from: decoder)
         }
     }
+
+    /// A copy with the MTP head disabled (see
+    /// `AthenaQwen35TextConfiguration.withMTPDisabled`).
+    public func withMTPDisabled() -> AthenaQwen35Configuration {
+        var copy = self
+        copy.textConfig = copy.textConfig.withMTPDisabled()
+        return copy
+    }
 }
 
 public class AthenaQwen35MoEModel: AthenaQwen35Model {

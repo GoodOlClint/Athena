@@ -29,6 +29,15 @@ final class AthenaModelsConfigTests: XCTestCase {
         XCTAssertGreaterThan(cfg.textConfig.vocabularySize, 0)
         // qwen3_5 is the hybrid GDN model: full-attention every N layers.
         XCTAssertGreaterThan(cfg.textConfig.fullAttentionInterval, 0)
+        // The -mtp checkpoint declares an MTP head (M2.2a opt-in gate).
+        XCTAssertGreaterThan(cfg.textConfig.mtpNumHiddenLayers, 0)
+    }
+
+    func testInlineConfigMtpDefaultsToZero() throws {
+        let json = #"{"model_type":"qwen3_5","hidden_size":2048}"#
+        let cfg = try JSONDecoder().decode(
+            AthenaQwen35Configuration.self, from: Data(json.utf8))
+        XCTAssertEqual(cfg.textConfig.mtpNumHiddenLayers, 0)
     }
 
     func testInlineTextConfigDefaultsApply() throws {

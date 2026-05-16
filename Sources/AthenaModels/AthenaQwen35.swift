@@ -50,6 +50,9 @@ public struct AthenaQwen35TextConfiguration: Codable, Sendable {
     var moeIntermediateSize: Int = 0
     var normTopkProb: Bool = true
 
+    // MTP (multi-token-prediction) speculative-decoding head. 0 ⇒ absent.
+    var mtpNumHiddenLayers: Int = 0
+
     enum CodingKeys: String, CodingKey {
         case modelType = "model_type"
         case hiddenSize = "hidden_size"
@@ -78,6 +81,7 @@ public struct AthenaQwen35TextConfiguration: Codable, Sendable {
         case sharedExpertIntermediateSize = "shared_expert_intermediate_size"
         case moeIntermediateSize = "moe_intermediate_size"
         case normTopkProb = "norm_topk_prob"
+        case mtpNumHiddenLayers = "mtp_num_hidden_layers"
     }
 
     public init(from decoder: Decoder) throws {
@@ -130,6 +134,8 @@ public struct AthenaQwen35TextConfiguration: Codable, Sendable {
         self.moeIntermediateSize =
             try container.decodeIfPresent(Int.self, forKey: .moeIntermediateSize) ?? 0
         self.normTopkProb = try container.decodeIfPresent(Bool.self, forKey: .normTopkProb) ?? true
+        self.mtpNumHiddenLayers =
+            try container.decodeIfPresent(Int.self, forKey: .mtpNumHiddenLayers) ?? 0
 
         let ropeContainer = try decoder.container(keyedBy: RopeParametersCodingKey.self)
         let ropeParameters = try ropeContainer.decodeIfPresent(
@@ -156,6 +162,16 @@ public struct AthenaQwen35TextConfiguration: Codable, Sendable {
         if self.headDim == nil {
             self.headDim = self.hiddenSize / self.attentionHeads
         }
+    }
+
+    /// A copy with the MTP head disabled. `mtp_num_hidden_layers` is an
+    /// architectural constant present even in stock checkpoints that ship
+    /// no `mtp.*` weights; the registry uses this to suppress the head
+    /// when the checkpoint lacks those tensors.
+    public func withMTPDisabled() -> AthenaQwen35TextConfiguration {
+        var copy = self
+        copy.mtpNumHiddenLayers = 0
+        return copy
     }
 }
 
@@ -558,6 +574,11 @@ public class AthenaQwen35TextModel: Module, LLMModel, KVCacheDimensionProvider {
 
     @ModuleInfo(key: "lm_head") var lmHead: Linear?
 
+    /// Optional MTP speculative-decoding head; present only when the
+    /// checkpoint declares `mtp_num_hidden_layers > 0`. Loaded in M2.2a;
+    /// wired into generation in M2.2c.
+    @ModuleInfo(key: "mtp") var mtp: AthenaQwen35MTPModule?
+
     public init(_ args: AthenaQwen35TextConfiguration) {
         self.configuration = args
         self.vocabularySize = args.vocabularySize
@@ -566,6 +587,9 @@ public class AthenaQwen35TextModel: Module, LLMModel, KVCacheDimensionProvider {
 
         if !args.tieWordEmbeddings {
             _lmHead.wrappedValue = Linear(args.hiddenSize, args.vocabularySize, bias: false)
+        }
+        if args.mtpNumHiddenLayers > 0 {
+            _mtp.wrappedValue = AthenaQwen35MTPModule(args)
         }
     }
 
@@ -603,18 +627,35 @@ public class AthenaQwen35TextModel: Module, LLMModel, KVCacheDimensionProvider {
         }
         let shouldShiftNormWeights = hasUnsanitizedConv1d
 
-        var weights = weights.filter { !$0.key.contains("mtp.") }
+        // MTP presence is checkpoint-driven: the registry suppresses the
+        // head (config `mtp_num_hidden_layers` is an architectural
+        // constant present even in stock checkpoints with no mtp.*
+        // weights). So `mtp == nil` reliably means a non-mtp checkpoint —
+        // just drop any stray mtp.* in that case (mlx-swift forbids
+        // mutating the module tree here, hence the gate lives at
+        // construction, not in sanitize).
+        var weights = weights
+        if mtp == nil {
+            weights = weights.filter { !$0.key.contains("mtp.") }
+        }
 
         if configuration.tieWordEmbeddings {
             weights["lm_head.weight"] = nil
         }
 
+        // The fork adds 3 MTP-specific norm suffixes to the +1-shift set
+        // (qwen3_5.py:489–492) alongside the generic backbone norms; the
+        // MTP attention sublayer norms are covered by the generic
+        // .q_norm/.k_norm/.input_layernorm/.post_attention_layernorm.
         let normKeys = [
             ".input_layernorm.weight",
             ".post_attention_layernorm.weight",
             "model.norm.weight",
             ".q_norm.weight",
             ".k_norm.weight",
+            ".pre_fc_norm_hidden.weight",
+            ".pre_fc_norm_embedding.weight",
+            "mtp.norm.weight",
         ]
 
         for k in Array(weights.keys) {
