@@ -177,6 +177,16 @@ public struct AthenaQwen35TextConfiguration: Codable, Sendable {
 
 // MARK: - GatedDeltaNet
 
+/// Side channel for MTP single-pass verify (MambaCache is `public` but not
+/// `open`, so it can't be subclassed). During an `nConfirmed` split the
+/// GatedDeltaNet layers stash their post-confirmed (conv, ssm) state here,
+/// keyed by cache-object identity; the speculative loop restores from it on
+/// draft rejection. nil ⇒ no MTP path is active (zero overhead/effect).
+public final class GDNRollback: @unchecked Sendable {
+    public var states: [ObjectIdentifier: [MLXArray]] = [:]
+    public init() {}
+}
+
 final class AthenaQwen35GatedDeltaNet: Module {
     let hiddenSize: Int
     let numVHeads: Int
@@ -245,10 +255,36 @@ final class AthenaQwen35GatedDeltaNet: Module {
     func callAsFunction(
         _ inputs: MLXArray,
         mask: MLXArray? = nil,
-        cache: MambaCache? = nil
+        cache: MambaCache? = nil,
+        nConfirmed: Int = 0,
+        rollback: GDNRollback? = nil
     ) -> MLXArray {
         let B = inputs.dim(0)
         let S = inputs.dim(1)
+
+        // MTP single-pass verify: process the confirmed prefix, snapshot
+        // the post-confirmed recurrent state, then the draft suffix —
+        // carrying conv+ssm state through the existing per-chunk path.
+        // Sub-chunking with carried state is mathematically identical to
+        // one chunk (the cached-decode invariant), so output stays
+        // bit-identical; this just exposes the intermediate state for
+        // rollback on draft rejection. Default nConfirmed == 0 ⇒ the
+        // original single-chunk path, byte-unchanged for every other
+        // caller.
+        if let cache, nConfirmed > 0, nConfirmed < S {
+            let pre = inputs[0..., 0 ..< nConfirmed, 0...]
+            let suf = inputs[0..., nConfirmed ..< S, 0...]
+            let mPre = mask.map { $0[0..., 0 ..< nConfirmed] }
+            let mSuf = mask.map { $0[0..., nConfirmed ..< S] }
+            let outPre = callAsFunction(pre, mask: mPre, cache: cache)
+            if let rollback, let c0 = cache[0], let c1 = cache[1] {
+                rollback.states[ObjectIdentifier(cache)] = [
+                    c0[.ellipsis], c1[.ellipsis],
+                ]
+            }
+            let outSuf = callAsFunction(suf, mask: mSuf, cache: cache)
+            return concatenated([outPre, outSuf], axis: 1)
+        }
 
         var qkv = inProjQKV(inputs)
         let z = inProjZ(inputs).reshaped(B, S, numVHeads, headVDim)
@@ -496,12 +532,19 @@ final class AthenaQwen35DecoderLayer: Module {
         _ x: MLXArray,
         attentionMask: MLXFast.ScaledDotProductAttentionMaskMode,
         ssmMask: MLXArray?,
-        cache: KVCache?
+        cache: KVCache?,
+        nConfirmed: Int = 0,
+        rollback: GDNRollback? = nil
     ) -> MLXArray {
         let r: MLXArray
         if isLinear {
-            r = linearAttn!(inputLayerNorm(x), mask: ssmMask, cache: cache as? MambaCache)
+            r = linearAttn!(
+                inputLayerNorm(x), mask: ssmMask,
+                cache: cache as? MambaCache, nConfirmed: nConfirmed,
+                rollback: rollback)
         } else {
+            // Attention runs once over the whole [confirmed|draft] chunk
+            // (the speedup); KV reject is a trim(1) in the loop.
             r = selfAttn!(inputLayerNorm(x), mask: attentionMask, cache: cache)
         }
 
@@ -544,7 +587,10 @@ public class AthenaQwen35TextModelInner: Module {
     /// The backbone up to (but NOT including) the final norm — the
     /// pre-norm hidden the MTP head consumes. `callAsFunction` applies
     /// `norm` on top, so the non-speculative path is byte-unchanged.
-    func backbone(_ inputs: MLXArray, cache: [KVCache?]? = nil) -> MLXArray {
+    func backbone(
+        _ inputs: MLXArray, cache: [KVCache?]? = nil, nConfirmed: Int = 0,
+        rollback: GDNRollback? = nil
+    ) -> MLXArray {
         var hiddenStates = embedTokens(inputs)
 
         var cacheArray = cache
@@ -561,7 +607,9 @@ public class AthenaQwen35TextModelInner: Module {
                 layer.isLinear
                 ? MLXFast.ScaledDotProductAttentionMaskMode.none : faMask
             hiddenStates = layer(
-                hiddenStates, attentionMask: attnMask, ssmMask: mask, cache: cacheArray?[i])
+                hiddenStates, attentionMask: attnMask, ssmMask: mask,
+                cache: cacheArray?[i], nConfirmed: nConfirmed,
+                rollback: rollback)
         }
 
         return hiddenStates
@@ -625,9 +673,12 @@ public class AthenaQwen35TextModel: Module, LLMModel, KVCacheDimensionProvider {
     /// One backbone pass returning both the logits AND the pre-norm
     /// hidden the MTP head needs (avoids a second forward).
     public func logitsAndHidden(
-        _ inputs: MLXArray, cache: [KVCache]?
+        _ inputs: MLXArray, cache: [KVCache]?, nConfirmed: Int = 0,
+        rollback: GDNRollback? = nil
     ) -> (logits: MLXArray, hidden: MLXArray) {
-        let hidden = model.backbone(inputs, cache: cache)
+        let hidden = model.backbone(
+            inputs, cache: cache, nConfirmed: nConfirmed,
+            rollback: rollback)
         return (project(model.normalize(hidden)), hidden)
     }
 
@@ -756,9 +807,12 @@ public class AthenaQwen35Model: Module, LLMModel, KVCacheDimensionProvider {
     public var hasMTPHead: Bool { languageModel.hasMTPHead }
 
     public func logitsAndHidden(
-        _ inputs: MLXArray, cache: [KVCache]?
+        _ inputs: MLXArray, cache: [KVCache]?, nConfirmed: Int = 0,
+        rollback: GDNRollback? = nil
     ) -> (logits: MLXArray, hidden: MLXArray) {
-        languageModel.logitsAndHidden(inputs, cache: cache)
+        languageModel.logitsAndHidden(
+            inputs, cache: cache, nConfirmed: nConfirmed,
+            rollback: rollback)
     }
 
     public func mtpForward(

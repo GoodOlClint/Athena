@@ -21,6 +21,11 @@ enum SpeculativeGeneration {
         return argMax(last, axis: -1).item(Int.self)
     }
 
+    private static func argmaxAt(_ logits: MLXArray, _ pos: Int) -> Int {
+        // logits: (1, S, vocab) → position `pos` → argmax token id.
+        argMax(logits[0..., pos, 0...], axis: -1).item(Int.self)
+    }
+
     private static func tokenArray(_ id: Int) -> MLXArray {
         MLXArray([Int32(id)], [1, 1])
     }
@@ -38,28 +43,22 @@ enum SpeculativeGeneration {
         let mtpCacheArr = model.makeMTPCache()
         let mtpCache: [KVCache?] = mtpCacheArr.map { $0 }
 
-        // Mamba (GatedDeltaNet) layers need snapshot/restore on reject;
-        // KVCacheSimple layers are trimmable. Record indices once.
-        let mambaIdx = backbone.enumerated().compactMap {
-            $0.element is MambaCache ? $0.offset : nil
-        }
-
-        func snapshotMamba() -> [Int: MambaCache] {
-            var s: [Int: MambaCache] = [:]
-            for i in mambaIdx {
-                s[i] = (backbone[i].copy() as! MambaCache)
-            }
-            return s
-        }
-        func restoreMamba(_ snap: [Int: MambaCache]) {
-            for (i, m) in snap {
-                let live = backbone[i] as! MambaCache
-                live.state = m.state.map { $0[.ellipsis] }
-                live.offset = m.offset
-            }
-        }
+        // Reject undoes the single 2-token verify: KVCacheSimple
+        // (attention) layers trim the draft position; GatedDelta/Mamba
+        // layers restore the post-confirmed recurrent state the GDN
+        // n_confirmed split stashed on AthenaMambaCache.rollbackState.
+        let rollback = GDNRollback()
         func trimKV() {
             for c in backbone where c.isTrimmable { _ = c.trim(1) }
+        }
+        func restoreMambaFromRollback() {
+            for c in backbone {
+                if let mc = c as? MambaCache,
+                    let rb = rollback.states[ObjectIdentifier(mc)]
+                {
+                    mc.state = rb.map { $0[.ellipsis] }
+                }
+            }
         }
 
         // --- Prefill --------------------------------------------------
@@ -91,22 +90,26 @@ enum SpeculativeGeneration {
                 hidden: hidden, nextTokenIds: tokenArray(prev),
                 mtpCache: mtpCache) ?? logits)
 
-        // --- Greedy draft/verify/accept ------------------------------
+        // --- Greedy draft/verify/accept (single-pass verify) ---------
+        // ONE backbone forward over [confirmed, draft] with nConfirmed=1:
+        // attention/MLP run once over both positions (the speedup); the
+        // GDN layers internally split + stash the post-confirmed state.
+        // pos0 logits = prediction after the confirmed token
+        // (== non-spec's next token); pos1 logits = prediction after the
+        // draft (the bonus). Bit-identical to non-spec greedy by the
+        // cached-decode state-carry invariant.
         while out.count < maxTokens {
-            // 1. Confirmed forward (the token we already committed).
-            let (logitsC, hiddenC) = model.logitsAndHidden(
-                tokenArray(prev), cache: backbone)
-            let verifyPred = argmaxLast(logitsC)
-
-            // 2. Snapshot post-confirmed recurrent state, then draft.
-            let snap = snapshotMamba()
-            let (logitsD, hiddenD) = model.logitsAndHidden(
-                tokenArray(draft), cache: backbone)
-            let bonus = argmaxLast(logitsD)
+            let inp = MLXArray([Int32(prev), Int32(draft)], [1, 2])
+            let (logits2, hidden2) = model.logitsAndHidden(
+                inp, cache: backbone, nConfirmed: 1, rollback: rollback)
+            let verifyPred = argmaxAt(logits2, 0)
+            let bonus = argmaxAt(logits2, 1)
+            let hiddenC = hidden2[0..., 0 ..< 1, 0...]
+            let hiddenD = hidden2[0..., 1 ..< 2, 0...]
             asyncEval(backbone)
 
             if draft == verifyPred {
-                // Accept: draft is exactly non-spec's next token.
+                // Accept: caches already hold [confirmed, draft] (final).
                 out.append(draft)
                 if draft == eosTokenId || out.count >= maxTokens { break }
                 out.append(bonus)
@@ -115,18 +118,19 @@ enum SpeculativeGeneration {
                 draft = argmaxLast(
                     model.mtpForward(
                         hidden: hiddenD, nextTokenIds: tokenArray(bonus),
-                        mtpCache: mtpCache) ?? logitsD)
+                        mtpCache: mtpCache) ?? logits2)
             } else {
-                // Reject: undo the draft forward, emit the true token.
+                // Reject: drop the draft position — KV trim(1), Mamba
+                // restore to the post-confirmed snapshot.
                 trimKV()
-                restoreMamba(snap)
+                restoreMambaFromRollback()
                 out.append(verifyPred)
                 if verifyPred == eosTokenId { break }
                 prev = verifyPred
                 draft = argmaxLast(
                     model.mtpForward(
                         hidden: hiddenC, nextTokenIds: tokenArray(verifyPred),
-                        mtpCache: mtpCache) ?? logitsC)
+                        mtpCache: mtpCache) ?? logits2)
             }
 
             if out.count % 256 == 0 { MLX.Memory.clearCache() }
