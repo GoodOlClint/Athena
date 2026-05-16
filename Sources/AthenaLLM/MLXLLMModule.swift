@@ -50,6 +50,15 @@ public actor MLXLLMModule: LLMModule {
 
     public func load(reservation: MemoryReservation) async throws {
         if container != nil { return }
+        // Route Qwen3.5 directories to Athena's vendored model so the
+        // substrate stays pristine. Idempotent; must precede the load.
+        // Debug seam: ATHENA_DISABLE_VENDORED_MODEL=1 keeps the substrate's
+        // own Qwen35 (used for the M2.1 deterministic parity A/B).
+        if ProcessInfo.processInfo.environment[
+            "ATHENA_DISABLE_VENDORED_MODEL"] != "1"
+        {
+            await AthenaModelRegistration.install()
+        }
         guard
             FileManager.default.fileExists(
                 atPath: modelDirectory.appendingPathComponent("config.json").path)

@@ -29,6 +29,12 @@ struct Serve: AsyncParsableCommand {
     @Option(help: "LLM engine: mlx (real Qwen3.5) or stub (no model).")
     var engine: Engine = .mlx
 
+    @Option(help: "Sampling temperature (0 = deterministic greedy).")
+    var temperature: Double?
+
+    @Option(help: "Max generated tokens.")
+    var maxTokens: Int = 1024
+
     @Option(help: "Model directory path, or a name under the model store.")
     var model: String?
 
@@ -57,7 +63,11 @@ struct Serve: AsyncParsableCommand {
         case .stub:
             llm = StubLLMModule()
         case .mlx:
-            llm = MLXLLMModule(modelDirectory: modelURL)
+            llm = MLXLLMModule(
+                modelDirectory: modelURL,
+                parameters: .init(
+                    maxTokens: maxTokens,
+                    temperature: Float(temperature ?? 0.7)))
         }
         await governor.register(llm, evictable: false)
         await governor.register(StubTranscriptionModule(), evictable: true)

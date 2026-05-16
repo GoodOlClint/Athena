@@ -27,6 +27,12 @@ let package = Package(
         // (~/Source/mlx-swift-lm); a path dependency keeps M1 buildable
         // against the exact reusable Qwen3.5/TokenIterator code.
         .package(path: "../mlx-swift-lm"),
+        // Direct mlx-swift dep: the vendored AthenaModels Qwen3.5 needs the
+        // MLX/MLXNN modules (products of mlx-swift, not mlx-swift-lm).
+        // Same range mlx-swift-lm pins, so SwiftPM unifies the version.
+        .package(
+            url: "https://github.com/ml-explore/mlx-swift",
+            .upToNextMinor(from: "0.31.3")),
         // swift-transformers (Jinja chat templates + tokenizers) and
         // swift-huggingface (Hub client) are NOT transitive deps of
         // mlx-swift-lm — the MLXHuggingFace macros expand into code that
@@ -52,6 +58,21 @@ let package = Package(
             name: "AthenaDeploy",
             path: "Sources/AthenaDeploy"),
 
+        // Athena-owned Qwen3.5 model, vendored from the pristine
+        // mlx-swift-lm clone (the 3 internal helpers it needs are not
+        // importable). Registered into the substrate's public model-type
+        // registry; M2 grows the MTP head here. The substrate stays an
+        // unmodified upstream path dependency.
+        .target(
+            name: "AthenaModels",
+            dependencies: [
+                .product(name: "MLXLLM", package: "mlx-swift-lm"),
+                .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
+                .product(name: "MLX", package: "mlx-swift"),
+                .product(name: "MLXNN", package: "mlx-swift"),
+            ],
+            path: "Sources/AthenaModels"),
+
         // Inference modules. M0 ships governed stubs that conform to the
         // module protocol and reserve/release real budget; the MLX-backed
         // implementations land in M1 (llm), M4 (transcription/embedding).
@@ -59,6 +80,7 @@ let package = Package(
             name: "AthenaLLM",
             dependencies: [
                 "AthenaCore",
+                "AthenaModels",
                 .product(name: "MLXLLM", package: "mlx-swift-lm"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
                 .product(name: "MLXHuggingFace", package: "mlx-swift-lm"),
@@ -93,7 +115,7 @@ let package = Package(
         .testTarget(
             name: "AthenaCoreTests",
             dependencies: [
-                "AthenaCore", "AthenaDeploy", "AthenaLLM",
+                "AthenaCore", "AthenaDeploy", "AthenaLLM", "AthenaModels",
                 "AthenaTranscription", "AthenaEmbedding",
             ],
             path: "Tests/AthenaCoreTests"),
