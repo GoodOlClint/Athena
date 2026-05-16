@@ -4,6 +4,29 @@ import XCTest
 
 @testable import AthenaLLM
 
+/// MTP speculative decoding is greedy-only (GoodOlClint/athena#1): the
+/// gate must engage iff speculative AND temperature == 0. Pure, CI-safe.
+final class SpeculativeGateTests: XCTestCase {
+    func testEngagesOnlyForSpeculativeGreedy() {
+        XCTAssertTrue(
+            LLMGenerationParameters(temperature: 0, speculative: true)
+                .speculativeGreedyEligible)
+    }
+    func testTempAboveZeroFallsBack() {
+        XCTAssertFalse(
+            LLMGenerationParameters(temperature: 0.7, speculative: true)
+                .speculativeGreedyEligible)
+    }
+    func testSpeculativeOffNeverEngages() {
+        XCTAssertFalse(
+            LLMGenerationParameters(temperature: 0, speculative: false)
+                .speculativeGreedyEligible)
+        XCTAssertFalse(
+            LLMGenerationParameters(temperature: 0.7, speculative: false)
+                .speculativeGreedyEligible)
+    }
+}
+
 /// ModelStore path resolution — pure logic, no MLX, always runs in CI.
 final class ModelStoreTests: XCTestCase {
 

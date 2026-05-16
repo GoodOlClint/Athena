@@ -27,6 +27,15 @@ public struct LLMGenerationParameters: Sendable {
         self.topP = topP
         self.speculative = speculative
     }
+
+    /// MTP speculative decoding is **greedy-only**: it engages only at
+    /// temperature 0. temp>0 residual-sampling acceptance is a deliberate
+    /// deferral (bench-unvalidated even in the Python reference) — see
+    /// GoodOlClint/athena#1. temp>0 requests fall back to the standard
+    /// (correct, non-accelerated) path.
+    public var speculativeGreedyEligible: Bool {
+        speculative && temperature == 0
+    }
 }
 
 /// The real MLX-backed LLM module (M1). Loads a Qwen3.5 model from a local
@@ -121,8 +130,7 @@ public actor MLXLLMModule: LLMModule {
     /// one decode of the full id sequence keeps the bit-identical-greedy
     /// comparison unambiguous.
     private func runSpeculative(prompt: String) async throws -> String? {
-        guard params.speculative, params.temperature == 0,
-            let container
+        guard params.speculativeGreedyEligible, let container
         else { return nil }
 
         let lmInput = try await container.prepare(
