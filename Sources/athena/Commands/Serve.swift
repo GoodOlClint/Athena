@@ -2,6 +2,7 @@ import ArgumentParser
 import AthenaCore
 import AthenaEmbedding
 import AthenaLLM
+import AthenaStore
 import AthenaTranscription
 import Foundation
 import MLX
@@ -69,6 +70,16 @@ struct Serve: AsyncParsableCommand {
     )
     var diarizationModel: String =
         "mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16"
+
+    @Option(
+        help:
+            "Data dir for the embedded store (vectors + queue). Default ~/.athena."
+    )
+    var dataDir: String?
+
+    @Option(
+        help: "Built-in vector store byte cap. Default: budget/8.")
+    var vectorCapBytes: Int?
 
     mutating func run() async throws {
         // HF download cache: prefer the SSD's hf-cache (sibling of the
@@ -164,10 +175,23 @@ struct Serve: AsyncParsableCommand {
                 + "budget=\(config.totalBudgetBytes)B "
                 + "listen=\(config.listenHost):\(config.listenPort)")
 
+        // M7: one embedded SQLite store (vectors + queue) under the
+        // data dir. Governor-capped resident vector working set.
+        let dataRoot =
+            dataDir.map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".athena", isDirectory: true)
+        let athenaStore = try AthenaStore(
+            path: dataRoot.appendingPathComponent("athena.sqlite"))
+        let vectorStore = VectorStore(
+            store: athenaStore,
+            capBytes: vectorCapBytes
+                ?? (config.totalBudgetBytes / 8))
+
         let server = AthenaServer(
             config: config, governor: governor, llm: llm,
             embedding: embedding, transcription: transcription,
-            diarization: diarization,
+            diarization: diarization, vectorStore: vectorStore,
             modelName: modelURL.lastPathComponent)
         try await server.run()
     }

@@ -1,6 +1,8 @@
 import AthenaCore
 import AthenaEmbedding
 import AthenaLLM
+import AthenaStore
+import AthenaStructured
 import AthenaTranscription
 import Foundation
 import HTTPTypes
@@ -17,6 +19,7 @@ struct AthenaServer {
     let embedding: any EmbeddingModule
     let transcription: any TranscriptionModule
     let diarization: any DiarizationModule
+    let vectorStore: VectorStore
     /// Display name reported by the Ollama shim (`/api/tags` etc.).
     let modelName: String
 
@@ -42,6 +45,24 @@ struct AthenaServer {
 
         router.post("/v1/audio/diarizations") { request, _ -> Response in
             await handleDiarizations(request)
+        }
+
+        // Built-in vector DB (M7.2).
+        router.post("/v1/vectors") { request, _ -> Response in
+            await handleVectorUpsert(request)
+        }
+        router.post("/v1/vectors/query") { request, _ -> Response in
+            await handleVectorQuery(request)
+        }
+        router.get("/v1/vectors/stats") { _, _ -> Response in
+            let st = await vectorStore.stats()
+            return Self.json(
+                VectorStatsResponse(
+                    count: st.count, dim: st.dim, bytes: st.bytes,
+                    cap_bytes: st.capBytes))
+        }
+        router.delete("/v1/vectors/:id") { _, context -> Response in
+            await handleVectorDelete(context.parameters.get("id"))
         }
 
         // Ollama-compatible shim (M6.1, non-streaming).
@@ -438,6 +459,114 @@ struct AthenaServer {
                         start: $0.start, end: $0.end,
                         speaker: $0.speaker)
                 }))
+    }
+
+    // MARK: - Built-in vector DB (M7.2)
+
+    /// Resolve a request's vector: explicit `vector`, else embed
+    /// `text` via the governed embedding module.
+    private func resolveVector(
+        _ vector: [Float]?, _ text: String?
+    ) async -> Outcome<[Float]> {
+        if let vector { return .ok(vector) }
+        guard let text, !text.isEmpty else {
+            return .fail(
+                Self.error(
+                    status: .badRequest,
+                    message: "provide 'vector' or non-empty 'text'",
+                    type: "invalid_request_error",
+                    code: "missing_vector"))
+        }
+        switch await ollamaEmbed([text], module: .textEmbedding) {
+        case .fail(let r): return .fail(r)
+        case .ok(let vs):
+            return .ok(vs.first ?? [])
+        }
+    }
+
+    private static func vectorErrorResponse(
+        _ error: any Error
+    ) -> Response {
+        if let e = error as? VectorStore.VectorError {
+            switch e {
+            case .capExceeded:
+                return Self.error(
+                    status: .serviceUnavailable, message: e.description,
+                    type: "server_error",
+                    code: "vector_store_cap_exceeded")
+            case .dimMismatch:
+                return Self.error(
+                    status: .badRequest, message: e.description,
+                    type: "invalid_request_error",
+                    code: "dimension_mismatch")
+            }
+        }
+        return Self.classified(error, module: .textEmbedding)
+    }
+
+    private func handleVectorUpsert(_ request: Request) async
+        -> Response
+    {
+        let decoded = await decodeJSON(
+            request, VectorUpsertRequest.self)
+        guard case .ok(let body) = decoded else {
+            if case .fail(let r) = decoded { return r }
+            fatalError()
+        }
+        let vec: [Float]
+        switch await resolveVector(body.vector, body.text) {
+        case .fail(let r): return r
+        case .ok(let v): vec = v
+        }
+        let meta = body.metadata.flatMap { try? JSONEncoder().encode($0) }
+        do {
+            try await vectorStore.upsert(
+                id: body.id, vector: vec, metadata: meta)
+        } catch {
+            return Self.vectorErrorResponse(error)
+        }
+        return Self.json(VectorIdResponse(id: body.id))
+    }
+
+    private func handleVectorQuery(_ request: Request) async -> Response
+    {
+        let decoded = await decodeJSON(request, VectorQueryRequest.self)
+        guard case .ok(let body) = decoded else {
+            if case .fail(let r) = decoded { return r }
+            fatalError()
+        }
+        let vec: [Float]
+        switch await resolveVector(body.vector, body.text) {
+        case .fail(let r): return r
+        case .ok(let v): vec = v
+        }
+        let hits = await vectorStore.query(
+            vector: vec, k: body.k ?? 5)
+        return Self.json(
+            VectorQueryResponse(
+                matches: hits.map {
+                    VectorMatch(
+                        id: $0.id, score: $0.score,
+                        metadata: $0.metadata.flatMap {
+                            try? JSONDecoder().decode(
+                                JSONValue.self, from: $0)
+                        })
+                }))
+    }
+
+    private func handleVectorDelete(_ id: String?) async -> Response {
+        guard let id, !id.isEmpty else {
+            return Self.error(
+                status: .badRequest, message: "missing vector id",
+                type: "invalid_request_error", code: "missing_id")
+        }
+        let ok = await vectorStore.delete(id: id)
+        if !ok {
+            return Self.error(
+                status: .notFound, message: "no vector '\(id)'",
+                type: "invalid_request_error", code: "not_found")
+        }
+        return Self.json(VectorIdResponse(id: id))
     }
 
     // MARK: - Ollama shim (M6.1)

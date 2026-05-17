@@ -248,3 +248,32 @@ struct DiarizationResponse: Codable {
     let num_speakers: Int
     let segments: [DiarizationSegmentDTO]
 }
+
+// MARK: - /v1/vectors (M7.2 built-in vector DB)
+
+struct VectorUpsertRequest: Decodable {
+    let id: String
+    let vector: [Float]?
+    let text: String?
+    let metadata: JSONValue?
+}
+struct VectorIdResponse: Codable { let id: String }
+
+struct VectorQueryRequest: Decodable {
+    let vector: [Float]?
+    let text: String?
+    let k: Int?
+}
+struct VectorMatch: Codable {
+    let id: String
+    let score: Float
+    let metadata: JSONValue?
+}
+struct VectorQueryResponse: Codable { let matches: [VectorMatch] }
+
+struct VectorStatsResponse: Codable {
+    let count: Int
+    let dim: Int
+    let bytes: Int
+    let cap_bytes: Int
+}
