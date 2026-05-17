@@ -16,12 +16,16 @@ public struct AthenaConfig: Sendable, Equatable {
     /// Log verbosity floor (trace|debug|info|notice|warning|error|
     /// critical). Optional — daemon defaults to info when absent.
     public var logLevel: String?
+    /// Opt-in remote syslog sink, e.g. "udp://host:514". The single
+    /// documented passive-oracle exception (logs only, default off).
+    public var syslogRemote: String?
     public var logDir: String
 
     public init(
         listenHost: String, listenPort: Int, budgetBytes: Int?,
         engine: String?, model: String?, dataDir: String? = nil,
-        logLevel: String? = nil, logDir: String
+        logLevel: String? = nil, syslogRemote: String? = nil,
+        logDir: String
     ) {
         self.listenHost = listenHost
         self.listenPort = listenPort
@@ -30,6 +34,7 @@ public struct AthenaConfig: Sendable, Equatable {
         self.model = model
         self.dataDir = dataDir
         self.logLevel = logLevel
+        self.syslogRemote = syslogRemote
         self.logDir = logDir
     }
 
@@ -95,6 +100,7 @@ public struct AthenaConfig: Sendable, Equatable {
             model: scalar("model", in: toml),
             dataDir: scalar("data_dir", in: toml),
             logLevel: scalar("log_level", in: toml),
+            syslogRemote: scalar("syslog_remote", in: toml),
             logDir: logDir)
     }
 

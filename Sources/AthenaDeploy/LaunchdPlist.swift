@@ -33,6 +33,9 @@ public enum LaunchdPlist {
         if let logLevel = config.logLevel {
             args += ["--log-level", logLevel]
         }
+        if let syslogRemote = config.syslogRemote {
+            args += ["--syslog-remote", syslogRemote]
+        }
 
         return [
             "Label": label,

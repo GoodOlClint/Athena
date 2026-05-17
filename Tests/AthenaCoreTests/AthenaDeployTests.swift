@@ -85,12 +85,13 @@ final class LaunchdPlistTests: XCTestCase {
 
     private func cfg(
         budget: Int? = nil, model: String? = nil, dataDir: String? = nil,
-        logLevel: String? = nil
+        logLevel: String? = nil, syslogRemote: String? = nil
     ) -> AthenaConfig {
         AthenaConfig(
             listenHost: "127.0.0.1", listenPort: 7447, budgetBytes: budget,
             engine: "mlx", model: model, dataDir: dataDir,
-            logLevel: logLevel, logDir: "/var/log/athena")
+            logLevel: logLevel, syslogRemote: syslogRemote,
+            logDir: "/var/log/athena")
     }
 
     func testDefaultProgramArguments() {
@@ -115,7 +116,8 @@ final class LaunchdPlistTests: XCTestCase {
             workingDirectory: "/w",
             config: cfg(
                 budget: 36_000_000_000, model: "M", dataDir: "/srv/a",
-                logLevel: "debug"))
+                logLevel: "debug",
+                syslogRemote: "udp://10.0.0.5:514"))
         XCTAssertEqual(
             d["ProgramArguments"] as? [String],
             [
@@ -123,6 +125,7 @@ final class LaunchdPlistTests: XCTestCase {
                 "--port", "7447", "--budget-bytes", "36000000000",
                 "--engine", "mlx", "--model", "M",
                 "--data-dir", "/srv/a", "--log-level", "debug",
+                "--syslog-remote", "udp://10.0.0.5:514",
             ])
     }
 

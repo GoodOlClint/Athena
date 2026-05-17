@@ -58,3 +58,9 @@ log_dir = "/usr/local/var/log/athena"
 # (subsystem "athena"): trace|debug|info|notice|warning|error|
 # critical. Commented ⇒ "info". "debug" (or "trace") = maximum.
 # log_level = "info"
+
+# Opt-in remote syslog sink (RFC5424 over UDP). This is the SINGLE
+# sanctioned exception to the passive-oracle "no outbound" rule —
+# LOGS ONLY, never inference data; default OFF (commented). Form:
+# "udp://host[:514]". Same level floor as log_level applies.
+# syslog_remote = "udp://10.0.0.5:514"

@@ -70,6 +70,8 @@ struct Start: AsyncParsableCommand {
     var dataDir: String?
     @Option(help: "Log level (trace|debug|info|…; default info).")
     var logLevel: String?
+    @Option(help: "Opt-in remote syslog udp://host[:514] (logs only).")
+    var syslogRemote: String?
 
     func run() async throws {
         if let pid = livePid(dataDir) {
@@ -95,6 +97,9 @@ struct Start: AsyncParsableCommand {
         if let model { args += ["--model", model] }
         if let dataDir { args += ["--data-dir", dataDir] }
         if let logLevel { args += ["--log-level", logLevel] }
+        if let syslogRemote {
+            args += ["--syslog-remote", syslogRemote]
+        }
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: selfExecutable())

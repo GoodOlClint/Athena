@@ -91,6 +91,12 @@ struct Load: AsyncParsableCommand {
     )
     var logLevel: String?
 
+    @Option(
+        help:
+            "Opt-in remote syslog sink udp://host[:514] (logs only; the one passive-oracle exception; default off)."
+    )
+    var syslogRemote: String?
+
     mutating func run() async throws {
         // Centralized logging first — must precede any Logger creation
         // (Hummingbird/NIO included) so everything routes through the
@@ -101,7 +107,9 @@ struct Load: AsyncParsableCommand {
                 "warning: invalid --log-level '\(lv)', using info\n"
             FileHandle.standardError.write(Data(msg.utf8))
         }
-        AthenaLog.bootstrap(level: AthenaLog.level(logLevel) ?? .info)
+        AthenaLog.bootstrap(
+            level: AthenaLog.level(logLevel) ?? .info,
+            syslogRemote: syslogRemote)
 
         // HF download cache: prefer the SSD's hf-cache (sibling of the
         // model store) when the volume is mounted; otherwise leave
