@@ -15,6 +15,10 @@ public enum AthenaError: Error, Sendable, Equatable {
     /// from governed admission). Classified to 503 so the client sees
     /// retryable backpressure, never a bare 500 / process abort.
     case metalOutOfMemory(module: ModuleID?, detail: String)
+    /// The request's prompt would need more KV/prompt-cache bytes than
+    /// the governor-owned global cap allows. Governed 503 (refuse big
+    /// contexts before they OOM the box), not a bare failure.
+    case promptCacheCapExceeded(requestedBytes: Int, capBytes: Int)
 
     /// HTTP status the serve path should return for this error.
     public var httpStatus: Int {
@@ -23,6 +27,7 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .moduleLoadFailed: return 500
         case .moduleNotRegistered: return 404
         case .metalOutOfMemory: return 503
+        case .promptCacheCapExceeded: return 503
         }
     }
 
@@ -33,6 +38,7 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .moduleLoadFailed: return "module_load_failed"
         case .moduleNotRegistered: return "module_not_registered"
         case .metalOutOfMemory: return "metal_oom"
+        case .promptCacheCapExceeded: return "prompt_cache_cap_exceeded"
         }
     }
 
@@ -48,6 +54,9 @@ public enum AthenaError: Error, Sendable, Equatable {
         case let .metalOutOfMemory(module, detail):
             let who = module.map { " for \($0.rawValue)" } ?? ""
             return "Metal/MLX out of memory\(who): \(detail)"
+        case let .promptCacheCapExceeded(requested, cap):
+            return "Prompt too large for the governed prompt-cache "
+                + "cap: needs ~\(requested) B, cap \(cap) B."
         }
     }
 

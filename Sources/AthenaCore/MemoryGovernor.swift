@@ -13,6 +13,7 @@ public struct GovernorSnapshot: Sendable, Codable {
     public let totalBudgetBytes: Int
     public let reservedBytes: Int
     public let freeBytes: Int
+    public let promptCacheCapBytes: Int
     public let modules: [ModuleSnapshot]
 }
 
@@ -43,6 +44,9 @@ public actor MemoryGovernor {
     public typealias UnloadHook = @Sendable () -> Void
 
     public let totalBudgetBytes: Int
+    /// Governor-owned global prompt-cache byte cap (brief 4b). The LLM
+    /// module reads this to refuse over-cap prompts.
+    public let promptCacheCapBytes: Int
     private var entries: [ModuleID: Entry] = [:]
     private var reservedBytes: Int = 0
     /// Coalesces concurrent `ensureLoaded` callers onto one load.
@@ -56,11 +60,14 @@ public actor MemoryGovernor {
 
     public init(
         totalBudgetBytes: Int, memoryProbe: MemoryProbe? = nil,
-        onUnloaded: UnloadHook? = nil
+        onUnloaded: UnloadHook? = nil,
+        promptCacheCapBytes: Int? = nil
     ) {
         self.totalBudgetBytes = totalBudgetBytes
         self.memoryProbe = memoryProbe
         self.onUnloaded = onUnloaded
+        self.promptCacheCapBytes =
+            promptCacheCapBytes ?? (totalBudgetBytes / 4)
     }
 
     public init(
@@ -70,6 +77,7 @@ public actor MemoryGovernor {
         self.totalBudgetBytes = config.totalBudgetBytes
         self.memoryProbe = memoryProbe
         self.onUnloaded = onUnloaded
+        self.promptCacheCapBytes = config.promptCacheCapBytes
     }
 
     /// Register a module instance under its id. `evictable` controls whether
@@ -274,6 +282,7 @@ public actor MemoryGovernor {
             totalBudgetBytes: totalBudgetBytes,
             reservedBytes: reservedBytes,
             freeBytes: totalBudgetBytes - reservedBytes,
+            promptCacheCapBytes: promptCacheCapBytes,
             modules: mods
         )
     }

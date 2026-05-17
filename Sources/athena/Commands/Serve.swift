@@ -27,6 +27,12 @@ struct Serve: AsyncParsableCommand {
     @Option(help: "Global memory budget in bytes. Defaults to 75% of RAM.")
     var budgetBytes: Int?
 
+    @Option(
+        help:
+            "Max KV/prompt-cache bytes per request. Default: ¼ of budget."
+    )
+    var promptCacheCapBytes: Int?
+
     @Option(help: "LLM engine: mlx (real Qwen3.5) or stub (no model).")
     var engine: Engine = .mlx
 
@@ -75,7 +81,8 @@ struct Serve: AsyncParsableCommand {
         let config = GovernorConfig(
             totalBudgetBytes: budgetBytes,
             listenHost: host,
-            listenPort: port
+            listenPort: port,
+            promptCacheCapBytes: promptCacheCapBytes
         )
         // M5.2: cap MLX's own allocator at the global budget so its
         // buffer pool can't overshoot the box into a Metal OOM.
@@ -108,7 +115,8 @@ struct Serve: AsyncParsableCommand {
                 parameters: .init(
                     maxTokens: maxTokens,
                     temperature: Float(temperature ?? 0.7),
-                    speculative: speculative))
+                    speculative: speculative),
+                promptCacheCapBytes: config.promptCacheCapBytes)
         }
         // Embeddings: real MLX module under the mlx engine, stub under
         // the stub engine. Evictable — the LLM is the primary workload.

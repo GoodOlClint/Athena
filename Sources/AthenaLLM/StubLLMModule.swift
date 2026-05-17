@@ -16,9 +16,18 @@ public protocol LLMModule: InferenceModule {
         prompt: String, schemaJSON: String?,
         tools: [[String: any Sendable]]?
     ) -> AsyncStream<String>
+
+    /// Reject — before any generation — a prompt whose KV/prompt-cache
+    /// would exceed the governor-owned cap (brief 4b). Default: no cap
+    /// (stub / modules without a model). Throws `AthenaError`
+    /// (`.promptCacheCapExceeded`) so the serve path returns a
+    /// governed 503.
+    func preflightPromptCache(prompt: String) async throws
 }
 
 extension LLMModule {
+    public func preflightPromptCache(prompt: String) async throws {}
+
     public nonisolated func generate(
         prompt: String, schemaJSON: String?,
         tools: [[String: any Sendable]]?

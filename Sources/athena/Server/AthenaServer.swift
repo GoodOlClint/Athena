@@ -86,6 +86,18 @@ struct AthenaServer {
             .filter { $0.role == "user" }
             .compactMap(\.content)
             .joined(separator: "\n")
+        // Brief 4b: refuse an over-cap prompt up front as a governed
+        // 503, before any KV cache is allocated.
+        do {
+            try await llm.preflightPromptCache(prompt: prompt)
+        } catch let e as AthenaError {
+            return Self.error(
+                status: HTTPResponse.Status(code: e.httpStatus),
+                message: e.message, type: "server_error", code: e.code)
+        } catch {
+            return Self.classified(error, module: .llm)
+        }
+
         let created = Int(Date().timeIntervalSince1970)
         let id = "chatcmpl-\(UUID().uuidString)"
         let effective = body.effectiveSchema()

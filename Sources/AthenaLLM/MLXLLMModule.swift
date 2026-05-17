@@ -60,13 +60,37 @@ public actor MLXLLMModule: LLMModule {
     private var cachedVocabTokens:
         (tokens: [VocabToken], eos: UInt32, opener: [UInt32: UInt32])?
 
+    /// Governor-owned prompt-cache cap in bytes (0 ⇒ disabled). The
+    /// per-token KV figure is a deliberately conservative upper bound
+    /// across Qwen3.5 variants (≈2·layers·kvdim·fp16 for the 27B), so
+    /// the cap errs toward refusing early — the safe direction for an
+    /// OOM guard. Brief 4b.
+    private let promptCacheCapBytes: Int
+    private let perTokenKVBytes = 256 * 1024
+
     public init(
         modelDirectory: URL,
-        parameters: LLMGenerationParameters = .init()
+        parameters: LLMGenerationParameters = .init(),
+        promptCacheCapBytes: Int = 0
     ) {
         self.modelDirectory = modelDirectory
         self.params = parameters
         self.estimatedBytes = Self.estimateBytes(forModelAt: modelDirectory)
+        self.promptCacheCapBytes = promptCacheCapBytes
+    }
+
+    /// Brief 4b: refuse a prompt whose KV/prompt-cache would exceed the
+    /// governor-owned cap, before any generation, as a governed 503.
+    public func preflightPromptCache(prompt: String) async throws {
+        guard promptCacheCapBytes > 0, let container else { return }
+        let lmInput = try await container.prepare(
+            input: UserInput(chat: [.user(prompt)]))
+        let tokens = lmInput.text.tokens.size
+        let needed = tokens * perTokenKVBytes
+        if needed > promptCacheCapBytes {
+            throw AthenaError.promptCacheCapExceeded(
+                requestedBytes: needed, capBytes: promptCacheCapBytes)
+        }
     }
 
     public var residentBytes: Int { container == nil ? 0 : estimatedBytes }

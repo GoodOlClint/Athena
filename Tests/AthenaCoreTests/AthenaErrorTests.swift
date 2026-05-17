@@ -59,4 +59,33 @@ final class AthenaErrorTests: XCTestCase {
             module: .textEmbedding)
         XCTAssertEqual(passthrough.code, "memory_budget_exceeded")
     }
+
+    func testPromptCacheCapExceededIs503() {
+        let e = AthenaError.promptCacheCapExceeded(
+            requestedBytes: 9, capBytes: 4)
+        XCTAssertEqual(e.httpStatus, 503)
+        XCTAssertEqual(e.code, "prompt_cache_cap_exceeded")
+        XCTAssertTrue(e.message.contains("9"))
+        XCTAssertTrue(e.message.contains("4"))
+    }
+}
+
+/// Brief 4b — the prompt-cache cap is owned by the governor (config
+/// default ¼ budget) and surfaced in the snapshot. Pure, CI-safe.
+final class PromptCacheCapTests: XCTestCase {
+
+    func testConfigDefaultsToQuarterBudget() {
+        let c = GovernorConfig(totalBudgetBytes: 4_000)
+        XCTAssertEqual(c.promptCacheCapBytes, 1_000)
+        let c2 = GovernorConfig(
+            totalBudgetBytes: 4_000, promptCacheCapBytes: 777)
+        XCTAssertEqual(c2.promptCacheCapBytes, 777)
+    }
+
+    func testGovernorSnapshotExposesCap() async {
+        let gov = MemoryGovernor(
+            totalBudgetBytes: 8_000, promptCacheCapBytes: 2_500)
+        let s = await gov.snapshot()
+        XCTAssertEqual(s.promptCacheCapBytes, 2_500)
+    }
 }
