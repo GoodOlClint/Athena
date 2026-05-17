@@ -47,6 +47,24 @@ engine = "mlx"
 # model_store = "/Volumes/SB-XTM5/mlx-models"
 
 
+# ── Inference tuning ─────────────────────────────────────────────────
+# All optional; commented ⇒ the built-in default shown.
+
+# Max generated tokens per request (default 1024).
+# max_tokens = 1024
+
+# Sampling temperature; 0 = deterministic greedy (default 0.7).
+# Bare number, not quoted.
+# temperature = 0.7
+
+# MTP speculative decoding — greedy/temp-0 only (default false).
+# Bare boolean.
+# speculative = false
+
+# Built-in vector-store byte cap (default: memory budget / 8).
+# vector_cap_bytes = 4294967296
+
+
 # ── Storage ──────────────────────────────────────────────────────────
 
 # Directory for the embedded SQLite store (vector DB + async queue +

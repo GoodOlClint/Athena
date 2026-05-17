@@ -6,11 +6,17 @@ import Foundation
 /// preserves comments/layout) in exactly one place.
 enum ConfigEditor {
     /// String-valued keys are quoted; these two are bare ints.
-    static let intKeys: Set<String> = ["listen_port", "budget_bytes"]
+    static let intKeys: Set<String> = [
+        "listen_port", "budget_bytes", "max_tokens",
+        "vector_cap_bytes",
+    ]
+    /// Written bare (unquoted), like ints: a float and a bool.
+    static let rawKeys: Set<String> = ["temperature", "speculative"]
     static let knownKeys: Set<String> = [
         "listen_host", "listen_port", "budget_bytes", "engine",
         "model", "model_store", "data_dir", "log_level",
-        "syslog_remote", "log_dir",
+        "syslog_remote", "log_dir", "max_tokens", "temperature",
+        "speculative", "vector_cap_bytes",
     ]
 
     /// `--config` wins; else the installed file if present; else the
@@ -51,6 +57,12 @@ enum ConfigEditor {
         case "log_level": return cfg.logLevel
         case "syslog_remote": return cfg.syslogRemote
         case "log_dir": return cfg.logDir
+        case "max_tokens": return cfg.maxTokens.map(String.init)
+        case "temperature": return cfg.temperature
+        case "speculative":
+            return cfg.speculative.map { $0 ? "true" : "false" }
+        case "vector_cap_bytes":
+            return cfg.vectorCapBytes.map(String.init)
         default: FailableExit.die("error: unknown key '\(key)'")
         }
     }
@@ -82,6 +94,7 @@ enum ConfigEditor {
     enum Failure: Error, CustomStringConvertible {
         case unknownKey(String)
         case notAnInteger(String)
+        case badValue(String, String)
         case noConfig(URL)
         case writeFailed(URL, String)
         var description: String {
@@ -93,6 +106,8 @@ enum ConfigEditor {
                     .joined(separator: ", ") + ")"
             case .notAnInteger(let k):
                 return "\(k) must be an integer"
+            case .badValue(let k, let want):
+                return "\(k) must be \(want)"
             case .noConfig(let u): return "no config at \(u.path)"
             case .writeFailed(let u, let e):
                 return "cannot write \(u.path): \(e)"
@@ -114,6 +129,16 @@ enum ConfigEditor {
         if intKeys.contains(key) {
             guard Int(value) != nil else {
                 throw Failure.notAnInteger(key)
+            }
+            formatted = "\(key) = \(value)"
+        } else if rawKeys.contains(key) {
+            // Bare, unquoted. Validate the two raw keys' shapes.
+            if key == "temperature", Double(value) == nil {
+                throw Failure.badValue(key, "a number")
+            }
+            if key == "speculative",
+                value != "true", value != "false" {
+                throw Failure.badValue(key, "true or false")
             }
             formatted = "\(key) = \(value)"
         } else {

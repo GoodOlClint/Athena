@@ -39,6 +39,18 @@ public enum LaunchdPlist {
         if let syslogRemote = config.syslogRemote {
             args += ["--syslog-remote", syslogRemote]
         }
+        if let maxTokens = config.maxTokens {
+            args += ["--max-tokens", String(maxTokens)]
+        }
+        if let temperature = config.temperature {
+            args += ["--temperature", temperature]
+        }
+        if config.speculative == true {
+            args += ["--speculative"]  // a Flag, not an Option
+        }
+        if let vectorCapBytes = config.vectorCapBytes {
+            args += ["--vector-cap-bytes", String(vectorCapBytes)]
+        }
 
         return [
             "Label": label,

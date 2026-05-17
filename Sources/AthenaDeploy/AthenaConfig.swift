@@ -23,6 +23,14 @@ public struct AthenaConfig: Sendable, Equatable {
     /// Opt-in remote syslog sink, e.g. "udp://host:514". The single
     /// documented passive-oracle exception (logs only, default off).
     public var syslogRemote: String?
+    /// Inference tuning. All optional — daemon defaults apply when
+    /// absent (max 1024 tokens, temp 0.7, speculative off,
+    /// vector cap = budget/8). Kept as the raw scalar for
+    /// temperature so the value passes straight to `--temperature`.
+    public var maxTokens: Int?
+    public var temperature: String?
+    public var speculative: Bool?
+    public var vectorCapBytes: Int?
     public var logDir: String
 
     public init(
@@ -30,6 +38,8 @@ public struct AthenaConfig: Sendable, Equatable {
         engine: String?, model: String?, modelStore: String? = nil,
         dataDir: String? = nil,
         logLevel: String? = nil, syslogRemote: String? = nil,
+        maxTokens: Int? = nil, temperature: String? = nil,
+        speculative: Bool? = nil, vectorCapBytes: Int? = nil,
         logDir: String
     ) {
         self.listenHost = listenHost
@@ -41,6 +51,10 @@ public struct AthenaConfig: Sendable, Equatable {
         self.dataDir = dataDir
         self.logLevel = logLevel
         self.syslogRemote = syslogRemote
+        self.maxTokens = maxTokens
+        self.temperature = temperature
+        self.speculative = speculative
+        self.vectorCapBytes = vectorCapBytes
         self.logDir = logDir
     }
 
@@ -97,6 +111,15 @@ public struct AthenaConfig: Sendable, Equatable {
         if let b = scalar("budget_bytes", in: toml) {
             budget = try int("budget_bytes", b)
         }
+        var maxTok: Int?
+        if let m = scalar("max_tokens", in: toml) {
+            maxTok = try int("max_tokens", m)
+        }
+        var vecCap: Int?
+        if let v = scalar("vector_cap_bytes", in: toml) {
+            vecCap = try int("vector_cap_bytes", v)
+        }
+        let spec = scalar("speculative", in: toml).map { $0 == "true" }
 
         return AthenaConfig(
             listenHost: host,
@@ -108,6 +131,10 @@ public struct AthenaConfig: Sendable, Equatable {
             dataDir: scalar("data_dir", in: toml),
             logLevel: scalar("log_level", in: toml),
             syslogRemote: scalar("syslog_remote", in: toml),
+            maxTokens: maxTok,
+            temperature: scalar("temperature", in: toml),
+            speculative: spec,
+            vectorCapBytes: vecCap,
             logDir: logDir)
     }
 

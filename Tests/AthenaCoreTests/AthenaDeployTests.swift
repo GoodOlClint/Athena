@@ -86,13 +86,17 @@ final class LaunchdPlistTests: XCTestCase {
     private func cfg(
         budget: Int? = nil, model: String? = nil,
         modelStore: String? = nil, dataDir: String? = nil,
-        logLevel: String? = nil, syslogRemote: String? = nil
+        logLevel: String? = nil, syslogRemote: String? = nil,
+        maxTokens: Int? = nil, temperature: String? = nil,
+        speculative: Bool? = nil, vectorCapBytes: Int? = nil
     ) -> AthenaConfig {
         AthenaConfig(
             listenHost: "127.0.0.1", listenPort: 7447, budgetBytes: budget,
             engine: "mlx", model: model, modelStore: modelStore,
             dataDir: dataDir, logLevel: logLevel,
-            syslogRemote: syslogRemote, logDir: "/var/log/athena")
+            syslogRemote: syslogRemote, maxTokens: maxTokens,
+            temperature: temperature, speculative: speculative,
+            vectorCapBytes: vectorCapBytes, logDir: "/var/log/athena")
     }
 
     func testDefaultProgramArguments() {
@@ -119,7 +123,9 @@ final class LaunchdPlistTests: XCTestCase {
                 budget: 36_000_000_000, model: "M",
                 modelStore: "/srv/models", dataDir: "/srv/a",
                 logLevel: "debug",
-                syslogRemote: "udp://10.0.0.5:514"))
+                syslogRemote: "udp://10.0.0.5:514",
+                maxTokens: 2048, temperature: "0.2",
+                speculative: true, vectorCapBytes: 1_000_000))
         XCTAssertEqual(
             d["ProgramArguments"] as? [String],
             [
@@ -129,6 +135,8 @@ final class LaunchdPlistTests: XCTestCase {
                 "--model-store", "/srv/models",
                 "--data-dir", "/srv/a", "--log-level", "debug",
                 "--syslog-remote", "udp://10.0.0.5:514",
+                "--max-tokens", "2048", "--temperature", "0.2",
+                "--speculative", "--vector-cap-bytes", "1000000",
             ])
     }
 
