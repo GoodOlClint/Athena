@@ -63,6 +63,13 @@ struct Serve: AsyncParsableCommand {
     var transcriptionModel: String =
         "mlx-community/whisper-large-v3-turbo"
 
+    @Option(
+        help:
+            "Speaker-diarization model HF id (default mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16)."
+    )
+    var diarizationModel: String =
+        "mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16"
+
     mutating func run() async throws {
         // HF download cache: prefer the SSD's hf-cache (sibling of the
         // model store) when the volume is mounted; otherwise leave
@@ -137,9 +144,19 @@ struct Serve: AsyncParsableCommand {
             transcription = MLXTranscriptionModule(
                 modelId: transcriptionModel)
         }
+        // Diarization: vendored Sortformer under mlx, stub under stub.
+        let diarization: any DiarizationModule
+        switch engine {
+        case .stub:
+            diarization = StubDiarizationModule()
+        case .mlx:
+            diarization = MLXDiarizationModule(
+                modelId: diarizationModel)
+        }
         await governor.register(llm, evictable: false)
         await governor.register(transcription, evictable: true)
         await governor.register(embedding, evictable: true)
+        await governor.register(diarization, evictable: true)
 
         print(
             "athena: engine=\(engine.rawValue) "
@@ -150,6 +167,7 @@ struct Serve: AsyncParsableCommand {
         let server = AthenaServer(
             config: config, governor: governor, llm: llm,
             embedding: embedding, transcription: transcription,
+            diarization: diarization,
             modelName: modelURL.lastPathComponent)
         try await server.run()
     }

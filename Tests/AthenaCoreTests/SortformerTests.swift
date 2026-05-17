@@ -1,3 +1,4 @@
+import AthenaCore
 import Foundation
 import MLX
 import XCTest
@@ -70,5 +71,50 @@ final class SortformerIntegrationTests: XCTestCase {
             lastEnd, expected, accuracy: 3.0,
             "segments should span ~the clip duration")
         XCTAssertFalse(out.text.isEmpty)
+    }
+
+    /// M4.3b — the governed `MLXDiarizationModule` end-to-end through
+    /// the `MemoryGovernor` (register → ensureLoaded → diarize).
+    func testGovernedDiarizationModule() async throws {
+        guard
+            ProcessInfo.processInfo.environment["ATHENA_RUN_MODEL_TESTS"]
+                == "1"
+        else { throw XCTSkip("set ATHENA_RUN_MODEL_TESTS=1 (heavy)") }
+
+        let pcm =
+            try sayClip("Alex", "First speaker, a little audio here.")
+            + sayClip("Samantha", "Second speaker, some more audio.")
+        var wav = Data()  // minimal RIFF/WAVE 16k mono float32
+        func le<T: FixedWidthInteger>(_ v: T) -> Data {
+            withUnsafeBytes(of: v.littleEndian) { Data($0) }
+        }
+        let bytes = pcm.withUnsafeBytes { Data($0) }
+        wav.append("RIFF".data(using: .ascii)!)
+        wav.append(le(UInt32(36 + bytes.count)))
+        wav.append("WAVEfmt ".data(using: .ascii)!)
+        wav.append(le(UInt32(16)))
+        wav.append(le(UInt16(3)))  // IEEE float
+        wav.append(le(UInt16(1)))  // mono
+        wav.append(le(UInt32(16_000)))
+        wav.append(le(UInt32(16_000 * 4)))
+        wav.append(le(UInt16(4)))
+        wav.append(le(UInt16(32)))
+        wav.append("data".data(using: .ascii)!)
+        wav.append(le(UInt32(bytes.count)))
+        wav.append(bytes)
+
+        let m = MLXDiarizationModule()
+        XCTAssertEqual(m.id, .diarization)
+        let gov = MemoryGovernor(totalBudgetBytes: Int(8) << 30)
+        await gov.register(m, evictable: true)
+        try await gov.ensureLoaded(.diarization)
+
+        let r = try await m.diarize(audio: wav, filename: "a.wav")
+        XCTAssertFalse(r.turns.isEmpty)
+        XCTAssertGreaterThanOrEqual(r.numSpeakers, 1)
+        for t in r.turns {
+            XCTAssertLessThanOrEqual(t.start, t.end)
+            XCTAssertGreaterThanOrEqual(t.speaker, 0)
+        }
     }
 }

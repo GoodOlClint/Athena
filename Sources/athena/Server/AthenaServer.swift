@@ -16,6 +16,7 @@ struct AthenaServer {
     let llm: any LLMModule
     let embedding: any EmbeddingModule
     let transcription: any TranscriptionModule
+    let diarization: any DiarizationModule
     /// Display name reported by the Ollama shim (`/api/tags` etc.).
     let modelName: String
 

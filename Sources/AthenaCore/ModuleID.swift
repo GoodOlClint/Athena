@@ -6,6 +6,7 @@ public enum ModuleID: String, Sendable, CaseIterable, Codable {
     case llm
     case transcription
     case textEmbedding
+    case diarization
 }
 
 /// Lifecycle state of a module as tracked by the governor.
