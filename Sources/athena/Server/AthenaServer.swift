@@ -16,6 +16,8 @@ struct AthenaServer {
     let llm: any LLMModule
     let embedding: any EmbeddingModule
     let transcription: any TranscriptionModule
+    /// Display name reported by the Ollama shim (`/api/tags` etc.).
+    let modelName: String
 
     func run() async throws {
         let router = Router()
@@ -35,6 +37,32 @@ struct AthenaServer {
 
         router.post("/v1/audio/transcriptions") { request, _ -> Response in
             await handleTranscriptions(request)
+        }
+
+        // Ollama-compatible shim (M6.1, non-streaming).
+        router.get("/api/version") { _, _ -> Response in
+            Self.json(OllamaVersionResponse(version: OllamaShim.version))
+        }
+        router.get("/api/tags") { _, _ -> Response in
+            Self.json(
+                OllamaTagsResponse(models: [
+                    OllamaModelInfo(
+                        name: modelName, model: modelName,
+                        modified_at: Self.now(), size: 0,
+                        digest: "")
+                ]))
+        }
+        router.post("/api/chat") { request, _ -> Response in
+            await handleOllamaChat(request)
+        }
+        router.post("/api/generate") { request, _ -> Response in
+            await handleOllamaGenerate(request)
+        }
+        router.post("/api/embeddings") { request, _ -> Response in
+            await handleOllamaEmbeddings(request)
+        }
+        router.post("/api/embed") { request, _ -> Response in
+            await handleOllamaEmbed(request)
         }
 
         let app = Application(
@@ -302,6 +330,158 @@ struct AthenaServer {
                     }))
         default:  // "json" / nil
             return Self.json(TranscriptionResponse(text: result.text))
+        }
+    }
+
+    // MARK: - Ollama shim (M6.1)
+
+    /// `Response` isn't `Error`, so a plain success-or-error-response.
+    private enum Outcome<T> {
+        case ok(T)
+        case fail(Response)
+    }
+
+    private static func now() -> String {
+        ISO8601DateFormatter().string(from: Date())
+    }
+
+    private func decodeJSON<T: Decodable>(
+        _ request: Request, _ type: T.Type
+    ) async -> Outcome<T> {
+        do {
+            let buf = try await request.body.collect(upTo: 4 * 1024 * 1024)
+            return .ok(
+                try JSONDecoder().decode(T.self, from: Data(buffer: buf)))
+        } catch {
+            return .fail(
+                Self.error(
+                    status: .badRequest,
+                    message: "Invalid request body: \(error)",
+                    type: "invalid_request_error", code: "invalid_body"))
+        }
+    }
+
+    /// The governed text path shared by `/api/chat` + `/api/generate`:
+    /// ensureLoaded(.llm) + the 4b prompt-cache preflight (both
+    /// classified), then non-streamed accumulation. Mirrors the
+    /// OpenAI non-stream path.
+    private func governedText(
+        prompt: String
+    ) async -> Outcome<String> {
+        do {
+            try await governor.ensureLoaded(.llm)
+            try await llm.preflightPromptCache(prompt: prompt)
+        } catch let e as AthenaError {
+            return .fail(
+                Self.error(
+                    status: HTTPResponse.Status(code: e.httpStatus),
+                    message: e.message, type: "server_error",
+                    code: e.code))
+        } catch {
+            return .fail(Self.classified(error, module: .llm))
+        }
+        var text = ""
+        for await chunk in llm.generate(prompt: prompt) { text += chunk }
+        return .ok(text)
+    }
+
+    private func handleOllamaChat(_ request: Request) async -> Response {
+        let decoded = await decodeJSON(request, OllamaChatRequest.self)
+        guard case .ok(let body) = decoded else {
+            if case .fail(let r) = decoded { return r }
+            fatalError()
+        }
+        let prompt = body.messages
+            .filter { $0.role == "user" }
+            .map { $0.content }
+            .joined(separator: "\n")
+        switch await governedText(prompt: prompt) {
+        case .fail(let r): return r
+        case .ok(let text):
+            return Self.json(
+                OllamaChatResponse(
+                    model: body.model ?? modelName,
+                    created_at: Self.now(),
+                    message: OllamaMessage(
+                        role: "assistant", content: text),
+                    done: true, done_reason: "stop"))
+        }
+    }
+
+    private func handleOllamaGenerate(_ request: Request) async -> Response
+    {
+        let decoded = await decodeJSON(
+            request, OllamaGenerateRequest.self)
+        guard case .ok(let body) = decoded else {
+            if case .fail(let r) = decoded { return r }
+            fatalError()
+        }
+        switch await governedText(prompt: body.prompt) {
+        case .fail(let r): return r
+        case .ok(let text):
+            return Self.json(
+                OllamaGenerateResponse(
+                    model: body.model ?? modelName,
+                    created_at: Self.now(), response: text,
+                    done: true, done_reason: "stop"))
+        }
+    }
+
+    private func ollamaEmbed(_ inputs: [String], module: ModuleID)
+        async -> Outcome<[[Float]]>
+    {
+        do {
+            try await governor.ensureLoaded(.textEmbedding)
+        } catch let e as AthenaError {
+            return .fail(
+                Self.error(
+                    status: HTTPResponse.Status(code: e.httpStatus),
+                    message: e.message, type: "server_error",
+                    code: e.code))
+        } catch {
+            return .fail(Self.classified(error, module: module))
+        }
+        do {
+            return .ok(try await embedding.embed(inputs))
+        } catch {
+            return .fail(Self.classified(error, module: module))
+        }
+    }
+
+    private func handleOllamaEmbeddings(_ request: Request) async
+        -> Response
+    {
+        let decoded = await decodeJSON(
+            request, OllamaEmbeddingsRequest.self)
+        guard case .ok(let body) = decoded else {
+            if case .fail(let r) = decoded { return r }
+            fatalError()
+        }
+        switch await ollamaEmbed([body.prompt], module: .textEmbedding) {
+        case .fail(let r): return r
+        case .ok(let v):
+            return Self.json(
+                OllamaEmbeddingsResponse(embedding: v.first ?? []))
+        }
+    }
+
+    private func handleOllamaEmbed(_ request: Request) async -> Response {
+        let decoded = await decodeJSON(request, OllamaEmbedRequest.self)
+        guard case .ok(let body) = decoded else {
+            if case .fail(let r) = decoded { return r }
+            fatalError()
+        }
+        guard !body.input.isEmpty else {
+            return Self.error(
+                status: .badRequest, message: "'input' is required",
+                type: "invalid_request_error", code: "invalid_input")
+        }
+        switch await ollamaEmbed(body.input, module: .textEmbedding) {
+        case .fail(let r): return r
+        case .ok(let v):
+            return Self.json(
+                OllamaEmbedResponse(
+                    model: body.model ?? modelName, embeddings: v))
         }
     }
 

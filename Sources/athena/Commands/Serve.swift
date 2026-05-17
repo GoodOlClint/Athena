@@ -149,7 +149,8 @@ struct Serve: AsyncParsableCommand {
 
         let server = AthenaServer(
             config: config, governor: governor, llm: llm,
-            embedding: embedding, transcription: transcription)
+            embedding: embedding, transcription: transcription,
+            modelName: modelURL.lastPathComponent)
         try await server.run()
     }
 }
