@@ -42,6 +42,11 @@ public actor MemoryGovernor {
     /// own buffer pool can be trimmed (the freed bytes otherwise stay
     /// cached). Injected — keeps AthenaCore substrate-agnostic.
     public typealias UnloadHook = @Sendable () -> Void
+    /// Model-lifecycle observer (loading/loaded/evicted/unloaded/load
+    /// failed), keyed by module. Injected so AthenaCore needs no
+    /// logging dependency; the `athena` target maps it to a per-module
+    /// unified-log category.
+    public typealias EventHook = @Sendable (ModuleID, String) -> Void
 
     public let totalBudgetBytes: Int
     /// Governor-owned global prompt-cache byte cap (brief 4b). The LLM
@@ -53,6 +58,7 @@ public actor MemoryGovernor {
     private var inFlight: [ModuleID: Task<Void, Error>] = [:]
     private let memoryProbe: MemoryProbe?
     private let onUnloaded: UnloadHook?
+    private let onEvent: EventHook?
     /// M5.4: real footprint observed on a prior load. Subsequent
     /// admissions use this instead of the static `memoryEstimate()`, so
     /// an evicted-then-reloaded module is admitted on its true cost.
@@ -61,22 +67,26 @@ public actor MemoryGovernor {
     public init(
         totalBudgetBytes: Int, memoryProbe: MemoryProbe? = nil,
         onUnloaded: UnloadHook? = nil,
+        onEvent: EventHook? = nil,
         promptCacheCapBytes: Int? = nil
     ) {
         self.totalBudgetBytes = totalBudgetBytes
         self.memoryProbe = memoryProbe
         self.onUnloaded = onUnloaded
+        self.onEvent = onEvent
         self.promptCacheCapBytes =
             promptCacheCapBytes ?? (totalBudgetBytes / 4)
     }
 
     public init(
         config: GovernorConfig, memoryProbe: MemoryProbe? = nil,
-        onUnloaded: UnloadHook? = nil
+        onUnloaded: UnloadHook? = nil,
+        onEvent: EventHook? = nil
     ) {
         self.totalBudgetBytes = config.totalBudgetBytes
         self.memoryProbe = memoryProbe
         self.onUnloaded = onUnloaded
+        self.onEvent = onEvent
         self.promptCacheCapBytes = config.promptCacheCapBytes
     }
 
@@ -158,18 +168,21 @@ public actor MemoryGovernor {
         entries[id]?.reservation = reservation
 
         let before = memoryProbe?()
+        onEvent?(id, "loading (estimate \(estimate)B)")
         do {
             try await entry.module.load(reservation: reservation)
         } catch {
             reservedBytes -= estimate
             entries[id]?.state = .unloaded
             entries[id]?.reservation = nil
+            onEvent?(id, "load failed: \(error)")
             // A Metal/MLX OOM during load is classified to 503, not a
             // bare 500 (brief item 4a).
             throw AthenaError.classify(error, module: id)
         }
         entries[id]?.state = .loaded
         entries[id]?.lastUsed = Date()
+        onEvent?(id, "loaded")
         // M5.1: reconcile the static estimate to the real Metal/MLX
         // footprint this load actually consumed. Best-effort
         // attribution (the probe is process-global; the actor +
@@ -240,6 +253,7 @@ public actor MemoryGovernor {
         reservedBytes -= reservation.bytes
         entries[id]?.state = .unloading
         entries[id]?.reservation = nil
+        onEvent?(id, "evicted (budget pressure)")
         let module = entry.module
         let hook = onUnloaded
         Task { [weak self] in
@@ -265,6 +279,7 @@ public actor MemoryGovernor {
         entries[id]?.reservation = nil
         await entry.module.unload()
         onUnloaded?()
+        onEvent?(id, "unloaded")
         entries[id]?.state = .unloaded
     }
 

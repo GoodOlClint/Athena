@@ -1,3 +1,4 @@
+import AthenaCore
 import Logging
 import os
 
@@ -13,13 +14,12 @@ enum AthenaLog {
     /// allows any string; this matches the binary/command name).
     static let subsystem = "athena"
 
-    /// swift-log labels we tag loggers with. The os.Logger `category`
-    /// is derived by stripping the `athena.` prefix; anything else
+    /// swift-log label for daemon/server logs. The label convention
+    /// itself lives in AthenaCore (`AthenaLogLabel`, shared with the
+    /// governor seam, dependency-free); the os.Logger `category` is
+    /// derived by stripping the `athena.` prefix — anything else
     /// (Hummingbird's serverName "athena", NIO, etc.) ⇒ `daemon`.
-    static let daemonLabel = "athena.daemon"
-    static func modelLabel(_ module: String) -> String {
-        "athena.model.\(module)"
-    }
+    static let daemonLabel = AthenaLogLabel.daemon
 
     static func category(forLabel label: String) -> String {
         let p = "athena."

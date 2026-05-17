@@ -7,6 +7,28 @@ public enum ModuleID: String, Sendable, CaseIterable, Codable {
     case transcription
     case textEmbedding
     case diarization
+
+    /// Friendly token for the unified-log category (`model.<token>`).
+    public var logCategory: String {
+        switch self {
+        case .llm: return "llm"
+        case .transcription: return "transcription"
+        case .textEmbedding: return "embedding"
+        case .diarization: return "diarization"
+        }
+    }
+}
+
+/// swift-log label convention, shared across targets as pure String
+/// constants so AthenaCore stays dependency-free. The unified-log
+/// bridge in the `athena` target maps `athena.<x>` → os.Logger
+/// category `<x>` (`athena.daemon` → "daemon", `athena.model.llm` →
+/// "model.llm", …).
+public enum AthenaLogLabel {
+    public static let daemon = "athena.daemon"
+    public static func model(_ id: ModuleID) -> String {
+        "athena.model.\(id.logCategory)"
+    }
 }
 
 /// Lifecycle state of a module as tracked by the governor.

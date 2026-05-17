@@ -133,7 +133,11 @@ struct Load: AsyncParsableCommand {
         let governor = MemoryGovernor(
             config: config,
             memoryProbe: { MLX.Memory.activeMemory },
-            onUnloaded: { MLX.Memory.clearCache() })
+            onUnloaded: { MLX.Memory.clearCache() },
+            onEvent: { id, msg in
+                Logger(label: AthenaLogLabel.model(id))
+                    .notice("model \(id.rawValue) \(msg)")
+            })
 
         let store = ModelStore(
             rootDirectory: modelStore.map {
