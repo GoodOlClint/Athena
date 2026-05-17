@@ -85,11 +85,23 @@ struct Load: AsyncParsableCommand {
         help: "Built-in vector store byte cap. Default: budget/8.")
     var vectorCapBytes: Int?
 
+    @Option(
+        help:
+            "Log level trace|debug|info|notice|warning|error|critical (default info; debug/trace = max)."
+    )
+    var logLevel: String?
+
     mutating func run() async throws {
         // Centralized logging first — must precede any Logger creation
         // (Hummingbird/NIO included) so everything routes through the
-        // stdout + unified-logging multiplex (M10).
-        AthenaLog.bootstrap()
+        // stdout + unified-logging multiplex (M10). Invalid level ⇒
+        // warn + info.
+        if let lv = logLevel, AthenaLog.level(lv) == nil {
+            let msg =
+                "warning: invalid --log-level '\(lv)', using info\n"
+            FileHandle.standardError.write(Data(msg.utf8))
+        }
+        AthenaLog.bootstrap(level: AthenaLog.level(logLevel) ?? .info)
 
         // HF download cache: prefer the SSD's hf-cache (sibling of the
         // model store) when the volume is mounted; otherwise leave

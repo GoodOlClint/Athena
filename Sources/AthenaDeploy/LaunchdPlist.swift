@@ -30,6 +30,9 @@ public enum LaunchdPlist {
         if let dataDir = config.dataDir {
             args += ["--data-dir", dataDir]
         }
+        if let logLevel = config.logLevel {
+            args += ["--log-level", logLevel]
+        }
 
         return [
             "Label": label,

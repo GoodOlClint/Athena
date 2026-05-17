@@ -29,14 +29,24 @@ enum AthenaLog {
         return String(label.dropFirst(p.count))
     }
 
+    /// Parse a log-level string (case-insensitive). nil/invalid ⇒ nil
+    /// so the caller can decide the default (and warn on invalid).
+    static func level(_ s: String?) -> Logging.Logger.Level? {
+        s.flatMap {
+            Logging.Logger.Level(rawValue: $0.lowercased())
+        }
+    }
+
     /// Bootstrap once, before any `Logger` is created. Multiplexes the
-    /// standard stdout handler with the unified-logging bridge.
-    static func bootstrap() {
+    /// stdout handler with the unified-logging bridge; `level` gates
+    /// BOTH (and the syslog sink in M10.4) — `debug`/`trace` = max.
+    static func bootstrap(level: Logging.Logger.Level = .info) {
         LoggingSystem.bootstrap { label in
-            MultiplexLogHandler([
-                StreamLogHandler.standardOutput(label: label),
-                OSUnifiedLogHandler(label: label),
-            ])
+            var stream = StreamLogHandler.standardOutput(label: label)
+            stream.logLevel = level
+            var unified = OSUnifiedLogHandler(label: label)
+            unified.logLevel = level
+            return MultiplexLogHandler([stream, unified])
         }
     }
 }

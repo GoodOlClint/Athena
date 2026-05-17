@@ -53,3 +53,8 @@ engine = "mlx"
 
 # Directory for athena.out.log / athena.err.log (launchd-managed).
 log_dir = "/usr/local/var/log/athena"
+
+# Verbosity floor for stdout AND the macOS unified log
+# (subsystem "athena"): trace|debug|info|notice|warning|error|
+# critical. Commented ⇒ "info". "debug" (or "trace") = maximum.
+# log_level = "info"

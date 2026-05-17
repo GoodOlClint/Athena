@@ -68,6 +68,8 @@ struct Start: AsyncParsableCommand {
     @Option(help: "Model dir or store name.") var model: String?
     @Option(help: "Runtime/data dir (default ~/.athena).")
     var dataDir: String?
+    @Option(help: "Log level (trace|debug|info|…; default info).")
+    var logLevel: String?
 
     func run() async throws {
         if let pid = livePid(dataDir) {
@@ -92,6 +94,7 @@ struct Start: AsyncParsableCommand {
         if let engine { args += ["--engine", engine] }
         if let model { args += ["--model", model] }
         if let dataDir { args += ["--data-dir", dataDir] }
+        if let logLevel { args += ["--log-level", logLevel] }
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: selfExecutable())

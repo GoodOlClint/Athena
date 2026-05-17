@@ -9,7 +9,7 @@ enum ConfigEditor {
     static let intKeys: Set<String> = ["listen_port", "budget_bytes"]
     static let knownKeys: Set<String> = [
         "listen_host", "listen_port", "budget_bytes", "engine",
-        "model", "data_dir", "log_dir",
+        "model", "data_dir", "log_level", "log_dir",
     ]
 
     /// `--config` wins; else the installed file if present; else the
@@ -46,6 +46,7 @@ enum ConfigEditor {
         case "engine": return cfg.engine
         case "model": return cfg.model
         case "data_dir": return cfg.dataDir
+        case "log_level": return cfg.logLevel
         case "log_dir": return cfg.logDir
         default: FailableExit.die("error: unknown key '\(key)'")
         }

@@ -13,12 +13,15 @@ public struct AthenaConfig: Sendable, Equatable {
     /// Where the daemon keeps its SQLite store (vectors + queue + jobs).
     /// Optional — the daemon defaults to `~/.athena` when absent.
     public var dataDir: String?
+    /// Log verbosity floor (trace|debug|info|notice|warning|error|
+    /// critical). Optional — daemon defaults to info when absent.
+    public var logLevel: String?
     public var logDir: String
 
     public init(
         listenHost: String, listenPort: Int, budgetBytes: Int?,
         engine: String?, model: String?, dataDir: String? = nil,
-        logDir: String
+        logLevel: String? = nil, logDir: String
     ) {
         self.listenHost = listenHost
         self.listenPort = listenPort
@@ -26,6 +29,7 @@ public struct AthenaConfig: Sendable, Equatable {
         self.engine = engine
         self.model = model
         self.dataDir = dataDir
+        self.logLevel = logLevel
         self.logDir = logDir
     }
 
@@ -90,6 +94,7 @@ public struct AthenaConfig: Sendable, Equatable {
             engine: scalar("engine", in: toml),
             model: scalar("model", in: toml),
             dataDir: scalar("data_dir", in: toml),
+            logLevel: scalar("log_level", in: toml),
             logDir: logDir)
     }
 
