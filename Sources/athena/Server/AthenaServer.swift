@@ -20,6 +20,7 @@ struct AthenaServer {
     let transcription: any TranscriptionModule
     let diarization: any DiarizationModule
     let vectorStore: VectorStore
+    let queue: RequestQueue
     /// Display name reported by the Ollama shim (`/api/tags` etc.).
     let modelName: String
 
@@ -65,6 +66,20 @@ struct AthenaServer {
             await handleVectorDelete(context.parameters.get("id"))
         }
 
+        // Async request queue (M8.1).
+        // Same path node ⇒ one shared param name across methods
+        // (Hummingbird's trie binds the name per position).
+        router.post("/v1/queue/:arg") { request, context -> Response in
+            await handleQueueSubmit(
+                context.parameters.get("arg"), request)
+        }
+        router.get("/v1/queue/:arg") { _, context -> Response in
+            await handleQueueStatus(context.parameters.get("arg"))
+        }
+        router.delete("/v1/queue/:arg") { _, context -> Response in
+            await handleQueueCancel(context.parameters.get("arg"))
+        }
+
         // Ollama-compatible shim (M6.1, non-streaming).
         router.get("/api/version") { _, _ -> Response in
             Self.json(OllamaVersionResponse(version: OllamaShim.version))
@@ -96,6 +111,14 @@ struct AthenaServer {
                 "status": "unloaded", "model": modelName,
             ])
         }
+
+        // Wire the queue executor to the governed module paths and
+        // start the single serial worker (M8.1).
+        await queue.setExecutor { kind, data in
+            await self.queuedExecute(kind: kind, request: data)
+        }
+        let worker = Task { await queue.runWorker() }
+        defer { worker.cancel() }
 
         let app = Application(
             router: router,
@@ -567,6 +590,124 @@ struct AthenaServer {
                 type: "invalid_request_error", code: "not_found")
         }
         return Self.json(VectorIdResponse(id: id))
+    }
+
+    // MARK: - Async request queue (M8.1)
+
+    private func handleQueueSubmit(
+        _ kind: String?, _ request: Request
+    ) async -> Response {
+        guard let kind, RequestQueue.kinds.contains(kind) else {
+            return Self.error(
+                status: .badRequest,
+                message:
+                    "unknown queue kind; expected one of "
+                    + RequestQueue.kinds.sorted().joined(
+                        separator: ", "),
+                type: "invalid_request_error", code: "invalid_kind")
+        }
+        let body: Data
+        do {
+            let buf = try await request.body.collect(
+                upTo: 8 * 1024 * 1024)
+            body = Data(buffer: buf)
+        } catch {
+            return Self.error(
+                status: .badRequest,
+                message: "Invalid request body: \(error)",
+                type: "invalid_request_error", code: "invalid_body")
+        }
+        do {
+            let id = try await queue.submit(
+                kind: kind, request: body)
+            return Self.json(
+                QueueSubmitResponse(id: id, status: "queued"))
+        } catch {
+            return Self.error(
+                status: .internalServerError,
+                message: "queue submit failed: \(error)",
+                type: "server_error", code: "queue_error")
+        }
+    }
+
+    private func handleQueueStatus(_ id: String?) async -> Response {
+        guard let id, let job = await queue.status(id: id) else {
+            return Self.error(
+                status: .notFound, message: "no job '\(id ?? "")'",
+                type: "invalid_request_error", code: "not_found")
+        }
+        let result = job.result.flatMap {
+            try? JSONDecoder().decode(JSONValue.self, from: $0)
+        }
+        return Self.json(
+            QueueStatusResponse(
+                id: job.id, kind: job.kind, status: job.status,
+                result: result, error: job.error))
+    }
+
+    private func handleQueueCancel(_ id: String?) async -> Response {
+        guard let id else {
+            return Self.error(
+                status: .badRequest, message: "missing job id",
+                type: "invalid_request_error", code: "missing_id")
+        }
+        let ok = await queue.cancel(id: id)
+        return Self.json(
+            QueueStatusResponse(
+                id: id, kind: "", status: ok ? "canceled" : "not_canceled",
+                result: nil,
+                error: ok ? nil : "job not found or already running"))
+    }
+
+    /// Runs a queued job through the same governed paths as the sync
+    /// endpoints. Returns (resultJSON, nil) or (nil, errorMessage).
+    private func queuedExecute(
+        kind: String, request: Data
+    ) async -> (result: Data?, error: String?) {
+        switch kind {
+        case "conversation":
+            guard
+                let req = try? JSONDecoder().decode(
+                    OllamaChatRequest.self, from: request)
+            else { return (nil, "invalid conversation body") }
+            let prompt = req.messages
+                .filter { $0.role == "user" }
+                .map { $0.content }
+                .joined(separator: "\n")
+            do {
+                try await governor.ensureLoaded(.llm)
+                try await llm.preflightPromptCache(prompt: prompt)
+            } catch let e as AthenaError {
+                return (nil, e.message)
+            } catch {
+                return (nil, String(describing: error))
+            }
+            var text = ""
+            for await c in llm.generate(prompt: prompt) { text += c }
+            return (
+                try? JSONEncoder().encode(
+                    QueuedTextResult(text: text)), nil
+            )
+        case "embeddings":
+            guard
+                let req = try? JSONDecoder().decode(
+                    OllamaEmbedRequest.self, from: request)
+            else { return (nil, "invalid embeddings body") }
+            do {
+                try await governor.ensureLoaded(.textEmbedding)
+                let v = try await embedding.embed(req.input)
+                return (
+                    try? JSONEncoder().encode(
+                        QueuedEmbeddingResult(embeddings: v)), nil
+                )
+            } catch let e as AthenaError {
+                return (nil, e.message)
+            } catch {
+                return (nil, String(describing: error))
+            }
+        default:
+            return (nil, "unknown kind '\(kind)'")
+        }
     }
 
     // MARK: - Ollama shim (M6.1)

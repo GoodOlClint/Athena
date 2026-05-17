@@ -187,12 +187,13 @@ struct Serve: AsyncParsableCommand {
             store: athenaStore,
             capBytes: vectorCapBytes
                 ?? (config.totalBudgetBytes / 8))
+        let queue = RequestQueue(store: athenaStore)
 
         let server = AthenaServer(
             config: config, governor: governor, llm: llm,
             embedding: embedding, transcription: transcription,
             diarization: diarization, vectorStore: vectorStore,
-            modelName: modelURL.lastPathComponent)
+            queue: queue, modelName: modelURL.lastPathComponent)
         try await server.run()
     }
 }

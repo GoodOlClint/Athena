@@ -277,3 +277,23 @@ struct VectorStatsResponse: Codable {
     let bytes: Int
     let cap_bytes: Int
 }
+
+// MARK: - /v1/queue (M8.1 async request queue)
+
+struct QueueSubmitResponse: Codable {
+    let id: String
+    let status: String  // "queued"
+}
+
+struct QueueStatusResponse: Codable {
+    let id: String
+    let kind: String
+    let status: String  // queued|running|done|error|canceled
+    let result: JSONValue?
+    let error: String?
+}
+
+/// Stored job results (encoded into the job row; surfaced under
+/// `result` on status).
+struct QueuedTextResult: Codable { let text: String }
+struct QueuedEmbeddingResult: Codable { let embeddings: [[Float]] }
