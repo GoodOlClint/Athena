@@ -44,7 +44,26 @@ struct Serve: AsyncParsableCommand {
     @Option(help: "Model store root. Default: external SSD mlx-models.")
     var modelStore: String?
 
+    @Option(
+        help:
+            "Text-embedding model HF id (default BAAI/bge-small-en-v1.5).")
+    var embeddingModel: String = "BAAI/bge-small-en-v1.5"
+
     mutating func run() async throws {
+        // HF download cache: prefer the SSD's hf-cache (sibling of the
+        // model store) when the volume is mounted; otherwise leave
+        // HF_HOME unset so the Hub client falls back to the local
+        // ~/.cache/huggingface. Never override an operator-set HF_HOME.
+        let env = ProcessInfo.processInfo.environment
+        if env["HF_HOME"] == nil, env["HF_HUB_CACHE"] == nil {
+            let ssdCache = ModelStore.defaultRoot
+                .deletingLastPathComponent()
+                .appendingPathComponent("hf-cache", isDirectory: true)
+            if FileManager.default.fileExists(atPath: ssdCache.path) {
+                setenv("HF_HOME", ssdCache.path, 1)
+            }
+        }
+
         let config = GovernorConfig(
             totalBudgetBytes: budgetBytes,
             listenHost: host,
@@ -73,9 +92,18 @@ struct Serve: AsyncParsableCommand {
                     temperature: Float(temperature ?? 0.7),
                     speculative: speculative))
         }
+        // Embeddings: real MLX module under the mlx engine, stub under
+        // the stub engine. Evictable — the LLM is the primary workload.
+        let embedding: any EmbeddingModule
+        switch engine {
+        case .stub:
+            embedding = StubEmbeddingModule()
+        case .mlx:
+            embedding = MLXEmbeddingModule(modelId: embeddingModel)
+        }
         await governor.register(llm, evictable: false)
         await governor.register(StubTranscriptionModule(), evictable: true)
-        await governor.register(StubEmbeddingModule(), evictable: true)
+        await governor.register(embedding, evictable: true)
 
         print(
             "athena: engine=\(engine.rawValue) "
@@ -84,7 +112,8 @@ struct Serve: AsyncParsableCommand {
                 + "listen=\(config.listenHost):\(config.listenPort)")
 
         let server = AthenaServer(
-            config: config, governor: governor, llm: llm)
+            config: config, governor: governor, llm: llm,
+            embedding: embedding)
         try await server.run()
     }
 }

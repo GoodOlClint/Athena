@@ -1,4 +1,5 @@
 import AthenaCore
+import AthenaEmbedding
 import AthenaLLM
 import Foundation
 import HTTPTypes
@@ -12,6 +13,7 @@ struct AthenaServer {
     let config: GovernorConfig
     let governor: MemoryGovernor
     let llm: any LLMModule
+    let embedding: any EmbeddingModule
 
     func run() async throws {
         let router = Router()
@@ -23,6 +25,10 @@ struct AthenaServer {
 
         router.post("/v1/chat/completions") { request, _ -> Response in
             await handleChatCompletions(request)
+        }
+
+        router.post("/v1/embeddings") { request, _ -> Response in
+            await handleEmbeddings(request)
         }
 
         let app = Application(
@@ -133,6 +139,62 @@ struct AthenaServer {
             usage: Usage(
                 prompt_tokens: 0, completion_tokens: 0, total_tokens: 0)
         )
+        return Self.json(response)
+    }
+
+    private func handleEmbeddings(_ request: Request) async -> Response {
+        let body: EmbeddingRequest
+        do {
+            let buffer = try await request.body.collect(upTo: 4 * 1024 * 1024)
+            body = try JSONDecoder().decode(
+                EmbeddingRequest.self, from: Data(buffer: buffer))
+        } catch {
+            return Self.error(
+                status: .badRequest,
+                message: "Invalid request body: \(error)",
+                type: "invalid_request_error",
+                code: "invalid_body")
+        }
+        guard !body.input.isEmpty else {
+            return Self.error(
+                status: .badRequest,
+                message: "'input' must be a non-empty string or array",
+                type: "invalid_request_error", code: "invalid_input")
+        }
+
+        do {
+            try await governor.ensureLoaded(.textEmbedding)
+        } catch let e as AthenaError {
+            return Self.error(
+                status: HTTPResponse.Status(code: e.httpStatus),
+                message: e.message, type: "server_error", code: e.code)
+        } catch {
+            return Self.error(
+                status: .internalServerError,
+                message: String(describing: error),
+                type: "server_error", code: "internal_error")
+        }
+
+        let vectors: [[Float]]
+        do {
+            vectors = try await embedding.embed(body.input)
+        } catch {
+            return Self.error(
+                status: .internalServerError,
+                message: "Embedding failed: \(error)",
+                type: "server_error", code: "embedding_error")
+        }
+
+        let response = EmbeddingResponse(
+            object: "list",
+            data: vectors.enumerated().map {
+                EmbeddingObject(
+                    object: "embedding", embedding: $0.element,
+                    index: $0.offset)
+            },
+            model: body.model ?? "athena-embedding",
+            usage: Usage(
+                prompt_tokens: 0, completion_tokens: 0, total_tokens: 0))
         return Self.json(response)
     }
 

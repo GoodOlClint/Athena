@@ -169,3 +169,42 @@ struct APIErrorBody: Codable {
     }
     let error: ErrorDetail
 }
+
+// MARK: - /v1/embeddings
+
+/// `input` is a string or an array of strings (OpenAI also allows token
+/// arrays — uncommon for this surface; those decode-fail → 400).
+struct EmbeddingRequest: Decodable {
+    let model: String?
+    let input: [String]
+    let encoding_format: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case model, input, encoding_format
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        model = try c.decodeIfPresent(String.self, forKey: .model)
+        encoding_format = try c.decodeIfPresent(
+            String.self, forKey: .encoding_format)
+        if let one = try? c.decode(String.self, forKey: .input) {
+            input = [one]
+        } else {
+            input = try c.decode([String].self, forKey: .input)
+        }
+    }
+}
+
+struct EmbeddingObject: Codable {
+    let object: String  // "embedding"
+    let embedding: [Float]
+    let index: Int
+}
+
+struct EmbeddingResponse: Codable {
+    let object: String  // "list"
+    let data: [EmbeddingObject]
+    let model: String
+    let usage: Usage
+}

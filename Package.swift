@@ -115,7 +115,15 @@ let package = Package(
             path: "Sources/AthenaTranscription"),
         .target(
             name: "AthenaEmbedding",
-            dependencies: ["AthenaCore"],
+            dependencies: [
+                "AthenaCore",
+                .product(name: "MLXEmbedders", package: "mlx-swift-lm"),
+                .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
+                .product(name: "MLXHuggingFace", package: "mlx-swift-lm"),
+                .product(name: "MLX", package: "mlx-swift"),
+                .product(name: "Tokenizers", package: "swift-transformers"),
+                .product(name: "HuggingFace", package: "swift-huggingface"),
+            ],
             path: "Sources/AthenaEmbedding"),
 
         // The `athena` executable: CLI (serve/run/pull/list/ps/...) and the
