@@ -77,25 +77,52 @@ enum ConfigEditor {
         return rest.first == "="
     }
 
+    enum Failure: Error, CustomStringConvertible {
+        case unknownKey(String)
+        case notAnInteger(String)
+        case noConfig(URL)
+        case writeFailed(URL, String)
+        var description: String {
+            switch self {
+            case .unknownKey(let k):
+                return
+                    "unknown key '\(k)' (allowed: "
+                    + ConfigEditor.knownKeys.sorted()
+                    .joined(separator: ", ") + ")"
+            case .notAnInteger(let k):
+                return "\(k) must be an integer"
+            case .noConfig(let u): return "no config at \(u.path)"
+            case .writeFailed(let u, let e):
+                return "cannot write \(u.path): \(e)"
+            }
+        }
+    }
+
     /// Validate + rewrite one scalar in place (replacing an active
     /// line or uncommenting a `# key =` one), then sanity-parse.
-    static func setScalar(key: String, value: String, in url: URL) {
+    /// THROWS rather than exiting — safe to call from the server
+    /// (`/ui/api/config`); a bad request must never kill the daemon.
+    static func setScalarThrowing(
+        key: String, value: String, in url: URL
+    ) throws {
         guard knownKeys.contains(key) else {
-            FailableExit.die(
-                "error: unknown key '\(key)' (allowed: "
-                    + knownKeys.sorted().joined(separator: ", ") + ")")
+            throw Failure.unknownKey(key)
         }
         let formatted: String
         if intKeys.contains(key) {
             guard Int(value) != nil else {
-                FailableExit.die("error: \(key) must be an integer")
+                throw Failure.notAnInteger(key)
             }
             formatted = "\(key) = \(value)"
         } else {
             formatted = "\(key) = \"\(value)\""
         }
+        guard
+            let contents = try? String(
+                contentsOf: url, encoding: .utf8)
+        else { throw Failure.noConfig(url) }
 
-        var lines = read(url).split(
+        var lines = contents.split(
             separator: "\n", omittingEmptySubsequences: false)
         if let i = lines.firstIndex(where: { isAssignment($0, key) }) {
             lines[i] = Substring(formatted)
@@ -112,18 +139,22 @@ enum ConfigEditor {
             try rewritten.write(
                 to: url, atomically: true, encoding: .utf8)
         } catch {
-            FailableExit.die(
-                "error: cannot write \(url.path): \(error)")
+            throw Failure.writeFailed(url, "\(error)")
         }
         // Sanity-parse; warn (don't roll back) on failure — usually a
         // pre-existing missing required key, not this edit.
-        do {
-            _ = try AthenaConfig.parse(file: url)
-        } catch {
+        if (try? AthenaConfig.parse(file: url)) == nil {
             FileHandle.standardError.write(
-                Data(
-                    "warning: config now unparseable: \(error)\n"
-                        .utf8))
+                Data("warning: config now unparseable\n".utf8))
+        }
+    }
+
+    /// CLI wrapper: same as before — print + exit(1) on failure.
+    static func setScalar(key: String, value: String, in url: URL) {
+        do {
+            try setScalarThrowing(key: key, value: value, in: url)
+        } catch {
+            FailableExit.die("error: \(error)")
         }
     }
 }

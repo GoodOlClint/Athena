@@ -50,6 +50,15 @@ struct AthenaServer {
         router.get("/ui/api/state") { _, _ -> Response in
             await handleUIState()
         }
+        router.get("/ui/config") { _, _ -> Response in
+            Self.html(Self.configPage)
+        }
+        router.get("/ui/api/config") { _, _ -> Response in
+            await handleUIConfigGet()
+        }
+        router.post("/ui/api/config") { request, _ -> Response in
+            await handleUIConfigPost(request)
+        }
 
         router.post("/v1/chat/completions") { request, _ -> Response in
             await handleChatCompletions(request)

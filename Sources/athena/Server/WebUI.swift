@@ -1,4 +1,5 @@
 import AthenaCore
+import AthenaDeploy
 import Foundation
 import HTTPTypes
 import Hummingbird
@@ -54,6 +55,134 @@ extension AthenaServer {
             body: ResponseBody(byteBuffer: buffer))
     }
 
+    // MARK: - Config view + edit (M11.3)
+
+    /// Current effective config values for the editable keys, plus the
+    /// resolved file path. Unparseable/missing ⇒ empty values (the
+    /// page still renders so the operator can populate it).
+    func handleUIConfigGet() async -> Response {
+        let url = ConfigEditor.resolvePath(nil)
+        var values: [String: String] = [:]
+        if let cfg = try? AthenaConfig.parse(file: url) {
+            for k in ConfigEditor.knownKeys {
+                values[k] = ConfigEditor.value(k, in: cfg) ?? ""
+            }
+        } else {
+            for k in ConfigEditor.knownKeys { values[k] = "" }
+        }
+        struct R: Codable {
+            let path: String
+            let keys: [String]
+            let values: [String: String]
+        }
+        return Self.json(
+            R(
+                path: url.path,
+                keys: ConfigEditor.knownKeys.sorted(),
+                values: values))
+    }
+
+    /// Write submitted scalars to the TOML via the THROWING editor
+    /// (never exits — a bad field is a 4xx, not a dead daemon).
+    /// Most keys need a daemon restart to take effect; the UI says so.
+    func handleUIConfigPost(_ request: Request) async -> Response {
+        let body: [String: String]
+        do {
+            let buf = try await request.body.collect(
+                upTo: 64 * 1024)
+            body =
+                (try? JSONDecoder().decode(
+                    [String: String].self,
+                    from: Data(buffer: buf))) ?? [:]
+        } catch {
+            return Self.json(
+                ["error": "invalid body"], status: .badRequest)
+        }
+        let url = ConfigEditor.resolvePath(nil)
+        var saved: [String] = []
+        var errors: [String: String] = [:]
+        for (k, v) in body
+        where ConfigEditor.knownKeys.contains(k)
+            && !v.trimmingCharacters(in: .whitespaces).isEmpty {
+            do {
+                try ConfigEditor.setScalarThrowing(
+                    key: k, value: v, in: url)
+                saved.append(k)
+            } catch {
+                errors[k] = "\(error)"
+            }
+        }
+        struct R: Codable {
+            let saved: [String]
+            let errors: [String: String]
+            let path: String
+            let note: String
+        }
+        return Self.json(
+            R(
+                saved: saved.sorted(), errors: errors,
+                path: url.path,
+                note:
+                    "saved — restart the daemon to apply "
+                    + "(athena stop && athena start)"),
+            status: errors.isEmpty ? .ok : .badRequest)
+    }
+
+    static let configPage = #"""
+        <!doctype html><html><head><meta charset="utf-8">
+        <title>athena · config</title>
+        <style>
+        body{background:#0d1117;color:#c9d1d9;font:13px ui-monospace,
+        Menlo,monospace;margin:0;padding:24px}
+        h1{font-size:16px;margin:0 0 4px}
+        a{color:#2f81f7}.sub{color:#8b949e;margin-bottom:20px}
+        .card{background:#161b22;border:1px solid #30363d;
+        border-radius:8px;padding:16px;max-width:640px}
+        label{display:block;color:#8b949e;margin:10px 0 3px}
+        input{width:100%;box-sizing:border-box;background:#0d1117;
+        color:#e6edf3;border:1px solid #30363d;border-radius:6px;
+        padding:7px;font:13px ui-monospace,monospace}
+        button{margin-top:16px;background:#238636;color:#fff;
+        border:0;border-radius:6px;padding:9px 16px;cursor:pointer;
+        font:13px ui-monospace,monospace}
+        #msg{margin-top:14px}.ok{color:#3fb950}.err{color:#f85149}
+        .k{color:#8b949e}
+        </style></head><body>
+        <h1>athena · configuration</h1>
+        <div class="sub"><a href="/ui">← dashboard</a> ·
+          <span id="path" class="k"></span></div>
+        <div class="card"><form id="f"></form>
+          <button onclick="save()">Save</button>
+          <div id="msg"></div></div>
+        <script>
+        const $=i=>document.getElementById(i);
+        let KEYS=[];
+        async function load(){
+          const c=await (await fetch("/ui/api/config")).json();
+          KEYS=c.keys; $("path").textContent=c.path;
+          $("f").innerHTML=c.keys.map(k=>
+            `<label>${k}</label><input id="in_${k}" value="${
+              (c.values[k]||"").replace(/"/g,'&quot;')}">`).join("");
+        }
+        async function save(){
+          const b={};
+          KEYS.forEach(k=>{const v=$("in_"+k).value.trim();
+            if(v)b[k]=v;});
+          const r=await fetch("/ui/api/config",{method:"POST",
+            headers:{"content-type":"application/json"},
+            body:JSON.stringify(b)});
+          const j=await r.json();
+          if(r.ok)$("msg").innerHTML=
+            `<span class=ok>saved ${j.saved.join(", ")}</span>`+
+            `<br><span class=k>${j.note}</span>`;
+          else $("msg").innerHTML=`<span class=err>`+
+            Object.entries(j.errors||{"":j.error}).map(
+              ([k,v])=>`${k}: ${v}`).join("<br>")+`</span>`;
+        }
+        load();
+        </script></body></html>
+        """#
+
     static let uiPage = #"""
         <!doctype html><html><head><meta charset="utf-8">
         <title>athena</title>
@@ -78,7 +207,9 @@ extension AthenaServer {
         .ok{color:#3fb950}.warn{color:#d29922}.err{color:#f85149}
         </style></head><body>
         <h1>athena</h1>
-        <div class="sub" id="sub">connecting…</div>
+        <div class="sub"><span id="sub">connecting…</span>
+          &nbsp;·&nbsp;<a href="/ui/config"
+          style="color:#2f81f7">config</a></div>
         <div class="grid">
           <div class="card"><h2>Memory governor</h2>
             <div class="bar"><i id="membar"></i></div>
