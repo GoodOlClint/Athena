@@ -24,6 +24,29 @@ command -v xcodebuild >/dev/null || {
   exit 1
 }
 
+# xcodebuild needs FULL Xcode, not the Command Line Tools. `command -v
+# xcodebuild` succeeds even under CLT, but the build then fails with
+# "tool 'xcodebuild' requires Xcode". Honor an explicit DEVELOPER_DIR;
+# else if the active dir is CLT, auto-select /Applications/Xcode.app.
+if [ -z "${DEVELOPER_DIR:-}" ]; then
+  active="$(xcode-select -p 2>/dev/null || true)"
+  case "$active" in
+    *Xcode.app*) : ;;  # already full Xcode
+    *)
+      if [ -d /Applications/Xcode.app/Contents/Developer ]; then
+        export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+        echo "build.sh: using DEVELOPER_DIR=$DEVELOPER_DIR" \
+             "(active xcode-select was '$active')"
+      else
+        echo "error: full Xcode required but not found. Install" \
+             "Xcode, or run: sudo xcode-select -s" \
+             "/Applications/Xcode.app, or export DEVELOPER_DIR." >&2
+        exit 1
+      fi
+      ;;
+  esac
+fi
+
 xcodebuild -scheme athena -configuration "$CONFIG" \
   -destination 'platform=macOS' -derivedDataPath .build/xcode \
   -skipMacroValidation -skipPackagePluginValidation build
