@@ -11,6 +11,10 @@ public enum AthenaError: Error, Sendable, Equatable {
     case moduleLoadFailed(ModuleID, reason: String)
     /// No module is registered under this id.
     case moduleNotRegistered(ModuleID)
+    /// An MLX/Metal allocation failed (genuine device OOM, distinct
+    /// from governed admission). Classified to 503 so the client sees
+    /// retryable backpressure, never a bare 500 / process abort.
+    case metalOutOfMemory(module: ModuleID?, detail: String)
 
     /// HTTP status the serve path should return for this error.
     public var httpStatus: Int {
@@ -18,6 +22,7 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .memoryBudgetExceeded: return 503
         case .moduleLoadFailed: return 500
         case .moduleNotRegistered: return 404
+        case .metalOutOfMemory: return 503
         }
     }
 
@@ -27,6 +32,7 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .memoryBudgetExceeded: return "memory_budget_exceeded"
         case .moduleLoadFailed: return "module_load_failed"
         case .moduleNotRegistered: return "module_not_registered"
+        case .metalOutOfMemory: return "metal_oom"
         }
     }
 
@@ -39,6 +45,40 @@ public enum AthenaError: Error, Sendable, Equatable {
             return "Module \(module.rawValue) failed to load: \(reason)"
         case let .moduleNotRegistered(module):
             return "No module registered for \(module.rawValue)."
+        case let .metalOutOfMemory(module, detail):
+            let who = module.map { " for \($0.rawValue)" } ?? ""
+            return "Metal/MLX out of memory\(who): \(detail)"
         }
+    }
+
+    /// Does `error` look like a genuine MLX/Metal allocation failure
+    /// (vs. governed admission, which is `memoryBudgetExceeded`)?
+    /// Substring match on the substrate/Metal failure vocabulary —
+    /// focused to avoid matching incidental "metal" text.
+    public static func isMetalOOM(_ error: any Error) -> Bool {
+        if error is AthenaError { return false }
+        let s = String(describing: error).lowercased()
+        let needles = [
+            "out of memory", "insufficient memory",
+            "failed to allocate", "cannot allocate",
+            "metal allocation", "mtlbuffer", "newbufferwithlength",
+            "[metal] out", "vm_allocate",
+        ]
+        return needles.contains { s.contains($0) }
+    }
+
+    /// Map an arbitrary thrown error to a classified `AthenaError`:
+    /// pass through existing ones, route Metal OOM to the 503 case,
+    /// else a 500 `moduleLoadFailed` (the generic substrate failure).
+    public static func classify(
+        _ error: any Error, module: ModuleID?
+    ) -> AthenaError {
+        if let a = error as? AthenaError { return a }
+        if isMetalOOM(error) {
+            return .metalOutOfMemory(
+                module: module, detail: String(describing: error))
+        }
+        return .moduleLoadFailed(
+            module ?? .llm, reason: String(describing: error))
     }
 }

@@ -156,8 +156,9 @@ public actor MemoryGovernor {
             reservedBytes -= estimate
             entries[id]?.state = .unloaded
             entries[id]?.reservation = nil
-            throw AthenaError.moduleLoadFailed(
-                id, reason: String(describing: error))
+            // A Metal/MLX OOM during load is classified to 503, not a
+            // bare 500 (brief item 4a).
+            throw AthenaError.classify(error, module: id)
         }
         entries[id]?.state = .loaded
         entries[id]?.lastUsed = Date()

@@ -185,10 +185,7 @@ struct AthenaServer {
         do {
             vectors = try await embedding.embed(body.input)
         } catch {
-            return Self.error(
-                status: .internalServerError,
-                message: "Embedding failed: \(error)",
-                type: "server_error", code: "embedding_error")
+            return Self.classified(error, module: .textEmbedding)
         }
 
         let response = EmbeddingResponse(
@@ -257,10 +254,7 @@ struct AthenaServer {
                 audio: file.data, filename: file.filename,
                 language: form.text("language"))
         } catch {
-            return Self.error(
-                status: .internalServerError,
-                message: "Transcription failed: \(error)",
-                type: "server_error", code: "transcription_error")
+            return Self.classified(error, module: .transcription)
         }
 
         func plain(_ s: String, _ type: String) -> Response {
@@ -386,5 +380,17 @@ struct AthenaServer {
             APIErrorBody(
                 error: .init(message: message, type: type, code: code)),
             status: status)
+    }
+
+    /// Classify an arbitrary inference error: a genuine MLX/Metal OOM
+    /// becomes a governed 503 (`metal_oom`), never a bare 500 / process
+    /// abort (brief item 4a). Existing `AthenaError`s pass through.
+    private static func classified(
+        _ err: any Error, module: ModuleID
+    ) -> Response {
+        let e = AthenaError.classify(err, module: module)
+        return error(
+            status: HTTPResponse.Status(code: e.httpStatus),
+            message: e.message, type: "server_error", code: e.code)
     }
 }
