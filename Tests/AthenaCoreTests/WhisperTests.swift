@@ -46,8 +46,9 @@ final class WhisperTranscribeIntegrationTests: XCTestCase {
         let mel = LogMel.logMel(pcm)
         let model = try await WhisperLoader.load()
         let tokenizer = try await WhisperLoader.loadTokenizer()
+        // language: nil ⇒ exercises M4.2e-1 auto-detection (English).
         let text = WhisperDecode.transcribe(
-            model: model, mel: mel, tokenizer: tokenizer, language: "en")
+            model: model, mel: mel, tokenizer: tokenizer, language: nil)
 
         let norm = text.lowercased().filter {
             $0.isLetter || $0.isWhitespace

@@ -72,8 +72,9 @@ public actor MLXTranscriptionModule: TranscriptionModule {
 
         let pcm = try AudioDecode.pcm16kMono(from: tmp)
         let mel = LogMel.logMel(pcm)
+        // nil language ⇒ Whisper auto-detects from the audio.
         return WhisperDecode.transcribe(
             model: model, mel: mel, tokenizer: tokenizer,
-            language: language ?? "en")
+            language: language)
     }
 }
