@@ -29,6 +29,11 @@ let package = Package(
         .package(
             url: "https://github.com/apple/swift-log",
             from: "1.5.0"),
+        // swift-crypto (already transitive via NIO) — declared direct
+        // for the auth middleware: SHA-256, HMAC, constant-time.
+        .package(
+            url: "https://github.com/apple/swift-crypto",
+            from: "4.0.0"),
         // The MLX substrate. Local clone per the the platform environment
         // (~/Source/mlx-swift-lm); a path dependency keeps M1 buildable
         // against the exact reusable Qwen3.5/TokenIterator code.
@@ -171,6 +176,7 @@ let package = Package(
                 .product(name: "Hummingbird", package: "hummingbird"),
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "Logging", package: "swift-log"),
+                .product(name: "Crypto", package: "swift-crypto"),
             ],
             path: "Sources/athena",
             linkerSettings: [

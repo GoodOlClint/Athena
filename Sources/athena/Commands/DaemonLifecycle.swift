@@ -72,6 +72,8 @@ struct Start: AsyncParsableCommand {
     var logLevel: String?
     @Option(help: "Opt-in remote syslog udp://host[:514] (logs only).")
     var syslogRemote: String?
+    @Option(help: "Bearer-auth keys file (see `athena load --help`).")
+    var authKeysFile: String?
 
     func run() async throws {
         if let pid = livePid(dataDir) {
@@ -99,6 +101,9 @@ struct Start: AsyncParsableCommand {
         if let logLevel { args += ["--log-level", logLevel] }
         if let syslogRemote {
             args += ["--syslog-remote", syslogRemote]
+        }
+        if let authKeysFile {
+            args += ["--auth-keys-file", authKeysFile]
         }
 
         let proc = Process()

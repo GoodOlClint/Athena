@@ -97,6 +97,12 @@ struct Load: AsyncParsableCommand {
     )
     var syslogRemote: String?
 
+    @Option(
+        help:
+            "Bearer-auth keys file (lines: `admin <key>` / `inference <key>`). Also ATHENA_ADMIN_KEYS/ATHENA_INFERENCE_KEYS env. No keys + loopback = open; + non-loopback = refuse to start."
+    )
+    var authKeysFile: String?
+
     mutating func run() async throws {
         // Centralized logging first — must precede any Logger creation
         // (Hummingbird/NIO included) so everything routes through the
@@ -236,12 +242,25 @@ struct Load: AsyncParsableCommand {
                 ?? (config.totalBudgetBytes / 8))
         let queue = RequestQueue(store: athenaStore)
 
+        // Inbound bearer auth (M12). Fail-safe: a non-loopback bind
+        // with no keys refuses to start.
+        let authConfig = AuthConfig.load(
+            file: authKeysFile,
+            env: ProcessInfo.processInfo.environment,
+            log: Logger(label: AthenaLogLabel.daemon))
+        try authConfig.validateStartup(
+            listenHost: config.listenHost)
+        Logger(label: AthenaLogLabel.daemon).notice(
+            authConfig.isEnabled
+                ? "auth: enabled (bearer, 2-tier)"
+                : "auth: DISABLED (loopback, no keys)")
+
         let server = AthenaServer(
             config: config, governor: governor, llm: llm,
             embedding: embedding, transcription: transcription,
             diarization: diarization, vectorStore: vectorStore,
             queue: queue, store: athenaStore,
-            modelName: modelURL.lastPathComponent)
+            modelName: modelURL.lastPathComponent, auth: authConfig)
         try await server.run()
     }
 }

@@ -16,7 +16,7 @@ enum ConfigEditor {
         "listen_host", "listen_port", "budget_bytes", "engine",
         "model", "model_store", "data_dir", "log_level",
         "syslog_remote", "log_dir", "max_tokens", "temperature",
-        "speculative", "vector_cap_bytes",
+        "speculative", "vector_cap_bytes", "auth_keys_file",
     ]
 
     /// `--config` wins; else the installed file if present; else the
@@ -63,6 +63,7 @@ enum ConfigEditor {
             return cfg.speculative.map { $0 ? "true" : "false" }
         case "vector_cap_bytes":
             return cfg.vectorCapBytes.map(String.init)
+        case "auth_keys_file": return cfg.authKeysFile
         default: FailableExit.die("error: unknown key '\(key)'")
         }
     }

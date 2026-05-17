@@ -29,9 +29,16 @@ struct AthenaServer {
     /// In-process request metrics (M11.1). Defaulted so the
     /// memberwise init is unchanged for existing call sites.
     let metrics = AthenaMetrics()
+    /// Inbound bearer auth (M12). Defaulted to disabled (open) so
+    /// existing call sites/tests are unchanged; Load injects the
+    /// loaded config. `var` (not `let`) so it's a memberwise-init
+    /// parameter — set once at construction, never mutated after.
+    var auth: AuthConfig = AuthConfig()
 
     func run() async throws {
         let router = Router()
+        // Auth outermost — reject at the edge, before timing work.
+        router.add(middleware: AuthMiddleware(config: auth))
         router.add(middleware: MetricsMiddleware(metrics: metrics))
 
         router.get("/healthz") { _, _ -> Response in

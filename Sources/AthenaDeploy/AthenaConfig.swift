@@ -31,6 +31,9 @@ public struct AthenaConfig: Sendable, Equatable {
     public var temperature: String?
     public var speculative: Bool?
     public var vectorCapBytes: Int?
+    /// Bearer-auth keys file. Optional — no keys + loopback = open;
+    /// no keys + non-loopback = the daemon refuses to start.
+    public var authKeysFile: String?
     public var logDir: String
 
     public init(
@@ -40,6 +43,7 @@ public struct AthenaConfig: Sendable, Equatable {
         logLevel: String? = nil, syslogRemote: String? = nil,
         maxTokens: Int? = nil, temperature: String? = nil,
         speculative: Bool? = nil, vectorCapBytes: Int? = nil,
+        authKeysFile: String? = nil,
         logDir: String
     ) {
         self.listenHost = listenHost
@@ -55,6 +59,7 @@ public struct AthenaConfig: Sendable, Equatable {
         self.temperature = temperature
         self.speculative = speculative
         self.vectorCapBytes = vectorCapBytes
+        self.authKeysFile = authKeysFile
         self.logDir = logDir
     }
 
@@ -135,6 +140,7 @@ public struct AthenaConfig: Sendable, Equatable {
             temperature: scalar("temperature", in: toml),
             speculative: spec,
             vectorCapBytes: vecCap,
+            authKeysFile: scalar("auth_keys_file", in: toml),
             logDir: logDir)
     }
 

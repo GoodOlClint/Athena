@@ -73,6 +73,18 @@ engine = "mlx"
 # data_dir = "/usr/local/var/athena/data"
 
 
+# ── Security ─────────────────────────────────────────────────────────
+
+# Bearer-token auth keys file. Each line: `admin <key>` or
+# `inference <key>` (# comments ok). Keep it chmod 600. Keys may
+# also come from ATHENA_ADMIN_KEYS / ATHENA_INFERENCE_KEYS env
+# (comma-separated). Commented + loopback bind ⇒ auth OFF (dev).
+# Commented + non-loopback bind ⇒ the daemon REFUSES to start.
+# Any keys present ⇒ enforced. admin ⊇ inference; admin also gates
+# the WebUI, /metrics, /v1/store, and mutating queue/vector ops.
+# auth_keys_file = "/usr/local/etc/athena/auth.keys"
+
+
 # ── Logging ──────────────────────────────────────────────────────────
 
 # Directory for athena.out.log / athena.err.log (launchd-managed).

@@ -88,7 +88,8 @@ final class LaunchdPlistTests: XCTestCase {
         modelStore: String? = nil, dataDir: String? = nil,
         logLevel: String? = nil, syslogRemote: String? = nil,
         maxTokens: Int? = nil, temperature: String? = nil,
-        speculative: Bool? = nil, vectorCapBytes: Int? = nil
+        speculative: Bool? = nil, vectorCapBytes: Int? = nil,
+        authKeysFile: String? = nil
     ) -> AthenaConfig {
         AthenaConfig(
             listenHost: "127.0.0.1", listenPort: 7447, budgetBytes: budget,
@@ -96,7 +97,8 @@ final class LaunchdPlistTests: XCTestCase {
             dataDir: dataDir, logLevel: logLevel,
             syslogRemote: syslogRemote, maxTokens: maxTokens,
             temperature: temperature, speculative: speculative,
-            vectorCapBytes: vectorCapBytes, logDir: "/var/log/athena")
+            vectorCapBytes: vectorCapBytes,
+            authKeysFile: authKeysFile, logDir: "/var/log/athena")
     }
 
     func testDefaultProgramArguments() {
@@ -125,7 +127,8 @@ final class LaunchdPlistTests: XCTestCase {
                 logLevel: "debug",
                 syslogRemote: "udp://10.0.0.5:514",
                 maxTokens: 2048, temperature: "0.2",
-                speculative: true, vectorCapBytes: 1_000_000))
+                speculative: true, vectorCapBytes: 1_000_000,
+                authKeysFile: "/etc/athena/auth.keys"))
         XCTAssertEqual(
             d["ProgramArguments"] as? [String],
             [
@@ -137,6 +140,7 @@ final class LaunchdPlistTests: XCTestCase {
                 "--syslog-remote", "udp://10.0.0.5:514",
                 "--max-tokens", "2048", "--temperature", "0.2",
                 "--speculative", "--vector-cap-bytes", "1000000",
+                "--auth-keys-file", "/etc/athena/auth.keys",
             ])
     }
 

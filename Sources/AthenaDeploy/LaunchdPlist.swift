@@ -51,6 +51,9 @@ public enum LaunchdPlist {
         if let vectorCapBytes = config.vectorCapBytes {
             args += ["--vector-cap-bytes", String(vectorCapBytes)]
         }
+        if let authKeysFile = config.authKeysFile {
+            args += ["--auth-keys-file", authKeysFile]
+        }
 
         return [
             "Label": label,
