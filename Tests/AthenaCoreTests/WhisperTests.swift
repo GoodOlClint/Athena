@@ -21,6 +21,44 @@ final class WhisperSinusoidsTests: XCTestCase {
     }
 }
 
+/// M4.2c — full pipeline on macOS `say` TTS of a known sentence:
+/// audio → log-mel → Whisper greedy decode → text. Gated + heavy.
+final class WhisperTranscribeIntegrationTests: XCTestCase {
+
+    func testTranscribesKnownUtterance() async throws {
+        guard
+            ProcessInfo.processInfo.environment["ATHENA_RUN_MODEL_TESTS"]
+                == "1"
+        else { throw XCTSkip("set ATHENA_RUN_MODEL_TESTS=1 (heavy)") }
+
+        let sentence = "the quick brown fox jumps over the lazy dog"
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("athena-say-\(UUID()).aiff")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/say")
+        p.arguments = ["-o", url.path, sentence]
+        try p.run()
+        p.waitUntilExit()
+        XCTAssertEqual(p.terminationStatus, 0, "say failed")
+
+        let pcm = try AudioDecode.pcm16kMono(from: url)
+        let mel = LogMel.logMel(pcm)
+        let model = try await WhisperLoader.load()
+        let tokenizer = try await WhisperLoader.loadTokenizer()
+        let text = WhisperDecode.transcribe(
+            model: model, mel: mel, tokenizer: tokenizer, language: "en")
+
+        let norm = text.lowercased().filter {
+            $0.isLetter || $0.isWhitespace
+        }
+        XCTAssertTrue(
+            norm.contains("quick brown fox"),
+            "got: \(text)")
+        XCTAssertTrue(norm.contains("lazy dog"), "got: \(text)")
+    }
+}
+
 final class WhisperLoadIntegrationTests: XCTestCase {
 
     func testLoadsAndRunsEncoderDecoder() async throws {

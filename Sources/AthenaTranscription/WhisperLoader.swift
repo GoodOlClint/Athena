@@ -4,6 +4,7 @@ import MLX
 import MLXHuggingFace
 import MLXLMCommon
 import MLXNN
+import Tokenizers
 
 /// Downloads an `mlx-community/whisper-*` checkpoint (config.json +
 /// weights.safetensors) via the substrate Hub downloader and loads it
@@ -59,5 +60,24 @@ public enum WhisperLoader {
             verify: .none)
         eval(model)
         return model
+    }
+
+    /// The Whisper GPT2-BPE tokenizer. The `mlx-community/whisper-*`
+    /// repos ship NO tokenizer files, so it is sourced from
+    /// `openai/whisper-large-v3` (tokenizer.json/vocab/merges) and loaded
+    /// with the substrate HF tokenizer loader. Used only to decode
+    /// generated ids → text (the forced prefix is built by id).
+    public static func loadTokenizer(
+        from tokenizerRepo: String = "openai/whisper-large-v3"
+    ) async throws -> any MLXLMCommon.Tokenizer {
+        let dir = try await #hubDownloader().download(
+            id: tokenizerRepo, revision: nil,
+            matching: [
+                "tokenizer.json", "tokenizer_config.json", "vocab.json",
+                "merges.txt", "special_tokens_map.json",
+                "added_tokens.json", "normalizer.json",
+            ],
+            useLatest: false, progressHandler: { _ in })
+        return try await #huggingFaceTokenizerLoader().load(from: dir)
     }
 }
