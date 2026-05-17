@@ -83,10 +83,13 @@ final class AthenaConfigTests: XCTestCase {
 
 final class LaunchdPlistTests: XCTestCase {
 
-    private func cfg(budget: Int? = nil, model: String? = nil) -> AthenaConfig {
+    private func cfg(
+        budget: Int? = nil, model: String? = nil, dataDir: String? = nil
+    ) -> AthenaConfig {
         AthenaConfig(
             listenHost: "127.0.0.1", listenPort: 7447, budgetBytes: budget,
-            engine: "mlx", model: model, logDir: "/var/log/athena")
+            engine: "mlx", model: model, dataDir: dataDir,
+            logDir: "/var/log/athena")
     }
 
     func testDefaultProgramArguments() {
@@ -98,7 +101,7 @@ final class LaunchdPlistTests: XCTestCase {
         XCTAssertEqual(
             d["ProgramArguments"] as? [String],
             [
-                "/usr/local/libexec/athena/athena", "serve",
+                "/usr/local/libexec/athena/athena", "load",
                 "--host", "127.0.0.1", "--port", "7447", "--engine", "mlx",
             ])
         XCTAssertEqual(d["RunAtLoad"] as? Bool, true)
@@ -109,13 +112,15 @@ final class LaunchdPlistTests: XCTestCase {
         let d = LaunchdPlist.dictionary(
             label: "l", executablePath: "/bin/athena", user: "svc",
             workingDirectory: "/w",
-            config: cfg(budget: 36_000_000_000, model: "M"))
+            config: cfg(
+                budget: 36_000_000_000, model: "M", dataDir: "/srv/a"))
         XCTAssertEqual(
             d["ProgramArguments"] as? [String],
             [
-                "/bin/athena", "serve", "--host", "127.0.0.1",
+                "/bin/athena", "load", "--host", "127.0.0.1",
                 "--port", "7447", "--budget-bytes", "36000000000",
                 "--engine", "mlx", "--model", "M",
+                "--data-dir", "/srv/a",
             ])
     }
 

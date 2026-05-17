@@ -14,7 +14,7 @@ public enum LaunchdPlist {
         config: AthenaConfig
     ) -> [String: Any] {
         var args: [String] = [
-            executablePath, "serve",
+            executablePath, "load",
             "--host", config.listenHost,
             "--port", String(config.listenPort),
         ]
@@ -26,6 +26,9 @@ public enum LaunchdPlist {
         }
         if let model = config.model {
             args += ["--model", model]
+        }
+        if let dataDir = config.dataDir {
+            args += ["--data-dir", dataDir]
         }
 
         return [

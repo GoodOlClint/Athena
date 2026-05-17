@@ -1,23 +1,55 @@
-# Athena daemon configuration.
+# ─────────────────────────────────────────────────────────────────────
+#  Athena daemon configuration
+# ─────────────────────────────────────────────────────────────────────
 #
-# Read by deploy/athena-install.sh and rendered into the launchd plist.
-# Flat scalar schema only — no tables/arrays — so the installer can parse it
-# with sed and stay dependency-free on a fresh Mac.
+#  Parsed by `athena install` (→ launchd plist) and editable in place
+#  with `athena config set <key> <value>`.
+#
+#  Schema: flat `key = value` scalars only — no tables or arrays. Lines
+#  starting with `#` are comments; a commented key falls back to the
+#  daemon's built-in default. Strings are quoted; ints are bare.
+#
+# ─────────────────────────────────────────────────────────────────────
 
+
+# ── Network ──────────────────────────────────────────────────────────
+
+# Address the HTTP surface binds to. 127.0.0.1 keeps Athena loopback-
+# only (passive-oracle default); set 0.0.0.0 to serve the LAN.
 listen_host = "127.0.0.1"
+
+# Athena's own port (7447), distinct from Ollama's 11434.
 listen_port = 7447
 
-# Global memory budget in bytes. Leave commented to let Athena default to
-# 75% of physical unified memory.
+
+# ── Memory governor ──────────────────────────────────────────────────
+
+# Global Metal/MLX memory budget, in bytes. Commented ⇒ the governor
+# defaults to 75% of physical unified memory. Example: 36 GB.
 # budget_bytes = 36000000000
 
+
+# ── Model ────────────────────────────────────────────────────────────
+
 # LLM engine: "mlx" (real Qwen3.5 from the model store) or "stub"
-# (no model — health/dev only).
+# (no model loaded — health/dev only).
 engine = "mlx"
 
-# Model directory path, or a name resolved under the model store root on
-# the external SSD. Leave commented to use the built-in default
+# Model directory path, or a name resolved under the model-store root
+# on the external SSD. Commented ⇒ the built-in default
 # (Qwen3.5-27B-4bit-mtp, MTP weights preserved).
 # model = "Qwen3.5-27B-4bit-mtp"
 
+
+# ── Storage ──────────────────────────────────────────────────────────
+
+# Directory for the embedded SQLite store (vector DB + async queue +
+# job rows). Commented ⇒ "~/.athena" of the daemon's user. Set this to
+# a stable, backed-up path for any real deployment.
+# data_dir = "/usr/local/var/athena/data"
+
+
+# ── Logging ──────────────────────────────────────────────────────────
+
+# Directory for athena.out.log / athena.err.log (launchd-managed).
 log_dir = "/usr/local/var/log/athena"

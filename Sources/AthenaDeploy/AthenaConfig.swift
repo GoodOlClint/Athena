@@ -10,17 +10,22 @@ public struct AthenaConfig: Sendable, Equatable {
     public var budgetBytes: Int?
     public var engine: String?
     public var model: String?
+    /// Where the daemon keeps its SQLite store (vectors + queue + jobs).
+    /// Optional — the daemon defaults to `~/.athena` when absent.
+    public var dataDir: String?
     public var logDir: String
 
     public init(
         listenHost: String, listenPort: Int, budgetBytes: Int?,
-        engine: String?, model: String?, logDir: String
+        engine: String?, model: String?, dataDir: String? = nil,
+        logDir: String
     ) {
         self.listenHost = listenHost
         self.listenPort = listenPort
         self.budgetBytes = budgetBytes
         self.engine = engine
         self.model = model
+        self.dataDir = dataDir
         self.logDir = logDir
     }
 
@@ -84,6 +89,7 @@ public struct AthenaConfig: Sendable, Equatable {
             budgetBytes: budget,
             engine: scalar("engine", in: toml),
             model: scalar("model", in: toml),
+            dataDir: scalar("data_dir", in: toml),
             logDir: logDir)
     }
 
