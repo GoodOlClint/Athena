@@ -26,13 +26,21 @@ struct AthenaServer {
     let store: AthenaStore
     /// Display name reported by the Ollama shim (`/api/tags` etc.).
     let modelName: String
+    /// In-process request metrics (M11.1). Defaulted so the
+    /// memberwise init is unchanged for existing call sites.
+    let metrics = AthenaMetrics()
 
     func run() async throws {
         let router = Router()
+        router.add(middleware: MetricsMiddleware(metrics: metrics))
 
         router.get("/healthz") { _, _ -> Response in
             let snapshot = await governor.snapshot()
             return Self.json(snapshot)
+        }
+
+        router.get("/metrics") { _, _ -> Response in
+            Self.json(await metrics.snapshot())
         }
 
         router.post("/v1/chat/completions") { request, _ -> Response in
