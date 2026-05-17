@@ -27,6 +27,9 @@ public enum LaunchdPlist {
         if let model = config.model {
             args += ["--model", model]
         }
+        if let modelStore = config.modelStore {
+            args += ["--model-store", modelStore]
+        }
         if let dataDir = config.dataDir {
             args += ["--data-dir", dataDir]
         }

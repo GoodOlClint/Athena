@@ -35,10 +35,16 @@ listen_port = 7447
 # (no model loaded — health/dev only).
 engine = "mlx"
 
-# Model directory path, or a name resolved under the model-store root
-# on the external SSD. Commented ⇒ the built-in default
-# (Qwen3.5-27B-4bit-mtp, MTP weights preserved).
+# Model directory path, or a name resolved under the model-store root.
+# Commented ⇒ the built-in default (Qwen3.5-27B-4bit-mtp, MTP weights
+# preserved).
 # model = "Qwen3.5-27B-4bit-mtp"
+
+# Model-store ROOT directory (where model dirs / the HF cache live).
+# Commented ⇒ the built-in default (the external SSD,
+# /Volumes/SB-XTM5/mlx-models). Set this when models live elsewhere
+# (no SSD attached, models on the boot volume, etc.).
+# model_store = "/Users/you/mlx-models"
 
 
 # ── Storage ──────────────────────────────────────────────────────────

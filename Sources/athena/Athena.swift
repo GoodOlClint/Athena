@@ -7,7 +7,7 @@ struct Athena: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "athena",
         abstract: "Project the platform inference appliance (passive oracle).",
-        version: "0.9.23",
+        version: "0.9.25",
         subcommands: [
             Load.self, Install.self, ListModels.self, Ps.self,
             Run.self, Pull.self, Convert.self, Verify.self,

@@ -9,7 +9,8 @@ enum ConfigEditor {
     static let intKeys: Set<String> = ["listen_port", "budget_bytes"]
     static let knownKeys: Set<String> = [
         "listen_host", "listen_port", "budget_bytes", "engine",
-        "model", "data_dir", "log_level", "syslog_remote", "log_dir",
+        "model", "model_store", "data_dir", "log_level",
+        "syslog_remote", "log_dir",
     ]
 
     /// `--config` wins; else the installed file if present; else the
@@ -45,6 +46,7 @@ enum ConfigEditor {
         case "budget_bytes": return cfg.budgetBytes.map(String.init)
         case "engine": return cfg.engine
         case "model": return cfg.model
+        case "model_store": return cfg.modelStore
         case "data_dir": return cfg.dataDir
         case "log_level": return cfg.logLevel
         case "syslog_remote": return cfg.syslogRemote

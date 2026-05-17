@@ -10,6 +10,10 @@ public struct AthenaConfig: Sendable, Equatable {
     public var budgetBytes: Int?
     public var engine: String?
     public var model: String?
+    /// Model-store root directory. Optional — falls back to the
+    /// built-in default (the external SSD) when absent. Set this when
+    /// models live elsewhere (no SSD attached, boot-volume store…).
+    public var modelStore: String?
     /// Where the daemon keeps its SQLite store (vectors + queue + jobs).
     /// Optional — the daemon defaults to `~/.athena` when absent.
     public var dataDir: String?
@@ -23,7 +27,8 @@ public struct AthenaConfig: Sendable, Equatable {
 
     public init(
         listenHost: String, listenPort: Int, budgetBytes: Int?,
-        engine: String?, model: String?, dataDir: String? = nil,
+        engine: String?, model: String?, modelStore: String? = nil,
+        dataDir: String? = nil,
         logLevel: String? = nil, syslogRemote: String? = nil,
         logDir: String
     ) {
@@ -32,6 +37,7 @@ public struct AthenaConfig: Sendable, Equatable {
         self.budgetBytes = budgetBytes
         self.engine = engine
         self.model = model
+        self.modelStore = modelStore
         self.dataDir = dataDir
         self.logLevel = logLevel
         self.syslogRemote = syslogRemote
@@ -98,6 +104,7 @@ public struct AthenaConfig: Sendable, Equatable {
             budgetBytes: budget,
             engine: scalar("engine", in: toml),
             model: scalar("model", in: toml),
+            modelStore: scalar("model_store", in: toml),
             dataDir: scalar("data_dir", in: toml),
             logLevel: scalar("log_level", in: toml),
             syslogRemote: scalar("syslog_remote", in: toml),
