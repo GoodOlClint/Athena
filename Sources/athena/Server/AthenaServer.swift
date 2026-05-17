@@ -73,11 +73,17 @@ struct AthenaServer {
             await handleQueueSubmit(
                 context.parameters.get("arg"), request)
         }
-        router.get("/v1/queue/:arg") { _, context -> Response in
-            await handleQueueStatus(context.parameters.get("arg"))
+        router.get("/v1/queue/:arg") { request, context -> Response in
+            await handleQueueStatus(
+                context.parameters.get("arg"), request)
         }
         router.delete("/v1/queue/:arg") { _, context -> Response in
             await handleQueueCancel(context.parameters.get("arg"))
+        }
+        // SSE: stream status transitions until terminal (inbound only —
+        // the passive-oracle thesis forbids outbound webhooks).
+        router.get("/v1/queue/:arg/events") { _, context -> Response in
+            handleQueueEvents(context.parameters.get("arg"))
         }
 
         // Ollama-compatible shim (M6.1, non-streaming).
@@ -630,19 +636,99 @@ struct AthenaServer {
         }
     }
 
-    private func handleQueueStatus(_ id: String?) async -> Response {
-        guard let id, let job = await queue.status(id: id) else {
-            return Self.error(
-                status: .notFound, message: "no job '\(id ?? "")'",
-                type: "invalid_request_error", code: "not_found")
-        }
+    private static func isTerminal(_ s: String) -> Bool {
+        s == "done" || s == "error" || s == "canceled"
+    }
+
+    private static func statusResponse(_ job: JobRow) -> Response {
         let result = job.result.flatMap {
             try? JSONDecoder().decode(JSONValue.self, from: $0)
         }
-        return Self.json(
+        return json(
             QueueStatusResponse(
                 id: job.id, kind: job.kind, status: job.status,
                 result: result, error: job.error))
+    }
+
+    /// `?wait=N` long-polls up to N s (clamped 0…120) for a terminal
+    /// state before responding — inbound-only, no outbound callback.
+    private func handleQueueStatus(
+        _ id: String?, _ request: Request
+    ) async -> Response {
+        guard let id else {
+            return Self.error(
+                status: .notFound, message: "no job ''",
+                type: "invalid_request_error", code: "not_found")
+        }
+        var wait = 0
+        if let q = request.uri.query {
+            for kv in q.split(separator: "&")
+            where kv.hasPrefix("wait=") {
+                wait = min(120, max(0, Int(kv.dropFirst(5)) ?? 0))
+            }
+        }
+        let deadline = Date().addingTimeInterval(Double(wait))
+        while true {
+            guard let job = await queue.status(id: id) else {
+                return Self.error(
+                    status: .notFound, message: "no job '\(id)'",
+                    type: "invalid_request_error", code: "not_found")
+            }
+            if Self.isTerminal(job.status) || Date() >= deadline {
+                return Self.statusResponse(job)
+            }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+        }
+    }
+
+    private func handleQueueEvents(_ id: String?) -> Response {
+        let q = queue
+        let stream = AsyncStream<ByteBuffer> { continuation in
+            let task = Task {
+                func emit(_ job: JobRow) {
+                    let r = job.result.flatMap {
+                        try? JSONDecoder().decode(
+                            JSONValue.self, from: $0)
+                    }
+                    guard
+                        let data = try? JSONEncoder().encode(
+                            QueueStatusResponse(
+                                id: job.id, kind: job.kind,
+                                status: job.status, result: r,
+                                error: job.error))
+                    else { return }
+                    var b = ByteBuffer()
+                    b.writeString("data: ")
+                    b.writeBytes(data)
+                    b.writeString("\n\n")
+                    continuation.yield(b)
+                }
+                var last = ""
+                // Cap the stream so a stuck job can't hold a
+                // connection forever (~600 × 0.5 s = 5 min).
+                for _ in 0..<600 {
+                    guard let id, let job = await q.status(id: id)
+                    else { break }
+                    if job.status != last {
+                        emit(job)
+                        last = job.status
+                    }
+                    if Self.isTerminal(job.status) { break }
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                }
+                var done = ByteBuffer()
+                done.writeString("data: [DONE]\n\n")
+                continuation.yield(done)
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+        var headers = HTTPFields()
+        headers[.contentType] = "text/event-stream"
+        headers[.cacheControl] = "no-cache"
+        return Response(
+            status: .ok, headers: headers,
+            body: ResponseBody(asyncSequence: stream))
     }
 
     private func handleQueueCancel(_ id: String?) async -> Response {
