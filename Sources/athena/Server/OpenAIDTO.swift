@@ -222,6 +222,9 @@ struct VerboseSegment: Codable {
     let start: Double
     let end: Double
     let text: String
+    /// Speaker id (M4.3c) — present only when the request opted into
+    /// diarization (`diarize=true`); omitted otherwise.
+    let speaker: Int?
 }
 
 /// OpenAI `response_format: "verbose_json"` shape.
@@ -231,4 +234,17 @@ struct VerboseTranscriptionResponse: Codable {
     let duration: Double
     let text: String
     let segments: [VerboseSegment]
+}
+
+// MARK: - /v1/audio/diarizations (M4.3c, standalone)
+
+struct DiarizationSegmentDTO: Codable {
+    let start: Double
+    let end: Double
+    let speaker: Int
+}
+
+struct DiarizationResponse: Codable {
+    let num_speakers: Int
+    let segments: [DiarizationSegmentDTO]
 }

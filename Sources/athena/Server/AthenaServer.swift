@@ -40,6 +40,10 @@ struct AthenaServer {
             await handleTranscriptions(request)
         }
 
+        router.post("/v1/audio/diarizations") { request, _ -> Response in
+            await handleDiarizations(request)
+        }
+
         // Ollama-compatible shim (M6.1, non-streaming).
         router.get("/api/version") { _, _ -> Response in
             Self.json(OllamaVersionResponse(version: OllamaShim.version))
@@ -326,6 +330,19 @@ struct AthenaServer {
                 TranscriptionFormat.vtt(result.segments),
                 "text/vtt; charset=utf-8")
         case "verbose_json":
+            // Opt-in diarization: tag each Whisper segment with the
+            // best-overlapping Sortformer speaker turn (M4.3c).
+            var turns: [DiarizationTurn] = []
+            if form.text("diarize") == "true" {
+                do {
+                    try await governor.ensureLoaded(.diarization)
+                    turns = try await diarization.diarize(
+                        audio: file.data, filename: file.filename
+                    ).turns
+                } catch {
+                    return Self.classified(error, module: .diarization)
+                }
+            }
             return Self.json(
                 VerboseTranscriptionResponse(
                     task: "transcribe", language: result.language,
@@ -333,11 +350,94 @@ struct AthenaServer {
                     segments: result.segments.enumerated().map {
                         VerboseSegment(
                             id: $0.offset, start: $0.element.start,
-                            end: $0.element.end, text: $0.element.text)
+                            end: $0.element.end, text: $0.element.text,
+                            speaker: turns.isEmpty
+                                ? nil
+                                : Self.speaker(
+                                    start: $0.element.start,
+                                    end: $0.element.end, turns: turns))
                     }))
         default:  // "json" / nil
             return Self.json(TranscriptionResponse(text: result.text))
         }
+    }
+
+    /// The speaker whose turn most overlaps `[start,end]`, or nil if
+    /// none overlap (M4.3c Sortformer↔Whisper alignment).
+    private static func speaker(
+        start: Double, end: Double, turns: [DiarizationTurn]
+    ) -> Int? {
+        var best: (speaker: Int, overlap: Double)?
+        for t in turns {
+            let ov = min(end, t.end) - max(start, t.start)
+            if ov > 0, best == nil || ov > best!.overlap {
+                best = (t.speaker, ov)
+            }
+        }
+        return best?.speaker
+    }
+
+    private func handleDiarizations(_ request: Request) async -> Response
+    {
+        guard
+            let ct = request.headers[.contentType],
+            let boundary = MultipartForm.boundary(fromContentType: ct)
+        else {
+            return Self.error(
+                status: .badRequest,
+                message: "expected multipart/form-data with a boundary",
+                type: "invalid_request_error",
+                code: "invalid_content_type")
+        }
+        let body: Data
+        do {
+            let buffer = try await request.body.collect(
+                upTo: 25 * 1024 * 1024)
+            body = Data(buffer: buffer)
+        } catch {
+            return Self.error(
+                status: .badRequest,
+                message: "Invalid request body: \(error)",
+                type: "invalid_request_error", code: "invalid_body")
+        }
+        guard
+            let form = MultipartForm(body: body, boundary: boundary),
+            let file = form.first("file"), !file.data.isEmpty
+        else {
+            return Self.error(
+                status: .badRequest,
+                message: "missing required 'file' part",
+                type: "invalid_request_error", code: "missing_file")
+        }
+
+        do {
+            try await governor.ensureLoaded(.diarization)
+        } catch let e as AthenaError {
+            return Self.error(
+                status: HTTPResponse.Status(code: e.httpStatus),
+                message: e.message, type: "server_error", code: e.code)
+        } catch {
+            return Self.error(
+                status: .internalServerError,
+                message: String(describing: error),
+                type: "server_error", code: "internal_error")
+        }
+
+        let r: DiarizationResult
+        do {
+            r = try await diarization.diarize(
+                audio: file.data, filename: file.filename)
+        } catch {
+            return Self.classified(error, module: .diarization)
+        }
+        return Self.json(
+            DiarizationResponse(
+                num_speakers: r.numSpeakers,
+                segments: r.turns.map {
+                    DiarizationSegmentDTO(
+                        start: $0.start, end: $0.end,
+                        speaker: $0.speaker)
+                }))
     }
 
     // MARK: - Ollama shim (M6.1)
