@@ -23,6 +23,12 @@ let package = Package(
         .package(
             url: "https://github.com/apple/swift-argument-parser",
             from: "1.4.0"),
+        // swift-log is already in the graph transitively (Hummingbird/
+        // NIO). Declared directly so the centralized-logging bridge
+        // (M10) can import Logging + bootstrap a custom handler.
+        .package(
+            url: "https://github.com/apple/swift-log",
+            from: "1.5.0"),
         // The MLX substrate. Local clone per the the platform environment
         // (~/Source/mlx-swift-lm); a path dependency keeps M1 buildable
         // against the exact reusable Qwen3.5/TokenIterator code.
@@ -164,6 +170,7 @@ let package = Package(
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "Hummingbird", package: "hummingbird"),
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
+                .product(name: "Logging", package: "swift-log"),
             ],
             path: "Sources/athena",
             linkerSettings: [

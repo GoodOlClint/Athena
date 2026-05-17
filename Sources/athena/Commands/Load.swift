@@ -5,6 +5,7 @@ import AthenaLLM
 import AthenaStore
 import AthenaTranscription
 import Foundation
+import Logging
 import MLX
 
 enum Engine: String, CaseIterable, ExpressibleByArgument {
@@ -85,6 +86,11 @@ struct Load: AsyncParsableCommand {
     var vectorCapBytes: Int?
 
     mutating func run() async throws {
+        // Centralized logging first — must precede any Logger creation
+        // (Hummingbird/NIO included) so everything routes through the
+        // stdout + unified-logging multiplex (M10).
+        AthenaLog.bootstrap()
+
         // HF download cache: prefer the SSD's hf-cache (sibling of the
         // model store) when the volume is mounted; otherwise leave
         // HF_HOME unset so the Hub client falls back to the local
@@ -177,6 +183,15 @@ struct Load: AsyncParsableCommand {
                 + "model=\(modelURL.path) "
                 + "budget=\(config.totalBudgetBytes)B "
                 + "listen=\(config.listenHost):\(config.listenPort)")
+
+        // Persisted unified-log marker (notice ⇒ survives `log show`);
+        // also confirms the centralized-logging pipeline is live.
+        Logging.Logger(label: AthenaLog.daemonLabel).notice(
+            """
+            athena daemon up — engine=\(engine.rawValue) \
+            listen=\(config.listenHost):\(config.listenPort) \
+            budget=\(config.totalBudgetBytes)B
+            """)
 
         // M7: one embedded SQLite store (vectors + queue) under the
         // data dir. Governor-capped resident vector working set.
