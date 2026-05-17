@@ -7,6 +7,7 @@ import AthenaTranscription
 import Foundation
 import HTTPTypes
 import Hummingbird
+import Logging
 import NIOCore
 
 /// The single Athena HTTP listener. Passive oracle: it only answers inbound
@@ -1183,10 +1184,17 @@ struct AthenaServer {
     /// Classify an arbitrary inference error: a genuine MLX/Metal OOM
     /// becomes a governed 503 (`metal_oom`), never a bare 500 / process
     /// abort (brief item 4a). Existing `AthenaError`s pass through.
+    private static let log = Logger(label: AthenaLog.daemonLabel)
+
     private static func classified(
         _ err: any Error, module: ModuleID
     ) -> Response {
         let e = AthenaError.classify(err, module: module)
+        log.warning(
+            """
+            governed request failed module=\(module) \
+            status=\(e.httpStatus) code=\(e.code) \(e.message)
+            """)
         return error(
             status: HTTPResponse.Status(code: e.httpStatus),
             message: e.message, type: "server_error", code: e.code)

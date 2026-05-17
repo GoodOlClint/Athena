@@ -1,5 +1,6 @@
 import AthenaStore
 import Foundation
+import Logging
 
 /// Async request queue (M8.1). Jobs persist in the shared
 /// `AthenaStore`; a single serial worker drains them through the same
@@ -21,6 +22,7 @@ actor RequestQueue {
     private var executor: Executor?
     private let wake: AsyncStream<Void>
     private let signal: AsyncStream<Void>.Continuation
+    private let log = Logger(label: AthenaLog.daemonLabel)
 
     init(store: AthenaStore) {
         self.store = store
@@ -34,6 +36,7 @@ actor RequestQueue {
         let id = UUID().uuidString
         try await store.insertJob(
             id: id, kind: kind, request: request)
+        log.info("queue submit kind=\(kind) id=\(id)")
         signal.yield(())
         return id
     }
@@ -84,12 +87,19 @@ actor RequestQueue {
                     id: job.id, status: "running", result: nil,
                     error: nil)
             }
+            log.info("queue job running kind=\(job.kind) id=\(job.id)")
             let (result, error) = await executor(
                 job.kind, job.request)
             try? await store.updateJob(
                 id: job.id,
                 status: error == nil ? "done" : "error",
                 result: result, error: error)
+            if let error {
+                log.warning(
+                    "queue job error id=\(job.id) detail=\(error)")
+            } else {
+                log.info("queue job done id=\(job.id)")
+            }
         }
     }
 }
