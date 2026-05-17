@@ -32,16 +32,7 @@ struct ListModels: ParsableCommand {
         for dir in entries {
             let cfg = dir.appendingPathComponent("config.json")
             guard fm.fileExists(atPath: cfg.path) else { continue }
-            let size =
-                ((try? fm.contentsOfDirectory(
-                    at: dir, includingPropertiesForKeys: [.fileSizeKey]))
-                ?? [])
-                .filter { $0.pathExtension == "safetensors" }
-                .reduce(0) {
-                    $0
-                        + ((try? $1.resourceValues(forKeys: [.fileSizeKey]))?
-                            .fileSize ?? 0)
-                }
+            let size = Self.safetensorsSize(dir)
             let mod =
                 (try? dir.resourceValues(forKeys: [
                     .contentModificationDateKey
@@ -68,6 +59,28 @@ struct ListModels: ParsableCommand {
                         toLength: 12, withPad: " ", startingAt: 0)
                     + df.string(from: r.modified))
         }
+    }
+
+    /// Sum of `*.safetensors` bytes, resolving symlinks. `pull` links a
+    /// model dir to the HF cache `snapshots/<hash>/` whose entries are
+    /// themselves symlinks into `blobs/`; the link's own size is ~0, so
+    /// both the dir and each file must be symlink-resolved to get the
+    /// real blob sizes.
+    static func safetensorsSize(_ dir: URL) -> Int {
+        let real = dir.resolvingSymlinksInPath()
+        let entries =
+            (try? FileManager.default.contentsOfDirectory(
+                at: real, includingPropertiesForKeys: nil)) ?? []
+        return
+            entries
+            .filter { $0.pathExtension == "safetensors" }
+            .reduce(0) {
+                let f = $1.resolvingSymlinksInPath()
+                let s =
+                    (try? f.resourceValues(forKeys: [.fileSizeKey]))?
+                    .fileSize ?? 0
+                return $0 + s
+            }
     }
 
     static func humanBytes(_ n: Int) -> String {

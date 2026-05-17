@@ -64,6 +64,12 @@ struct AthenaServer {
         router.post("/api/embed") { request, _ -> Response in
             await handleOllamaEmbed(request)
         }
+        router.post("/api/stop") { _, _ -> Response in
+            await governor.unload(.llm)
+            return Self.json([
+                "status": "unloaded", "model": modelName,
+            ])
+        }
 
         let app = Application(
             router: router,

@@ -61,17 +61,7 @@ struct Show: ParsableCommand {
             print("error: no model '\(model)' in \(root.path)")
             throw ExitCode.failure
         }
-        let fm = FileManager.default
-        let size =
-            ((try? fm.contentsOfDirectory(
-                at: dir, includingPropertiesForKeys: [.fileSizeKey]))
-            ?? [])
-            .filter { $0.pathExtension == "safetensors" }
-            .reduce(0) {
-                $0
-                    + ((try? $1.resourceValues(forKeys: [.fileSizeKey]))?
-                        .fileSize ?? 0)
-            }
+        let size = ListModels.safetensorsSize(dir)
         print("model:    \(model)")
         print("path:     \(dir.path)")
         print("size:     \(ListModels.humanBytes(size))")
