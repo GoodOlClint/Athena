@@ -43,6 +43,14 @@ struct AthenaServer {
             Self.json(await metrics.snapshot())
         }
 
+        // Monitoring dashboard (M11.2) — inbound-only.
+        router.get("/ui") { _, _ -> Response in
+            Self.html(Self.uiPage)
+        }
+        router.get("/ui/api/state") { _, _ -> Response in
+            await handleUIState()
+        }
+
         router.post("/v1/chat/completions") { request, _ -> Response in
             await handleChatCompletions(request)
         }
@@ -631,7 +639,7 @@ struct AthenaServer {
 
     /// On-disk footprint = main DB + the WAL/SHM sidecars (a hot DB's
     /// recent writes live in `-wal` until checkpoint).
-    private func storeBytes() -> Int {
+    func storeBytes() -> Int {
         let base = store.dbPath
         return Self.fileBytes(base)
             + Self.fileBytes(base.appendingPathExtension("wal"))
@@ -1165,7 +1173,7 @@ struct AthenaServer {
             body: ResponseBody(asyncSequence: stream))
     }
 
-    private static func json<T: Encodable>(
+    static func json<T: Encodable>(
         _ value: T, status: HTTPResponse.Status = .ok
     ) -> Response {
         let data =
