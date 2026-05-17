@@ -6,8 +6,12 @@ import Foundation
 /// gone) reports as `missing` because `fileExists` follows symlinks.
 public enum ModelHealth {
     /// Empty ⇒ healthy. Each string is one human-readable problem.
-    public static func check(_ dir: URL) -> [String] {
+    public static func check(_ entry: URL) -> [String] {
         let fm = FileManager.default
+        // Resolve a symlinked model dir (how `pull` and `cp` alias
+        // land) so enumeration sees the real contents; a dangling
+        // link resolves to a non-existent path ⇒ still "missing".
+        let dir = entry.resolvingSymlinksInPath()
         var isDir: ObjCBool = false
         guard fm.fileExists(atPath: dir.path, isDirectory: &isDir),
             isDir.boolValue
