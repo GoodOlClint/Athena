@@ -59,14 +59,26 @@ public enum WhisperDecode {
         var tokens = prefix
         let limit = min(
             model.config.n_text_ctx, prefix.count + maxTokens)
-        while tokens.count < limit {
-            let inp = MLXArray(
-                tokens.map { Int32($0) }, [1, tokens.count])
-            let lg = model.logits(inp, audio: audio)
+        // KV-cached incremental decode (M4.2e-3): prime the cache with
+        // the whole prefix, then feed one token at a time. Restricting
+        // argmax to [0, eot] and the cached-attention math being
+        // identical to a full re-forward keeps this bit-identical to
+        // the uncached greedy — only faster.
+        let cache = WhisperKVCache(layers: model.config.n_text_layer)
+        func step(_ ids: [Int], _ offset: Int) -> Int {
+            let inp = MLXArray(ids.map { Int32($0) }, [1, ids.count])
+            let lg = model.logits(
+                inp, audio: audio, offset: offset, cache: cache)
             let last = lg[0..., -1, 0 ..< (eot + 1)]
-            let next = argMax(last, axis: -1).item(Int.self)
-            if next == eot { break }
+            let n = argMax(last, axis: -1).item(Int.self)
+            cache.evalStep()
+            return n
+        }
+        var next = step(prefix, 0)
+        while next != eot && tokens.count < limit {
             tokens.append(next)
+            if tokens.count >= limit { break }
+            next = step([next], tokens.count - 1)
         }
         let generated = Array(tokens[prefix.count...])
         return tokenizer.decode(

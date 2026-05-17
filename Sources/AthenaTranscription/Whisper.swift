@@ -32,6 +32,28 @@ func whisperSinusoids(length: Int, channels: Int) -> MLXArray {
     return MLX.concatenated([MLX.sin(scaled), MLX.cos(scaled)], axis: 1)
 }
 
+/// Per-decode KV cache (side-channel, like the speculative GDNRollback
+/// pattern — keeps the @ModuleInfo modules pure). Self slots grow with
+/// generated tokens; cross slots are computed once from the fixed
+/// encoder output and reused. M4.2e-3.
+public final class WhisperKVCache {
+    final class Slot { var k: MLXArray?; var v: MLXArray? }
+    let selfSlots: [Slot]
+    let crossSlots: [Slot]
+    init(layers: Int) {
+        selfSlots = (0 ..< layers).map { _ in Slot() }
+        crossSlots = (0 ..< layers).map { _ in Slot() }
+    }
+    /// Force the accumulated K/V to concrete arrays so the lazy graph
+    /// stays bounded across the decode loop.
+    func evalStep() {
+        for s in selfSlots + crossSlots {
+            if let k = s.k { k.eval() }
+            if let v = s.v { v.eval() }
+        }
+    }
+}
+
 final class WhisperAttention: Module {
     let nHead: Int
     @ModuleInfo(key: "query") var query: Linear
@@ -48,14 +70,43 @@ final class WhisperAttention: Module {
     }
 
     /// `x` [B,Tq,D]; `xa` (cross k/v source) [B,Tk,D] or nil (self);
-    /// `mask` [Tq,Tk] additive or nil.
+    /// `mask` [Tq,Tk] additive or nil. With `slot`: self-attn appends
+    /// the new K/V to the cache and attends the full history; cross-attn
+    /// computes K/V once (encoder output is fixed) and reuses them —
+    /// mathematically identical to the uncached path.
     func callAsFunction(
-        _ x: MLXArray, xa: MLXArray? = nil, mask: MLXArray? = nil
+        _ x: MLXArray, xa: MLXArray? = nil, mask: MLXArray? = nil,
+        slot: WhisperKVCache.Slot? = nil, isCross: Bool = false
     ) -> MLXArray {
         let q = query(x)
-        let kv = xa ?? x
-        let k = key(kv)
-        let v = value(kv)
+        let k: MLXArray
+        let v: MLXArray
+        if isCross {
+            if let slot, let ck = slot.k, let cv = slot.v {
+                k = ck
+                v = cv
+            } else {
+                let src = xa ?? x
+                k = key(src)
+                v = value(src)
+                slot?.k = k
+                slot?.v = v
+            }
+        } else {
+            let nk = key(x)
+            let nv = value(x)
+            if let slot, let pk = slot.k, let pv = slot.v {
+                k = MLX.concatenated([pk, nk], axis: 1)
+                v = MLX.concatenated([pv, nv], axis: 1)
+            } else {
+                k = nk
+                v = nv
+            }
+            if let slot {
+                slot.k = k
+                slot.v = v
+            }
+        }
         let (B, Tq) = (x.dim(0), x.dim(1))
         let D = q.dim(2), Dh = D / nHead
         let Tk = k.dim(1)
@@ -98,11 +149,20 @@ final class WhisperBlock: Module {
     }
 
     func callAsFunction(
-        _ x: MLXArray, xa: MLXArray? = nil, mask: MLXArray? = nil
+        _ x: MLXArray, xa: MLXArray? = nil, mask: MLXArray? = nil,
+        cache: WhisperKVCache? = nil, layer: Int = 0
     ) -> MLXArray {
-        var x = x + attn(attnLN(x), mask: mask)
+        var x =
+            x
+            + attn(
+                attnLN(x), mask: mask,
+                slot: cache?.selfSlots[layer], isCross: false)
         if let crossAttn, let crossAttnLN, let xa {
-            x = x + crossAttn(crossAttnLN(x), xa: xa)
+            x =
+                x
+                + crossAttn(
+                    crossAttnLN(x), xa: xa,
+                    slot: cache?.crossSlots[layer], isCross: true)
         }
         x = x + mlp2(gelu(mlp1(mlpLN(x))))
         return x
@@ -167,17 +227,27 @@ final class WhisperTextDecoder: Module {
     /// `tokens` [B,T], `audio` [B,n_audio_ctx,D], `offset` = position of
     /// token 0 (KV-cache decoding lands in M4.2c). → logits [B,T,vocab].
     func callAsFunction(
-        _ tokens: MLXArray, audio: MLXArray, offset: Int = 0
+        _ tokens: MLXArray, audio: MLXArray, offset: Int = 0,
+        cache: WhisperKVCache? = nil
     ) -> MLXArray {
         let T = tokens.dim(1)
         var x =
             tokenEmbedding(tokens)
             + positionalEmbedding[offset ..< (offset + T)]
-        // causal additive mask [T,T]: -1e9 strictly above the diagonal.
-        let r = MLXArray(0 ..< T).reshaped([T, 1])
-        let c = MLXArray(0 ..< T).reshaped([1, T])
-        let mask = (c .> r).asType(.float32) * Float(-1e9)
-        for b in blocks { x = b(x, xa: audio, mask: mask) }
+        // Causal mask only when >1 query token (prefix / uncached
+        // full-sequence pass). A single cached step attends the whole
+        // cached history, which is exactly the causal set — no mask.
+        let mask: MLXArray?
+        if T > 1 {
+            let r = MLXArray(0 ..< T).reshaped([T, 1])
+            let c = MLXArray(0 ..< T).reshaped([1, T])
+            mask = (c .> r).asType(.float32) * Float(-1e9)
+        } else {
+            mask = nil
+        }
+        for (i, b) in blocks.enumerated() {
+            x = b(x, xa: audio, mask: mask, cache: cache, layer: i)
+        }
         x = ln(x)
         return MLX.matmul(x, tokenEmbedding.weight.transposed(1, 0))
     }
@@ -197,8 +267,13 @@ public final class WhisperModel: Module {
     /// `mel` [n_mels, n_frames] → audio features [1, n_audio_ctx, D].
     public func embedAudio(_ mel: MLXArray) -> MLXArray { encoder(mel) }
 
-    /// `tokens` [B,T] + audio features → logits [B,T,vocab].
-    public func logits(_ tokens: MLXArray, audio: MLXArray) -> MLXArray {
-        decoder(tokens, audio: audio)
+    /// `tokens` [B,T] + audio features → logits [B,T,vocab]. `cache`
+    /// (+`offset`) enables incremental KV-cached decoding; nil keeps the
+    /// full-sequence path (unchanged for existing callers/tests).
+    public func logits(
+        _ tokens: MLXArray, audio: MLXArray, offset: Int = 0,
+        cache: WhisperKVCache? = nil
+    ) -> MLXArray {
+        decoder(tokens, audio: audio, offset: offset, cache: cache)
     }
 }
