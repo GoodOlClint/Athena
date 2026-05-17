@@ -73,12 +73,15 @@ struct AthenaServer {
             await handleQueueSubmit(
                 context.parameters.get("arg"), request)
         }
+        router.get("/v1/queue") { request, _ -> Response in
+            await handleQueueList(request)
+        }
         router.get("/v1/queue/:arg") { request, context -> Response in
             await handleQueueStatus(
                 context.parameters.get("arg"), request)
         }
         router.delete("/v1/queue/:arg") { _, context -> Response in
-            await handleQueueCancel(context.parameters.get("arg"))
+            await handleQueueRemove(context.parameters.get("arg"))
         }
         // SSE: stream status transitions until terminal (inbound only —
         // the passive-oracle thesis forbids outbound webhooks).
@@ -731,18 +734,39 @@ struct AthenaServer {
             body: ResponseBody(asyncSequence: stream))
     }
 
-    private func handleQueueCancel(_ id: String?) async -> Response {
+    private func handleQueueRemove(_ id: String?) async -> Response {
         guard let id else {
             return Self.error(
                 status: .badRequest, message: "missing job id",
                 type: "invalid_request_error", code: "missing_id")
         }
-        let ok = await queue.cancel(id: id)
+        let removed = await queue.remove(id: id)
+        if !removed {
+            return Self.error(
+                status: .notFound, message: "no job '\(id)'",
+                type: "invalid_request_error", code: "not_found")
+        }
         return Self.json(
-            QueueStatusResponse(
-                id: id, kind: "", status: ok ? "canceled" : "not_canceled",
-                result: nil,
-                error: ok ? nil : "job not found or already running"))
+            QueueRemoveResponse(id: id, removed: true))
+    }
+
+    /// `GET /v1/queue[?status=...]` — job summaries, oldest first.
+    private func handleQueueList(_ request: Request) async -> Response {
+        var status: String?
+        if let qy = request.uri.query {
+            for kv in qy.split(separator: "&")
+            where kv.hasPrefix("status=") {
+                status = String(kv.dropFirst(7))
+            }
+        }
+        let jobs = await queue.list(status: status)
+        return Self.json(
+            QueueListResponse(
+                jobs: jobs.map {
+                    QueueJobSummary(
+                        id: $0.id, kind: $0.kind, status: $0.status,
+                        created: $0.created, updated: $0.updated)
+                }))
     }
 
     /// Runs a queued job through the same governed paths as the sync

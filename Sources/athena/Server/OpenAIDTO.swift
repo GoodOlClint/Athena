@@ -297,3 +297,13 @@ struct QueueStatusResponse: Codable {
 /// `result` on status).
 struct QueuedTextResult: Codable { let text: String }
 struct QueuedEmbeddingResult: Codable { let embeddings: [[Float]] }
+
+struct QueueJobSummary: Codable {
+    let id: String
+    let kind: String
+    let status: String
+    let created: Double
+    let updated: Double
+}
+struct QueueListResponse: Codable { let jobs: [QueueJobSummary] }
+struct QueueRemoveResponse: Codable { let id: String; let removed: Bool }

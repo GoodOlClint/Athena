@@ -42,6 +42,17 @@ actor RequestQueue {
         await store.getJob(id: id)
     }
 
+    func list(status: String?) async -> [JobRow] {
+        await store.listJobs(status: status)
+    }
+
+    /// Remove a job row entirely (cancel-if-queued is implicit — a
+    /// deleted row is simply never picked up). Returns whether it
+    /// existed.
+    func remove(id: String) async -> Bool {
+        await store.deleteJob(id: id)
+    }
+
     /// Cancel a not-yet-running job. Running jobs can't be interrupted
     /// (the governed work is atomic); returns false then.
     func cancel(id: String) async -> Bool {
