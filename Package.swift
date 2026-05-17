@@ -135,6 +135,18 @@ let package = Package(
             ],
             path: "Sources/AthenaEmbedding"),
 
+        // M7: one embedded SQLite store backing the built-in vector DB
+        // and the async request queue. System SQLite3 (no new SPM dep);
+        // MLX for the governed cosine working set.
+        .target(
+            name: "AthenaStore",
+            dependencies: [
+                "AthenaCore",
+                .product(name: "MLX", package: "mlx-swift"),
+            ],
+            path: "Sources/AthenaStore",
+            linkerSettings: [.linkedLibrary("sqlite3")]),
+
         // The `athena` executable: CLI (serve/run/pull/list/ps/...) and the
         // governed HTTP surface.
         .executableTarget(
@@ -146,6 +158,7 @@ let package = Package(
                 "AthenaStructured",
                 "AthenaTranscription",
                 "AthenaEmbedding",
+                "AthenaStore",
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "Hummingbird", package: "hummingbird"),
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
@@ -162,6 +175,7 @@ let package = Package(
             dependencies: [
                 "AthenaCore", "AthenaDeploy", "AthenaLLM", "AthenaModels",
                 "AthenaStructured", "AthenaTranscription", "AthenaEmbedding",
+                "AthenaStore",
             ],
             path: "Tests/AthenaCoreTests",
             linkerSettings: [
