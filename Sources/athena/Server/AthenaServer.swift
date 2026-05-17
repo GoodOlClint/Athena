@@ -365,24 +365,52 @@ struct AthenaServer {
     /// ensureLoaded(.llm) + the 4b prompt-cache preflight (both
     /// classified), then non-streamed accumulation. Mirrors the
     /// OpenAI non-stream path.
-    private func governedText(
+    /// Governed gate shared by chat/generate: ensureLoaded(.llm) + the
+    /// 4b prompt-cache preflight, both classified. Returns an error
+    /// `Response` to send, or nil when the request may proceed.
+    private func governedPreflight(
         prompt: String
-    ) async -> Outcome<String> {
+    ) async -> Response? {
         do {
             try await governor.ensureLoaded(.llm)
             try await llm.preflightPromptCache(prompt: prompt)
+            return nil
         } catch let e as AthenaError {
-            return .fail(
-                Self.error(
-                    status: HTTPResponse.Status(code: e.httpStatus),
-                    message: e.message, type: "server_error",
-                    code: e.code))
+            return Self.error(
+                status: HTTPResponse.Status(code: e.httpStatus),
+                message: e.message, type: "server_error", code: e.code)
         } catch {
-            return .fail(Self.classified(error, module: .llm))
+            return Self.classified(error, module: .llm)
         }
-        var text = ""
-        for await chunk in llm.generate(prompt: prompt) { text += chunk }
-        return .ok(text)
+    }
+
+    /// Newline-delimited JSON streamer (Ollama's stream format). Each
+    /// generated piece → one JSON line; a final `done` line closes it.
+    private static func streamNDJSON(
+        tokens: AsyncStream<String>,
+        line: @escaping @Sendable (_ content: String, _ done: Bool)
+            -> Data?
+    ) -> Response {
+        let stream = AsyncStream<ByteBuffer> { continuation in
+            let task = Task {
+                func emit(_ d: Data?) {
+                    guard let d else { return }
+                    var b = ByteBuffer()
+                    b.writeBytes(d)
+                    b.writeString("\n")
+                    continuation.yield(b)
+                }
+                for await piece in tokens { emit(line(piece, false)) }
+                emit(line("", true))
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+        var headers = HTTPFields()
+        headers[.contentType] = "application/x-ndjson"
+        return Response(
+            status: .ok, headers: headers,
+            body: ResponseBody(asyncSequence: stream))
     }
 
     private func handleOllamaChat(_ request: Request) async -> Response {
@@ -395,16 +423,29 @@ struct AthenaServer {
             .filter { $0.role == "user" }
             .map { $0.content }
             .joined(separator: "\n")
-        switch await governedText(prompt: prompt) {
-        case .fail(let r): return r
-        case .ok(let text):
+        if let err = await governedPreflight(prompt: prompt) {
+            return err
+        }
+        let model = body.model ?? modelName
+        if body.stream == false {
+            var text = ""
+            for await c in llm.generate(prompt: prompt) { text += c }
             return Self.json(
                 OllamaChatResponse(
-                    model: body.model ?? modelName,
-                    created_at: Self.now(),
+                    model: model, created_at: Self.now(),
                     message: OllamaMessage(
                         role: "assistant", content: text),
                     done: true, done_reason: "stop"))
+        }
+        return Self.streamNDJSON(tokens: llm.generate(prompt: prompt)) {
+            content, done in
+            try? JSONEncoder().encode(
+                OllamaChatResponse(
+                    model: model, created_at: Self.now(),
+                    message: OllamaMessage(
+                        role: "assistant",
+                        content: done ? "" : content),
+                    done: done, done_reason: done ? "stop" : ""))
         }
     }
 
@@ -416,14 +457,28 @@ struct AthenaServer {
             if case .fail(let r) = decoded { return r }
             fatalError()
         }
-        switch await governedText(prompt: body.prompt) {
-        case .fail(let r): return r
-        case .ok(let text):
+        if let err = await governedPreflight(prompt: body.prompt) {
+            return err
+        }
+        let model = body.model ?? modelName
+        if body.stream == false {
+            var text = ""
+            for await c in llm.generate(prompt: body.prompt) {
+                text += c
+            }
             return Self.json(
                 OllamaGenerateResponse(
-                    model: body.model ?? modelName,
-                    created_at: Self.now(), response: text,
-                    done: true, done_reason: "stop"))
+                    model: model, created_at: Self.now(),
+                    response: text, done: true, done_reason: "stop"))
+        }
+        return Self.streamNDJSON(
+            tokens: llm.generate(prompt: body.prompt)
+        ) { content, done in
+            try? JSONEncoder().encode(
+                OllamaGenerateResponse(
+                    model: model, created_at: Self.now(),
+                    response: done ? "" : content,
+                    done: done, done_reason: done ? "stop" : ""))
         }
     }
 
