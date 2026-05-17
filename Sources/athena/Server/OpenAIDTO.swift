@@ -216,3 +216,19 @@ struct EmbeddingResponse: Codable {
 struct TranscriptionResponse: Codable {
     let text: String
 }
+
+struct VerboseSegment: Codable {
+    let id: Int
+    let start: Double
+    let end: Double
+    let text: String
+}
+
+/// OpenAI `response_format: "verbose_json"` shape.
+struct VerboseTranscriptionResponse: Codable {
+    let task: String  // "transcribe"
+    let language: String
+    let duration: Double
+    let text: String
+    let segments: [VerboseSegment]
+}

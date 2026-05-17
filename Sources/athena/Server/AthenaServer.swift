@@ -251,9 +251,9 @@ struct AthenaServer {
                 type: "server_error", code: "internal_error")
         }
 
-        let text: String
+        let result: TranscriptionResult
         do {
-            text = try await transcription.transcribe(
+            result = try await transcription.transcribe(
                 audio: file.data, filename: file.filename,
                 language: form.text("language"))
         } catch {
@@ -263,16 +263,40 @@ struct AthenaServer {
                 type: "server_error", code: "transcription_error")
         }
 
-        if form.text("response_format") == "text" {
+        func plain(_ s: String, _ type: String) -> Response {
             var headers = HTTPFields()
-            headers[.contentType] = "text/plain; charset=utf-8"
+            headers[.contentType] = type
             var buf = ByteBuffer()
-            buf.writeString(text)
+            buf.writeString(s)
             return Response(
                 status: .ok, headers: headers,
                 body: ResponseBody(byteBuffer: buf))
         }
-        return Self.json(TranscriptionResponse(text: text))
+
+        switch form.text("response_format") {
+        case "text":
+            return plain(result.text, "text/plain; charset=utf-8")
+        case "srt":
+            return plain(
+                TranscriptionFormat.srt(result.segments),
+                "text/plain; charset=utf-8")
+        case "vtt":
+            return plain(
+                TranscriptionFormat.vtt(result.segments),
+                "text/vtt; charset=utf-8")
+        case "verbose_json":
+            return Self.json(
+                VerboseTranscriptionResponse(
+                    task: "transcribe", language: result.language,
+                    duration: result.duration, text: result.text,
+                    segments: result.segments.enumerated().map {
+                        VerboseSegment(
+                            id: $0.offset, start: $0.element.start,
+                            end: $0.element.end, text: $0.element.text)
+                    }))
+        default:  // "json" / nil
+            return Self.json(TranscriptionResponse(text: result.text))
+        }
     }
 
     // MARK: - Response helpers

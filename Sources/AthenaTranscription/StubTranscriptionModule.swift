@@ -5,10 +5,10 @@ import Foundation
 /// path holds this; the MLX-backed impl is `MLXTranscriptionModule`.
 public protocol TranscriptionModule: InferenceModule {
     /// Transcribe `audio` (raw uploaded file bytes; `filename` hints the
-    /// container) → text. `language` is an ISO code (nil ⇒ default en).
+    /// container). `language` is an ISO code (nil/"auto" ⇒ detect).
     func transcribe(
         audio: Data, filename: String?, language: String?
-    ) async throws -> String
+    ) async throws -> TranscriptionResult
 }
 
 /// M0 placeholder, still used by `--engine stub`. Returns a fixed
@@ -31,7 +31,14 @@ public actor StubTranscriptionModule: TranscriptionModule {
 
     public func transcribe(
         audio: Data, filename: String?, language: String?
-    ) async throws -> String {
-        "[athena stub transcription]"
+    ) async throws -> TranscriptionResult {
+        TranscriptionResult(
+            text: "[athena stub transcription]",
+            language: language ?? "en", duration: 0,
+            segments: [
+                TranscriptionSegment(
+                    start: 0, end: 0,
+                    text: "[athena stub transcription]")
+            ])
     }
 }

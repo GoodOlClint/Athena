@@ -54,7 +54,7 @@ public actor MLXTranscriptionModule: TranscriptionModule {
 
     public func transcribe(
         audio: Data, filename: String?, language: String?
-    ) async throws -> String {
+    ) async throws -> TranscriptionResult {
         guard let model, let tokenizer else {
             throw AthenaError.moduleLoadFailed(
                 .transcription, reason: "transcribe called before load")
@@ -72,8 +72,9 @@ public actor MLXTranscriptionModule: TranscriptionModule {
 
         let pcm = try AudioDecode.pcm16kMono(from: tmp)
         // PCM-level entry: >30 s is chunked into 30 s windows. nil
-        // language ⇒ Whisper auto-detects (once, on window 0).
-        return WhisperDecode.transcribe(
+        // language ⇒ Whisper auto-detects (once, on window 0). Result
+        // carries timed segments for verbose_json/srt/vtt.
+        return WhisperDecode.transcribeResult(
             model: model, pcm: pcm, tokenizer: tokenizer,
             language: language)
     }
