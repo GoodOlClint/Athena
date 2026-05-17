@@ -172,4 +172,32 @@ final class MemoryGovernorTests: XCTestCase {
         let v = s.modules.first { $0.id == .transcription }?.state
         XCTAssertTrue(v == .unloading || v == .unloaded)
     }
+
+    // MARK: - M5.2 unload hook (trim substrate cache)
+
+    private final class Counter: @unchecked Sendable {
+        private(set) var n = 0
+        func bump() { n += 1 }
+    }
+
+    func testUnloadHookFiresOnEvictionAndExplicitUnload() async throws {
+        let c = Counter()
+        let gov = MemoryGovernor(
+            totalBudgetBytes: 100, onUnloaded: { c.bump() })
+        await gov.register(
+            StubTranscriptionModule(reserveBytes: 60), evictable: true)
+        await gov.register(
+            StubEmbeddingModule(reserveBytes: 60), evictable: true)
+
+        try await gov.ensureLoaded(.transcription)
+        try await gov.ensureLoaded(.textEmbedding)  // evicts transcription
+        // eviction unload is detached; wait for it to settle.
+        for _ in 0..<50 where c.n == 0 {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(c.n, 1, "hook should fire on eviction")
+
+        await gov.unload(.textEmbedding)
+        XCTAssertEqual(c.n, 2, "hook should fire on explicit unload")
+    }
 }

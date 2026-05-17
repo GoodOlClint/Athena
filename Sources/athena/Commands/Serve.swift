@@ -77,10 +77,17 @@ struct Serve: AsyncParsableCommand {
             listenHost: host,
             listenPort: port
         )
+        // M5.2: cap MLX's own allocator at the global budget so its
+        // buffer pool can't overshoot the box into a Metal OOM.
+        MLX.Memory.memoryLimit = config.totalBudgetBytes
+
         // M5.1: reconcile reservations to the real Metal/MLX footprint.
+        // M5.2: trim the MLX buffer pool whenever a module unloads so
+        // freed bytes actually leave the process.
         let governor = MemoryGovernor(
             config: config,
-            memoryProbe: { MLX.Memory.activeMemory })
+            memoryProbe: { MLX.Memory.activeMemory },
+            onUnloaded: { MLX.Memory.clearCache() })
 
         let store = ModelStore(
             rootDirectory: modelStore.map {

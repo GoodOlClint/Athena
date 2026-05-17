@@ -37,6 +37,10 @@ public actor MemoryGovernor {
     /// `AthenaCore` stays substrate-agnostic — the `athena` target
     /// backs it with `MLX.Memory`. nil ⇒ estimate-only (pre-M5).
     public typealias MemoryProbe = @Sendable () -> Int
+    /// Called after a module finishes `unload()`, so the substrate's
+    /// own buffer pool can be trimmed (the freed bytes otherwise stay
+    /// cached). Injected — keeps AthenaCore substrate-agnostic.
+    public typealias UnloadHook = @Sendable () -> Void
 
     public let totalBudgetBytes: Int
     private var entries: [ModuleID: Entry] = [:]
@@ -44,19 +48,24 @@ public actor MemoryGovernor {
     /// Coalesces concurrent `ensureLoaded` callers onto one load.
     private var inFlight: [ModuleID: Task<Void, Error>] = [:]
     private let memoryProbe: MemoryProbe?
+    private let onUnloaded: UnloadHook?
 
     public init(
-        totalBudgetBytes: Int, memoryProbe: MemoryProbe? = nil
+        totalBudgetBytes: Int, memoryProbe: MemoryProbe? = nil,
+        onUnloaded: UnloadHook? = nil
     ) {
         self.totalBudgetBytes = totalBudgetBytes
         self.memoryProbe = memoryProbe
+        self.onUnloaded = onUnloaded
     }
 
     public init(
-        config: GovernorConfig, memoryProbe: MemoryProbe? = nil
+        config: GovernorConfig, memoryProbe: MemoryProbe? = nil,
+        onUnloaded: UnloadHook? = nil
     ) {
         self.totalBudgetBytes = config.totalBudgetBytes
         self.memoryProbe = memoryProbe
+        self.onUnloaded = onUnloaded
     }
 
     /// Register a module instance under its id. `evictable` controls whether
@@ -189,8 +198,10 @@ public actor MemoryGovernor {
         entries[id]?.state = .unloading
         entries[id]?.reservation = nil
         let module = entry.module
+        let hook = onUnloaded
         Task { [weak self] in
             await module.unload()
+            hook?()
             await self?.markUnloaded(id)
         }
     }
@@ -210,6 +221,7 @@ public actor MemoryGovernor {
         entries[id]?.state = .unloading
         entries[id]?.reservation = nil
         await entry.module.unload()
+        onUnloaded?()
         entries[id]?.state = .unloaded
     }
 
