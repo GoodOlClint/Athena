@@ -146,6 +146,7 @@ let package = Package(
                 "AthenaStructured",
                 "AthenaTranscription",
                 "AthenaEmbedding",
+                .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "Hummingbird", package: "hummingbird"),
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ],

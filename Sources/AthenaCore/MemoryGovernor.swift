@@ -33,18 +33,30 @@ public actor MemoryGovernor {
         var lastUsed: Date
     }
 
+    /// Reads process-global Metal/MLX active bytes. Injected so
+    /// `AthenaCore` stays substrate-agnostic — the `athena` target
+    /// backs it with `MLX.Memory`. nil ⇒ estimate-only (pre-M5).
+    public typealias MemoryProbe = @Sendable () -> Int
+
     public let totalBudgetBytes: Int
     private var entries: [ModuleID: Entry] = [:]
     private var reservedBytes: Int = 0
     /// Coalesces concurrent `ensureLoaded` callers onto one load.
     private var inFlight: [ModuleID: Task<Void, Error>] = [:]
+    private let memoryProbe: MemoryProbe?
 
-    public init(totalBudgetBytes: Int) {
+    public init(
+        totalBudgetBytes: Int, memoryProbe: MemoryProbe? = nil
+    ) {
         self.totalBudgetBytes = totalBudgetBytes
+        self.memoryProbe = memoryProbe
     }
 
-    public init(config: GovernorConfig) {
+    public init(
+        config: GovernorConfig, memoryProbe: MemoryProbe? = nil
+    ) {
         self.totalBudgetBytes = config.totalBudgetBytes
+        self.memoryProbe = memoryProbe
     }
 
     /// Register a module instance under its id. `evictable` controls whether
@@ -95,6 +107,7 @@ public actor MemoryGovernor {
         entries[id]?.state = .loading
         entries[id]?.reservation = reservation
 
+        let before = memoryProbe?()
         do {
             try await entry.module.load(reservation: reservation)
         } catch {
@@ -106,6 +119,41 @@ public actor MemoryGovernor {
         }
         entries[id]?.state = .loaded
         entries[id]?.lastUsed = Date()
+        // M5.1: reconcile the static estimate to the real Metal/MLX
+        // footprint this load actually consumed. Best-effort
+        // attribution (the probe is process-global; the actor +
+        // inFlight coalescing serialise loads). Honest accounting here
+        // makes the NEXT admission correctly 503/evict; an over-budget
+        // reconciliation also sheds other evictable modules now.
+        if let before, let after = memoryProbe?() {
+            reconcile(id, estimate: estimate, observed: max(after - before, 0))
+        }
+    }
+
+    /// Replace `id`'s estimate-based reservation with the observed
+    /// footprint and, if that pushes the budget over, evict other
+    /// evictable modules LRU-first to get back under.
+    private func reconcile(
+        _ id: ModuleID, estimate: Int, observed: Int
+    ) {
+        guard observed > 0,
+            entries[id]?.state == .loaded,
+            entries[id]?.reservation != nil
+        else { return }
+        reservedBytes += observed - estimate
+        entries[id]?.reservation = MemoryReservation(
+            module: id, bytes: observed)
+        guard reservedBytes > totalBudgetBytes else { return }
+        let victims = entries
+            .filter {
+                $0.key != id && $0.value.evictable
+                    && $0.value.state == .loaded
+            }
+            .sorted { $0.value.lastUsed < $1.value.lastUsed }
+        for (victimID, _) in victims {
+            if reservedBytes <= totalBudgetBytes { break }
+            evictSync(victimID)
+        }
     }
 
     /// Free budget for `estimate` bytes, evicting evictable loaded modules

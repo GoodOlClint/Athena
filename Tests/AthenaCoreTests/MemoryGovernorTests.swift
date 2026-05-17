@@ -118,4 +118,58 @@ final class MemoryGovernorTests: XCTestCase {
             XCTAssertEqual(e.httpStatus, 404)
         }
     }
+
+    // MARK: - M5.1 live footprint reconciliation
+
+    /// Scripted process-memory probe: successive calls return the next
+    /// value (last repeats). Models before/after each load sample.
+    private final class FakeProbe: @unchecked Sendable {
+        private var seq: [Int]
+        private var i = 0
+        init(_ seq: [Int]) { self.seq = seq }
+        func next() -> Int {
+            defer { i += 1 }
+            return seq[Swift.min(i, seq.count - 1)]
+        }
+    }
+
+    func testReconcilesReservationToObservedFootprint() async throws {
+        let probe = FakeProbe([0, 600])  // before=0, after=600
+        let gov = MemoryGovernor(
+            totalBudgetBytes: 1_000,
+            memoryProbe: { probe.next() })
+        await gov.register(
+            StubLLMModule(reserveBytes: 400), evictable: false)
+
+        try await gov.ensureLoaded(.llm)
+
+        let s = await gov.snapshot()
+        // Estimate was 400; real footprint 600 ⇒ reservation reconciled.
+        XCTAssertEqual(s.reservedBytes, 600)
+        XCTAssertEqual(s.freeBytes, 400)
+        XCTAssertEqual(
+            s.modules.first { $0.id == .llm }?.reservedBytes, 600)
+    }
+
+    func testOverBudgetReconciliationEvictsEvictable() async throws {
+        // t: before0/after60 (obs 60 == est). llm: before60/after150
+        // (obs 90 vs est 30) ⇒ reserved 60+90=150 > 100 ⇒ evict t.
+        let probe = FakeProbe([0, 60, 60, 150])
+        let gov = MemoryGovernor(
+            totalBudgetBytes: 100, memoryProbe: { probe.next() })
+        await gov.register(
+            StubTranscriptionModule(reserveBytes: 60), evictable: true)
+        await gov.register(
+            StubLLMModule(reserveBytes: 30), evictable: false)
+
+        try await gov.ensureLoaded(.transcription)
+        try await gov.ensureLoaded(.llm)
+
+        let s = await gov.snapshot()
+        XCTAssertEqual(s.reservedBytes, 90)
+        XCTAssertEqual(
+            s.modules.first { $0.id == .llm }?.state, .loaded)
+        let v = s.modules.first { $0.id == .transcription }?.state
+        XCTAssertTrue(v == .unloading || v == .unloaded)
+    }
 }

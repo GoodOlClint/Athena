@@ -4,6 +4,7 @@ import AthenaEmbedding
 import AthenaLLM
 import AthenaTranscription
 import Foundation
+import MLX
 
 enum Engine: String, CaseIterable, ExpressibleByArgument {
     case mlx
@@ -76,7 +77,10 @@ struct Serve: AsyncParsableCommand {
             listenHost: host,
             listenPort: port
         )
-        let governor = MemoryGovernor(config: config)
+        // M5.1: reconcile reservations to the real Metal/MLX footprint.
+        let governor = MemoryGovernor(
+            config: config,
+            memoryProbe: { MLX.Memory.activeMemory })
 
         let store = ModelStore(
             rootDirectory: modelStore.map {
