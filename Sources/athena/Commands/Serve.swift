@@ -49,6 +49,13 @@ struct Serve: AsyncParsableCommand {
             "Text-embedding model HF id (default BAAI/bge-small-en-v1.5).")
     var embeddingModel: String = "BAAI/bge-small-en-v1.5"
 
+    @Option(
+        help:
+            "Speech-to-text model HF id (default mlx-community/whisper-large-v3-turbo)."
+    )
+    var transcriptionModel: String =
+        "mlx-community/whisper-large-v3-turbo"
+
     mutating func run() async throws {
         // HF download cache: prefer the SSD's hf-cache (sibling of the
         // model store) when the volume is mounted; otherwise leave
@@ -101,8 +108,18 @@ struct Serve: AsyncParsableCommand {
         case .mlx:
             embedding = MLXEmbeddingModule(modelId: embeddingModel)
         }
+        // Transcription: real Whisper under the mlx engine, stub under
+        // the stub engine. Evictable — the LLM is the primary workload.
+        let transcription: any TranscriptionModule
+        switch engine {
+        case .stub:
+            transcription = StubTranscriptionModule()
+        case .mlx:
+            transcription = MLXTranscriptionModule(
+                modelId: transcriptionModel)
+        }
         await governor.register(llm, evictable: false)
-        await governor.register(StubTranscriptionModule(), evictable: true)
+        await governor.register(transcription, evictable: true)
         await governor.register(embedding, evictable: true)
 
         print(
@@ -113,7 +130,7 @@ struct Serve: AsyncParsableCommand {
 
         let server = AthenaServer(
             config: config, governor: governor, llm: llm,
-            embedding: embedding)
+            embedding: embedding, transcription: transcription)
         try await server.run()
     }
 }

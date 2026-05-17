@@ -1,6 +1,7 @@
 import AthenaCore
 import AthenaEmbedding
 import AthenaLLM
+import AthenaTranscription
 import Foundation
 import HTTPTypes
 import Hummingbird
@@ -14,6 +15,7 @@ struct AthenaServer {
     let governor: MemoryGovernor
     let llm: any LLMModule
     let embedding: any EmbeddingModule
+    let transcription: any TranscriptionModule
 
     func run() async throws {
         let router = Router()
@@ -29,6 +31,10 @@ struct AthenaServer {
 
         router.post("/v1/embeddings") { request, _ -> Response in
             await handleEmbeddings(request)
+        }
+
+        router.post("/v1/audio/transcriptions") { request, _ -> Response in
+            await handleTranscriptions(request)
         }
 
         let app = Application(
@@ -196,6 +202,77 @@ struct AthenaServer {
             usage: Usage(
                 prompt_tokens: 0, completion_tokens: 0, total_tokens: 0))
         return Self.json(response)
+    }
+
+    private func handleTranscriptions(_ request: Request) async -> Response
+    {
+        guard
+            let ct = request.headers[.contentType],
+            let boundary = MultipartForm.boundary(fromContentType: ct)
+        else {
+            return Self.error(
+                status: .badRequest,
+                message: "expected multipart/form-data with a boundary",
+                type: "invalid_request_error", code: "invalid_content_type")
+        }
+
+        let body: Data
+        do {
+            let buffer = try await request.body.collect(
+                upTo: 25 * 1024 * 1024)  // OpenAI's 25 MB audio cap
+            body = Data(buffer: buffer)
+        } catch {
+            return Self.error(
+                status: .badRequest,
+                message: "Invalid request body: \(error)",
+                type: "invalid_request_error", code: "invalid_body")
+        }
+
+        guard
+            let form = MultipartForm(body: body, boundary: boundary),
+            let file = form.first("file"), !file.data.isEmpty
+        else {
+            return Self.error(
+                status: .badRequest,
+                message: "missing required 'file' part",
+                type: "invalid_request_error", code: "missing_file")
+        }
+
+        do {
+            try await governor.ensureLoaded(.transcription)
+        } catch let e as AthenaError {
+            return Self.error(
+                status: HTTPResponse.Status(code: e.httpStatus),
+                message: e.message, type: "server_error", code: e.code)
+        } catch {
+            return Self.error(
+                status: .internalServerError,
+                message: String(describing: error),
+                type: "server_error", code: "internal_error")
+        }
+
+        let text: String
+        do {
+            text = try await transcription.transcribe(
+                audio: file.data, filename: file.filename,
+                language: form.text("language"))
+        } catch {
+            return Self.error(
+                status: .internalServerError,
+                message: "Transcription failed: \(error)",
+                type: "server_error", code: "transcription_error")
+        }
+
+        if form.text("response_format") == "text" {
+            var headers = HTTPFields()
+            headers[.contentType] = "text/plain; charset=utf-8"
+            var buf = ByteBuffer()
+            buf.writeString(text)
+            return Response(
+                status: .ok, headers: headers,
+                body: ResponseBody(byteBuffer: buf))
+        }
+        return Self.json(TranscriptionResponse(text: text))
     }
 
     // MARK: - Response helpers

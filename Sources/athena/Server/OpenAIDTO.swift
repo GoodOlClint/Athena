@@ -208,3 +208,11 @@ struct EmbeddingResponse: Codable {
     let model: String
     let usage: Usage
 }
+
+// MARK: - /v1/audio/transcriptions
+
+/// OpenAI default (`response_format: "json"`) shape. `"text"` format
+/// returns the bare string instead.
+struct TranscriptionResponse: Codable {
+    let text: String
+}
