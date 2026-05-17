@@ -11,7 +11,7 @@ struct Athena: AsyncParsableCommand {
         subcommands: [
             Serve.self, Install.self, ListModels.self, Ps.self,
             Run.self, Pull.self, Rm.self, Show.self, Stop.self,
-            Queue.self, Vectors.self,
+            Queue.self, Vectors.self, Store.self,
         ],
         defaultSubcommand: Serve.self
     )

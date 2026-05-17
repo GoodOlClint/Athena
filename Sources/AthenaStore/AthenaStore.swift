@@ -32,11 +32,14 @@ public actor AthenaStore {
     // nonisolated(unsafe): the actor serialises all real access; only
     // `deinit` (no live refs) reads it outside isolation, to close.
     private nonisolated(unsafe) var db: OpaquePointer?
+    /// The backing SQLite file. Immutable + Sendable ⇒ readable off-actor.
+    public nonisolated let dbPath: URL
     // SQLite asks the binding to copy (buffer is freed after the call).
     private static let transient = unsafeBitCast(
         -1, to: sqlite3_destructor_type.self)
 
     public init(path: URL) throws {
+        self.dbPath = path
         try FileManager.default.createDirectory(
             at: path.deletingLastPathComponent(),
             withIntermediateDirectories: true)
@@ -279,5 +282,33 @@ public actor AthenaStore {
         sqlite3_bind_text(st, 1, id, -1, Self.transient)
         return sqlite3_step(st) == SQLITE_DONE
             && sqlite3_changes(db) > 0
+    }
+
+    public func jobCount() -> Int {
+        guard let st = try? Self.prepared(db,"SELECT COUNT(*) FROM jobs;")
+        else { return 0 }
+        defer { sqlite3_finalize(st) }
+        return sqlite3_step(st) == SQLITE_ROW
+            ? Int(sqlite3_column_int(st, 0)) : 0
+    }
+
+    // MARK: Backup
+
+    /// Write a fully self-contained, defragmented snapshot of the live
+    /// DB to `dest` via `VACUUM INTO` — checkpoints the WAL into the
+    /// copy, so it is safe while the daemon keeps serving. `dest` must
+    /// not already exist (SQLite refuses to overwrite); the caller
+    /// removes any stale file first.
+    public func backup(to dest: URL) throws {
+        try? FileManager.default.removeItem(at: dest)
+        try FileManager.default.createDirectory(
+            at: dest.deletingLastPathComponent(),
+            withIntermediateDirectories: true)
+        let st = try Self.prepared(db, "VACUUM INTO ?;")
+        defer { sqlite3_finalize(st) }
+        sqlite3_bind_text(st, 1, dest.path, -1, Self.transient)
+        guard sqlite3_step(st) == SQLITE_DONE else {
+            throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
+        }
     }
 }

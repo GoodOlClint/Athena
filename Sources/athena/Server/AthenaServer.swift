@@ -21,6 +21,8 @@ struct AthenaServer {
     let diarization: any DiarizationModule
     let vectorStore: VectorStore
     let queue: RequestQueue
+    /// Shared SQLite store (vectors + queue) — backs `/v1/store/*`.
+    let store: AthenaStore
     /// Display name reported by the Ollama shim (`/api/tags` etc.).
     let modelName: String
 
@@ -64,6 +66,15 @@ struct AthenaServer {
         }
         router.delete("/v1/vectors/:id") { _, context -> Response in
             await handleVectorDelete(context.parameters.get("id"))
+        }
+
+        // Shared SQLite store admin (M9.3). Export = a live, consistent
+        // snapshot via VACUUM INTO (safe while serving).
+        router.post("/v1/store/export") { request, _ -> Response in
+            await handleStoreExport(request)
+        }
+        router.get("/v1/store/stats") { _, _ -> Response in
+            await handleStoreStats()
         }
 
         // Async request queue (M8.1).
@@ -599,6 +610,59 @@ struct AthenaServer {
                 type: "invalid_request_error", code: "not_found")
         }
         return Self.json(VectorIdResponse(id: id))
+    }
+
+    // MARK: - Shared store admin (M9.3)
+
+    private static func fileBytes(_ url: URL) -> Int {
+        let attrs = try? FileManager.default.attributesOfItem(
+            atPath: url.path)
+        return (attrs?[.size] as? Int) ?? 0
+    }
+
+    /// On-disk footprint = main DB + the WAL/SHM sidecars (a hot DB's
+    /// recent writes live in `-wal` until checkpoint).
+    private func storeBytes() -> Int {
+        let base = store.dbPath
+        return Self.fileBytes(base)
+            + Self.fileBytes(base.appendingPathExtension("wal"))
+            + Self.fileBytes(base.appendingPathExtension("shm"))
+    }
+
+    private func handleStoreExport(_ request: Request) async -> Response {
+        let decoded = await decodeJSON(request, StoreExportRequest.self)
+        guard case .ok(let body) = decoded else {
+            if case .fail(let r) = decoded { return r }
+            fatalError()
+        }
+        let raw = (body.path as NSString).expandingTildeInPath
+        guard !raw.isEmpty else {
+            return Self.error(
+                status: .badRequest, message: "missing export path",
+                type: "invalid_request_error", code: "missing_path")
+        }
+        let dest = URL(fileURLWithPath: raw)
+        do {
+            try await store.backup(to: dest)
+        } catch {
+            return Self.error(
+                status: .internalServerError,
+                message: "export failed: \(error)",
+                type: "server_error", code: "export_failed")
+        }
+        return Self.json(
+            StoreExportResponse(
+                path: dest.path, bytes: Self.fileBytes(dest)))
+    }
+
+    private func handleStoreStats() async -> Response {
+        let vectors = await store.vectorCount()
+        let jobs = await store.jobCount()
+        let bytes = storeBytes()
+        let path = store.dbPath.path
+        return Self.json(
+            StoreStatsResponse(
+                vectors: vectors, jobs: jobs, bytes: bytes, path: path))
     }
 
     // MARK: - Async request queue (M8.1)

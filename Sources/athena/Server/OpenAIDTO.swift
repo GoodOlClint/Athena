@@ -307,3 +307,17 @@ struct QueueJobSummary: Codable {
 }
 struct QueueListResponse: Codable { let jobs: [QueueJobSummary] }
 struct QueueRemoveResponse: Codable { let id: String; let removed: Bool }
+
+// MARK: - /v1/store (M9.3 shared-store admin)
+
+struct StoreExportRequest: Decodable { let path: String }
+struct StoreExportResponse: Codable {
+    let path: String
+    let bytes: Int
+}
+struct StoreStatsResponse: Codable {
+    let vectors: Int
+    let jobs: Int
+    let bytes: Int
+    let path: String
+}

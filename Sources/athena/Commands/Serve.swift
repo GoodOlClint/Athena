@@ -193,7 +193,8 @@ struct Serve: AsyncParsableCommand {
             config: config, governor: governor, llm: llm,
             embedding: embedding, transcription: transcription,
             diarization: diarization, vectorStore: vectorStore,
-            queue: queue, modelName: modelURL.lastPathComponent)
+            queue: queue, store: athenaStore,
+            modelName: modelURL.lastPathComponent)
         try await server.run()
     }
 }
