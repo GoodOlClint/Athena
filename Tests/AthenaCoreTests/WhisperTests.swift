@@ -60,6 +60,49 @@ final class WhisperTranscribeIntegrationTests: XCTestCase {
     }
 }
 
+/// M4.2e-2 — audio longer than 30 s must be chunked, not truncated.
+/// A ~50 s clip with a distinctive opening and closing word: both must
+/// survive, proving ≥2 windows were decoded and concatenated.
+final class WhisperChunkingIntegrationTests: XCTestCase {
+
+    func testChunksLongAudioBeyond30s() async throws {
+        guard
+            ProcessInfo.processInfo.environment["ATHENA_RUN_MODEL_TESTS"]
+                == "1"
+        else { throw XCTSkip("set ATHENA_RUN_MODEL_TESTS=1 (heavy)") }
+
+        let filler = Array(repeating:
+            "one two three four five six seven eight nine ten,",
+            count: 14).joined(separator: " ")
+        let sentence =
+            "alpha is the opening word. \(filler) "
+            + "omega is the closing word."
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("athena-long-\(UUID()).aiff")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/say")
+        p.arguments = ["-r", "170", "-o", url.path, sentence]
+        try p.run()
+        p.waitUntilExit()
+
+        let pcm = try AudioDecode.pcm16kMono(from: url)
+        XCTAssertGreaterThan(
+            pcm.count, LogMel.nSamples,
+            "clip must exceed 30 s to exercise chunking")
+
+        let model = try await WhisperLoader.load()
+        let tokenizer = try await WhisperLoader.loadTokenizer()
+        let text = WhisperDecode.transcribe(
+            model: model, pcm: pcm, tokenizer: tokenizer, language: "en")
+        let norm = text.lowercased().filter {
+            $0.isLetter || $0.isWhitespace
+        }
+        XCTAssertTrue(norm.contains("alpha"), "lost window 0: \(text)")
+        XCTAssertTrue(norm.contains("omega"), "lost last window: \(text)")
+    }
+}
+
 final class WhisperLoadIntegrationTests: XCTestCase {
 
     func testLoadsAndRunsEncoderDecoder() async throws {

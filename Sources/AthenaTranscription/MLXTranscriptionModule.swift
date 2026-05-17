@@ -71,10 +71,10 @@ public actor MLXTranscriptionModule: TranscriptionModule {
         defer { try? FileManager.default.removeItem(at: tmp) }
 
         let pcm = try AudioDecode.pcm16kMono(from: tmp)
-        let mel = LogMel.logMel(pcm)
-        // nil language ⇒ Whisper auto-detects from the audio.
+        // PCM-level entry: >30 s is chunked into 30 s windows. nil
+        // language ⇒ Whisper auto-detects (once, on window 0).
         return WhisperDecode.transcribe(
-            model: model, mel: mel, tokenizer: tokenizer,
+            model: model, pcm: pcm, tokenizer: tokenizer,
             language: language)
     }
 }

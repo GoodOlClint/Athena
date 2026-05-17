@@ -37,9 +37,44 @@ public enum WhisperDecode {
         return langBase + argMax(langs, axis: -1).item(Int.self)
     }
 
+    /// Explicit ISO code wins; nil/"auto" ⇒ detect from `audio`.
+    private static func resolveLang(
+        _ language: String?, model: WhisperModel, audio: MLXArray
+    ) -> Int {
+        if let language, language.lowercased() != "auto" {
+            return languageToken(language)
+        }
+        return detectLanguageToken(model: model, audio: audio)
+    }
+
+    /// Greedy decode of one already-embedded 30 s window. argmax is
+    /// restricted to `[0, eot]` so special/lang/timestamp ids are
+    /// structurally excluded.
+    private static func decodeWindow(
+        model: WhisperModel, audio: MLXArray,
+        tokenizer: any MLXLMCommon.Tokenizer,
+        langTok: Int, maxTokens: Int
+    ) -> String {
+        let prefix = [sot, langTok, transcribe, noTimestamps]
+        var tokens = prefix
+        let limit = min(
+            model.config.n_text_ctx, prefix.count + maxTokens)
+        while tokens.count < limit {
+            let inp = MLXArray(
+                tokens.map { Int32($0) }, [1, tokens.count])
+            let lg = model.logits(inp, audio: audio)
+            let last = lg[0..., -1, 0 ..< (eot + 1)]
+            let next = argMax(last, axis: -1).item(Int.self)
+            if next == eot { break }
+            tokens.append(next)
+        }
+        let generated = Array(tokens[prefix.count...])
+        return tokenizer.decode(
+            tokenIds: generated, skipSpecialTokens: true
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// Transcribe a single ≤30 s log-mel (`[n_mels, 3000]`) → text.
-    /// Greedy argmax restricted to text ids + `eot` (special/lang/
-    /// timestamp ids are structurally excluded by the argmax range).
     public static func transcribe(
         model: WhisperModel,
         mel: MLXArray,
@@ -49,34 +84,49 @@ public enum WhisperDecode {
     ) -> String {
         let audio = model.embedAudio(mel)
         audio.eval()
+        let langTok = resolveLang(language, model: model, audio: audio)
+        return decodeWindow(
+            model: model, audio: audio, tokenizer: tokenizer,
+            langTok: langTok, maxTokens: maxTokens)
+    }
 
-        // Explicit ISO code wins; nil/"auto" ⇒ detect from the audio.
-        let langTok: Int
-        if let language, language.lowercased() != "auto" {
-            langTok = languageToken(language)
+    /// Transcribe full-length PCM (mono 16 kHz). Audio longer than 30 s
+    /// is split into consecutive 30 s windows (the last is zero-padded
+    /// by `LogMel`), each decoded independently and the texts joined.
+    /// Language is resolved once (detected on window 0 if not given)
+    /// and reused. Cross-window prompt conditioning is a future
+    /// refinement (M4.2e). M4.2e-2.
+    public static func transcribe(
+        model: WhisperModel,
+        pcm: [Float],
+        tokenizer: any MLXLMCommon.Tokenizer,
+        language: String? = nil,
+        maxTokens: Int = 224
+    ) -> String {
+        let n = LogMel.nSamples
+        let windows: [[Float]]
+        if pcm.count <= n {
+            windows = [pcm]
         } else {
-            langTok = detectLanguageToken(model: model, audio: audio)
+            windows = stride(from: 0, to: pcm.count, by: n).map {
+                Array(pcm[$0 ..< min($0 + n, pcm.count)])
+            }
         }
-        let prefix = [sot, langTok, transcribe, noTimestamps]
-        var tokens = prefix
-        let limit = min(
-            model.config.n_text_ctx, prefix.count + maxTokens)
-
-        while tokens.count < limit {
-            let inp = MLXArray(
-                tokens.map { Int32($0) }, [1, tokens.count])
-            let lg = model.logits(inp, audio: audio)
-            // Restrict to [0, eot] → text tokens + <|endoftext|>;
-            // everything ≥ sot (specials/langs/timestamps) excluded.
-            let last = lg[0..., -1, 0 ..< (eot + 1)]
-            let next = argMax(last, axis: -1).item(Int.self)
-            if next == eot { break }
-            tokens.append(next)
+        var langTok: Int?
+        var parts: [String] = []
+        for w in windows {
+            let audio = model.embedAudio(LogMel.logMel(w))
+            audio.eval()
+            let lt =
+                langTok
+                ?? resolveLang(language, model: model, audio: audio)
+            langTok = lt  // resolve once, reuse across windows
+            parts.append(
+                decodeWindow(
+                    model: model, audio: audio, tokenizer: tokenizer,
+                    langTok: lt, maxTokens: maxTokens))
         }
-
-        let generated = Array(tokens[prefix.count...])
-        return tokenizer.decode(
-            tokenIds: generated, skipSpecialTokens: true
-        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        return parts.filter { !$0.isEmpty }
+            .joined(separator: " ")
     }
 }
