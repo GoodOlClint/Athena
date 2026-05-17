@@ -21,7 +21,7 @@ private func runtimeDir(_ dataDir: String?) -> URL {
             fileURLWithPath: ($0 as NSString).expandingTildeInPath,
             isDirectory: true)
     }
-        ?? FileManager.default.homeDirectoryForCurrentUser
+        ?? AthenaEnv.userHome()
             .appendingPathComponent(".athena", isDirectory: true)
 }
 

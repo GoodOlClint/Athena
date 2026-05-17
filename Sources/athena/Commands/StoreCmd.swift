@@ -1,4 +1,5 @@
 import ArgumentParser
+import AthenaCore
 import Foundation
 
 /// `athena store …` — admin the shared SQLite store (M9.3). `export`
@@ -22,7 +23,7 @@ private func storeFile(_ dataDir: String?) -> URL {
                 fileURLWithPath: ($0 as NSString).expandingTildeInPath,
                 isDirectory: true)
         }
-        ?? FileManager.default.homeDirectoryForCurrentUser
+        ?? AthenaEnv.userHome()
             .appendingPathComponent(".athena", isDirectory: true)
     return root.appendingPathComponent("athena.sqlite")
 }

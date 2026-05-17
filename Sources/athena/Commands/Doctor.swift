@@ -115,7 +115,7 @@ struct Doctor: AsyncParsableCommand {
                         ($0 as NSString).expandingTildeInPath,
                     isDirectory: true)
             }
-            ?? fm.homeDirectoryForCurrentUser
+            ?? AthenaEnv.userHome()
                 .appendingPathComponent(".athena", isDirectory: true)
         if writable(dataDir) {
             say(.ok, "data dir writable: \(dataDir.path)")

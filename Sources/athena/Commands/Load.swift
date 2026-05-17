@@ -226,7 +226,7 @@ struct Load: AsyncParsableCommand {
         // data dir. Governor-capped resident vector working set.
         let dataRoot =
             dataDir.map { URL(fileURLWithPath: $0, isDirectory: true) }
-            ?? FileManager.default.homeDirectoryForCurrentUser
+            ?? AthenaEnv.userHome()
                 .appendingPathComponent(".athena", isDirectory: true)
         let athenaStore = try AthenaStore(
             path: dataRoot.appendingPathComponent("athena.sqlite"))

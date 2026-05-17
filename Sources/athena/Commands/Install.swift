@@ -1,4 +1,5 @@
 import ArgumentParser
+import AthenaCore
 import AthenaDeploy
 import Darwin
 import Foundation
@@ -87,11 +88,75 @@ struct Install: ParsableCommand {
                     + "output or pass --from")
         }
 
-        for dir in [plan.libexecDir, plan.configDir, plan.workingDir,
-                    URL(fileURLWithPath: cfg.logDir, isDirectory: true)] {
-            try fm.createDirectory(
-                at: dir, withIntermediateDirectories: true)
+        // The service user's home — NOT root's. The daemon runs as
+        // this user and resolves `~/.athena[/models]` against it; the
+        // installer must create those exact paths so the daemon can
+        // write them.
+        let svcHome =
+            AthenaEnv.homeDirectory(ofUser: serviceUser)
+            ?? URL(
+                fileURLWithPath: "/Users/\(serviceUser)",
+                isDirectory: true)
+        func resolve(_ p: String?, default def: URL) -> URL {
+            guard let p, !p.isEmpty else { return def }
+            if p.hasPrefix("~") {
+                return svcHome.appendingPathComponent(
+                    String(p.dropFirst()).drop(while: { $0 == "/" })
+                        .description, isDirectory: true)
+            }
+            return URL(fileURLWithPath: p, isDirectory: true)
         }
+        let dataDir = resolve(
+            cfg.dataDir,
+            default: svcHome.appendingPathComponent(
+                ".athena", isDirectory: true))
+        let modelStore = resolve(
+            cfg.modelStore,
+            default: svcHome.appendingPathComponent(
+                ".athena/models", isDirectory: true))
+        let logURL = URL(
+            fileURLWithPath: cfg.logDir, isDirectory: true)
+
+        // Create everything. Service-writable dirs are chowned to the
+        // service user; every dir is 0755 so the service user can
+        // TRAVERSE the path (the launchd EX_CONFIG bug was
+        // /usr/local/var/log at mode 744 — unreadable by the
+        // non-root service user, so launchd couldn't open the log).
+        func ensureDir(_ url: URL, owner: String?) throws {
+            try fm.createDirectory(
+                at: url, withIntermediateDirectories: true)
+            try? fm.setAttributes(
+                [.posixPermissions: 0o755],
+                ofItemAtPath: url.path)
+            if let owner {
+                try? fm.setAttributes(
+                    [.ownerAccountName: owner],
+                    ofItemAtPath: url.path)
+            }
+        }
+        /// Make every ancestor of `leaf` that lies under `prefix`
+        /// traversable (0755) — fixes umask-restricted intermediates
+        /// like /usr/local/var/log created during this install.
+        func makeTraversable(toward leaf: URL) {
+            let base = plan.prefix.standardizedFileURL.path
+            var cur = leaf.standardizedFileURL
+            while cur.path.hasPrefix(base), cur.path != base {
+                if fm.fileExists(atPath: cur.path) {
+                    try? fm.setAttributes(
+                        [.posixPermissions: 0o755],
+                        ofItemAtPath: cur.path)
+                }
+                cur = cur.deletingLastPathComponent()
+            }
+        }
+
+        try ensureDir(plan.libexecDir, owner: nil)
+        try ensureDir(plan.configDir, owner: nil)
+        try ensureDir(plan.workingDir, owner: serviceUser)
+        try ensureDir(logURL, owner: serviceUser)
+        makeTraversable(toward: logURL)
+        try ensureDir(dataDir, owner: serviceUser)
+        try ensureDir(modelStore, owner: serviceUser)
 
         for name in plan.artifactNames(fileManager: fm) {
             let src = plan.sourceDir.appendingPathComponent(name)
@@ -113,21 +178,22 @@ struct Install: ParsableCommand {
         try fm.setAttributes(
             [.posixPermissions: 0o644], ofItemAtPath: plan.plistPath.path)
 
-        // Service-owned writable dirs (logs, working dir).
-        for dir in [plan.workingDir.path, cfg.logDir] {
-            try? fm.setAttributes(
-                [.ownerAccountName: serviceUser], ofItemAtPath: dir)
-        }
+        // (dirs already created + chowned + made traversable above.)
 
         _ = Self.launchctl(["bootout", "system", plan.plistPath.path])
         try Self.launchctlChecked(["bootstrap", "system", plan.plistPath.path])
         _ = Self.launchctl(["enable", "system/\(label)"])
         _ = Self.launchctl(["kickstart", "-k", "system/\(label)"])
 
-        print("installed \(label).")
+        print("installed \(label) (service user: \(serviceUser)).")
+        print("  model store: \(modelStore.path)")
+        print("  data dir:    \(dataDir.path)")
         print(
             "  health: curl -s http://\(cfg.listenHost):\(cfg.listenPort)/healthz")
         print("  logs:   tail -f \(cfg.logDir)/athena.err.log")
+        print(
+            "  note: the daemon serves /healthz + /ui even with no "
+                + "model loaded; pull/convert a model for inference.")
     }
 
     @discardableResult

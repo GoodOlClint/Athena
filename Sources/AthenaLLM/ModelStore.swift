@@ -1,3 +1,4 @@
+import AthenaCore
 import Foundation
 
 /// Resolves where LLM weights live on disk. A model is referenced either
@@ -9,8 +10,7 @@ public struct ModelStore: Sendable {
     /// Default model store: `~/.athena/models` (sibling of the data
     /// dir). Self-contained on the boot volume — no external disk
     /// assumed. Models land here via `pull`/`convert`.
-    public static let defaultRoot = FileManager.default
-        .homeDirectoryForCurrentUser
+    public static let defaultRoot = AthenaEnv.userHome()
         .appendingPathComponent(".athena/models", isDirectory: true)
 
     /// Default LLM: 4-bit Qwen3.5-27B with `mtp.*` preserved — the brief's

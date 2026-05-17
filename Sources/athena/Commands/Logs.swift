@@ -1,4 +1,5 @@
 import ArgumentParser
+import AthenaCore
 import AthenaDeploy
 import Foundation
 
@@ -39,7 +40,7 @@ struct Logs: AsyncParsableCommand {
                             ($0 as NSString).expandingTildeInPath,
                         isDirectory: true)
                 }
-                ?? FileManager.default.homeDirectoryForCurrentUser
+                ?? AthenaEnv.userHome()
                     .appendingPathComponent(
                         ".athena", isDirectory: true)
             url = dir.appendingPathComponent("athena.log")
