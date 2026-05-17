@@ -22,7 +22,7 @@ struct Convert: AsyncParsableCommand {
     @Option(help: "Output name in the store (default <repo>-<bits>bit).")
     var name: String?
 
-    @Option(help: "Model store root. Default: external SSD mlx-models.")
+    @Option(help: "Model store root. Default: ~/.athena/models.")
     var modelStore: String?
 
     func run() async throws {

@@ -11,8 +11,8 @@ public struct AthenaConfig: Sendable, Equatable {
     public var engine: String?
     public var model: String?
     /// Model-store root directory. Optional — falls back to the
-    /// built-in default (the external SSD) when absent. Set this when
-    /// models live elsewhere (no SSD attached, boot-volume store…).
+    /// built-in default (`~/.athena/models`) when absent. Set this to
+    /// relocate the store (e.g. onto an external SSD).
     public var modelStore: String?
     /// Where the daemon keeps its SQLite store (vectors + queue + jobs).
     /// Optional — the daemon defaults to `~/.athena` when absent.

@@ -13,7 +13,7 @@ struct Pull: AsyncParsableCommand {
     @Argument(help: "HF repo id, e.g. mlx-community/whisper-large-v3-turbo")
     var model: String
 
-    @Option(help: "Model store root. Default: external SSD mlx-models.")
+    @Option(help: "Model store root. Default: ~/.athena/models.")
     var modelStore: String?
 
     func run() async throws {

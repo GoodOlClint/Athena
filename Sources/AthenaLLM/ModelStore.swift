@@ -1,14 +1,17 @@
 import Foundation
 
-/// Resolves where LLM weights live on disk. Athena's model store defaults to
-/// the external SSD (the HF cache and pre-converted MLX models live there,
-/// not on the boot volume). A model is referenced either by an absolute
-/// directory path or by a name resolved under the store root.
+/// Resolves where LLM weights live on disk. A model is referenced either
+/// by an absolute directory path or by a name resolved under the store
+/// root. The root defaults to `~/.athena/models` and is overridable via
+/// `--model-store` / the `model_store` config key (e.g. to point at an
+/// external SSD).
 public struct ModelStore: Sendable {
-    /// External-SSD model store. Pre-converted MLX Qwen models (MTP weights
-    /// preserved) live here as plain directories — loadable with no download.
-    public static let defaultRoot = URL(
-        fileURLWithPath: "/Volumes/SB-XTM5/mlx-models", isDirectory: true)
+    /// Default model store: `~/.athena/models` (sibling of the data
+    /// dir). Self-contained on the boot volume — no external disk
+    /// assumed. Models land here via `pull`/`convert`.
+    public static let defaultRoot = FileManager.default
+        .homeDirectoryForCurrentUser
+        .appendingPathComponent(".athena/models", isDirectory: true)
 
     /// Default LLM: 4-bit Qwen3.5-27B with `mtp.*` preserved — the brief's
     /// intended M2 default. The earlier "garbage" from these checkpoints

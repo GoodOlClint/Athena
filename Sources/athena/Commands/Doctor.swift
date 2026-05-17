@@ -16,7 +16,7 @@ struct Doctor: AsyncParsableCommand {
 
     @Option(help: "Config file (overrides auto-resolution).")
     var config: String?
-    @Option(help: "Model store root. Default: external SSD mlx-models.")
+    @Option(help: "Model store root. Default: ~/.athena/models.")
     var modelStore: String?
 
     private enum Level: String { case ok = "ok  ", warn = "warn", fail = "FAIL" }
@@ -63,12 +63,13 @@ struct Doctor: AsyncParsableCommand {
         if fm.fileExists(atPath: root.path, isDirectory: &isDir),
             isDir.boolValue
         {
-            say(.ok, "model store mounted: \(root.path)")
+            say(.ok, "model store present: \(root.path)")
         } else {
             say(
                 .fail,
-                "model store not mounted: \(root.path) "
-                    + "(external SSD detached?)")
+                "model store missing: \(root.path) — pull/convert a "
+                    + "model, set model_store, or mount the volume "
+                    + "if it lives on one")
         }
 
         // 4. Config resolve + parse.

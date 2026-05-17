@@ -40,11 +40,11 @@ engine = "mlx"
 # preserved).
 # model = "Qwen3.5-27B-4bit-mtp"
 
-# Model-store ROOT directory (where model dirs / the HF cache live).
-# Commented ⇒ the built-in default (the external SSD,
-# /Volumes/SB-XTM5/mlx-models). Set this when models live elsewhere
-# (no SSD attached, models on the boot volume, etc.).
-# model_store = "/Users/you/mlx-models"
+# Model-store ROOT directory (where model dirs / an optional sibling
+# hf-cache live). Commented ⇒ the built-in default
+# "~/.athena/models" (boot volume, no external disk assumed). Set
+# this to relocate the store, e.g. onto an external SSD.
+# model_store = "/Volumes/SB-XTM5/mlx-models"
 
 
 # ── Storage ──────────────────────────────────────────────────────────

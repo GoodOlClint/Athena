@@ -53,7 +53,7 @@ struct Load: AsyncParsableCommand {
     @Option(help: "Model directory path, or a name under the model store.")
     var model: String?
 
-    @Option(help: "Model store root. Default: external SSD mlx-models.")
+    @Option(help: "Model store root. Default: ~/.athena/models.")
     var modelStore: String?
 
     @Option(
@@ -111,17 +111,22 @@ struct Load: AsyncParsableCommand {
             level: AthenaLog.level(logLevel) ?? .info,
             syslogRemote: syslogRemote)
 
-        // HF download cache: prefer the SSD's hf-cache (sibling of the
-        // model store) when the volume is mounted; otherwise leave
-        // HF_HOME unset so the Hub client falls back to the local
-        // ~/.cache/huggingface. Never override an operator-set HF_HOME.
+        // HF download cache: if an `hf-cache` sits beside the model
+        // store (the configured root, or the default), use it;
+        // otherwise leave HF_HOME unset so the Hub client falls back
+        // to ~/.cache/huggingface. Never override an operator-set
+        // HF_HOME.
         let env = ProcessInfo.processInfo.environment
         if env["HF_HOME"] == nil, env["HF_HUB_CACHE"] == nil {
-            let ssdCache = ModelStore.defaultRoot
+            let msRoot =
+                modelStore.map {
+                    URL(fileURLWithPath: $0, isDirectory: true)
+                } ?? ModelStore.defaultRoot
+            let hfCache = msRoot
                 .deletingLastPathComponent()
                 .appendingPathComponent("hf-cache", isDirectory: true)
-            if FileManager.default.fileExists(atPath: ssdCache.path) {
-                setenv("HF_HOME", ssdCache.path, 1)
+            if FileManager.default.fileExists(atPath: hfCache.path) {
+                setenv("HF_HOME", hfCache.path, 1)
             }
         }
 

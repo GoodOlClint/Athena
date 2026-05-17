@@ -16,7 +16,7 @@ struct Verify: AsyncParsableCommand {
     @Flag(help: "Verify every model in the store.")
     var all = false
 
-    @Option(help: "Model store root. Default: external SSD mlx-models.")
+    @Option(help: "Model store root. Default: ~/.athena/models.")
     var modelStore: String?
 
     func run() async throws {

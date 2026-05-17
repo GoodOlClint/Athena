@@ -14,7 +14,7 @@ struct Prune: AsyncParsableCommand {
     @Flag(help: "Show what would be removed; change nothing.")
     var dryRun = false
 
-    @Option(help: "Model store root. Default: external SSD mlx-models.")
+    @Option(help: "Model store root. Default: ~/.athena/models.")
     var modelStore: String?
 
     /// Only prune things that are plausibly a model: a symlink (how
