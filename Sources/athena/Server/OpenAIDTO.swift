@@ -58,10 +58,13 @@ struct ChatCompletionRequest: Codable {
     let tools: [Tool]?
     let tool_choice: JSONValue?
 
-    /// The function to constrain to: `tool_choice` forcing one, else the
-    /// sole tool. nil when no tools, "none", or multiple tools with
-    /// "auto" (free multi-tool choice is a documented follow-up).
-    private func selectedTool() -> Tool? {
+    /// Tools to constrain to: `tool_choice` forcing one ⇒ `[that]`;
+    /// `"none"` / no tools ⇒ nil; otherwise (auto/absent/"required") ⇒
+    /// all declared tools (the caller compiles a single-fn schema for
+    /// one tool, a `oneOf` union for many — free multi-tool choice). A
+    /// forced name matching nothing ⇒ nil (falls through to
+    /// response_format / unconstrained, preserving prior behavior).
+    private func selectedTools() -> [Tool]? {
         guard let tools, !tools.isEmpty else { return nil }
         if case .string(let s)? = tool_choice,
             s == "none" { return nil }
@@ -69,9 +72,9 @@ struct ChatCompletionRequest: Codable {
             case .object(let f)? = o["function"],
             case .string(let name)? = f["name"]
         {
-            return tools.first { $0.function.name == name }
+            return tools.first { $0.function.name == name }.map { [$0] }
         }
-        return tools.count == 1 ? tools[0] : nil
+        return tools
     }
 
     /// All declared tools, lowered to the substrate `ToolSpec` shape
@@ -96,12 +99,17 @@ struct ChatCompletionRequest: Codable {
     /// whether it is a tool call (tools take precedence over
     /// response_format). nil ⇒ unconstrained.
     func effectiveSchema() -> (json: String, isToolCall: Bool)? {
-        if let tool = selectedTool(),
-            let s = StructuredSchema.toolCallSchema(
-                functionName: tool.function.name,
-                parameters: tool.function.parameters)
-        {
-            return (s, true)
+        if let ts = selectedTools(), !ts.isEmpty {
+            let schema =
+                ts.count == 1
+                ? StructuredSchema.toolCallSchema(
+                    functionName: ts[0].function.name,
+                    parameters: ts[0].function.parameters)
+                : StructuredSchema.toolCallUnionSchema(
+                    tools: ts.map {
+                        ($0.function.name, $0.function.parameters)
+                    })
+            if let schema { return (schema, true) }
         }
         if let s = StructuredSchema.schemaJSON(
             responseFormatType: response_format?.type,

@@ -50,6 +50,40 @@ final class StructuredSchemaTests: XCTestCase {
         XCTAssertNotNil(props["arguments"])
     }
 
+    func testToolCallUnionSchema() throws {
+        XCTAssertNil(StructuredSchema.toolCallUnionSchema(tools: []))
+        let s = try XCTUnwrap(
+            StructuredSchema.toolCallUnionSchema(tools: [
+                (
+                    "get_weather",
+                    .object([
+                        "type": .string("object"),
+                        "properties": .object([
+                            "city": .object(["type": .string("string")])
+                        ]),
+                    ])
+                ),
+                ("get_time", nil),
+            ]))
+        let v = try JSONDecoder().decode(JSONValue.self, from: Data(s.utf8))
+        guard case .object(let o) = v,
+            case .array(let branches)? = o["oneOf"]
+        else { return XCTFail("expected oneOf array: \(s)") }
+        XCTAssertEqual(branches.count, 2)
+        var names: [String] = []
+        for b in branches {
+            guard case .object(let bo) = b,
+                case .object(let props)? = bo["properties"],
+                case .object(let nameC)? = props["name"],
+                case .string(let cnst)? = nameC["const"]
+            else { return XCTFail("bad branch shape: \(b)") }
+            XCTAssertNotNil(props["arguments"])
+            XCTAssertEqual(bo["additionalProperties"], .bool(false))
+            names.append(cnst)
+        }
+        XCTAssertEqual(names.sorted(), ["get_time", "get_weather"])
+    }
+
     func testFoundationValueLowersToNativeContainers() throws {
         let v: JSONValue = .object([
             "type": .string("object"),

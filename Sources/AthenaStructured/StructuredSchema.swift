@@ -83,14 +83,14 @@ public enum StructuredSchema {
         }
     }
 
-    /// Constraining schema for a Qwen-style tool call: an object
-    /// `{"name": "<fn>", "arguments": <params>}`. The `<tool_call>`
-    /// wrapper itself is handled by the decoder's IDLE pass-through;
-    /// only this inner object is enforced.
-    public static func toolCallSchema(
+    /// One Qwen-style tool-call object: `{"name": "<fn>", "arguments":
+    /// <params>}`, name pinned to `fn` and arguments correlated to that
+    /// tool's params. Shared by the single- and union-tool schemas so
+    /// the two stay byte-identical per branch.
+    private static func toolCallObject(
         functionName: String, parameters: JSONValue?
-    ) -> String? {
-        JSONValue.object([
+    ) -> JSONValue {
+        .object([
             "type": .string("object"),
             "properties": .object([
                 "name": .object(["const": .string(functionName)]),
@@ -99,6 +99,36 @@ public enum StructuredSchema {
             ]),
             "required": .array([.string("name"), .string("arguments")]),
             "additionalProperties": .bool(false),
+        ])
+    }
+
+    /// Constraining schema for a Qwen-style tool call: an object
+    /// `{"name": "<fn>", "arguments": <params>}`. The `<tool_call>`
+    /// wrapper itself is handled by the decoder's IDLE pass-through;
+    /// only this inner object is enforced.
+    public static func toolCallSchema(
+        functionName: String, parameters: JSONValue?
+    ) -> String? {
+        toolCallObject(functionName: functionName, parameters: parameters)
+            .jsonString()
+    }
+
+    /// Union constraining schema for free multi-tool choice (>1 tool
+    /// with `tool_choice:"auto"`): `{"oneOf": [<tool-call object>, …]}`.
+    /// Each branch fixes `name` to one tool and correlates `arguments`
+    /// to that tool's params, so the emitted call is a valid call to
+    /// exactly one declared tool (name + args can't be mismatched).
+    /// nil ⇒ empty tool list.
+    public static func toolCallUnionSchema(
+        tools: [(name: String, parameters: JSONValue?)]
+    ) -> String? {
+        guard !tools.isEmpty else { return nil }
+        return JSONValue.object([
+            "oneOf": .array(
+                tools.map {
+                    toolCallObject(
+                        functionName: $0.name, parameters: $0.parameters)
+                })
         ]).jsonString()
     }
 }
