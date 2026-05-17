@@ -115,6 +115,10 @@ let package = Package(
                 "AthenaCore",
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXFFT", package: "mlx-swift"),
+                .product(name: "MLXNN", package: "mlx-swift"),
+                .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
+                .product(name: "MLXHuggingFace", package: "mlx-swift-lm"),
+                .product(name: "HuggingFace", package: "swift-huggingface"),
             ],
             path: "Sources/AthenaTranscription"),
         .target(
