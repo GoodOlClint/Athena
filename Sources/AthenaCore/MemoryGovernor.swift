@@ -88,6 +88,7 @@ public actor MemoryGovernor {
         guard let entry = entries[id] else {
             throw AthenaError.moduleNotRegistered(id)
         }
+        relievePressure(except: id)
         if entry.state == .loaded {
             entries[id]?.lastUsed = Date()
             return
@@ -100,6 +101,28 @@ public actor MemoryGovernor {
         inFlight[id] = task
         defer { inFlight[id] = nil }
         try await task.value
+    }
+
+    /// M5.3 OOM guard: relief based on the LIVE substrate footprint,
+    /// not the bookkeeping (which the static estimates can under-count
+    /// even when reconciled). If actual MLX memory is above the
+    /// high-water mark, shed the LRU evictable module (≠ the one being
+    /// requested) — its `unload` + the clear-cache hook reclaim the
+    /// pool. Best-effort and progressive: sustained pressure across
+    /// requests sheds further victims one at a time.
+    private func relievePressure(except keep: ModuleID) {
+        guard let memoryProbe else { return }
+        let highWater = totalBudgetBytes / 10 * 9  // 90%
+        guard memoryProbe() > highWater else { return }
+        let victim =
+            entries
+            .filter {
+                $0.key != keep && $0.value.evictable
+                    && $0.value.state == .loaded
+            }
+            .min { $0.value.lastUsed < $1.value.lastUsed }?
+            .key
+        if let victim { evictSync(victim) }
     }
 
     private func performLoad(_ id: ModuleID) async throws {

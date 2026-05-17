@@ -133,8 +133,11 @@ final class MemoryGovernorTests: XCTestCase {
         }
     }
 
+    // Note: each ensureLoaded reads the probe 3×: relievePressure,
+    // then performLoad before + after.
     func testReconcilesReservationToObservedFootprint() async throws {
-        let probe = FakeProbe([0, 600])  // before=0, after=600
+        // relief=0 (no relief), before=0, after=600.
+        let probe = FakeProbe([0, 0, 600])
         let gov = MemoryGovernor(
             totalBudgetBytes: 1_000,
             memoryProbe: { probe.next() })
@@ -152,9 +155,10 @@ final class MemoryGovernorTests: XCTestCase {
     }
 
     func testOverBudgetReconciliationEvictsEvictable() async throws {
-        // t: before0/after60 (obs 60 == est). llm: before60/after150
+        // 3 reads/load. t: relief0, before0, after60 (obs 60 == est).
+        // llm: relief0 (≤90 hi-water, no relief), before60, after150
         // (obs 90 vs est 30) ⇒ reserved 60+90=150 > 100 ⇒ evict t.
-        let probe = FakeProbe([0, 60, 60, 150])
+        let probe = FakeProbe([0, 0, 60, 0, 60, 150])
         let gov = MemoryGovernor(
             totalBudgetBytes: 100, memoryProbe: { probe.next() })
         await gov.register(
@@ -199,5 +203,39 @@ final class MemoryGovernorTests: XCTestCase {
 
         await gov.unload(.textEmbedding)
         XCTAssertEqual(c.n, 2, "hook should fire on explicit unload")
+    }
+
+    // MARK: - M5.3 proactive pressure relief (live probe)
+
+    func testLivePressureShedsLRUEvenWhenBookkeepingHasRoom() async throws
+    {
+        // Constant-high probe: 950 > 90% of 1000 ⇒ relief triggers.
+        // before==after ⇒ reconcile observes 0 ⇒ no-op (isolated test).
+        let gov = MemoryGovernor(
+            totalBudgetBytes: 1_000,
+            memoryProbe: { 950 })
+        await gov.register(
+            StubTranscriptionModule(reserveBytes: 60), evictable: true)
+        await gov.register(
+            StubEmbeddingModule(reserveBytes: 60), evictable: true)
+
+        try await gov.ensureLoaded(.transcription)
+        // Bookkeeping has ample room (60+60 ≪ 1000) but live memory is
+        // over high-water, so loading embedding sheds the LRU evictable.
+        try await gov.ensureLoaded(.textEmbedding)
+        for _ in 0..<50 {
+            let st = await gov.snapshot().modules
+                .first { $0.id == .transcription }?.state
+            if st == .unloaded { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        let s = await gov.snapshot()
+        let t = s.modules.first { $0.id == .transcription }?.state
+        XCTAssertTrue(
+            t == .unloading || t == .unloaded,
+            "live pressure should have shed transcription")
+        XCTAssertEqual(
+            s.modules.first { $0.id == .textEmbedding }?.state, .loaded)
     }
 }
