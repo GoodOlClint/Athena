@@ -238,4 +238,76 @@ final class MemoryGovernorTests: XCTestCase {
         XCTAssertEqual(
             s.modules.first { $0.id == .textEmbedding }?.state, .loaded)
     }
+
+    // MARK: - M5.4 learned footprints
+
+    /// Shared "process memory" the fake modules allocate into.
+    private final class MemBox: @unchecked Sendable {
+        private(set) var value = 0
+        func add(_ n: Int) { value += n }
+    }
+
+    /// Fake module that actually moves the probe: `load` allocates
+    /// `footprint` into the shared box (deterministic — no scripted
+    /// sequence). `memoryEstimate` is the deliberately-wrong static
+    /// guess.
+    private actor AllocatingModule: InferenceModule {
+        nonisolated let id: ModuleID
+        private let estimate: Int
+        private let footprint: Int
+        private let box: MemBox
+        private var loaded = false
+        init(
+            id: ModuleID, estimate: Int, footprint: Int, box: MemBox
+        ) {
+            self.id = id
+            self.estimate = estimate
+            self.footprint = footprint
+            self.box = box
+        }
+        var residentBytes: Int { loaded ? footprint : 0 }
+        func memoryEstimate() -> Int { estimate }
+        func load(reservation: MemoryReservation) async throws {
+            box.add(footprint)
+            loaded = true
+        }
+        func unload() async { loaded = false }
+    }
+
+    func testReadmissionUsesLearnedFootprintNotEstimate() async throws {
+        let box = MemBox()
+        let gov = MemoryGovernor(
+            totalBudgetBytes: 1_000, memoryProbe: { box.value })
+        // Static estimate 100, but loading really costs 600.
+        await gov.register(
+            AllocatingModule(
+                id: .transcription, estimate: 100, footprint: 600,
+                box: box), evictable: true)
+        // Non-evictable blocker that reserves 500 (no extra alloc).
+        await gov.register(
+            AllocatingModule(
+                id: .llm, estimate: 500, footprint: 0, box: box),
+            evictable: false)
+
+        try await gov.ensureLoaded(.transcription)  // observes 600
+        let reserved1 = await gov.snapshot().reservedBytes
+        XCTAssertEqual(reserved1, 600)
+        await gov.unload(.transcription)  // learned[.transcription]=600
+        try await gov.ensureLoaded(.llm)  // reserves 500
+
+        // Re-admit transcription. With the stale estimate (100) it
+        // would fit (500+100 ≤ 1000); with the LEARNED 600 it must be
+        // rejected (500+600 > 1000, blocker non-evictable).
+        do {
+            try await gov.ensureLoaded(.transcription)
+            XCTFail("expected memoryBudgetExceeded (learned 600)")
+        } catch let e as AthenaError {
+            guard
+                case let .memoryBudgetExceeded(requested, _, _) = e
+            else { return XCTFail("wrong error: \(e)") }
+            XCTAssertEqual(
+                requested, 600,
+                "admission must use the learned footprint, not 100")
+        }
+    }
 }

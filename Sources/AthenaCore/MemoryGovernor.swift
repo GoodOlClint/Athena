@@ -49,6 +49,10 @@ public actor MemoryGovernor {
     private var inFlight: [ModuleID: Task<Void, Error>] = [:]
     private let memoryProbe: MemoryProbe?
     private let onUnloaded: UnloadHook?
+    /// M5.4: real footprint observed on a prior load. Subsequent
+    /// admissions use this instead of the static `memoryEstimate()`, so
+    /// an evicted-then-reloaded module is admitted on its true cost.
+    private var learnedFootprint: [ModuleID: Int] = [:]
 
     public init(
         totalBudgetBytes: Int, memoryProbe: MemoryProbe? = nil,
@@ -131,7 +135,13 @@ public actor MemoryGovernor {
         }
         if entry.state == .loaded { return }
 
-        let estimate = await entry.module.memoryEstimate()
+        // M5.4: prefer a previously-observed real footprint.
+        let estimate: Int
+        if let learned = learnedFootprint[id] {
+            estimate = learned
+        } else {
+            estimate = await entry.module.memoryEstimate()
+        }
         try makeRoom(for: estimate, requestedBy: id)
 
         let reservation = MemoryReservation(module: id, bytes: estimate)
@@ -175,6 +185,7 @@ public actor MemoryGovernor {
         reservedBytes += observed - estimate
         entries[id]?.reservation = MemoryReservation(
             module: id, bytes: observed)
+        learnedFootprint[id] = observed  // M5.4
         guard reservedBytes > totalBudgetBytes else { return }
         let victims = entries
             .filter {
