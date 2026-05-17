@@ -1,18 +1,19 @@
 import ArgumentParser
 
 /// `athena` — the Project the platform inference appliance. Ollama-style CLI
-/// (M6) + `queue` (M9.1); `vectors`/`store` land in later M9 slices.
+/// (M6) + queue/vectors/store (M9.1–9.3) + daemon lifecycle (M9.4).
 @main
 struct Athena: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "athena",
         abstract: "Project the platform inference appliance (passive oracle).",
-        version: "0.9.3",
+        version: "0.9.7",
         subcommands: [
-            Serve.self, Install.self, ListModels.self, Ps.self,
-            Run.self, Pull.self, Rm.self, Show.self, Stop.self,
+            Load.self, Install.self, ListModels.self, Ps.self,
+            Run.self, Pull.self, Rm.self, Show.self, Unload.self,
+            Start.self, Stop.self, Status.self,
             Queue.self, Vectors.self, Store.self,
         ],
-        defaultSubcommand: Serve.self
+        defaultSubcommand: Load.self
     )
 }

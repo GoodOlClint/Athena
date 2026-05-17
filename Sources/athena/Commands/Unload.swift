@@ -2,11 +2,12 @@ import ArgumentParser
 import AthenaCore
 import Foundation
 
-/// `athena stop [MODEL]` — unload the running model so the governor
-/// reclaims its budget (ollama-style; single-model shim, MODEL echoed).
-struct Stop: AsyncParsableCommand {
+/// `athena unload [MODEL]` — unload the running model so the governor
+/// reclaims its budget; the daemon keeps running. (Was `stop`; `stop`
+/// now controls the daemon process — M9.4.)
+struct Unload: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        commandName: "stop",
+        commandName: "unload",
         abstract: "Unload the running model and free its budget."
     )
 
@@ -35,6 +36,6 @@ struct Stop: AsyncParsableCommand {
         let obj =
             (try? JSONSerialization.jsonObject(with: data))
             as? [String: Any]
-        print("stopped \(obj?["model"] as? String ?? model ?? "model")")
+        print("unloaded \(obj?["model"] as? String ?? model ?? "model")")
     }
 }

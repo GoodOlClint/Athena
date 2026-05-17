@@ -12,11 +12,14 @@ enum Engine: String, CaseIterable, ExpressibleByArgument {
     case stub
 }
 
-/// Start the governed HTTP surface. This is the launchd-able daemon.
-struct Serve: AsyncParsableCommand {
+/// Run the governed HTTP surface in the foreground. This is the
+/// launchd-able daemon body. (Was `serve`; renamed for symmetry with
+/// `unload` — `serve` kept as an ollama-compat alias. M9.4.)
+struct Load: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        commandName: "serve",
-        abstract: "Start the governed HTTP inference surface."
+        commandName: "load",
+        abstract: "Run the governed HTTP inference surface (foreground).",
+        aliases: ["serve"]
     )
 
     @Option(help: "Listen host.")
