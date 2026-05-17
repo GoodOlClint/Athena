@@ -111,7 +111,11 @@ let package = Package(
             path: "Sources/AthenaLLM"),
         .target(
             name: "AthenaTranscription",
-            dependencies: ["AthenaCore"],
+            dependencies: [
+                "AthenaCore",
+                .product(name: "MLX", package: "mlx-swift"),
+                .product(name: "MLXFFT", package: "mlx-swift"),
+            ],
             path: "Sources/AthenaTranscription"),
         .target(
             name: "AthenaEmbedding",
