@@ -1,6 +1,10 @@
 import ArgumentParser
 import Foundation
 
+#if canImport(FoundationNetworking)
+    import FoundationNetworking
+#endif
+
 /// `athena queue …` — manage the async request queue (M9.1). Thin
 /// HTTP client to a running daemon's `/v1/queue` surface.
 public struct Queue: AsyncParsableCommand {
@@ -106,6 +110,30 @@ public struct QueueGet: AsyncParsableCommand {
 
     public func run() async throws {
         if follow {
+            try await followJob()
+            return
+        }
+        let url =
+            daemon.base + "/v1/queue/\(id)"
+            + (wait.map { "?wait=\($0)" } ?? "")
+        let (code, data): (Int, Data)
+        do {
+            (code, data) = try await HTTPClient.send(
+                "GET", url, key: daemon.authKey)
+        } catch { HTTPClient.noDaemon(daemon, error) }
+        HTTPClient.printJSON(data)
+        if code >= 400 { throw ExitCode.failure }
+    }
+
+    private static let terminal: Set<String> = [
+        "done", "error", "canceled",
+    ]
+
+    /// Apple: native SSE stream. Linux (FoundationNetworking has no
+    /// `URLSession.bytes`): poll the status endpoint and print each
+    /// transition until terminal — same observable behavior.
+    private func followJob() async throws {
+        #if canImport(Darwin)
             var req = URLRequest(
                 url: URL(
                     string: daemon.base + "/v1/queue/\(id)/events")!)
@@ -124,18 +152,32 @@ public struct QueueGet: AsyncParsableCommand {
                     print(p)
                 }
             } catch { HTTPClient.noDaemon(daemon, error) }
-            return
-        }
-        let url =
-            daemon.base + "/v1/queue/\(id)"
-            + (wait.map { "?wait=\($0)" } ?? "")
-        let (code, data): (Int, Data)
-        do {
-            (code, data) = try await HTTPClient.send(
-                "GET", url, key: daemon.authKey)
-        } catch { HTTPClient.noDaemon(daemon, error) }
-        HTTPClient.printJSON(data)
-        if code >= 400 { throw ExitCode.failure }
+        #else
+            struct S: Decodable { let status: String }
+            var last = ""
+            for _ in 0..<600 {
+                let (code, data): (Int, Data)
+                do {
+                    (code, data) = try await HTTPClient.send(
+                        "GET", daemon.base + "/v1/queue/\(id)",
+                        key: daemon.authKey)
+                } catch { HTTPClient.noDaemon(daemon, error) }
+                guard code < 400,
+                    let s = try? JSONDecoder().decode(
+                        S.self, from: data)
+                else {
+                    HTTPClient.printJSON(data)
+                    if code >= 400 { throw ExitCode.failure }
+                    return
+                }
+                if s.status != last {
+                    HTTPClient.printJSON(data)
+                    last = s.status
+                }
+                if Self.terminal.contains(s.status) { return }
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        #endif
     }
 }
 

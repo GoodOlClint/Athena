@@ -1,5 +1,11 @@
 import Foundation
 
+#if canImport(Darwin)
+    import Darwin
+#elseif canImport(Glibc)
+    import Glibc
+#endif
+
 /// One keyed secret store for the thin CLI (M13). A single login-
 /// Keychain service (`athena`) with an arbitrary `account` per secret,
 /// so the daemon bearer key (`<host>:<port>`) and the Hugging Face

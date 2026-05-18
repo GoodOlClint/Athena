@@ -169,10 +169,12 @@ let package = Package(
         // `HTTPClient`. Foundation + ArgumentParser only; the
         // AthenaCore dep (for `GovernorConfig.defaultPort`) is
         // temporary — severed in M14.3 for the Linux build.
+        // Foundation + ArgumentParser ONLY — no AthenaCore/Darwin/MLX
+        // graph, so the portable `athena` client is Linux-clean
+        // (M14.3). Platform bits are `#if canImport`-guarded.
         .target(
             name: "AthenaClient",
             dependencies: [
-                "AthenaCore",
                 .product(
                     name: "ArgumentParser",
                     package: "swift-argument-parser"),

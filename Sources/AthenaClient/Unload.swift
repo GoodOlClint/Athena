@@ -1,6 +1,9 @@
 import ArgumentParser
-import AthenaCore
 import Foundation
+
+#if canImport(FoundationNetworking)
+    import FoundationNetworking
+#endif
 
 /// `athena unload [MODEL]` — unload the running model so the governor
 /// reclaims its budget; the daemon keeps running. (Was `stop`; `stop`
@@ -18,7 +21,7 @@ public struct Unload: AsyncParsableCommand {
     public var host: String = "127.0.0.1"
 
     @Option(help: "Daemon port.")
-    public var port: Int = GovernorConfig.defaultPort
+    public var port: Int = athenaDefaultPort
 
     public init() {}
 

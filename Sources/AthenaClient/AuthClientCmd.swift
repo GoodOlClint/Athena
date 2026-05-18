@@ -1,7 +1,11 @@
 import ArgumentParser
-import AthenaCore
-import Darwin
 import Foundation
+
+#if canImport(Darwin)
+    import Darwin
+#elseif canImport(Glibc)
+    import Glibc
+#endif
 
 // Client-side credential store (login/logout/status) — manages THIS
 // host's stored bearer key for talking to a (local or remote) daemon.
@@ -27,7 +31,7 @@ public struct AuthLogin: AsyncParsableCommand {
     @Option(help: "Daemon host.") public var host: String =
         "127.0.0.1"
     @Option(help: "Daemon port.")
-    public var port: Int = GovernorConfig.defaultPort
+    public var port: Int = athenaDefaultPort
     @Option(help: "Key (omit to read stdin / prompt, no echo).")
     public var key: String?
     public init() {}
@@ -61,7 +65,7 @@ public struct AuthLogout: AsyncParsableCommand {
     @Option(help: "Daemon host.") public var host: String =
         "127.0.0.1"
     @Option(help: "Daemon port.")
-    public var port: Int = GovernorConfig.defaultPort
+    public var port: Int = athenaDefaultPort
     public init() {}
     public func run() async throws {
         print(
@@ -78,7 +82,7 @@ public struct AuthStatus: AsyncParsableCommand {
     @Option(help: "Daemon host.") public var host: String =
         "127.0.0.1"
     @Option(help: "Daemon port.")
-    public var port: Int = GovernorConfig.defaultPort
+    public var port: Int = athenaDefaultPort
     public init() {}
     public func run() async throws {
         let env = ProcessInfo.processInfo.environment["ATHENA_KEY"]

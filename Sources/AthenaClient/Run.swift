@@ -1,7 +1,14 @@
 import ArgumentParser
-import AthenaCore
-import Darwin
 import Foundation
+
+#if canImport(FoundationNetworking)
+    import FoundationNetworking
+#endif
+#if canImport(Darwin)
+    import Darwin
+#elseif canImport(Glibc)
+    import Glibc
+#endif
 
 /// `athena run MODEL [PROMPT]` — one-shot generation against a running
 /// daemon. PROMPT from args or piped stdin. An interactive REPL (tty,
@@ -24,7 +31,7 @@ public struct Run: AsyncParsableCommand {
     public var host: String = "127.0.0.1"
 
     @Option(help: "Daemon port.")
-    public var port: Int = GovernorConfig.defaultPort
+    public var port: Int = athenaDefaultPort
 
     public init() {}
 

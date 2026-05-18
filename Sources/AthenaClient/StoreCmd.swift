@@ -1,6 +1,9 @@
 import ArgumentParser
-import AthenaCore
 import Foundation
+
+#if canImport(FoundationNetworking)
+    import FoundationNetworking
+#endif
 
 /// `athena store …` — admin the shared SQLite store (M9.3). `export`
 /// and `stats` talk to a running daemon; `import` is deliberately
@@ -25,7 +28,7 @@ private func storeFile(_ dataDir: String?) -> URL {
                     .expandingTildeInPath,
                 isDirectory: true)
         }
-        ?? AthenaEnv.userHome()
+        ?? FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".athena", isDirectory: true)
     return root.appendingPathComponent("athena.sqlite")
 }

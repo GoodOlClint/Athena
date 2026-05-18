@@ -1,6 +1,9 @@
 import ArgumentParser
-import AthenaCore
 import Foundation
+
+#if canImport(FoundationNetworking)
+    import FoundationNetworking
+#endif
 
 /// Shared host/port options for CLI subcommands that talk to a running
 /// daemon over HTTP. (Portable client surface — M14.1 extraction.)
@@ -9,7 +12,7 @@ public struct DaemonOptions: ParsableArguments {
     public var host: String = "127.0.0.1"
 
     @Option(help: "Daemon port.")
-    public var port: Int = GovernorConfig.defaultPort
+    public var port: Int = athenaDefaultPort
 
     @Option(help: "Bearer key (else ATHENA_KEY env, else Keychain).")
     public var key: String?
