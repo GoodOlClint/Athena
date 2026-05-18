@@ -43,10 +43,15 @@ struct Pull: AsyncParsableCommand {
         ProxyEnv.applyConfigAndAuth()  // egress proxy (M13.2)
         HFAuth.exportToEnv()  // gated/private repos (M13)
         print("pulling \(model) …")
+        let bar = ProgressBar("  \(model)")
         do {
-            let dest = try await ModelPull.pull(id: model, into: root)
+            let dest = try await ModelPull.pull(
+                id: model, into: root,
+                progress: { f in bar.update(f) })
+            bar.finish()
             print("pulled \(model) → \(dest.path)")
         } catch {
+            bar.finish()
             print("error: pull failed — \(error)")
             throw ExitCode.failure
         }

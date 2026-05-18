@@ -54,16 +54,21 @@ struct Convert: AsyncParsableCommand {
             ?? ModelStore.defaultRoot
         ProxyEnv.applyConfigAndAuth()  // egress proxy (M13.2)
         HFAuth.exportToEnv()  // gated/private repos (M13)
-        print("converting \(model) → \(qBits)-bit …")
+        print("converting \(model) → \(qBits)-bit (download, "
+            + "then quantize) …")
+        let bar = ProgressBar("  \(model)")
         do {
             let r = try await ModelConvert.convert(
                 id: model, bits: qBits, groupSize: qGroupSize,
-                into: root, name: name)
+                into: root, name: name,
+                progress: { f in bar.update(f) })
+            bar.finish()
             let mb = Double(r.bytes) / 1_048_576
             print(
                 "converted \(model) → \(r.path.path) "
                     + "(\(String(format: "%.0f", mb)) MB)")
         } catch {
+            bar.finish()
             print("error: convert failed — \(error)")
             throw ExitCode.failure
         }

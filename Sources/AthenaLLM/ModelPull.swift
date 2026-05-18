@@ -8,8 +8,12 @@ import MLXLMCommon
 /// `storeRoot/<name>`, so `serve --model <name>` and `athena list`
 /// pick it up without a multi-GB copy. M6-cli-3.
 public enum ModelPull {
+    /// `progress` (0…1 download fraction) is optional — default nil
+    /// keeps the daemon/queue callers unchanged; the CLI passes a
+    /// renderer.
     public static func pull(
-        id: String, revision: String? = nil, into storeRoot: URL
+        id: String, revision: String? = nil, into storeRoot: URL,
+        progress: (@Sendable (Double) -> Void)? = nil
     ) async throws -> URL {
         let snapshot = try await #hubDownloader(
             HuggingFace.HubClient(
@@ -20,7 +24,10 @@ public enum ModelPull {
                 "*.json", "*.safetensors", "*.txt", "*.jinja",
                 "tokenizer*", "*.model",
             ],
-            useLatest: false, progressHandler: { _ in })
+            useLatest: false,
+            progressHandler: { p in
+                progress?(p.fractionCompleted)
+            })
 
         let name = id.split(separator: "/").last.map(String.init) ?? id
         try FileManager.default.createDirectory(

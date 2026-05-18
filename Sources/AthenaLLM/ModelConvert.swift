@@ -32,10 +32,14 @@ public enum ModelConvert {
         return !name.hasPrefix(".")
     }
 
+    /// `progress` (0…1) covers the DOWNLOAD phase only; the
+    /// quantization tail has no HF progress. Default nil keeps the
+    /// daemon/queue caller unchanged.
     public static func convert(
         id: String, revision: String? = nil,
         bits: Int = 4, groupSize: Int = 64,
-        into storeRoot: URL, name: String? = nil
+        into storeRoot: URL, name: String? = nil,
+        progress: (@Sendable (Double) -> Void)? = nil
     ) async throws -> Result {
         let snapshot = try await #hubDownloader(
             HuggingFace.HubClient(
@@ -46,7 +50,10 @@ public enum ModelConvert {
                 "*.json", "*.safetensors", "*.txt", "*.jinja",
                 "tokenizer*", "*.model",
             ],
-            useLatest: false, progressHandler: { _ in })
+            useLatest: false,
+            progressHandler: { p in
+                progress?(p.fractionCompleted)
+            })
 
         // Same vendored-model route `serve` uses, so the converted
         // checkpoint loads back through the identical path.
