@@ -143,13 +143,16 @@ struct AthenaServer {
             await handleQueueStatus(
                 context.parameters.get("arg"), request)
         }
-        router.delete("/v1/queue/:arg") { _, context -> Response in
-            await handleQueueRemove(context.parameters.get("arg"))
+        router.delete("/v1/queue/:arg") { request, context -> Response in
+            await handleQueueRemove(
+                context.parameters.get("arg"), request)
         }
         // SSE: stream status transitions until terminal (inbound only —
         // the passive-oracle thesis forbids outbound webhooks).
-        router.get("/v1/queue/:arg/events") { _, context -> Response in
-            handleQueueEvents(context.parameters.get("arg"))
+        router.get("/v1/queue/:arg/events") { request, context
+            -> Response in
+            await handleQueueEvents(
+                context.parameters.get("arg"), request)
         }
 
         // Ollama-compatible shim (M6.1, non-streaming).
@@ -719,6 +722,36 @@ struct AthenaServer {
 
     // MARK: - Async request queue (M8.1)
 
+    /// Per-submitter queue authorization (M12.6). `enforced` is auth
+    /// being on; `principal` identifies the bearer (the route is
+    /// inference-tier — AuthMiddleware already validated the token).
+    private func queuePrincipal(_ request: Request) async -> (
+        principal: String?, isAdmin: Bool, enforced: Bool
+    ) {
+        guard auth.isEnabled else { return (nil, false, false) }
+        guard
+            let h = request.headers[.authorization],
+            h.hasPrefix("Bearer "),
+            case let tok = String(h.dropFirst(7)), !tok.isEmpty
+        else { return (nil, false, true) }
+        let isAdmin = await auth.tier(forBearer: tok) == .admin
+        return (
+            AuthConfig.principal(forBearer: tok), isAdmin, true
+        )
+    }
+
+    /// May this caller see/act on `job`? Open when auth is off;
+    /// admin sees all; a nil-owner row is legacy/unowned (pre-M12.6,
+    /// back-compat); otherwise only the submitting principal.
+    private static func canAccess(
+        _ job: JobRow, principal: String?, isAdmin: Bool,
+        enforced: Bool
+    ) -> Bool {
+        if !enforced || isAdmin { return true }
+        guard let owner = job.owner else { return true }
+        return owner == principal
+    }
+
     private func handleQueueSubmit(
         _ kind: String?, _ request: Request
     ) async -> Response {
@@ -742,9 +775,11 @@ struct AthenaServer {
                 message: "Invalid request body: \(error)",
                 type: "invalid_request_error", code: "invalid_body")
         }
+        let who = await queuePrincipal(request)
         do {
             let id = try await queue.submit(
-                kind: kind, request: body)
+                kind: kind, request: body,
+                owner: who.enforced ? who.principal : nil)
             return Self.json(
                 QueueSubmitResponse(id: id, status: "queued"))
         } catch {
@@ -786,9 +821,15 @@ struct AthenaServer {
                 wait = min(120, max(0, Int(kv.dropFirst(5)) ?? 0))
             }
         }
+        let who = await queuePrincipal(request)
         let deadline = Date().addingTimeInterval(Double(wait))
         while true {
-            guard let job = await queue.status(id: id) else {
+            guard let job = await queue.status(id: id),
+                Self.canAccess(
+                    job, principal: who.principal,
+                    isAdmin: who.isAdmin, enforced: who.enforced)
+            else {
+                // 404 (not 403) — don't reveal another tenant's job.
                 return Self.error(
                     status: .notFound, message: "no job '\(id)'",
                     type: "invalid_request_error", code: "not_found")
@@ -800,7 +841,19 @@ struct AthenaServer {
         }
     }
 
-    private func handleQueueEvents(_ id: String?) -> Response {
+    private func handleQueueEvents(
+        _ id: String?, _ request: Request
+    ) async -> Response {
+        let who = await queuePrincipal(request)
+        if let id, let job = await queue.status(id: id),
+            !Self.canAccess(
+                job, principal: who.principal, isAdmin: who.isAdmin,
+                enforced: who.enforced)
+        {
+            return Self.error(
+                status: .notFound, message: "no job '\(id)'",
+                type: "invalid_request_error", code: "not_found")
+        }
         let q = queue
         let stream = AsyncStream<ByteBuffer> { continuation in
             let task = Task {
@@ -850,11 +903,25 @@ struct AthenaServer {
             body: ResponseBody(asyncSequence: stream))
     }
 
-    private func handleQueueRemove(_ id: String?) async -> Response {
+    private func handleQueueRemove(
+        _ id: String?, _ request: Request
+    ) async -> Response {
         guard let id else {
             return Self.error(
                 status: .badRequest, message: "missing job id",
                 type: "invalid_request_error", code: "missing_id")
+        }
+        // Only the owner (or admin) may remove — and a non-owner
+        // gets 404, not 403, so job existence stays hidden.
+        let who = await queuePrincipal(request)
+        if let job = await queue.status(id: id),
+            !Self.canAccess(
+                job, principal: who.principal, isAdmin: who.isAdmin,
+                enforced: who.enforced)
+        {
+            return Self.error(
+                status: .notFound, message: "no job '\(id)'",
+                type: "invalid_request_error", code: "not_found")
         }
         let removed = await queue.remove(id: id)
         if !removed {
@@ -875,7 +942,14 @@ struct AthenaServer {
                 status = String(kv.dropFirst(7))
             }
         }
-        let jobs = await queue.list(status: status)
+        let who = await queuePrincipal(request)
+        let jobs = await queue.list(status: status).filter {
+            Self.canAccess(
+                $0, principal: who.principal, isAdmin: who.isAdmin,
+                enforced: who.enforced) && (
+                    !who.enforced || who.isAdmin
+                        || $0.owner == who.principal)
+        }
         return Self.json(
             QueueListResponse(
                 jobs: jobs.map {

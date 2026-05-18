@@ -56,6 +56,13 @@ struct AuthConfig: Sendable {
         Array(SHA256.hash(data: Data(s.utf8)))
     }
 
+    /// Stable principal id for a bearer token (M12.6) — the token's
+    /// own SHA-256, so the raw key is never needed for ownership.
+    static func principal(forBearer token: String) -> String {
+        "t:" + sha(token).map { String(format: "%02x", $0) }
+            .joined()
+    }
+
     /// SHA-256 of a raw key, as the `sha256:<hex>` entry persisted by
     /// `athena auth add` (no secret stored at rest).
     static func hashEntry(forRawKey key: String) -> String {
@@ -231,8 +238,9 @@ enum AuthPolicy {
         if path == "/ui" || path.hasPrefix("/ui/") { return .admin }
         if path.hasPrefix("/v1/store") { return .admin }
         if path == "/api/stop" { return .admin }
-        // Mutating store/queue/vector admin; reads stay inference.
-        if path.hasPrefix("/v1/queue"), mutating { return .admin }
+        // /v1/queue is inference-tier; per-submitter OWNERSHIP is
+        // enforced in the handlers (M12.6) — admin tier sees all.
+        // Mutating vectors stay admin (shared resource).
         if path.hasPrefix("/v1/vectors"), mutating,
             path != "/v1/vectors/query"
         {

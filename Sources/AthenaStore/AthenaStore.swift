@@ -12,6 +12,9 @@ public struct JobRow: Sendable {
     public let error: String?
     public let created: Double
     public let updated: Double
+    /// Submitting principal (M12.6). nil = legacy/unowned (pre-
+    /// ownership rows, or auth disabled) — readable without scoping.
+    public let owner: String?
 }
 
 /// One embedded SQLite store backing the built-in vector DB and the
@@ -62,7 +65,8 @@ public actor AthenaStore {
               id TEXT PRIMARY KEY, kind TEXT NOT NULL,
               status TEXT NOT NULL, request BLOB NOT NULL,
               result BLOB, error TEXT,
-              created REAL NOT NULL, updated REAL NOT NULL);
+              created REAL NOT NULL, updated REAL NOT NULL,
+              owner TEXT);
             CREATE TABLE IF NOT EXISTS auth_users(
               username TEXT PRIMARY KEY, salt BLOB NOT NULL,
               hash BLOB NOT NULL, iters INTEGER NOT NULL,
@@ -71,6 +75,10 @@ public actor AthenaStore {
               hash BLOB PRIMARY KEY, tier TEXT NOT NULL,
               label TEXT, created REAL NOT NULL);
             """)
+        // Migration for stores created before M12.6 (no IF NOT
+        // EXISTS for columns; the dup-column error is expected and
+        // ignored on already-migrated DBs).
+        try? Self.exec(db, "ALTER TABLE jobs ADD COLUMN owner TEXT;")
     }
 
     deinit { sqlite3_close(db) }
@@ -192,18 +200,22 @@ public actor AthenaStore {
     // MARK: Jobs
 
     public func insertJob(
-        id: String, kind: String, request: Data
+        id: String, kind: String, request: Data, owner: String?
     ) throws {
         let now = Date().timeIntervalSince1970
         let st = try Self.prepared(db,
             "INSERT INTO jobs(id,kind,status,request,result,error,"
-                + "created,updated) VALUES(?,?,'queued',?,NULL,NULL,?,?);")
+                + "created,updated,owner) "
+                + "VALUES(?,?,'queued',?,NULL,NULL,?,?,?);")
         defer { sqlite3_finalize(st) }
         sqlite3_bind_text(st, 1, id, -1, Self.transient)
         sqlite3_bind_text(st, 2, kind, -1, Self.transient)
         Self.bindBlob(st, 3, request)
         sqlite3_bind_double(st, 4, now)
         sqlite3_bind_double(st, 5, now)
+        if let owner {
+            sqlite3_bind_text(st, 6, owner, -1, Self.transient)
+        } else { sqlite3_bind_null(st, 6) }
         guard sqlite3_step(st) == SQLITE_DONE else {
             throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
         }
@@ -241,6 +253,9 @@ public actor AthenaStore {
             ? nil : Self.blob(st, 4)
         let err: String? = sqlite3_column_type(st, 5) == SQLITE_NULL
             ? nil : String(cString: sqlite3_column_text(st, 5))
+        let owner: String? =
+            sqlite3_column_type(st, 8) == SQLITE_NULL
+            ? nil : String(cString: sqlite3_column_text(st, 8))
         return JobRow(
             id: String(cString: sqlite3_column_text(st, 0)),
             kind: String(cString: sqlite3_column_text(st, 1)),
@@ -248,11 +263,12 @@ public actor AthenaStore {
             request: Self.blob(st, 3),
             result: result, error: err,
             created: sqlite3_column_double(st, 6),
-            updated: sqlite3_column_double(st, 7))
+            updated: sqlite3_column_double(st, 7),
+            owner: owner)
     }
 
     private static let jobCols =
-        "id,kind,status,request,result,error,created,updated"
+        "id,kind,status,request,result,error,created,updated,owner"
 
     public func getJob(id: String) -> JobRow? {
         guard

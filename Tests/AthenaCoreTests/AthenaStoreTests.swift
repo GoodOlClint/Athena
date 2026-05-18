@@ -58,9 +58,11 @@ final class AthenaStoreTests: XCTestCase {
 
         let req = Data("{\"prompt\":\"hi\"}".utf8)
         try await s.insertJob(
-            id: "j1", kind: "conversation", request: req)
+            id: "j1", kind: "conversation", request: req,
+            owner: "u:alice")
         let q = await s.getJob(id: "j1")
         XCTAssertEqual(q?.status, "queued")
+        XCTAssertEqual(q?.owner, "u:alice")
         XCTAssertEqual(q?.kind, "conversation")
         XCTAssertEqual(q?.request, req)
         XCTAssertNil(q?.result)
@@ -78,7 +80,8 @@ final class AthenaStoreTests: XCTestCase {
             done?.created ?? .greatestFiniteMagnitude)
 
         try await s.insertJob(
-            id: "j2", kind: "embeddings", request: Data())
+            id: "j2", kind: "embeddings", request: Data(),
+            owner: nil)
         let count = await s.listJobs().count
         XCTAssertEqual(count, 2)
         let queued = await s.listJobs(status: "queued").map { $0.id }
@@ -100,7 +103,8 @@ final class AthenaStoreTests: XCTestCase {
         do {
             let s = try AthenaStore(path: url)
             try await s.insertJob(
-                id: "e", kind: "x", request: Data("q".utf8))
+                id: "e", kind: "x", request: Data("q".utf8),
+                owner: nil)
             try await s.updateJob(
                 id: "e", status: "error", result: nil, error: "boom")
             try await s.putVector(

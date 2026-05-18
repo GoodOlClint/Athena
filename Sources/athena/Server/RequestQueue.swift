@@ -31,11 +31,14 @@ actor RequestQueue {
 
     func setExecutor(_ e: @escaping Executor) { executor = e }
 
-    /// Enqueue; returns the job id.
-    func submit(kind: String, request: Data) async throws -> String {
+    /// Enqueue; returns the job id. `owner` = the submitting
+    /// principal (M12.6); nil when auth is disabled.
+    func submit(
+        kind: String, request: Data, owner: String?
+    ) async throws -> String {
         let id = UUID().uuidString
         try await store.insertJob(
-            id: id, kind: kind, request: request)
+            id: id, kind: kind, request: request, owner: owner)
         log.info("queue submit kind=\(kind) id=\(id)")
         signal.yield(())
         return id
