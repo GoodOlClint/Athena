@@ -234,6 +234,56 @@ struct AthenaServer {
             handleModelRemove(context.parameters.get("name"))
         }
 
+        // RBAC administration over HTTP (M16.4). Every mutation
+        // enforces RBAC.canGrant against the CALLER's permission set
+        // (NOT implicit-admin like the offline CLI) + last-admin
+        // protection. Perm-gated by AuthPolicy
+        // (users.read/users.admin/tokens.admin).
+        router.get("/api/users") { _, _ -> Response in
+            await handleUsersList()
+        }
+        router.post("/api/users") { request, _ -> Response in
+            await handleUserCreate(request)
+        }
+        router.delete("/api/users/:name") { request, context
+            -> Response in
+            await handleUserDelete(
+                context.parameters.get("name"), request)
+        }
+        router.post("/api/users/:name/roles/:role") {
+            request, context -> Response in
+            await handleRoleGrant(
+                context.parameters.get("name"),
+                context.parameters.get("role"), request)
+        }
+        router.delete("/api/users/:name/roles/:role") {
+            request, context -> Response in
+            await handleRoleRevoke(
+                context.parameters.get("name"),
+                context.parameters.get("role"), request)
+        }
+        router.get("/api/roles") { _, _ -> Response in
+            Self.json(
+                RolesResponse(
+                    roles: RBAC.roleNames.map { r in
+                        RoleCatalogEntry(
+                            role: r,
+                            permissions: (RBAC.catalog[r] ?? [])
+                                .map(\.rawValue).sorted())
+                    }))
+        }
+        router.get("/api/tokens") { _, _ -> Response in
+            await handleTokensList()
+        }
+        router.post("/api/tokens") { request, _ -> Response in
+            await handleTokenCreate(request)
+        }
+        router.delete("/api/tokens/:prefix") { _, context
+            -> Response in
+            await handleTokenDelete(
+                context.parameters.get("prefix"))
+        }
+
         // Wire the queue executor to the governed module paths and
         // start the single serial worker (M8.1).
         await queue.setExecutor { kind, data in
@@ -1463,6 +1513,348 @@ struct AthenaServer {
                 message: "queue submit failed: \(error)",
                 type: "server_error", code: "queue_error")
         }
+    }
+
+    // MARK: - RBAC admin (M16.4)
+
+    /// The CALLER's effective permission set. Auth-off loopback is a
+    /// single trusted operator (mirrors the offline CLI's implicit-
+    /// admin grantor). With auth on, a missing/invalid bearer ⇒ empty
+    /// set ⇒ every escalation check fails closed (AuthMiddleware has
+    /// already gated the route, so this is defense-in-depth).
+    private func callerPermissions(_ request: Request) async
+        -> Set<Permission>
+    {
+        guard auth.isEnabled else { return Set(Permission.allCases) }
+        guard
+            let h = request.headers[.authorization],
+            h.hasPrefix("Bearer "),
+            case let tok = String(h.dropFirst(7)), !tok.isEmpty,
+            let s = await auth.resolve(bearer: tok)
+        else { return [] }
+        return s.permissions
+    }
+
+    /// Bare identifier guard for network input (username/role names):
+    /// `[A-Za-z0-9._-]`, ≤64, not `.`/`..`.
+    private static func safeIdent(_ s: String?) -> String? {
+        guard let s, !s.isEmpty, s.count <= 64 else { return nil }
+        let ok = s.allSatisfy {
+            $0.isLetter || $0.isNumber || $0 == "." || $0 == "_"
+                || $0 == "-"
+        }
+        guard ok, s != "..", s != "." else { return nil }
+        return s
+    }
+
+    /// Caller may assign every role in `roles` only if it holds every
+    /// permission each confers (fail-closed on an unknown role).
+    private static func canGrantAll(
+        _ roles: some Sequence<String>, _ caller: Set<Permission>
+    ) -> Bool {
+        roles.allSatisfy {
+            RBAC.canGrant(role: $0, grantorPermissions: caller)
+        }
+    }
+
+    private func handleUsersList() async -> Response {
+        var out: [UserSummaryDTO] = []
+        for u in await store.listUsers() {
+            out.append(
+                UserSummaryDTO(
+                    username: u,
+                    roles: await store.rolesForUser(username: u)))
+        }
+        return Self.json(UserListResponse(users: out))
+    }
+
+    private func handleUserCreate(_ request: Request) async
+        -> Response
+    {
+        let decoded = await decodeJSON(request, CreateUserRequest.self)
+        guard case .ok(let body) = decoded else {
+            if case .fail(let r) = decoded { return r }
+            fatalError()
+        }
+        guard let username = Self.safeIdent(body.username) else {
+            return Self.error(
+                status: .badRequest,
+                message: "invalid username [A-Za-z0-9._-]",
+                type: "invalid_request_error", code: "invalid_name")
+        }
+        guard body.password.count >= 8 else {
+            return Self.error(
+                status: .badRequest,
+                message: "password must be >= 8 chars",
+                type: "invalid_request_error", code: "weak_password")
+        }
+        let role = body.role ?? "member"
+        guard RBAC.isValidRole(role) else {
+            return Self.error(
+                status: .badRequest,
+                message: "unknown role '\(role)'",
+                type: "invalid_request_error", code: "unknown_role")
+        }
+        let caller = await callerPermissions(request)
+        guard
+            RBAC.canGrant(role: role, grantorPermissions: caller)
+        else {
+            return Self.deny403(
+                "cannot grant a role conferring permissions you do "
+                    + "not hold")
+        }
+        // Replacing an existing account = a password reset; refuse if
+        // the target currently outranks the caller (account takeover).
+        if await store.getUser(username: username) != nil {
+            let cur = await store.rolesForUser(username: username)
+            guard
+                RBAC.permissions(forRoles: cur).isSubset(of: caller)
+            else {
+                return Self.deny403(
+                    "refusing to replace a user whose roles exceed "
+                        + "your permissions")
+            }
+        }
+        let salt = Passwords.randomSalt()
+        let hash = Passwords.derive(
+            password: body.password, salt: salt,
+            iters: Passwords.defaultIterations)
+        do {
+            try await store.putUser(
+                username: username, salt: salt, hash: hash,
+                iters: Passwords.defaultIterations)
+            try await store.grantRole(
+                username: username, role: role)
+        } catch {
+            return Self.error(
+                status: .internalServerError, message: "\(error)",
+                type: "server_error", code: "store_error")
+        }
+        return Self.json(
+            UserSummaryDTO(
+                username: username,
+                roles: await store.rolesForUser(
+                    username: username)))
+    }
+
+    private func handleUserDelete(
+        _ name: String?, _ request: Request
+    ) async -> Response {
+        guard let username = Self.safeIdent(name) else {
+            return Self.error(
+                status: .badRequest, message: "invalid username",
+                type: "invalid_request_error", code: "invalid_name")
+        }
+        guard await store.getUser(username: username) != nil else {
+            return Self.error(
+                status: .notFound, message: "no user '\(username)'",
+                type: "invalid_request_error", code: "not_found")
+        }
+        if await store.usersWithRole("admin") == [username] {
+            return Self.deny403(
+                "'\(username)' is the only admin — refusing "
+                    + "(grant admin to another user first)")
+        }
+        let ok = await store.deleteUser(username: username)
+        return Self.json(
+            UserRemovedResponse(username: username, removed: ok))
+    }
+
+    private func handleRoleGrant(
+        _ name: String?, _ role: String?, _ request: Request
+    ) async -> Response {
+        guard let username = Self.safeIdent(name),
+            let role = Self.safeIdent(role)
+        else {
+            return Self.error(
+                status: .badRequest, message: "invalid name/role",
+                type: "invalid_request_error", code: "invalid_name")
+        }
+        guard RBAC.isValidRole(role) else {
+            return Self.error(
+                status: .badRequest,
+                message: "unknown role '\(role)'",
+                type: "invalid_request_error", code: "unknown_role")
+        }
+        guard await store.getUser(username: username) != nil else {
+            return Self.error(
+                status: .notFound, message: "no user '\(username)'",
+                type: "invalid_request_error", code: "not_found")
+        }
+        let caller = await callerPermissions(request)
+        guard
+            RBAC.canGrant(role: role, grantorPermissions: caller)
+        else {
+            return Self.deny403(
+                "cannot grant a role conferring permissions you do "
+                    + "not hold")
+        }
+        do {
+            try await store.grantRole(
+                username: username, role: role)
+        } catch {
+            return Self.error(
+                status: .internalServerError, message: "\(error)",
+                type: "server_error", code: "store_error")
+        }
+        return Self.json(OkResponse(ok: true))
+    }
+
+    private func handleRoleRevoke(
+        _ name: String?, _ role: String?, _ request: Request
+    ) async -> Response {
+        guard let username = Self.safeIdent(name),
+            let role = Self.safeIdent(role)
+        else {
+            return Self.error(
+                status: .badRequest, message: "invalid name/role",
+                type: "invalid_request_error", code: "invalid_name")
+        }
+        guard await store.getUser(username: username) != nil else {
+            return Self.error(
+                status: .notFound, message: "no user '\(username)'",
+                type: "invalid_request_error", code: "not_found")
+        }
+        if role == "admin",
+            await store.usersWithRole("admin") == [username]
+        {
+            return Self.deny403(
+                "'\(username)' is the only admin — refusing to "
+                    + "revoke admin")
+        }
+        let ok = await store.revokeRole(
+            username: username, role: role)
+        return Self.json(OkResponse(ok: ok))
+    }
+
+    private func handleTokensList() async -> Response {
+        let toks = await store.listTokens()
+        return Self.json(
+            TokenListResponse(
+                tokens: toks.map {
+                    TokenSummaryDTO(
+                        username: $0.username, scope: $0.scoped,
+                        hash_prefix: String($0.hex.prefix(12)),
+                        label: $0.label)
+                }))
+    }
+
+    private func handleTokenCreate(_ request: Request) async
+        -> Response
+    {
+        let decoded = await decodeJSON(
+            request, CreateTokenRequest.self)
+        guard case .ok(let body) = decoded else {
+            if case .fail(let r) = decoded { return r }
+            fatalError()
+        }
+        guard let user = Self.safeIdent(body.user) else {
+            return Self.error(
+                status: .badRequest, message: "invalid user",
+                type: "invalid_request_error", code: "invalid_name")
+        }
+        guard await store.getUser(username: user) != nil else {
+            return Self.error(
+                status: .notFound, message: "no user '\(user)'",
+                type: "invalid_request_error", code: "not_found")
+        }
+        let caller = await callerPermissions(request)
+        let scoped =
+            (body.role?.isEmpty == false) ? body.role : nil
+        if let scoped {
+            for r in scoped where !RBAC.isValidRole(r) {
+                return Self.error(
+                    status: .badRequest,
+                    message: "unknown role '\(r)'",
+                    type: "invalid_request_error",
+                    code: "unknown_role")
+            }
+            guard Self.canGrantAll(scoped, caller) else {
+                return Self.deny403(
+                    "token scope exceeds your permissions")
+            }
+        } else {
+            // Unscoped ⇒ inherits the user's full roles; refuse to
+            // mint a token more powerful than the caller.
+            let inherited = RBAC.permissions(
+                forRoles: await store.rolesForUser(username: user))
+            guard inherited.isSubset(of: caller) else {
+                return Self.deny403(
+                    "an unscoped token for '\(user)' would exceed "
+                        + "your permissions — pass an explicit role "
+                        + "scope you can grant")
+            }
+        }
+        let (key, hash) = AuthConfig.mintToken()
+        do {
+            try await store.putToken(
+                hash: hash, username: user, scopedRoles: scoped,
+                label: body.label)
+        } catch {
+            return Self.error(
+                status: .internalServerError, message: "\(error)",
+                type: "server_error", code: "store_error")
+        }
+        return Self.json(
+            CreateTokenResponse(
+                user: user, scope: scoped, token: key,
+                hash_prefix: String(
+                    AuthConfig.hex(Array(hash)).prefix(12))),
+            status: .accepted)
+    }
+
+    /// 64-char hex → 32 bytes (token-hash reconstruction).
+    private static func hexData(_ s: String) -> Data? {
+        guard s.count == 64 else { return nil }
+        var out = [UInt8]()
+        out.reserveCapacity(32)
+        var i = s.startIndex
+        while i < s.endIndex {
+            let j = s.index(i, offsetBy: 2)
+            guard let b = UInt8(s[i..<j], radix: 16) else {
+                return nil
+            }
+            out.append(b)
+            i = j
+        }
+        return Data(out)
+    }
+
+    private func handleTokenDelete(_ prefix: String?) async
+        -> Response
+    {
+        guard let prefix, prefix.count >= 6,
+            prefix.allSatisfy({ $0.isHexDigit })
+        else {
+            return Self.error(
+                status: .badRequest,
+                message: "prefix must be >= 6 hex chars",
+                type: "invalid_request_error", code: "invalid_prefix")
+        }
+        let matches = await store.listTokens().filter {
+            $0.hex.hasPrefix(prefix)
+        }
+        if matches.isEmpty {
+            return Self.error(
+                status: .notFound,
+                message: "no token matched \(prefix)",
+                type: "invalid_request_error", code: "not_found")
+        }
+        var removed = 0
+        for m in matches {
+            if let d = Self.hexData(m.hex),
+                await store.deleteToken(hash: d)
+            {
+                removed += 1
+            }
+        }
+        return Self.json(TokensRemovedResponse(removed: removed))
+    }
+
+    private static func deny403(_ msg: String) -> Response {
+        Self.error(
+            status: .forbidden, message: msg,
+            type: "auth_error", code: "forbidden")
     }
 
     // MARK: - Response helpers

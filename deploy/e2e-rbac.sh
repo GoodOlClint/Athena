@@ -51,10 +51,11 @@ printf '{"model_type":"test","hidden_size":8}' \
 : > "$MSTORE/fake-model/model.safetensors"
 ln -s /nonexistent/gone "$MSTORE/dead"
 
+D2=""                          # phase-8 isolated RBAC-admin data dir
 cleanup() {
   [ -n "$DPID" ] && kill "$DPID" 2>/dev/null
   wait "$DPID" 2>/dev/null
-  rm -rf "$D" "$EMPTY" "$MSTORE"
+  rm -rf "$D" "$EMPTY" "$MSTORE" ${D2:+"$D2"}
 }
 trap cleanup EXIT
 
@@ -318,6 +319,61 @@ else
   bad "daemon failed to start open on loopback"
   cat "$D/daemon.log"
 fi
+
+echo
+echo "== phase 8: RBAC admin over HTTP (M16.4) =="
+# Isolated DB so create/delete/last-admin can't disturb phases 0–7.
+D2="$(mktemp -d)"
+"$ATHENA" auth user add admin --password adminpass1 --role admin \
+  --data-dir "$D2" >/dev/null && ok "seed D2 admin" || bad "seed admin"
+"$ATHENA" auth user add ro --password ropass1234 --role readonly \
+  --data-dir "$D2" >/dev/null && ok "seed D2 ro" || bad "seed ro"
+"$ATHENA" auth user add mem --password mempass12 --role member \
+  --data-dir "$D2" >/dev/null && ok "seed D2 mem" || bad "seed mem"
+t2() {
+  "$ATHENA" auth token add --user "$1" --data-dir "$D2" 2>/dev/null \
+    | grep -o 'sk-athena-[A-Za-z0-9_-]*' | head -1
+}
+A2="$(t2 admin)"; R2="$(t2 ro)"; M2="$(t2 mem)"
+start_daemon "$D2" 127.0.0.1 || { echo "d2 failed"; \
+  cat "$D/daemon.log"; exit 1; }
+# Perm gating (AuthMiddleware): users.read / users.admin / tokens.admin
+code 200 GET    /api/users  "$A2"
+code 200 GET    /api/users  "$R2"     # readonly ∋ users.read
+code 403 GET    /api/users  "$M2"     # member ∌ users.read
+code 200 GET    /api/roles  "$R2"
+code 403 GET    /api/roles  "$M2"
+code 403 POST   /api/users  "$R2" '{"username":"x","password":"abcdefgh"}'
+code 403 GET    /api/tokens "$R2"     # tokens.admin only
+code 403 GET    /api/tokens "$M2"
+code 200 GET    /api/tokens "$A2"
+# Functional CRUD round-trip (admin) + fail-closed validation
+code 200 POST   /api/users "$A2" '{"username":"e2e1","password":"pw123456","role":"member"}'
+code 200 POST   /api/users/e2e1/roles/operator "$A2"
+code 400 POST   /api/users/e2e1/roles/notarole "$A2"   # unknown role
+code 404 POST   /api/users/ghost/roles/member  "$A2"   # unknown user
+code 400 POST   /api/users "$A2" '{"username":"weak","password":"short"}'
+code 400 POST   /api/users "$A2" '{"username":"bad","password":"pw123456","role":"nope"}'
+code 200 DELETE /api/users/e2e1/roles/operator "$A2"
+code 200 DELETE /api/users/e2e1 "$A2"
+code 404 DELETE /api/users/e2e1 "$A2"
+# Token mint → use → list → delete
+CRESP="$(curl -s -X POST "http://127.0.0.1:$PORT/api/tokens" \
+  -H "Authorization: Bearer $A2" -H 'Content-Type: application/json' \
+  -d '{"user":"mem","label":"e2e"}')"
+NT="$(echo "$CRESP" \
+  | sed -n 's/.*"token":"\(sk-athena-[^"]*\)".*/\1/p')"
+HP="$(echo "$CRESP" | grep -o '"hash_prefix":"[0-9a-f]*"' \
+  | sed 's/.*:"//;s/"//')"
+[ -n "$NT" ] && ok "minted token via /api/tokens" || bad "api mint"
+code 200 POST /v1/chat/completions "$NT" "$CHAT"   # member inference
+code 200 DELETE "/api/tokens/$HP" "$A2"            # delete the new one
+code 404 DELETE /api/tokens/deadbeef9999 "$A2"
+code 400 DELETE /api/tokens/abc "$A2"               # <6 hex
+# Last-admin protection over HTTP (D2 has exactly one admin).
+code 403 DELETE /api/users/admin "$A2"              # sole admin
+code 403 DELETE /api/users/admin/roles/admin "$A2"  # revoke sole admin
+stop_daemon
 
 echo
 echo "════════════════════════════════════════"

@@ -145,3 +145,57 @@ struct QueuedModelPruneResult: Codable {
     let removed: Int
     let dry_run: Bool
 }
+
+// MARK: - /api/users, /api/roles, /api/tokens (M16.4 — RBAC CRUD)
+
+struct UserSummaryDTO: Codable {
+    let username: String
+    let roles: [String]
+}
+struct UserListResponse: Codable { let users: [UserSummaryDTO] }
+
+struct CreateUserRequest: Codable {
+    let username: String
+    let password: String
+    /// Initial role (default: member). Caller must be able to grant
+    /// it (server-side `RBAC.canGrant`).
+    let role: String?
+}
+
+struct RoleCatalogEntry: Codable {
+    let role: String
+    let permissions: [String]
+}
+struct RolesResponse: Codable { let roles: [RoleCatalogEntry] }
+
+struct TokenSummaryDTO: Codable {
+    let username: String
+    let scope: [String]?  // nil ⇒ inherits the user's full roles
+    let hash_prefix: String
+    let label: String?
+}
+struct TokenListResponse: Codable { let tokens: [TokenSummaryDTO] }
+
+struct CreateTokenRequest: Codable {
+    let user: String
+    /// Scope the token to a role subset (default: the user's full
+    /// set). Caller must be able to grant each scoped role; an
+    /// unscoped token may not exceed the caller's own permissions.
+    let role: [String]?
+    let label: String?
+}
+/// The minted key is returned ONCE here and never persisted.
+struct CreateTokenResponse: Codable {
+    let user: String
+    let scope: [String]?
+    let token: String
+    let hash_prefix: String
+}
+
+/// Generic mutation acknowledgements.
+struct OkResponse: Codable { let ok: Bool }
+struct UserRemovedResponse: Codable {
+    let username: String
+    let removed: Bool
+}
+struct TokensRemovedResponse: Codable { let removed: Int }

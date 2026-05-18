@@ -62,6 +62,23 @@ struct AuthConfig: Sendable {
         Array(SHA256.hash(data: Data(s.utf8)))
     }
 
+    /// Mint a fresh 256-bit bearer key (`sk-athena-<b64url>`, shown
+    /// ONCE) plus its at-rest SHA-256. The single key-generation path,
+    /// shared by `athena auth token add` (offline CLI) and
+    /// `POST /api/tokens` (M16.4) — no secret is ever persisted.
+    static func mintToken() -> (key: String, hash: Data) {
+        let raw = SymmetricKey(size: .bits256).withUnsafeBytes {
+            Data($0)
+        }
+        let key =
+            "sk-athena-"
+            + raw.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+        return (key, Data(sha(key)))
+    }
+
     static func hex(_ bytes: [UInt8]) -> String {
         bytes.map { String(format: "%02x", $0) }.joined()
     }
@@ -268,6 +285,17 @@ enum AuthPolicy {
         }
         if path == "/api/models" || path.hasPrefix("/api/models/") {
             return mutating ? .modelWrite : .modelRead
+        }
+        if path == "/api/roles" || path.hasPrefix("/api/roles/") {
+            return .usersRead  // read-only RBAC catalog
+        }
+        if path == "/api/users" || path.hasPrefix("/api/users/") {
+            return mutating ? .usersAdmin : .usersRead
+        }
+        if path == "/api/tokens" || path.hasPrefix("/api/tokens/") {
+            // Listing exposes ownership/scope; minting/removing are
+            // privileged — tokens.admin for the whole surface.
+            return .tokensAdmin
         }
         if path.hasPrefix("/v1/vectors") {
             if path == "/v1/vectors/query" { return .vectorsRead }

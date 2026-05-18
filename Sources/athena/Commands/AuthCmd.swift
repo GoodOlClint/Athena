@@ -275,20 +275,12 @@ struct AuthTokenAdd: AsyncParsableCommand {
         guard await db.getUser(username: user) != nil else {
             FailableExit.die("error: no such user '\(user)'")
         }
-        // 32 bytes CSPRNG → sk-athena-<base64url>.
-        let raw = SymmetricKey(size: .bits256).withUnsafeBytes {
-            Data($0)
-        }
-        let key =
-            "sk-athena-"
-            + raw.base64EncodedString()
-            .replacingOccurrences(of: "+", with: "-")
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "=", with: "")
+        // Single key-generation path, shared with POST /api/tokens.
+        let (key, hash) = AuthConfig.mintToken()
         let scoped = role.isEmpty ? nil : role
         do {
             try await db.putToken(
-                hash: Data(AuthConfig.sha(key)), username: user,
+                hash: hash, username: user,
                 scopedRoles: scoped, label: label)
         } catch {
             FailableExit.die("error: \(error)")
