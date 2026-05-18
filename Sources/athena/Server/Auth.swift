@@ -29,6 +29,37 @@ struct AuthConfig: Sendable {
         Array(SHA256.hash(data: Data(s.utf8)))
     }
 
+    /// SHA-256 of a raw key, as the `sha256:<hex>` entry persisted by
+    /// `athena auth add` (no secret stored at rest).
+    static func hashEntry(forRawKey key: String) -> String {
+        "sha256:" + hex(sha(key))
+    }
+
+    static func hex(_ bytes: [UInt8]) -> String {
+        bytes.map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Decode a `sha256:<64-hex>` entry to its 32 bytes; nil if it
+    /// isn't that form (⇒ caller treats the token as a raw key).
+    static func hashEntry(_ token: String) -> [UInt8]? {
+        let p = "sha256:"
+        guard token.hasPrefix(p) else { return nil }
+        let hexStr = token.dropFirst(p.count)
+        guard hexStr.count == 64 else { return nil }
+        var out: [UInt8] = []
+        out.reserveCapacity(32)
+        var i = hexStr.startIndex
+        while i < hexStr.endIndex {
+            let j = hexStr.index(i, offsetBy: 2)
+            guard let b = UInt8(hexStr[i..<j], radix: 16) else {
+                return nil
+            }
+            out.append(b)
+            i = j
+        }
+        return out
+    }
+
     /// Load keys from the file (lines `tier key`, `#` comments) and
     /// the env (`ATHENA_ADMIN_KEYS` / `ATHENA_INFERENCE_KEYS`,
     /// comma-separated). Env augments the file. A given key keeps its
@@ -41,7 +72,15 @@ struct AuthConfig: Sendable {
         func add(_ key: String, _ tier: AuthTier) {
             let k = key.trimmingCharacters(in: .whitespaces)
             guard !k.isEmpty else { return }
-            let h = sha(k)
+            // `sha256:<64-hex>` ⇒ a pre-hashed entry (recommended;
+            // written by `athena auth add` — no secret at rest).
+            // Anything else ⇒ a raw key, hashed here.
+            let h: [UInt8]
+            if let bytes = Self.hashEntry(k) {
+                h = bytes
+            } else {
+                h = sha(k)
+            }
             if let cur = map[h] { map[h] = max(cur, tier) } else {
                 map[h] = tier
             }

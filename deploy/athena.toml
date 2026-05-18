@@ -83,6 +83,9 @@ engine = "mlx"
 # Any keys present ⇒ enforced. admin ⊇ inference; admin also gates
 # the WebUI, /metrics, /v1/store, and mutating queue/vector ops.
 # auth_keys_file = "/usr/local/etc/athena/auth.keys"
+# Generate keys with `athena auth add admin|inference` — the raw
+# key is shown ONCE and only its sha256:<hex> is written here (no
+# secret at rest). Raw `tier <key>` lines are still accepted.
 
 
 # ── Logging ──────────────────────────────────────────────────────────
