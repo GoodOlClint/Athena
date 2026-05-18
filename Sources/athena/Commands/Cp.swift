@@ -25,46 +25,24 @@ struct Cp: AsyncParsableCommand {
     var modelStore: String?
 
     func run() async throws {
-        let store = ModelStore(
-            rootDirectory: modelStore.map {
+        let root =
+            modelStore.map {
                 URL(fileURLWithPath: $0, isDirectory: true)
-            } ?? ModelStore.defaultRoot)
-        let source = store.resolve(src)
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: source.path) else {
-            FailableExit.die("error: no such model: \(source.path)")
-        }
-        guard !dst.contains("/") else {
+            } ?? ModelStore.defaultRoot
+        let dest: URL
+        do {
+            dest = try ModelStoreOps.copy(
+                root: root, src: src, dst: dst,
+                deepCopy: copy, force: force)
+        } catch ModelStoreOps.OpError.notFound {
+            FailableExit.die("error: no such model: \(src)")
+        } catch ModelStoreOps.OpError.invalidName {
             FailableExit.die(
                 "error: destination must be a bare store name")
-        }
-        let dest = store.rootDirectory.appendingPathComponent(
-            dst, isDirectory: true)
-
-        if fm.fileExists(atPath: dest.path)
-            || (try? dest.checkResourceIsReachable()) == true
-        {
-            guard force else {
-                FailableExit.die(
-                    "error: \(dst) exists (use --force)")
-            }
-            try? fm.removeItem(at: dest)
-        } else {
-            // Catch a dangling symlink at the destination too.
-            try? fm.removeItem(at: dest)
-        }
-        try fm.createDirectory(
-            at: store.rootDirectory, withIntermediateDirectories: true)
-        do {
-            if copy {
-                try fm.copyItem(
-                    at: source.resolvingSymlinksInPath(), to: dest)
-            } else {
-                try fm.createSymbolicLink(
-                    at: dest, withDestinationURL: source)
-            }
+        } catch ModelStoreOps.OpError.exists {
+            FailableExit.die("error: \(dst) exists (use --force)")
         } catch {
-            FailableExit.die("error: cp failed: \(error)")
+            FailableExit.die("error: \(error)")
         }
         print(
             "\(copy ? "copied" : "aliased") \(src) → \(dest.path)")

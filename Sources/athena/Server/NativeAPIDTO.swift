@@ -1,3 +1,4 @@
+import AthenaStructured
 import Foundation
 
 // Athena-native `/api/*` JSON (M16). Deliberately NOT Ollama and NOT
@@ -64,3 +65,45 @@ struct AthenaStopResponse: Codable {
     let status: String  // "unloaded"
     let model: String
 }
+
+// MARK: - /api/models (M16.2 — model-store read + sync ops)
+
+struct ModelEntryDTO: Codable {
+    let name: String
+    let bytes: Int
+    let modified: String  // ISO-8601
+}
+struct ModelListResponse: Codable { let models: [ModelEntryDTO] }
+
+struct ModelDetailResponse: Codable {
+    let name: String
+    let path: String
+    let bytes: Int
+    /// Parsed `config.json` (the model's own config), embedded.
+    let config: JSONValue?
+}
+
+struct ModelRemovedResponse: Codable {
+    let name: String
+    let removed: Bool
+}
+
+struct ModelCopyRequest: Codable {
+    let src: String
+    let dst: String
+    /// Deep-copy instead of the default symlink alias.
+    let copy: Bool?
+    let force: Bool?
+}
+struct ModelCopyResponse: Codable {
+    let src: String
+    let dst: String
+    let path: String
+    let aliased: Bool  // false ⇒ deep copy
+}
+
+struct DefaultModelResponse: Codable {
+    let model: String
+    let source: String  // "config" | "builtin"
+}
+struct SetDefaultModelRequest: Codable { let name: String }

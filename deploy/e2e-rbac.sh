@@ -37,15 +37,22 @@ echo "using: $ATHENA"
 
 D="$(mktemp -d)"
 EMPTY="$(mktemp -d)"
+MSTORE="$(mktemp -d)"          # ephemeral model store (never ~/.athena)
 PORT=17447
 DPID=""
 PASS=0
 FAIL=0
 
+# Seed one fake model so list/show/cp/rm have something to act on.
+mkdir -p "$MSTORE/fake-model"
+printf '{"model_type":"test","hidden_size":8}' \
+  > "$MSTORE/fake-model/config.json"
+: > "$MSTORE/fake-model/model.safetensors"
+
 cleanup() {
   [ -n "$DPID" ] && kill "$DPID" 2>/dev/null
   wait "$DPID" 2>/dev/null
-  rm -rf "$D" "$EMPTY"
+  rm -rf "$D" "$EMPTY" "$MSTORE"
 }
 trap cleanup EXIT
 
@@ -72,7 +79,8 @@ code() {
 
 start_daemon() { # DATADIR HOST
   "$ATHENA" load --engine stub --host "$2" --port "$PORT" \
-    --data-dir "$1" > "$D/daemon.log" 2>&1 &
+    --data-dir "$1" --model-store "$MSTORE" \
+    > "$D/daemon.log" 2>&1 &
   DPID=$!
   for _ in $(seq 1 40); do
     if curl -s -o /dev/null "http://127.0.0.1:$PORT/healthz"; then
@@ -185,6 +193,36 @@ if echo "$CB" | grep -q '"done_reason"\|"message"'; then
 else
   ok "native chat is not Ollama-shaped"
 fi
+
+echo
+echo "== phase 3.6: model store /api/models (M16.2) =="
+# read = model.read (admin, operator, readonly); mutate = model.write
+code 200 GET    /api/models            "$ADMIN_TOK"
+code 200 GET    /api/models            "$RO_TOK"   # readonly ∋ read
+code 403 GET    /api/models            "$ALICE_TOK"  # member ∌ read
+code 200 GET    /api/models/fake-model "$RO_TOK"
+code 404 GET    /api/models/nope       "$RO_TOK"
+code 400 GET    /api/models/bad~name   "$RO_TOK"   # name guard
+code 200 GET    /api/models/default    "$RO_TOK"   # read default
+code 403 DELETE /api/models/fake-model "$RO_TOK"   # ro ∌ model.write
+code 403 PUT    /api/models/default    "$ALICE_TOK" '{"name":"x"}'
+code 403 POST   /api/models/copy       "$ALICE_TOK" '{"src":"fake-model","dst":"c1"}'
+# model.write mutations (admin) — symlink alias, force, delete
+code 200 POST   /api/models/copy       "$ADMIN_TOK" '{"src":"fake-model","dst":"alias1"}'
+code 200 GET    /api/models/alias1     "$ADMIN_TOK"
+code 409 POST   /api/models/copy       "$ADMIN_TOK" '{"src":"fake-model","dst":"alias1"}'
+code 200 POST   /api/models/copy       "$ADMIN_TOK" '{"src":"fake-model","dst":"alias1","force":true}'
+code 404 POST   /api/models/copy       "$ADMIN_TOK" '{"src":"ghost","dst":"a2"}'
+code 200 DELETE /api/models/alias1     "$ADMIN_TOK"
+code 404 DELETE /api/models/alias1     "$ADMIN_TOK"
+# TOML-injection guard on the default setter (rejected pre-write).
+code 400 PUT    /api/models/default    "$ADMIN_TOK" '{"name":"x\"\nlisten_host=\"0.0.0.0"}'
+# list payload shape: contains the seeded model name
+ML="$(curl -s -H "Authorization: Bearer $ADMIN_TOK" \
+  "http://127.0.0.1:$PORT/api/models")"
+echo "$ML" | grep -q '"fake-model"' \
+  && ok "model list carries seeded model" \
+  || bad "model list missing fake-model ($ML)"
 
 echo
 echo "== phase 4: cross-tenant queue isolation =="

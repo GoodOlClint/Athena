@@ -275,7 +275,8 @@ struct Load: AsyncParsableCommand {
             embedding: embedding, transcription: transcription,
             diarization: diarization, vectorStore: vectorStore,
             queue: queue, store: athenaStore,
-            modelName: modelURL.lastPathComponent, auth: authConfig)
+            modelName: modelURL.lastPathComponent,
+            modelStoreRoot: store.rootDirectory, auth: authConfig)
         try await server.run()
     }
 }

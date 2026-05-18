@@ -1,4 +1,5 @@
 import AthenaCore
+import AthenaDeploy
 import AthenaEmbedding
 import AthenaLLM
 import AthenaStore
@@ -26,6 +27,10 @@ struct AthenaServer {
     let store: AthenaStore
     /// Served model's display name, echoed in native `/api/*` replies.
     let modelName: String
+    /// Model-store root for `/api/models*` (M16.2). `var = default` so
+    /// it stays a memberwise-init parameter (see the `auth` note);
+    /// Load injects the configured `--model-store` root.
+    var modelStoreRoot: URL = ModelStore.defaultRoot
     /// In-process request metrics (M11.1). Defaulted so the
     /// memberwise init is unchanged for existing call sites.
     let metrics = AthenaMetrics()
@@ -171,6 +176,29 @@ struct AthenaServer {
             return Self.json(
                 AthenaStopResponse(
                     status: "unloaded", model: modelName))
+        }
+
+        // Model store (M16.2). Literal sub-paths are registered
+        // BEFORE `:name` so Hummingbird's trie (sibling match in
+        // registration order) resolves them first; `default`/`copy`
+        // are therefore reserved names for show/rm.
+        router.get("/api/models") { _, _ -> Response in
+            handleModelsList()
+        }
+        router.get("/api/models/default") { _, _ -> Response in
+            handleDefaultModelGet()
+        }
+        router.put("/api/models/default") { request, _ -> Response in
+            await handleDefaultModelSet(request)
+        }
+        router.post("/api/models/copy") { request, _ -> Response in
+            await handleModelCopy(request)
+        }
+        router.get("/api/models/:name") { _, context -> Response in
+            handleModelShow(context.parameters.get("name"))
+        }
+        router.delete("/api/models/:name") { _, context -> Response in
+            handleModelRemove(context.parameters.get("name"))
         }
 
         // Wire the queue executor to the governed module paths and
@@ -1148,6 +1176,164 @@ struct AthenaServer {
                 AthenaEmbedResponse(
                     model: body.model ?? modelName, embeddings: v))
         }
+    }
+
+    // MARK: - Model store (M16.2)
+
+    private static func iso(_ d: Date) -> String {
+        ISO8601DateFormatter().string(from: d)
+    }
+
+    /// Conservative model-name guard for NETWORK input: a bare store
+    /// child over `[A-Za-z0-9._-]`. Blocks path traversal and — for
+    /// the `default` setter — TOML injection via quotes/newlines
+    /// (`setScalarThrowing` does not escape string values).
+    private static func safeModelName(_ s: String?) -> String? {
+        guard let s, !s.isEmpty, s.count <= 128 else { return nil }
+        let ok = s.allSatisfy {
+            $0.isLetter || $0.isNumber || $0 == "." || $0 == "_"
+                || $0 == "-"
+        }
+        guard ok, s != "..", s != "." else { return nil }
+        return s
+    }
+
+    private func handleModelsList() -> Response {
+        Self.json(
+            ModelListResponse(
+                models: ModelStoreOps.list(root: modelStoreRoot)
+                    .map {
+                        ModelEntryDTO(
+                            name: $0.name, bytes: $0.bytes,
+                            modified: Self.iso($0.modified))
+                    }))
+    }
+
+    private func handleModelShow(_ name: String?) -> Response {
+        guard let name = Self.safeModelName(name) else {
+            return Self.error(
+                status: .badRequest, message: "invalid model name",
+                type: "invalid_request_error", code: "invalid_name")
+        }
+        guard
+            let d = ModelStoreOps.show(
+                root: modelStoreRoot, name: name)
+        else {
+            return Self.error(
+                status: .notFound, message: "no model '\(name)'",
+                type: "invalid_request_error", code: "not_found")
+        }
+        return Self.json(
+            ModelDetailResponse(
+                name: d.name, path: d.path, bytes: d.bytes,
+                config: try? JSONDecoder().decode(
+                    JSONValue.self, from: d.configJSON)))
+    }
+
+    private func handleModelRemove(_ name: String?) -> Response {
+        guard let name = Self.safeModelName(name) else {
+            return Self.error(
+                status: .badRequest, message: "invalid model name",
+                type: "invalid_request_error", code: "invalid_name")
+        }
+        do {
+            try ModelStoreOps.remove(
+                root: modelStoreRoot, name: name)
+        } catch ModelStoreOps.OpError.notFound {
+            return Self.error(
+                status: .notFound, message: "no model '\(name)'",
+                type: "invalid_request_error", code: "not_found")
+        } catch {
+            return Self.error(
+                status: .internalServerError, message: "\(error)",
+                type: "server_error", code: "remove_failed")
+        }
+        return Self.json(
+            ModelRemovedResponse(name: name, removed: true))
+    }
+
+    private func handleModelCopy(_ request: Request) async -> Response {
+        let decoded = await decodeJSON(request, ModelCopyRequest.self)
+        guard case .ok(let body) = decoded else {
+            if case .fail(let r) = decoded { return r }
+            fatalError()
+        }
+        // Network copies are store-name → store-name only (no
+        // absolute path / traversal source).
+        guard
+            let src = Self.safeModelName(body.src),
+            let dst = Self.safeModelName(body.dst)
+        else {
+            return Self.error(
+                status: .badRequest,
+                message: "src and dst must be bare model names",
+                type: "invalid_request_error", code: "invalid_name")
+        }
+        let deep = body.copy ?? false
+        do {
+            let dest = try ModelStoreOps.copy(
+                root: modelStoreRoot, src: src, dst: dst,
+                deepCopy: deep, force: body.force ?? false)
+            return Self.json(
+                ModelCopyResponse(
+                    src: src, dst: dst, path: dest.path,
+                    aliased: !deep))
+        } catch ModelStoreOps.OpError.notFound {
+            return Self.error(
+                status: .notFound, message: "no model '\(src)'",
+                type: "invalid_request_error", code: "not_found")
+        } catch ModelStoreOps.OpError.exists {
+            return Self.error(
+                status: .conflict, message: "'\(dst)' exists",
+                type: "invalid_request_error", code: "exists")
+        } catch {
+            return Self.error(
+                status: .internalServerError, message: "\(error)",
+                type: "server_error", code: "copy_failed")
+        }
+    }
+
+    private func handleDefaultModelGet() -> Response {
+        let url = ConfigEditor.resolvePath(nil)
+        if let cfg = try? AthenaConfig.parse(file: url),
+            let model = cfg.model, !model.isEmpty
+        {
+            return Self.json(
+                DefaultModelResponse(model: model, source: "config"))
+        }
+        return Self.json(
+            DefaultModelResponse(
+                model: ModelStore.defaultModelName,
+                source: "builtin"))
+    }
+
+    private func handleDefaultModelSet(_ request: Request) async
+        -> Response
+    {
+        let decoded = await decodeJSON(
+            request, SetDefaultModelRequest.self)
+        guard case .ok(let body) = decoded else {
+            if case .fail(let r) = decoded { return r }
+            fatalError()
+        }
+        guard let name = Self.safeModelName(body.name) else {
+            return Self.error(
+                status: .badRequest,
+                message:
+                    "name must be a bare model name [A-Za-z0-9._-]",
+                type: "invalid_request_error", code: "invalid_name")
+        }
+        let url = ConfigEditor.resolvePath(nil)
+        do {
+            try ConfigEditor.setScalarThrowing(
+                key: "model", value: name, in: url)
+        } catch {
+            return Self.error(
+                status: .badRequest, message: "\(error)",
+                type: "invalid_request_error", code: "config_error")
+        }
+        return Self.json(
+            DefaultModelResponse(model: name, source: "config"))
     }
 
     // MARK: - Response helpers

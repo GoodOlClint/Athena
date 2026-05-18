@@ -19,21 +19,18 @@ struct Rm: ParsableCommand {
         let root =
             modelStore.map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? ModelStore.defaultRoot
-        // Only ever a direct child of the store root (no path escape).
-        guard !model.contains("/"), model != "..", model != "." else {
+        do {
+            try ModelStoreOps.remove(root: root, name: model)
+        } catch ModelStoreOps.OpError.invalidName {
             print("error: invalid model name '\(model)'")
             throw ExitCode.failure
-        }
-        let dir = root.appendingPathComponent(model, isDirectory: true)
-        var isDir: ObjCBool = false
-        guard
-            FileManager.default.fileExists(
-                atPath: dir.path, isDirectory: &isDir), isDir.boolValue
-        else {
+        } catch ModelStoreOps.OpError.notFound {
             print("error: no model '\(model)' in \(root.path)")
             throw ExitCode.failure
+        } catch {
+            print("error: \(error)")
+            throw ExitCode.failure
         }
-        try FileManager.default.removeItem(at: dir)
         print("removed \(model)")
     }
 }
@@ -55,17 +52,18 @@ struct Show: ParsableCommand {
         let root =
             modelStore.map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? ModelStore.defaultRoot
-        let dir = root.appendingPathComponent(model, isDirectory: true)
-        let cfg = dir.appendingPathComponent("config.json")
-        guard let data = try? Data(contentsOf: cfg) else {
+        guard
+            let d = ModelStoreOps.show(root: root, name: model)
+        else {
             print("error: no model '\(model)' in \(root.path)")
             throw ExitCode.failure
         }
-        let size = ListModels.safetensorsSize(dir)
         print("model:    \(model)")
-        print("path:     \(dir.path)")
-        print("size:     \(ListModels.humanBytes(size))")
+        print("path:     \(d.path)")
+        print("size:     \(ModelStoreOps.humanBytes(d.bytes))")
         print("config.json:")
-        print(String(data: data, encoding: .utf8) ?? "<unreadable>")
+        print(
+            String(data: d.configJSON, encoding: .utf8)
+                ?? "<unreadable>")
     }
 }

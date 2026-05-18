@@ -266,6 +266,9 @@ enum AuthPolicy {
         if path == "/api/admin" || path.hasPrefix("/api/admin/") {
             return .daemonAdmin
         }
+        if path == "/api/models" || path.hasPrefix("/api/models/") {
+            return mutating ? .modelWrite : .modelRead
+        }
         if path.hasPrefix("/v1/vectors") {
             if path == "/v1/vectors/query" { return .vectorsRead }
             return mutating ? .vectorsWrite : .vectorsRead
