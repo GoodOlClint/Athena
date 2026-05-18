@@ -29,6 +29,7 @@ struct Convert: AsyncParsableCommand {
         let root =
             modelStore.map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? ModelStore.defaultRoot
+        ProxyEnv.applyConfigAndAuth()  // egress proxy (M13.2)
         HFAuth.exportToEnv()  // gated/private repos (M13)
         print("converting \(model) → \(qBits)-bit …")
         do {

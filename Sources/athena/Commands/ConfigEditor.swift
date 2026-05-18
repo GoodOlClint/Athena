@@ -17,6 +17,7 @@ enum ConfigEditor {
         "model", "model_store", "data_dir", "log_level",
         "syslog_remote", "log_dir", "max_tokens", "temperature",
         "speculative", "vector_cap_bytes", "auth_keys_file",
+        "https_proxy", "http_proxy", "all_proxy", "no_proxy",
     ]
 
     /// `--config` wins; else the installed file if present; else the
@@ -64,6 +65,10 @@ enum ConfigEditor {
         case "vector_cap_bytes":
             return cfg.vectorCapBytes.map(String.init)
         case "auth_keys_file": return cfg.authKeysFile
+        case "https_proxy": return cfg.httpsProxy
+        case "http_proxy": return cfg.httpProxy
+        case "all_proxy": return cfg.allProxy
+        case "no_proxy": return cfg.noProxy
         default: FailableExit.die("error: unknown key '\(key)'")
         }
     }

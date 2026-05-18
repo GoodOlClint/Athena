@@ -136,6 +136,11 @@ struct Load: AsyncParsableCommand {
             }
         }
 
+        // Egress proxy for the model-fetch outbound: TOML [network]
+        // fills any unset *_PROXY env var (operator env wins),
+        // Keychain proxy creds spliced in. M13.2.
+        ProxyEnv.applyConfigAndAuth()
+
         // HF token for gated/private on-demand fetches: export the
         // Keychain-stored token unless the operator already set one
         // (same never-override rule as HF_HOME above). M13.

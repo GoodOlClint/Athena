@@ -34,6 +34,12 @@ public struct AthenaConfig: Sendable, Equatable {
     /// Bearer-auth keys file. Optional — no keys + loopback = open;
     /// no keys + non-loopback = the daemon refuses to start.
     public var authKeysFile: String?
+    /// `[network]` egress-proxy keys (M13.2). An operator-set
+    /// `*_PROXY` env var always wins over these.
+    public var httpsProxy: String?
+    public var httpProxy: String?
+    public var allProxy: String?
+    public var noProxy: String?
     public var logDir: String
 
     public init(
@@ -44,6 +50,8 @@ public struct AthenaConfig: Sendable, Equatable {
         maxTokens: Int? = nil, temperature: String? = nil,
         speculative: Bool? = nil, vectorCapBytes: Int? = nil,
         authKeysFile: String? = nil,
+        httpsProxy: String? = nil, httpProxy: String? = nil,
+        allProxy: String? = nil, noProxy: String? = nil,
         logDir: String
     ) {
         self.listenHost = listenHost
@@ -60,6 +68,10 @@ public struct AthenaConfig: Sendable, Equatable {
         self.speculative = speculative
         self.vectorCapBytes = vectorCapBytes
         self.authKeysFile = authKeysFile
+        self.httpsProxy = httpsProxy
+        self.httpProxy = httpProxy
+        self.allProxy = allProxy
+        self.noProxy = noProxy
         self.logDir = logDir
     }
 
@@ -141,6 +153,10 @@ public struct AthenaConfig: Sendable, Equatable {
             speculative: spec,
             vectorCapBytes: vecCap,
             authKeysFile: scalar("auth_keys_file", in: toml),
+            httpsProxy: scalar("https_proxy", in: toml),
+            httpProxy: scalar("http_proxy", in: toml),
+            allProxy: scalar("all_proxy", in: toml),
+            noProxy: scalar("no_proxy", in: toml),
             logDir: logDir)
     }
 

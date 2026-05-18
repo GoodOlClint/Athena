@@ -88,6 +88,25 @@ engine = "mlx"
 # secret at rest). Raw `tier <key>` lines are still accepted.
 
 
+# ── Network (egress proxy) ───────────────────────────────────────────
+
+# The ONLY outbound the appliance makes is fetching model weights
+# from the Hugging Face Hub. In a locked-down network, route it
+# through an egress proxy here. The standard env vars
+# (HTTPS_PROXY / HTTP_PROXY / ALL_PROXY / NO_PROXY, case-insensitive)
+# ALWAYS take precedence — these keys only fill in what the env
+# leaves unset. Loopback (127.0.0.1, ::1, localhost) is always
+# bypassed. Form: scheme://host:port (socks5:// also supported).
+# https_proxy = "http://proxy.corp.example:3128"
+# http_proxy  = "http://proxy.corp.example:3128"
+# all_proxy   = "socks5://proxy.corp.example:1080"
+# no_proxy    = "127.0.0.1,localhost,.internal.example"
+# Proxy credentials are NOT stored here. Either embed them inline
+# (https://user:pass@host:port) or — recommended, no secret at rest —
+# run `athena proxy login` to keep them in the macOS Keychain (a
+# Keychain credential overrides any inline one).
+
+
 # ── Logging ──────────────────────────────────────────────────────────
 
 # Directory for athena.out.log / athena.err.log (launchd-managed).

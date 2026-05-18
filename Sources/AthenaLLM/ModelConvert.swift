@@ -37,7 +37,10 @@ public enum ModelConvert {
         bits: Int = 4, groupSize: Int = 64,
         into storeRoot: URL, name: String? = nil
     ) async throws -> Result {
-        let snapshot = try await #hubDownloader().download(
+        let snapshot = try await #hubDownloader(
+            HuggingFace.HubClient(
+                session: AthenaProxy.proxiedURLSession())
+        ).download(
             id: id, revision: revision,
             matching: [
                 "*.json", "*.safetensors", "*.txt", "*.jinja",

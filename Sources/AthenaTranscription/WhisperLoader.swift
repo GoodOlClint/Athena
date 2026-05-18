@@ -1,3 +1,4 @@
+import AthenaCore
 import Foundation
 import HuggingFace
 import MLX
@@ -29,7 +30,10 @@ public enum WhisperLoader {
     public static func load(
         modelId: String = "mlx-community/whisper-large-v3-turbo"
     ) async throws -> WhisperModel {
-        let dir = try await #hubDownloader().download(
+        let dir = try await #hubDownloader(
+            HuggingFace.HubClient(
+                session: AthenaProxy.proxiedURLSession())
+        ).download(
             id: modelId, revision: nil,
             matching: ["*.json", "*.safetensors"],
             useLatest: false, progressHandler: { _ in })
@@ -70,7 +74,10 @@ public enum WhisperLoader {
     public static func loadTokenizer(
         from tokenizerRepo: String = "openai/whisper-large-v3"
     ) async throws -> any MLXLMCommon.Tokenizer {
-        let dir = try await #hubDownloader().download(
+        let dir = try await #hubDownloader(
+            HuggingFace.HubClient(
+                session: AthenaProxy.proxiedURLSession())
+        ).download(
             id: tokenizerRepo, revision: nil,
             matching: [
                 "tokenizer.json", "tokenizer_config.json", "vocab.json",

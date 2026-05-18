@@ -49,6 +49,23 @@ final class AthenaConfigTests: XCTestCase {
         XCTAssertEqual(try AthenaConfig.parse(toml: toml).listenPort, 7447)
     }
 
+    func testNetworkProxyKeys() throws {
+        let toml = """
+            listen_host = "127.0.0.1"
+            listen_port = 7447
+            log_dir = "/l"
+            https_proxy = "http://proxy.corp:3128"
+            # http_proxy = "http://nope:1"
+            all_proxy = "socks5://s:1080"
+            no_proxy = "127.0.0.1,localhost,.internal"
+            """
+        let c = try AthenaConfig.parse(toml: toml)
+        XCTAssertEqual(c.httpsProxy, "http://proxy.corp:3128")
+        XCTAssertNil(c.httpProxy)  // commented ⇒ nil
+        XCTAssertEqual(c.allProxy, "socks5://s:1080")
+        XCTAssertEqual(c.noProxy, "127.0.0.1,localhost,.internal")
+    }
+
     func testMissingRequiredKeyThrows() {
         let toml = "listen_host = \"h\"\nlog_dir = \"/l\""
         XCTAssertThrowsError(try AthenaConfig.parse(toml: toml)) {

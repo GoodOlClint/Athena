@@ -1,6 +1,7 @@
 // Vendored from Blaizzy/mlx-audio-swift (MIT License), adapted for
 // Athena: kept in-module (no `import MLXAudioCore`); model download
 // routed through Athena's governed #hubDownloader. M4.3a.
+import AthenaCore
 import Foundation
 import MLX
 import MLXNN
@@ -1393,7 +1394,10 @@ public class SortformerModel: Module {
     public static func fromPretrained(
         _ repoId: String
     ) async throws -> SortformerModel {
-        let modelURL = try await #hubDownloader().download(
+        let modelURL = try await #hubDownloader(
+            HuggingFace.HubClient(
+                session: AthenaProxy.proxiedURLSession())
+        ).download(
             id: repoId, revision: nil,
             matching: ["*.json", "*.safetensors"],
             useLatest: false, progressHandler: { _ in })

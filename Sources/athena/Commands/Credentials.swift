@@ -173,6 +173,37 @@ enum HFAuth {
     static func remove() -> Bool { Secrets.remove(account: account) }
 }
 
+/// Egress-proxy Basic-auth credentials (M13.2). One global proxy ⇒ a
+/// single Keychain item (account `proxy:auth`, value `user:password`).
+/// Stored via `athena proxy login`; never written to disk in
+/// plaintext. Inline `user:pass@host` in the proxy URL is also
+/// accepted, but a Keychain credential takes precedence.
+enum ProxyAuth {
+    static let account = "proxy:auth"
+
+    /// (user, pass) split on the FIRST `:`; usernames containing a
+    /// colon are unsupported (documented).
+    static func read() -> (user: String, pass: String)? {
+        guard let raw = Secrets.read(account: account),
+            let i = raw.firstIndex(of: ":")
+        else { return nil }
+        let u = String(raw[..<i])
+        let p = String(raw[raw.index(after: i)...])
+        return u.isEmpty ? nil : (u, p)
+    }
+
+    static func store(user: String, pass: String) throws {
+        try Secrets.store("\(user):\(pass)", account: account)
+    }
+
+    @discardableResult
+    static func remove() -> Bool { Secrets.remove(account: account) }
+
+    static func source() -> String {
+        read() != nil ? "Keychain" : "none (inline URL or unset)"
+    }
+}
+
 enum CredentialError: Error, CustomStringConvertible {
     case keychain(String)
     case unsupported

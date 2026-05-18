@@ -48,7 +48,9 @@ public actor MLXEmbeddingModule: EmbeddingModule {
         if container != nil { return }
         do {
             container = try await EmbedderModelFactory.shared.loadContainer(
-                from: #hubDownloader(),
+                from: #hubDownloader(
+                    HuggingFace.HubClient(
+                        session: AthenaProxy.proxiedURLSession())),
                 using: #huggingFaceTokenizerLoader(),
                 configuration: ModelConfiguration(id: modelId))
         } catch {

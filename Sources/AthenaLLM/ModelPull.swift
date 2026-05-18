@@ -1,3 +1,4 @@
+import AthenaCore
 import Foundation
 import HuggingFace
 import MLXHuggingFace
@@ -10,7 +11,10 @@ public enum ModelPull {
     public static func pull(
         id: String, revision: String? = nil, into storeRoot: URL
     ) async throws -> URL {
-        let snapshot = try await #hubDownloader().download(
+        let snapshot = try await #hubDownloader(
+            HuggingFace.HubClient(
+                session: AthenaProxy.proxiedURLSession())
+        ).download(
             id: id, revision: revision,
             matching: [
                 "*.json", "*.safetensors", "*.txt", "*.jinja",
