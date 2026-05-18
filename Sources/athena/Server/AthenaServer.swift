@@ -76,6 +76,89 @@ struct AthenaServer {
         router.post("/ui/api/config") { request, _ -> Response in
             await handleUIConfigPost(request)
         }
+
+        // Model console (M18.2). SESSION-cookie authed (AuthPolicy
+        // gates /ui* on daemonAdmin); each handler ALSO re-checks the
+        // logged-in user's model.read/model.write and (mutations) the
+        // CSRF token, then REUSES the M16 op methods (ModelStoreOps /
+        // enqueueModelOp) — no self-HTTP, no duplication. All static
+        // literals ⇒ no Hummingbird trie-order hazard.
+        router.get("/ui/models") { request, _ -> Response in
+            await handleUIModelsPage(request)
+        }
+        router.get("/ui/api/models") { request, _ -> Response in
+            await uiModelsList(request)
+        }
+        router.get("/ui/api/models/show") { request, _
+            -> Response in
+            await uiModelShow(request)
+        }
+        router.get("/ui/api/models/default") { request, _
+            -> Response in
+            await uiDefaultGet(request)
+        }
+        router.post("/ui/api/models/default") { request, _
+            -> Response in
+            await uiModelMutate(request) {
+                await self.handleDefaultModelSet($0)
+            }
+        }
+        router.post("/ui/api/models/rm") { request, _
+            -> Response in
+            await uiModelRemove(request)
+        }
+        router.post("/ui/api/models/copy") { request, _
+            -> Response in
+            await uiModelMutate(request) {
+                await self.handleModelCopy($0)
+            }
+        }
+        router.post("/ui/api/models/pull") { request, _
+            -> Response in
+            await uiModelMutate(request) { r in
+                await self.enqueueModelOp(
+                    kind: "model_pull", r
+                ) { d in
+                    guard
+                        let x = try? JSONDecoder().decode(
+                            ModelPullRequest.self, from: d),
+                        !x.id.isEmpty
+                    else {
+                        return "model_pull requires non-empty 'id'"
+                    }
+                    return nil
+                }
+            }
+        }
+        router.post("/ui/api/models/convert") { request, _
+            -> Response in
+            await uiModelMutate(request) { r in
+                await self.enqueueModelOp(
+                    kind: "model_convert", r
+                ) { d in
+                    guard
+                        let x = try? JSONDecoder().decode(
+                            ModelConvertRequest.self, from: d),
+                        !x.id.isEmpty
+                    else {
+                        return
+                            "model_convert requires non-empty 'id'"
+                    }
+                    return nil
+                }
+            }
+        }
+        router.post("/ui/api/models/prune") { request, _
+            -> Response in
+            await uiModelMutate(request) { r in
+                await self.enqueueModelOp(
+                    kind: "model_prune", r) { _ in nil }
+            }
+        }
+        router.get("/ui/api/job") { request, _ -> Response in
+            await uiJobStatus(request)
+        }
+
         // WebUI session login (M12.2). /ui/login + /ui/logout are
         // open (AuthPolicy); the rest of /ui* needs the cookie.
         router.get("/ui/login") { _, _ -> Response in
@@ -1525,6 +1608,102 @@ struct AthenaServer {
                 message: "queue submit failed: \(error)",
                 type: "server_error", code: "queue_error")
         }
+    }
+
+    // MARK: - WebUI model console reuse (M18.2)
+
+    /// 403 JSON for a /ui/api/* action the logged-in user's perms
+    /// (or CSRF) reject. AuthPolicy already gated /ui* on
+    /// daemonAdmin; this is the per-action defense-in-depth
+    /// re-check (the page is never trusted). Lives here (not in
+    /// WebUI.swift) so it can reuse the file-private M16 op methods.
+    private static func uiDeny(_ msg: String) -> Response {
+        Self.error(
+            status: .forbidden, message: msg,
+            type: "auth_error", code: "forbidden")
+    }
+
+    /// First raw value of `key` in the query string. Our model
+    /// names are `[A-Za-z0-9._-]` (validated downstream by
+    /// `safeModelName`) so no percent-decode is needed.
+    private static func uiQuery(
+        _ r: Request, _ key: String
+    ) -> String? {
+        guard let q = r.uri.query else { return nil }
+        for kv in q.split(separator: "&") {
+            let p = kv.split(separator: "=", maxSplits: 1)
+            if p.first.map(String.init) == key {
+                return p.count == 2 ? String(p[1]) : ""
+            }
+        }
+        return nil
+    }
+
+    private func uiModelsList(_ r: Request) async -> Response {
+        guard await uiCaller(r).perms.contains(.modelRead) else {
+            return Self.uiDeny("need model.read")
+        }
+        return handleModelsList()
+    }
+
+    private func uiModelShow(_ r: Request) async -> Response {
+        guard await uiCaller(r).perms.contains(.modelRead) else {
+            return Self.uiDeny("need model.read")
+        }
+        return handleModelShow(Self.uiQuery(r, "name"))
+    }
+
+    private func uiDefaultGet(_ r: Request) async -> Response {
+        guard await uiCaller(r).perms.contains(.modelRead) else {
+            return Self.uiDeny("need model.read")
+        }
+        return handleDefaultModelGet()
+    }
+
+    /// CSRF + per-action `.modelWrite` re-check, THEN delegate to
+    /// the shared M16 op (ModelStoreOps / enqueueModelOp). Mutations
+    /// only. `op` is non-escaping (invoked here, never stored).
+    private func uiModelMutate(
+        _ r: Request, _ op: (Request) async -> Response
+    ) async -> Response {
+        guard csrfOK(r) else {
+            return Self.uiDeny("csrf token missing or invalid")
+        }
+        guard await uiCaller(r).perms.contains(.modelWrite) else {
+            return Self.uiDeny("need model.write")
+        }
+        return await op(r)
+    }
+
+    private func uiModelRemove(_ r: Request) async -> Response {
+        await uiModelMutate(r) { req in
+            let decoded = await self.decodeJSON(
+                req, SetDefaultModelRequest.self)
+            guard case .ok(let body) = decoded else {
+                if case .fail(let f) = decoded { return f }
+                fatalError()
+            }
+            return self.handleModelRemove(body.name)
+        }
+    }
+
+    /// Console job-progress poll. /ui ops are submitted with no
+    /// bearer ⇒ nil-owner (console-scoped, visible to any console
+    /// admin — matches the legacy unowned-job semantics);
+    /// `.modelRead` gates the peek. Reuses the queue + M16 status
+    /// DTO (`statusResponse`).
+    private func uiJobStatus(_ r: Request) async -> Response {
+        guard await uiCaller(r).perms.contains(.modelRead) else {
+            return Self.uiDeny("need model.read")
+        }
+        guard let id = Self.uiQuery(r, "id"),
+            let job = await queue.status(id: id)
+        else {
+            return Self.error(
+                status: .notFound, message: "no such job",
+                type: "invalid_request_error", code: "not_found")
+        }
+        return Self.statusResponse(job)
     }
 
     // MARK: - RBAC admin (M16.4)

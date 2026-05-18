@@ -215,6 +215,61 @@ AM="$(curl -s -o /dev/null -w '%{http_code}' -b "$UIJAR_A" -X POST \
   || bad "member config POST → $AM (want 303)"
 
 echo
+echo "== phase 2.6: WebUI model console reuse + RBAC/CSRF (M18.2) =="
+# /ui/api/models* re-checks the cookie user's model.read/write + CSRF
+# then REUSES the M16 op layer (ModelStoreOps / enqueueModelOp).
+MPAGE="$(curl -s -b "$UIJAR" "$B/ui/models")"
+echo "$MPAGE" | grep -q 'href="/ui/models"' \
+  && ok "models nav link present (model.read)" \
+  || bad "models nav link missing"
+CSRF="$(printf '%s' "$MPAGE" \
+  | sed -n 's/.*name="csrf" content="\([^"]*\)".*/\1/p' | head -1)"
+ML="$(curl -s -b "$UIJAR" "$B/ui/api/models")"
+echo "$ML" | grep -q 'fake-model' \
+  && ok "/ui/api/models lists the seeded model (reuse)" \
+  || bad "/ui/api/models missing fake-model ($ML)"
+uic() { # WANT METHOD PATH [CSRF] [BODY]
+  local w="$1" m="$2" p="$3" cs="${4:-}" bd="${5:-}"
+  local a=(-s -o /dev/null -w '%{http_code}' -b "$UIJAR"
+           -X "$m" "$B$p")
+  [ -n "$cs" ] && a+=(-H "X-CSRF-Token: $cs")
+  [ -n "$bd" ] && a+=(-H 'Content-Type: application/json' -d "$bd")
+  local g; g="$(curl "${a[@]}")"
+  [ "$g" = "$w" ] && ok "$m $p → $g" \
+    || bad "$m $p → $g (want $w)"
+}
+uic 200 GET  "/ui/api/models/default"
+uic 200 GET  "/ui/api/models/show?name=fake-model"
+uic 404 GET  "/ui/api/models/show?name=nope"
+uic 403 POST "/ui/api/models/rm" "" '{"name":"fake-model"}' # no CSRF
+uic 403 POST "/ui/api/models/rm" "bad" '{"name":"fake-model"}'
+uic 404 POST "/ui/api/models/rm" "$CSRF" '{"name":"ghost"}'   # reached
+uic 200 POST "/ui/api/models/copy" "$CSRF" \
+  '{"src":"fake-model","dst":"ui-tmp","copy":false}'
+uic 200 POST "/ui/api/models/rm" "$CSRF" '{"name":"ui-tmp"}'
+# pull enqueues via the SAME M16 path → 202 {job_id}; poll the
+# console job endpoint (nil-owner, model.read-gated).
+JR="$(curl -s -b "$UIJAR" -X POST -H "X-CSRF-Token: $CSRF" \
+  -H 'Content-Type: application/json' -d '{"id":"hf/none"}' \
+  "$B/ui/api/models/pull")"
+JID="$(printf '%s' "$JR" | sed -n \
+  's/.*"job_id":"\([^"]*\)".*/\1/p')"
+[ -n "$JID" ] && ok "pull enqueued via reuse (job $JID)" \
+  || bad "pull did not return job_id ($JR)"
+uic 200 GET "/ui/api/job?id=$JID"
+uic 400 POST "/ui/api/models/pull" "$CSRF" '{"id":""}'  # validator
+# member: model nav/page/mutation all gated pre-handler (∌ daemonAdmin)
+MC="$(curl -s -o /dev/null -w '%{http_code}' -b "$UIJAR_A" \
+  "$B/ui/models")"
+[ "$MC" = 303 ] && ok "member /ui/models → 303 (∌ daemonAdmin)" \
+  || bad "member /ui/models → $MC (want 303)"
+RC="$(curl -s -o /dev/null -w '%{http_code}' -b "$UIJAR_A" \
+  -X POST -H 'X-CSRF-Token: x' -H 'Content-Type: application/json' \
+  -d '{"name":"fake-model"}' "$B/ui/api/models/rm")"
+[ "$RC" = 303 ] && ok "member model rm → 303 (gated pre-handler)" \
+  || bad "member model rm → $RC (want 303)"
+
+echo
 echo "== phase 3: scoped-token downgrade =="
 # boss is an admin USER, but BOSS_SCOPED narrows to member.
 code 403 GET  /metrics "$BOSS_SCOPED"                   # member perms only

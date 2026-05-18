@@ -202,6 +202,8 @@ extension AthenaServer {
         NavItem(
             label: "dashboard", href: "/ui", perm: .metricsRead),
         NavItem(
+            label: "models", href: "/ui/models", perm: .modelRead),
+        NavItem(
             label: "config", href: "/ui/config",
             perm: .daemonAdmin),
     ]
@@ -282,6 +284,7 @@ extension AthenaServer {
         button{margin-top:16px;background:#238636;color:#fff;
         border:0;border-radius:6px;padding:9px 16px;cursor:pointer;
         font:13px ui-monospace,monospace}
+        button.danger{background:#da3633;margin:0;padding:4px 10px}
         #msg{margin-top:14px}
         .k{color:#8b949e}.v{color:#e6edf3}
         .ok{color:#3fb950}.warn{color:#d29922}.err{color:#f85149}
@@ -422,6 +425,135 @@ extension AthenaServer {
           else $("msg").innerHTML=`<span class=err>`+
             Object.entries(j.errors||{"":j.error}).map(
               ([k,v])=>`${k}: ${v}`).join("<br>")+`</span>`;
+        }
+        load();
+        </script>
+        """#
+
+    // MARK: - Model console page (M18.2)
+
+    /// The model-store console inside the shell. List is gated on
+    /// `.modelRead`; the mutate UI (pull/convert/copy/default/delete)
+    /// renders only when the logged-in user holds `.modelWrite` —
+    /// and every /ui/api/models* mutation re-checks it server-side
+    /// (the page is never trusted; see `uiModelMutate`).
+    func handleUIModelsPage(_ request: Request) async -> Response {
+        let c = await uiCaller(request)
+        let csrf = c.user.isEmpty ? "" : session.csrf(user: c.user)
+        let body: String
+        if c.perms.contains(.modelRead) {
+            let w = c.perms.contains(.modelWrite) ? "1" : "0"
+            body =
+                "<meta name=\"write\" content=\"\(w)\">"
+                + Self.modelsBody
+        } else {
+            body =
+                #"<div class="card">insufficient permission "#
+                + #"(need model.read)</div>"#
+        }
+        return Self.html(
+            Self.uiShell(
+                title: "athena · models", user: c.user,
+                csrf: csrf, perms: c.perms,
+                active: "/ui/models", body: body))
+    }
+
+    static let modelsBody = #"""
+        <div class="sub">model store · <span id="def"
+          class="k"></span></div>
+        <div class="grid">
+          <div class="card"><h2>Models</h2>
+            <table id="ml"><tr><td class=k>loading…</td></tr>
+            </table></div>
+          <div class="card mut"><h2>Pull / convert</h2>
+            <label>pull id (HF repo or path)</label>
+            <input id="pid">
+            <button onclick="op('pull','pid')">Pull</button>
+            <label>convert id</label><input id="cid">
+            <button onclick="op('convert','cid')">Convert</button>
+            <div id="job" class="k"></div></div>
+          <div class="card mut"><h2>Copy / default</h2>
+            <label>copy src</label><input id="csrc">
+            <label>copy dst</label><input id="cdst">
+            <label><input type="checkbox" id="cdeep"> deep copy
+              (else alias)</label>
+            <button onclick="cp()">Copy</button>
+            <label>set default model</label><input id="dname">
+            <button onclick="setDefault()">Set default</button>
+            <div id="cmsg" class="k"></div></div>
+        </div>
+        <script>
+        const $=i=>document.getElementById(i);
+        const CSRF=document.querySelector('meta[name=csrf]').content;
+        const WM=document.querySelector('meta[name=write]');
+        const WRITE=WM&&WM.content==="1";
+        const jget=async u=>(await fetch(u)).json();
+        const jpost=(u,b)=>fetch(u,{method:"POST",headers:{
+          "content-type":"application/json","X-CSRF-Token":CSRF},
+          body:JSON.stringify(b)});
+        const em=j=>(j&&j.error&&j.error.message)||
+          (j&&j.error)||"error";
+        async function load(){
+          const d=await jget("/ui/api/models/default");
+          $("def").textContent="default: "+d.model+
+            " ("+d.source+")";
+          const m=await jget("/ui/api/models");
+          const rows=(m.models||[]).map(x=>`<tr><td>${x.name}</td>
+            <td>${(x.bytes/1048576).toFixed(0)} MB</td>
+            <td class=k>${x.modified}</td>`+(WRITE?
+            `<td><button class=danger onclick="rm('${x.name}')">
+            delete</button></td>`:``)+`</tr>`).join("");
+          $("ml").innerHTML="<tr><th>name</th><th>size</th>"+
+            "<th>modified</th>"+(WRITE?"<th></th>":"")+"</tr>"+
+            (rows||"<tr><td class=k>no models</td></tr>");
+        }
+        async function poll(id){
+          const j=await jget("/ui/api/job?id="+
+            encodeURIComponent(id));
+          const cl=j.status=="error"?"err":
+            j.status=="done"?"ok":"warn";
+          $("job").innerHTML="job "+id.slice(0,8)+" · "+
+            `<span class=${cl}>${j.status}</span>`+
+            (j.error?(" · "+j.error):"");
+          if(j.status!="done"&&j.status!="error"&&
+             j.status!="canceled")setTimeout(()=>poll(id),2000);
+          else load();
+        }
+        async function op(kind,inp){
+          const id=$(inp).value.trim(); if(!id)return;
+          const r=await jpost("/ui/api/models/"+kind,{id:id});
+          const j=await r.json();
+          if(r.ok&&j.job_id){$("job").textContent=
+            "queued "+j.job_id; poll(j.job_id);}
+          else $("job").innerHTML=
+            "<span class=err>"+em(j)+"</span>";
+        }
+        async function cp(){
+          const r=await jpost("/ui/api/models/copy",{
+            src:$("csrc").value.trim(),dst:$("cdst").value.trim(),
+            copy:$("cdeep").checked});
+          const j=await r.json();
+          $("cmsg").innerHTML=r.ok?
+            `<span class=ok>copied → ${j.dst}</span>`:
+            `<span class=err>${em(j)}</span>`;
+          if(r.ok)load();
+        }
+        async function setDefault(){
+          const r=await jpost("/ui/api/models/default",
+            {name:$("dname").value.trim()});
+          const j=await r.json();
+          $("cmsg").innerHTML=r.ok?
+            `<span class=ok>default → ${j.model}</span>`:
+            `<span class=err>${em(j)}</span>`;
+          if(r.ok)load();
+        }
+        async function rm(n){
+          if(!confirm("Delete model '"+n+
+            "'? This cannot be undone."))return;
+          const r=await jpost("/ui/api/models/rm",{name:n});
+          if(r.ok)load();
+          else{const j=await r.json();
+            alert("delete failed: "+em(j));}
         }
         load();
         </script>
