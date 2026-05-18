@@ -509,6 +509,28 @@ else
 fi
 
 echo
+echo "== phase 11: client status verb (M17.3) =="
+# `athena status` off-box / portable -> GET /api/admin/status,
+# daemon.admin-gated. The client must surface admin=200(rc0) vs
+# member/readonly=403(rc!=0), and render the posture fields.
+if [ ! -x "$CLIENT" ]; then
+  echo "  skip (no portable client at $CLIENT)"
+elif start_daemon "$D2" 127.0.0.1; then
+  clic 0  "client status (admin -> daemon.admin)" status --key "$A2"
+  clic nz "client status (readonly=403)"          status --key "$R2"
+  clic nz "client status (member=403)"            status --key "$M2"
+  SO="$("$CLIENT" status --host 127.0.0.1 --port "$PORT" \
+    --key "$A2" 2>/dev/null)"
+  echo "$SO" | grep -q '"auth_enabled"' \
+    && ok "client status renders the RBAC posture" \
+    || bad "client status shape ($SO)"
+  stop_daemon
+else
+  bad "daemon failed to start for status client phase"
+  cat "$D/daemon.log"
+fi
+
+echo
 echo "════════════════════════════════════════"
 echo "  PASS=$PASS  FAIL=$FAIL"
 echo "════════════════════════════════════════"

@@ -176,6 +176,12 @@ struct Status: AsyncParsableCommand {
     var dataDir: String?
 
     func run() async throws {
+        // Off-box: no local pidfile to read — the native admin
+        // posture (/api/admin/status) is the remote equivalent.
+        if daemon.isRemote {
+            try await RemoteAdmin.status(daemon)
+            return
+        }
         let pid = livePid(dataDir)
         if let pid {
             print("daemon: running (pid \(pid))")
