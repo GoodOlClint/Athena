@@ -13,10 +13,10 @@ let package = Package(
         .macOS(.v14)
     ],
     products: [
-        // Portable cross-platform client (M14.2a).
+        // The unified macOS CLI (full surface). The portable
+        // Linux/Windows `athena` is the same command built from the
+        // AthenaClient subset via a standalone package (M14.4).
         .executable(name: "athena", targets: ["athena"]),
-        // Apple-only daemon + operator CLI.
-        .executable(name: "athenad", targets: ["athenad"]),
         .library(name: "AthenaCore", targets: ["AthenaCore"]),
         .library(name: "AthenaClient", targets: ["AthenaClient"]),
     ],
@@ -181,23 +181,14 @@ let package = Package(
             ],
             path: "Sources/AthenaClient"),
 
-        // The portable cross-platform client (M14.2a): thin HTTP CLI
-        // to a daemon. AthenaClient + ArgumentParser only — no MLX,
-        // no Hummingbird, no rust-shim.
+        // The unified macOS `athena` CLI: full surface — local daemon
+        // lifecycle + Apple-host operator ops + the HTTP client verbs
+        // (reused from AthenaClient). The governed HTTP surface +
+        // MLX/Metal modules (macOS-only). The portable Linux/Windows
+        // `athena` is the AthenaClient subset, packaged separately
+        // (M14.4). The `athenad` daemon binary lands in M14.2d.
         .executableTarget(
             name: "athena",
-            dependencies: [
-                "AthenaClient",
-                .product(
-                    name: "ArgumentParser",
-                    package: "swift-argument-parser"),
-            ],
-            path: "Sources/athena"),
-
-        // The `athenad` daemon + Apple-host operator CLI: the governed
-        // HTTP surface + MLX/Metal modules (macOS-only).
-        .executableTarget(
-            name: "athenad",
             dependencies: [
                 "AthenaCore",
                 "AthenaClient",
@@ -213,7 +204,7 @@ let package = Package(
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "Crypto", package: "swift-crypto"),
             ],
-            path: "Sources/athenad",
+            path: "Sources/athena",
             linkerSettings: [
                 .unsafeFlags([
                     "-L\(Context.packageDirectory)/rust-shim/target/release"
