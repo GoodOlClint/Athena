@@ -194,6 +194,39 @@ struct AthenaServer {
         router.post("/api/models/copy") { request, _ -> Response in
             await handleModelCopy(request)
         }
+        // Long-running ops → enqueued (model.write-gated route);
+        // returns {job_id}, poll GET /v1/queue/:job_id.
+        router.post("/api/models/pull") { request, _ -> Response in
+            await enqueueModelOp(
+                kind: "model_pull", request
+            ) { d in
+                guard
+                    let r = try? JSONDecoder().decode(
+                        ModelPullRequest.self, from: d),
+                    !r.id.isEmpty
+                else { return "model_pull requires non-empty 'id'" }
+                return nil
+            }
+        }
+        router.post("/api/models/convert") { request, _ -> Response in
+            await enqueueModelOp(
+                kind: "model_convert", request
+            ) { d in
+                guard
+                    let r = try? JSONDecoder().decode(
+                        ModelConvertRequest.self, from: d),
+                    !r.id.isEmpty
+                else {
+                    return "model_convert requires non-empty 'id'"
+                }
+                return nil
+            }
+        }
+        router.post("/api/models/prune") { request, _ -> Response in
+            await enqueueModelOp(kind: "model_prune", request) {
+                _ in nil
+            }
+        }
         router.get("/api/models/:name") { _, context -> Response in
             handleModelShow(context.parameters.get("name"))
         }
@@ -772,12 +805,12 @@ struct AthenaServer {
     private func handleQueueSubmit(
         _ kind: String?, _ request: Request
     ) async -> Response {
-        guard let kind, RequestQueue.kinds.contains(kind) else {
+        guard let kind, RequestQueue.publicKinds.contains(kind) else {
             return Self.error(
                 status: .badRequest,
                 message:
                     "unknown queue kind; expected one of "
-                    + RequestQueue.kinds.sorted().joined(
+                    + RequestQueue.publicKinds.sorted().joined(
                         separator: ", "),
                 type: "invalid_request_error", code: "invalid_kind")
         }
@@ -1021,6 +1054,62 @@ struct AthenaServer {
                 return (nil, e.message)
             } catch {
                 return (nil, String(describing: error))
+            }
+        case "model_pull":
+            // Egress (proxy + HF token) was exported process-wide at
+            // daemon startup (Load); the #hubDownloader reads it. Only
+            // sanctioned model-fetch egress — passive oracle intact.
+            guard
+                let req = try? JSONDecoder().decode(
+                    ModelPullRequest.self, from: request)
+            else { return (nil, "invalid model_pull body") }
+            do {
+                let dest = try await ModelPull.pull(
+                    id: req.id, revision: req.revision,
+                    into: modelStoreRoot)
+                return (
+                    try? JSONEncoder().encode(
+                        QueuedModelPullResult(
+                            name: dest.lastPathComponent,
+                            path: dest.path)), nil)
+            } catch {
+                return (nil, "pull failed: \(error)")
+            }
+        case "model_convert":
+            guard
+                let req = try? JSONDecoder().decode(
+                    ModelConvertRequest.self, from: request)
+            else { return (nil, "invalid model_convert body") }
+            do {
+                let r = try await ModelConvert.convert(
+                    id: req.id, revision: req.revision,
+                    bits: req.bits ?? 4,
+                    groupSize: req.group_size ?? 64,
+                    into: modelStoreRoot, name: req.name)
+                return (
+                    try? JSONEncoder().encode(
+                        QueuedModelConvertResult(
+                            path: r.path.path, bytes: r.bytes)), nil)
+            } catch {
+                return (nil, "convert failed: \(error)")
+            }
+        case "model_prune":
+            let req =
+                (try? JSONDecoder().decode(
+                    ModelPruneRequest.self, from: request))
+                ?? ModelPruneRequest(dry_run: false)
+            do {
+                let pr = try ModelStoreOps.prune(
+                    root: modelStoreRoot,
+                    dryRun: req.dry_run ?? false)
+                return (
+                    try? JSONEncoder().encode(
+                        QueuedModelPruneResult(
+                            candidates: pr.victims.map { $0.name },
+                            removed: pr.removed, dry_run: pr.dryRun)),
+                    nil)
+            } catch {
+                return (nil, "prune failed: \(error)")
             }
         default:
             return (nil, "unknown kind '\(kind)'")
@@ -1334,6 +1423,46 @@ struct AthenaServer {
         }
         return Self.json(
             DefaultModelResponse(model: name, source: "config"))
+    }
+
+    /// Enqueue a long-running model op (M16.3). The route is already
+    /// `.modelWrite`-gated; the job is owner-scoped to the caller so
+    /// `GET /v1/queue/:id` only reveals it to the submitter (or an
+    /// admin). `validate` returns an error message for a 400, or nil.
+    private func enqueueModelOp(
+        kind: String, _ request: Request,
+        validate: (Data) -> String?
+    ) async -> Response {
+        let body: Data
+        do {
+            let buf = try await request.body.collect(
+                upTo: 1 * 1024 * 1024)
+            body = Data(buffer: buf)
+        } catch {
+            return Self.error(
+                status: .badRequest,
+                message: "Invalid request body: \(error)",
+                type: "invalid_request_error", code: "invalid_body")
+        }
+        if let msg = validate(body) {
+            return Self.error(
+                status: .badRequest, message: msg,
+                type: "invalid_request_error", code: "invalid_body")
+        }
+        let who = await queuePrincipal(request)
+        do {
+            let id = try await queue.submit(
+                kind: kind, request: body,
+                owner: who.enforced ? who.principal : nil)
+            return Self.json(
+                ModelJobResponse(job_id: id, status: "queued"),
+                status: .accepted)
+        } catch {
+            return Self.error(
+                status: .internalServerError,
+                message: "queue submit failed: \(error)",
+                type: "server_error", code: "queue_error")
+        }
     }
 
     // MARK: - Response helpers

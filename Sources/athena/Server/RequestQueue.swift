@@ -16,7 +16,19 @@ actor RequestQueue {
             result: Data?, error: String?
         )
 
-    static let kinds: Set<String> = ["conversation", "embeddings"]
+    /// Kinds a client may submit via the public `/v1/queue/:kind`
+    /// route. Model-store ops are deliberately NOT here — they are
+    /// enqueued only by the perm-gated `/api/models/*` handlers
+    /// (M16.3), so a `queue.submit`-only caller cannot bypass the
+    /// `model.write` gate via the generic queue endpoint.
+    static let publicKinds: Set<String> = [
+        "conversation", "embeddings",
+    ]
+    /// Every kind the executor can run (public + the internally-
+    /// dispatched long-running model ops).
+    static let kinds: Set<String> = publicKinds.union([
+        "model_pull", "model_convert", "model_prune",
+    ])
 
     private let store: AthenaStore
     private var executor: Executor?

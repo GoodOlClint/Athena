@@ -175,4 +175,87 @@ public enum ModelStoreOps {
         }
         return dest
     }
+
+    // MARK: Prune (shared by `athena prune` + queued model_prune)
+
+    public struct Victim: Sendable {
+        public let name: String
+        public let problems: [String]
+    }
+    public struct PruneResult: Sendable {
+        public let victims: [Victim]
+        public let removed: Int
+        public let failed: Int
+        public let dryRun: Bool
+    }
+
+    /// Only prune things that are plausibly a model: a symlink (how
+    /// `pull` lands) or a dir holding model-shaped files. An unrelated
+    /// dir is left strictly alone.
+    private static func looksLikeModel(_ url: URL, isSymlink: Bool)
+        -> Bool
+    {
+        if isSymlink { return true }
+        let fm = FileManager.default
+        if fm.fileExists(
+            atPath: url.appendingPathComponent("config.json").path)
+        {
+            return true
+        }
+        let kids =
+            (try? fm.contentsOfDirectory(atPath: url.path)) ?? []
+        return kids.contains {
+            $0.hasSuffix(".safetensors") || $0.hasPrefix("tokenizer")
+        }
+    }
+
+    /// Scan the store for broken/dangling models (dead `pull` symlink,
+    /// half-converted dir, missing config/safetensors). With
+    /// `dryRun:false`, removes them. Throws `OpError.io` if the store
+    /// dir is absent.
+    public static func prune(root: URL, dryRun: Bool) throws
+        -> PruneResult
+    {
+        let fm = FileManager.default
+        guard
+            let entries = try? fm.contentsOfDirectory(
+                at: root,
+                includingPropertiesForKeys: [.isSymbolicLinkKey])
+        else { throw OpError.io("no store at \(root.path)") }
+
+        var victims: [Victim] = []
+        for e in entries.sorted(by: { $0.path < $1.path }) {
+            let isSymlink =
+                (try? e.resourceValues(forKeys: [.isSymbolicLinkKey])
+                    .isSymbolicLink) ?? false
+            guard looksLikeModel(e, isSymlink: isSymlink) else {
+                continue
+            }
+            let problems = ModelHealth.check(e)
+            if !problems.isEmpty {
+                victims.append(
+                    Victim(
+                        name: e.lastPathComponent,
+                        problems: problems))
+            }
+        }
+        if dryRun || victims.isEmpty {
+            return PruneResult(
+                victims: victims, removed: 0, failed: 0,
+                dryRun: dryRun)
+        }
+        var removed = 0, failed = 0
+        for v in victims {
+            do {
+                try fm.removeItem(
+                    at: root.appendingPathComponent(v.name))
+                removed += 1
+            } catch {
+                failed += 1
+            }
+        }
+        return PruneResult(
+            victims: victims, removed: removed, failed: failed,
+            dryRun: false)
+    }
 }

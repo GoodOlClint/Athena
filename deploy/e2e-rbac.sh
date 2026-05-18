@@ -43,11 +43,13 @@ DPID=""
 PASS=0
 FAIL=0
 
-# Seed one fake model so list/show/cp/rm have something to act on.
+# Seed one fake model so list/show/cp/rm have something to act on,
+# plus a dangling symlink so `prune` (M16.3) has a clear victim.
 mkdir -p "$MSTORE/fake-model"
 printf '{"model_type":"test","hidden_size":8}' \
   > "$MSTORE/fake-model/config.json"
 : > "$MSTORE/fake-model/model.safetensors"
+ln -s /nonexistent/gone "$MSTORE/dead"
 
 cleanup() {
   [ -n "$DPID" ] && kill "$DPID" 2>/dev/null
@@ -223,6 +225,41 @@ ML="$(curl -s -H "Authorization: Bearer $ADMIN_TOK" \
 echo "$ML" | grep -q '"fake-model"' \
   && ok "model list carries seeded model" \
   || bad "model list missing fake-model ($ML)"
+
+echo
+echo "== phase 3.7: async model ops via queue (M16.3) =="
+# perm: model.write only; AuthMiddleware blocks before any enqueue.
+code 403 POST /api/models/pull   "$ALICE_TOK" '{"id":"x/y"}'
+code 403 POST /api/models/prune  "$RO_TOK"
+code 400 POST /api/models/pull   "$ADMIN_TOK" '{}'   # 'id' required
+# Security: the public /v1/queue/:kind route must NOT accept model_*
+# (a queue.submit-only caller would otherwise bypass model.write).
+code 400 POST /v1/queue/model_pull   "$ALICE_TOK" '{"id":"x/y"}'
+code 400 POST /v1/queue/model_prune  "$ALICE_TOK" '{}'
+# prune round-trip (offline, deterministic): submit → poll → done.
+PJID="$(curl -s -X POST "http://127.0.0.1:$PORT/api/models/prune" \
+  -H "Authorization: Bearer $ADMIN_TOK" \
+  -H "Content-Type: application/json" -d '{}' \
+  | sed -n 's/.*"job_id":"\([^"]*\)".*/\1/p')"
+[ -n "$PJID" ] && ok "prune enqueued ($PJID)" || bad "prune enqueue"
+PRES="$(curl -s -H "Authorization: Bearer $ADMIN_TOK" \
+  "http://127.0.0.1:$PORT/v1/queue/$PJID?wait=15")"
+echo "$PRES" | grep -q '"status":"done"' \
+  && ok "prune job completed" || bad "prune job ($PRES)"
+echo "$PRES" | grep -q '"dead"' \
+  && ok "prune found the dangling symlink" \
+  || bad "prune candidates missing 'dead' ($PRES)"
+[ ! -e "$MSTORE/dead" ] \
+  && ok "dangling symlink removed" || bad "dead symlink survived"
+# pull dispatch + owner-scoped polling (no completion wait — network).
+DJID="$(curl -s -X POST "http://127.0.0.1:$PORT/api/models/pull" \
+  -H "Authorization: Bearer $ADMIN_TOK" \
+  -H "Content-Type: application/json" \
+  -d '{"id":"athena-e2e/does-not-exist"}' \
+  | sed -n 's/.*"job_id":"\([^"]*\)".*/\1/p')"
+[ -n "$DJID" ] && ok "pull enqueued ($DJID)" || bad "pull enqueue"
+code 200 GET "/v1/queue/$DJID" "$ADMIN_TOK"   # owner/admin sees it
+code 404 GET "/v1/queue/$DJID" "$BOB_TOK"     # other tenant hidden
 
 echo
 echo "== phase 4: cross-tenant queue isolation =="

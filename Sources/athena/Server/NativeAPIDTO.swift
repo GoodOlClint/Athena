@@ -107,3 +107,41 @@ struct DefaultModelResponse: Codable {
     let source: String  // "config" | "builtin"
 }
 struct SetDefaultModelRequest: Codable { let name: String }
+
+// MARK: - /api/models async ops (M16.3 — queue-dispatched)
+
+struct ModelPullRequest: Codable {
+    let id: String
+    let revision: String?
+}
+struct ModelConvertRequest: Codable {
+    let id: String
+    let revision: String?
+    let bits: Int?
+    let group_size: Int?
+    let name: String?
+}
+struct ModelPruneRequest: Codable { let dry_run: Bool? }
+
+/// Returned by an async model op (202). Poll `GET /v1/queue/:job_id`
+/// for progress/result — owner-scoped, so only the submitter (or an
+/// admin) can see it.
+struct ModelJobResponse: Codable {
+    let job_id: String
+    let status: String  // "queued"
+}
+
+// Stored job results (surfaced under `result` on /v1/queue/:id).
+struct QueuedModelPullResult: Codable {
+    let name: String
+    let path: String
+}
+struct QueuedModelConvertResult: Codable {
+    let path: String
+    let bytes: Int
+}
+struct QueuedModelPruneResult: Codable {
+    let candidates: [String]
+    let removed: Int
+    let dry_run: Bool
+}
