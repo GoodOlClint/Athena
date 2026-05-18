@@ -159,6 +159,27 @@ struct AthenaServer {
             await uiJobStatus(request)
         }
 
+        // Daemon control console (M18.3). The WebUI runs INSIDE the
+        // daemon ⇒ it controls a RUNNING daemon (warm/unload the
+        // model, read posture); it CANNOT cold-start a stopped
+        // daemon (nothing serves /ui then — use launchd/CLI). Cookie
+        // + per-action daemonAdmin re-check; CSRF on the mutations.
+        router.get("/ui/daemon") { request, _ -> Response in
+            await handleUIDaemonPage(request)
+        }
+        router.get("/ui/api/admin/status") { request, _
+            -> Response in
+            await uiAdminStatus(request)
+        }
+        router.post("/ui/api/admin/load") { request, _
+            -> Response in
+            await uiAdminLoad(request)
+        }
+        router.post("/ui/api/admin/stop") { request, _
+            -> Response in
+            await uiAdminStop(request)
+        }
+
         // WebUI session login (M12.2). /ui/login + /ui/logout are
         // open (AuthPolicy); the rest of /ui* needs the cookie.
         router.get("/ui/login") { _, _ -> Response in
@@ -255,22 +276,10 @@ struct AthenaServer {
             await handleNativeEmbed(request)
         }
         router.post("/api/admin/stop") { _, _ -> Response in
-            await governor.unload(.llm)
-            return Self.json(
-                AthenaStopResponse(
-                    status: "unloaded", model: modelName))
+            await adminUnloadLLM()
         }
         router.get("/api/admin/status") { _, _ -> Response in
-            Self.json(
-                AdminStatusResponse(
-                    model: modelName,
-                    listen:
-                        "\(config.listenHost):\(config.listenPort)",
-                    auth_enabled: auth.isEnabled,
-                    users: await store.userCount(),
-                    tokens: await store.tokenCount(),
-                    admins: await store.usersWithRole("admin")
-                        .count))
+            await adminStatus()
         }
 
         // Model store (M16.2). Literal sub-paths are registered
@@ -1704,6 +1713,78 @@ struct AthenaServer {
                 type: "invalid_request_error", code: "not_found")
         }
         return Self.statusResponse(job)
+    }
+
+    // MARK: - Daemon control ops (M16 admin + M18.3 reuse)
+
+    /// Unload the LLM module (frees its memory). Shared by
+    /// `POST /api/admin/stop` (bearer) and the M18.3 `/ui/api/admin/
+    /// stop` (cookie) — one implementation, no duplication.
+    private func adminUnloadLLM() async -> Response {
+        await governor.unload(.llm)
+        return Self.json(
+            AthenaStopResponse(status: "unloaded", model: modelName))
+    }
+
+    /// Pre-warm the LLM module so the next inference is hot. New
+    /// daemon-control verb (M18.3); exposed only on the cookie+CSRF
+    /// /ui surface (the public /api admin surface is frozen at M16).
+    private func adminLoadLLM() async -> Response {
+        do {
+            try await governor.ensureLoaded(.llm)
+            return Self.json(
+                AthenaStopResponse(
+                    status: "loaded", model: modelName))
+        } catch {
+            return Self.classified(error, module: .llm)
+        }
+    }
+
+    /// Daemon posture snapshot. Shared by `GET /api/admin/status`
+    /// (bearer) and `/ui/api/admin/status` (cookie).
+    private func adminStatus() async -> Response {
+        Self.json(
+            AdminStatusResponse(
+                model: modelName,
+                listen:
+                    "\(config.listenHost):\(config.listenPort)",
+                auth_enabled: auth.isEnabled,
+                users: await store.userCount(),
+                tokens: await store.tokenCount(),
+                admins: await store.usersWithRole("admin").count))
+    }
+
+    // MARK: - WebUI daemon console reuse (M18.3)
+
+    private func uiAdminStatus(_ r: Request) async -> Response {
+        guard await uiCaller(r).perms.contains(.daemonAdmin) else {
+            return Self.uiDeny("need daemon.admin")
+        }
+        return await adminStatus()
+    }
+
+    /// Destructive: CSRF + per-action `.daemonAdmin` re-check on the
+    /// logged-in user, then the shared unload op. The UI also gates
+    /// this behind an explicit confirm step (the page is not
+    /// trusted; the server decides).
+    private func uiAdminStop(_ r: Request) async -> Response {
+        guard csrfOK(r) else {
+            return Self.uiDeny("csrf token missing or invalid")
+        }
+        guard await uiCaller(r).perms.contains(.daemonAdmin) else {
+            return Self.uiDeny("need daemon.admin")
+        }
+        return await adminUnloadLLM()
+    }
+
+    private func uiAdminLoad(_ r: Request) async -> Response {
+        guard csrfOK(r) else {
+            return Self.uiDeny("csrf token missing or invalid")
+        }
+        guard await uiCaller(r).perms.contains(.daemonAdmin) else {
+            return Self.uiDeny("need daemon.admin")
+        }
+        return await adminLoadLLM()
     }
 
     // MARK: - RBAC admin (M16.4)

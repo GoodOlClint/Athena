@@ -270,6 +270,37 @@ RC="$(curl -s -o /dev/null -w '%{http_code}' -b "$UIJAR_A" \
   || bad "member model rm → $RC (want 303)"
 
 echo
+echo "== phase 2.7: WebUI daemon console + shared admin op (M18.3) =="
+# /ui/api/admin/* re-checks the cookie user's daemon.admin + CSRF,
+# then runs the SAME adminUnloadLLM/adminLoadLLM/adminStatus the
+# public /api/admin/* routes now delegate to (one impl).
+DP="$(curl -s -b "$UIJAR" "$B/ui/daemon")"
+echo "$DP" | grep -q 'href="/ui/daemon"' \
+  && ok "daemon nav link present (daemon.admin)" \
+  || bad "daemon nav link missing"
+SJ="$(curl -s -b "$UIJAR" "$B/ui/api/admin/status")"
+echo "$SJ" | grep -q '"listen"' \
+  && ok "/ui/api/admin/status posture (shared impl)" \
+  || bad "/ui/api/admin/status missing posture ($SJ)"
+uic 403 POST "/ui/api/admin/load"   ""        # no CSRF
+uic 403 POST "/ui/api/admin/stop"   "bad"     # bad CSRF
+uic 200 POST "/ui/api/admin/load"   "$CSRF"   # warm (stub loads)
+uic 200 POST "/ui/api/admin/stop"   "$CSRF"   # unload
+# the refactor must not regress the public bearer admin routes
+code 200 GET  /api/admin/status "$ADMIN_TOK"
+code 200 POST /api/admin/stop   "$ADMIN_TOK"
+code 403 POST /api/admin/stop   "$ALICE_TOK"  # member ∌ daemonAdmin
+# member: daemon nav/page/control all gated pre-handler
+DC="$(curl -s -o /dev/null -w '%{http_code}' -b "$UIJAR_A" \
+  "$B/ui/daemon")"
+[ "$DC" = 303 ] && ok "member /ui/daemon → 303 (∌ daemonAdmin)" \
+  || bad "member /ui/daemon → $DC (want 303)"
+SC="$(curl -s -o /dev/null -w '%{http_code}' -b "$UIJAR_A" \
+  -X POST -H 'X-CSRF-Token: x' "$B/ui/api/admin/stop")"
+[ "$SC" = 303 ] && ok "member admin stop → 303 (gated pre-handler)" \
+  || bad "member admin stop → $SC (want 303)"
+
+echo
 echo "== phase 3: scoped-token downgrade =="
 # boss is an admin USER, but BOSS_SCOPED narrows to member.
 code 403 GET  /metrics "$BOSS_SCOPED"                   # member perms only

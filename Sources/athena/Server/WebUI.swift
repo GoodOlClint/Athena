@@ -204,6 +204,9 @@ extension AthenaServer {
         NavItem(
             label: "models", href: "/ui/models", perm: .modelRead),
         NavItem(
+            label: "daemon", href: "/ui/daemon",
+            perm: .daemonAdmin),
+        NavItem(
             label: "config", href: "/ui/config",
             perm: .daemonAdmin),
     ]
@@ -554,6 +557,86 @@ extension AthenaServer {
           if(r.ok)load();
           else{const j=await r.json();
             alert("delete failed: "+em(j));}
+        }
+        load();
+        </script>
+        """#
+
+    // MARK: - Daemon control page (M18.3)
+
+    /// Daemon-control console inside the shell. Posture panel +
+    /// warm/unload the model. Copy states the hard scope limit: the
+    /// WebUI runs INSIDE the daemon so it can only control a RUNNING
+    /// one — it cannot cold-start a stopped daemon. daemonAdmin only
+    /// (re-checked server-side on every /ui/api/admin/* call).
+    func handleUIDaemonPage(_ request: Request) async -> Response {
+        let c = await uiCaller(request)
+        let csrf = c.user.isEmpty ? "" : session.csrf(user: c.user)
+        let body =
+            c.perms.contains(.daemonAdmin)
+            ? Self.daemonBody
+            : #"<div class="card">insufficient permission "#
+                + #"(need daemon.admin)</div>"#
+        return Self.html(
+            Self.uiShell(
+                title: "athena · daemon", user: c.user,
+                csrf: csrf, perms: c.perms,
+                active: "/ui/daemon", body: body))
+    }
+
+    static let daemonBody = #"""
+        <div class="sub">controls the RUNNING daemon — it cannot
+          cold-start a stopped one (use launchd / the CLI for
+          that)</div>
+        <div class="grid">
+          <div class="card"><h2>Posture</h2>
+            <table id="st"><tr><td class=k>loading…</td></tr>
+            </table></div>
+          <div class="card"><h2>Model</h2>
+            <p class="k">Warm pre-loads the model so the next
+              request is hot. Unload frees its memory; the next
+              request will lazily reload it.</p>
+            <button onclick="warm()">Warm (load)</button>
+            <button class=danger onclick="stop()"
+              style="padding:9px 16px;margin-top:16px">
+              Unload model</button>
+            <div id="dmsg" class="k"></div></div>
+        </div>
+        <script>
+        const $=i=>document.getElementById(i);
+        const CSRF=document.querySelector('meta[name=csrf]').content;
+        const jpost=u=>fetch(u,{method:"POST",
+          headers:{"X-CSRF-Token":CSRF}});
+        const em=j=>(j&&j.error&&j.error.message)||
+          (j&&j.error)||"error";
+        const R=(a,b)=>`<tr><td class=k>${a}</td>
+          <td class=v>${b}</td></tr>`;
+        async function load(){
+          const s=await (await fetch(
+            "/ui/api/admin/status")).json();
+          $("st").innerHTML="<table>"+R("model",s.model)+
+            R("listen",s.listen)+
+            R("auth",s.auth_enabled?"enabled":"open (loopback)")+
+            R("users",s.users)+R("tokens",s.tokens)+
+            R("admins",s.admins)+"</table>";
+        }
+        async function warm(){
+          $("dmsg").textContent="warming…";
+          const r=await jpost("/ui/api/admin/load");
+          const j=await r.json();
+          $("dmsg").innerHTML=r.ok?
+            `<span class=ok>model ${j.status}</span>`:
+            `<span class=err>${em(j)}</span>`;
+        }
+        async function stop(){
+          if(!confirm("Unload the model now? In-flight requests "+
+            "may fail; the next request reloads it."))return;
+          const r=await jpost("/ui/api/admin/stop");
+          const j=await r.json();
+          $("dmsg").innerHTML=r.ok?
+            `<span class=ok>model ${j.status}</span>`:
+            `<span class=err>${em(j)}</span>`;
+          load();
         }
         load();
         </script>
