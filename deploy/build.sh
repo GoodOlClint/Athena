@@ -47,11 +47,16 @@ if [ -z "${DEVELOPER_DIR:-}" ]; then
   esac
 fi
 
-xcodebuild -scheme athena -configuration "$CONFIG" \
+# The `athena-Package` aggregate scheme builds EVERY product —
+# `athena` AND the `athenad` daemon launcher (M14.2d) — into the same
+# Products/<config> dir. `athena install` copies both (InstallPlan
+# .artifactNames); building only `-scheme athena` leaves `athenad`
+# missing, so install fails ("file 'athenad' couldn't be opened").
+xcodebuild -scheme athena-Package -configuration "$CONFIG" \
   -destination 'platform=macOS' -derivedDataPath .build/xcode \
   -skipMacroValidation -skipPackagePluginValidation build
 
 echo
-echo "built: .build/xcode/Build/Products/${CONFIG}/athena"
+echo "built: .build/xcode/Build/Products/${CONFIG}/athena (+ athenad)"
 echo "install: sudo .build/xcode/Build/Products/${CONFIG}/athena install \\"
 echo "           --config deploy/athena.toml"

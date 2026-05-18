@@ -211,6 +211,15 @@ struct Install: AsyncParsableCommand {
         for name in plan.artifactNames(fileManager: fm) {
             let src = plan.sourceDir.appendingPathComponent(name)
             let dst = plan.libexecDir.appendingPathComponent(name)
+            guard fm.fileExists(atPath: src.path) else {
+                throw ValidationError(
+                    "build artifact '\(name)' not found in "
+                        + "\(plan.sourceDir.path). Build the whole "
+                        + "package (deploy/build.sh — it uses the "
+                        + "`athena-Package` scheme, which also "
+                        + "produces `athenad`), then install from "
+                        + "that output.")
+            }
             if fm.fileExists(atPath: dst.path) {
                 try fm.removeItem(at: dst)
             }
