@@ -1,6 +1,7 @@
 import ArgumentParser
 import AthenaCore
 import AthenaDeploy
+import AthenaStore
 import Crypto
 import Darwin
 import Foundation
@@ -15,7 +16,129 @@ struct Auth: AsyncParsableCommand {
         subcommands: [
             AuthAdd.self, AuthList.self, AuthRemove.self,
             AuthLogin.self, AuthLogout.self, AuthStatus.self,
+            AuthUser.self,
         ])
+}
+
+// MARK: - WebUI accounts (username/password, PBKDF2 in SQLite)
+// Works OFFLINE (opens the daemon's DB directly) so the first
+// admin can be created before the auth-protected UI exists.
+
+/// The daemon's SQLite path: configured `data_dir` (or ~/.athena) +
+/// athena.sqlite.
+private func storeDBPath(_ override: String? = nil) -> URL {
+    let dir: URL
+    if let override, !override.isEmpty {
+        dir = URL(
+            fileURLWithPath:
+                (override as NSString).expandingTildeInPath,
+            isDirectory: true)
+    } else if let cfg = try? AthenaConfig.parse(
+        file: ConfigEditor.resolvePath(nil)),
+        let d = cfg.dataDir, !d.isEmpty
+    {
+        dir = URL(
+            fileURLWithPath: (d as NSString).expandingTildeInPath,
+            isDirectory: true)
+    } else {
+        dir = AthenaEnv.userHome()
+            .appendingPathComponent(".athena", isDirectory: true)
+    }
+    return dir.appendingPathComponent("athena.sqlite")
+}
+
+struct AuthUser: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "user",
+        abstract: "Manage WebUI accounts (username/password).",
+        subcommands: [
+            AuthUserAdd.self, AuthUserList.self, AuthUserRemove.self,
+        ])
+}
+
+struct AuthUserAdd: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "add",
+        abstract: "Create/replace a WebUI account (prompts, no echo).")
+    @Argument(help: "Username.") var username: String
+    @Option(help: "Password (omit to prompt; avoid in shell history).")
+    var password: String?
+    @Option(help: "Data dir (default: configured / ~/.athena).")
+    var dataDir: String?
+
+    func run() async throws {
+        let pw: String
+        if let password, !password.isEmpty {
+            pw = password
+        } else if isatty(0) == 0 {
+            pw = (readLine() ?? "")
+        } else {
+            let a = String(cString: getpass("password: "))
+            let b = String(cString: getpass("confirm:  "))
+            guard a == b else {
+                FailableExit.die("error: passwords do not match")
+            }
+            pw = a
+        }
+        guard pw.count >= 8 else {
+            FailableExit.die("error: password must be >= 8 chars")
+        }
+        let salt = Passwords.randomSalt()
+        let hash = Passwords.derive(
+            password: pw, salt: salt,
+            iters: Passwords.defaultIterations)
+        let db: AthenaStore
+        do {
+            db = try AthenaStore(path: storeDBPath(dataDir))
+        } catch {
+            FailableExit.die("error: cannot open store: \(error)")
+        }
+        do {
+            try await db.putUser(
+                username: username, salt: salt, hash: hash,
+                iters: Passwords.defaultIterations)
+        } catch {
+            FailableExit.die("error: \(error)")
+        }
+        print(
+            "user '\(username)' saved "
+                + "(\(storeDBPath(dataDir).path))")
+    }
+}
+
+struct AuthUserList: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "list", abstract: "List WebUI accounts.")
+    @Option(help: "Data dir (default: configured / ~/.athena).")
+    var dataDir: String?
+    func run() async throws {
+        guard let db = try? AthenaStore(path: storeDBPath(dataDir))
+        else {
+            print("no store at \(storeDBPath(dataDir).path)")
+            return
+        }
+        let users = await db.listUsers()
+        if users.isEmpty { print("no users") } else {
+            users.forEach { print($0) }
+        }
+    }
+}
+
+struct AuthUserRemove: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "rm", abstract: "Delete a WebUI account.")
+    @Argument(help: "Username.") var username: String
+    @Option(help: "Data dir (default: configured / ~/.athena).")
+    var dataDir: String?
+    func run() async throws {
+        guard let db = try? AthenaStore(path: storeDBPath(dataDir))
+        else {
+            FailableExit.die(
+                "error: no store at \(storeDBPath(dataDir).path)")
+        }
+        let ok = await db.deleteUser(username: username)
+        print(ok ? "removed '\(username)'" : "no such user")
+    }
 }
 
 // MARK: - Client-side credential store (login/logout/status)

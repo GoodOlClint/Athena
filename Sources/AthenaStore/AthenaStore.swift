@@ -63,6 +63,13 @@ public actor AthenaStore {
               status TEXT NOT NULL, request BLOB NOT NULL,
               result BLOB, error TEXT,
               created REAL NOT NULL, updated REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS auth_users(
+              username TEXT PRIMARY KEY, salt BLOB NOT NULL,
+              hash BLOB NOT NULL, iters INTEGER NOT NULL,
+              created REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS auth_tokens(
+              hash BLOB PRIMARY KEY, tier TEXT NOT NULL,
+              label TEXT, created REAL NOT NULL);
             """)
     }
 
@@ -286,6 +293,149 @@ public actor AthenaStore {
 
     public func jobCount() -> Int {
         guard let st = try? Self.prepared(db,"SELECT COUNT(*) FROM jobs;")
+        else { return 0 }
+        defer { sqlite3_finalize(st) }
+        return sqlite3_step(st) == SQLITE_ROW
+            ? Int(sqlite3_column_int(st, 0)) : 0
+    }
+
+    // MARK: Auth — users (PBKDF2 salt/hash computed by the caller;
+    // this layer only stores opaque bytes) and token hashes.
+
+    public struct UserRow: Sendable {
+        public let salt: Data
+        public let hash: Data
+        public let iters: Int
+    }
+
+    public func putUser(
+        username: String, salt: Data, hash: Data, iters: Int
+    ) throws {
+        let st = try Self.prepared(db,
+            "INSERT OR REPLACE INTO auth_users"
+                + "(username,salt,hash,iters,created) "
+                + "VALUES(?,?,?,?,?);")
+        defer { sqlite3_finalize(st) }
+        sqlite3_bind_text(st, 1, username, -1, Self.transient)
+        Self.bindBlob(st, 2, salt)
+        Self.bindBlob(st, 3, hash)
+        sqlite3_bind_int(st, 4, Int32(iters))
+        sqlite3_bind_double(st, 5, Date().timeIntervalSince1970)
+        guard sqlite3_step(st) == SQLITE_DONE else {
+            throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
+        }
+    }
+
+    public func getUser(username: String) -> UserRow? {
+        guard let st = try? Self.prepared(db,
+            "SELECT salt,hash,iters FROM auth_users WHERE username=?;")
+        else { return nil }
+        defer { sqlite3_finalize(st) }
+        sqlite3_bind_text(st, 1, username, -1, Self.transient)
+        guard sqlite3_step(st) == SQLITE_ROW else { return nil }
+        return UserRow(
+            salt: Self.blob(st, 0), hash: Self.blob(st, 1),
+            iters: Int(sqlite3_column_int(st, 2)))
+    }
+
+    public func listUsers() -> [String] {
+        guard let st = try? Self.prepared(db,
+            "SELECT username FROM auth_users ORDER BY username;")
+        else { return [] }
+        defer { sqlite3_finalize(st) }
+        var out: [String] = []
+        while sqlite3_step(st) == SQLITE_ROW {
+            out.append(String(cString: sqlite3_column_text(st, 0)))
+        }
+        return out
+    }
+
+    @discardableResult
+    public func deleteUser(username: String) -> Bool {
+        guard let st = try? Self.prepared(db,
+            "DELETE FROM auth_users WHERE username=?;")
+        else { return false }
+        defer { sqlite3_finalize(st) }
+        sqlite3_bind_text(st, 1, username, -1, Self.transient)
+        return sqlite3_step(st) == SQLITE_DONE
+            && sqlite3_changes(db) > 0
+    }
+
+    public func userCount() -> Int {
+        guard let st = try? Self.prepared(db,
+            "SELECT COUNT(*) FROM auth_users;")
+        else { return 0 }
+        defer { sqlite3_finalize(st) }
+        return sqlite3_step(st) == SQLITE_ROW
+            ? Int(sqlite3_column_int(st, 0)) : 0
+    }
+
+    public func putToken(
+        hash: Data, tier: String, label: String?
+    ) throws {
+        let st = try Self.prepared(db,
+            "INSERT OR REPLACE INTO auth_tokens"
+                + "(hash,tier,label,created) VALUES(?,?,?,?);")
+        defer { sqlite3_finalize(st) }
+        Self.bindBlob(st, 1, hash)
+        sqlite3_bind_text(st, 2, tier, -1, Self.transient)
+        if let label {
+            sqlite3_bind_text(st, 3, label, -1, Self.transient)
+        } else { sqlite3_bind_null(st, 3) }
+        sqlite3_bind_double(st, 4, Date().timeIntervalSince1970)
+        guard sqlite3_step(st) == SQLITE_DONE else {
+            throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
+        }
+    }
+
+    /// Tier for an exact token-hash (SHA-256 bytes). Indexed PK
+    /// lookup — the presented value is already a hash, so a
+    /// byte-probing timing attack is infeasible.
+    public func tokenTier(hash: Data) -> String? {
+        guard let st = try? Self.prepared(db,
+            "SELECT tier FROM auth_tokens WHERE hash=?;")
+        else { return nil }
+        defer { sqlite3_finalize(st) }
+        Self.bindBlob(st, 1, hash)
+        guard sqlite3_step(st) == SQLITE_ROW else { return nil }
+        return String(cString: sqlite3_column_text(st, 0))
+    }
+
+    public func listTokens() -> [(hex: String, tier: String,
+        label: String?)]
+    {
+        guard let st = try? Self.prepared(db,
+            "SELECT hash,tier,label FROM auth_tokens "
+                + "ORDER BY created;")
+        else { return [] }
+        defer { sqlite3_finalize(st) }
+        var out: [(String, String, String?)] = []
+        while sqlite3_step(st) == SQLITE_ROW {
+            let h = Self.blob(st, 0)
+                .map { String(format: "%02x", $0) }.joined()
+            let tier = String(cString: sqlite3_column_text(st, 1))
+            let label =
+                sqlite3_column_type(st, 2) == SQLITE_NULL
+                ? nil : String(cString: sqlite3_column_text(st, 2))
+            out.append((h, tier, label))
+        }
+        return out
+    }
+
+    @discardableResult
+    public func deleteToken(hash: Data) -> Bool {
+        guard let st = try? Self.prepared(db,
+            "DELETE FROM auth_tokens WHERE hash=?;")
+        else { return false }
+        defer { sqlite3_finalize(st) }
+        Self.bindBlob(st, 1, hash)
+        return sqlite3_step(st) == SQLITE_DONE
+            && sqlite3_changes(db) > 0
+    }
+
+    public func tokenCount() -> Int {
+        guard let st = try? Self.prepared(db,
+            "SELECT COUNT(*) FROM auth_tokens;")
         else { return 0 }
         defer { sqlite3_finalize(st) }
         return sqlite3_step(st) == SQLITE_ROW
