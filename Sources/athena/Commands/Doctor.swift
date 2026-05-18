@@ -159,11 +159,13 @@ struct Doctor: AsyncParsableCommand {
             } ?? false
         var nTok = 0
         var nUsr = 0
+        var nAdmins = 0
         if let db = try? AthenaStore(
             path: dataDir.appendingPathComponent("athena.sqlite"))
         {
             nTok = await db.tokenCount()
             nUsr = await db.userCount()
+            nAdmins = await db.usersWithRole("admin").count
         }
         let anyCreds = envKeys || fileKeys || nTok > 0 || nUsr > 0
         let loopback: Set<String> = [
@@ -172,13 +174,25 @@ struct Doctor: AsyncParsableCommand {
         if anyCreds {
             var src: [String] = []
             if nTok > 0 { src.append("\(nTok) token(s)") }
-            if nUsr > 0 { src.append("\(nUsr) user(s)") }
-            if envKeys { src.append("env") }
+            if nUsr > 0 {
+                src.append(
+                    "\(nUsr) user(s)/\(nAdmins) admin")
+            }
+            if envKeys { src.append("env(admin)") }
             if fileKeys { src.append("file") }
             say(
                 .ok,
-                "auth: enabled — "
+                "auth: enabled (RBAC) — "
                     + src.joined(separator: ", "))
+            // A DB with users but no admin role and no env/file
+            // admin key ⇒ no one can administer the appliance.
+            if nUsr > 0, nAdmins == 0, !envKeys, !fileKeys {
+                say(
+                    .warn,
+                    "RBAC: users exist but NO admin — grant the "
+                        + "admin role (`athena auth role grant "
+                        + "<user> admin`)")
+            }
         } else if loopback.contains(host) {
             say(
                 .warn,

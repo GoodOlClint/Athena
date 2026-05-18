@@ -2,6 +2,7 @@ import ArgumentParser
 import AthenaCore
 import AthenaDeploy
 import AthenaStore
+import Crypto
 import Darwin
 import Foundation
 
@@ -159,11 +160,14 @@ struct Install: AsyncParsableCommand {
         try ensureDir(dataDir, owner: serviceUser)
         try ensureDir(modelStore, owner: serviceUser)
 
-        // Seed a default `admin` WebUI account on a fresh store so
-        // the UI is usable immediately. Idempotent: never touch an
-        // existing user (no password reset on reinstall).
+        // Seed a default `admin` account (with the `admin` role) and
+        // one admin bearer token on a fresh store, so the appliance
+        // is administrable immediately. Idempotent: never touch an
+        // existing install (no password reset / extra token on
+        // reinstall — gated on userCount==0).
         let dbURL = dataDir.appendingPathComponent("athena.sqlite")
         var seededPassword: String?
+        var seededToken: String?
         if let db = try? AthenaStore(path: dbURL) {
             if await db.userCount() == 0 {
                 let pw = Self.simplePassword()
@@ -174,7 +178,22 @@ struct Install: AsyncParsableCommand {
                 try? await db.putUser(
                     username: "admin", salt: salt, hash: hash,
                     iters: Passwords.defaultIterations)
+                try? await db.grantRole(
+                    username: "admin", role: "admin")
                 seededPassword = pw
+                let rawKey = SymmetricKey(size: .bits256)
+                    .withUnsafeBytes { Data($0) }
+                let key =
+                    "sk-athena-"
+                    + rawKey.base64EncodedString()
+                    .replacingOccurrences(of: "+", with: "-")
+                    .replacingOccurrences(of: "/", with: "_")
+                    .replacingOccurrences(of: "=", with: "")
+                try? await db.putToken(
+                    hash: Data(AuthConfig.sha(key)),
+                    username: "admin", scopedRoles: nil,
+                    label: "install-seed")
+                seededToken = key
             }
         }
         // The daemon runs as the service user and must own the DB
@@ -222,16 +241,26 @@ struct Install: AsyncParsableCommand {
         if let pw = seededPassword {
             print("")
             print("  ┌──────────────────────────────────────────┐")
-            print("  │ WebUI admin account created               │")
+            print("  │ admin account created (role: admin)       │")
             print("  │   username: admin                         │")
             print("  │   password: \(pw.padding(toLength: 30, withPad: " ", startingAt: 0))│")
             print("  │ SAVE THIS — shown once. Change it via     │")
             print("  │ `athena auth user add admin`.             │")
             print("  └──────────────────────────────────────────┘")
+            if let tok = seededToken {
+                print("")
+                print("  admin bearer token (SAVE NOW — shown once):")
+                print("    \(tok)")
+                print(
+                    "    use:  Authorization: Bearer <token>")
+                print(
+                    "    mint more: `athena auth token add --user "
+                        + "<u>`")
+            }
             print("")
         } else {
             print(
-                "  webui: existing accounts kept (no admin seeded)")
+                "  auth: existing accounts kept (no admin seeded)")
         }
         print(
             "  health: curl -s http://\(cfg.listenHost):\(cfg.listenPort)/healthz")

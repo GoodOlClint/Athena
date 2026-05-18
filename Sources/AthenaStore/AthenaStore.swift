@@ -71,9 +71,13 @@ public actor AthenaStore {
               username TEXT PRIMARY KEY, salt BLOB NOT NULL,
               hash BLOB NOT NULL, iters INTEGER NOT NULL,
               created REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS auth_user_roles(
+              username TEXT NOT NULL, role TEXT NOT NULL,
+              PRIMARY KEY(username, role));
             CREATE TABLE IF NOT EXISTS auth_tokens(
-              hash BLOB PRIMARY KEY, tier TEXT NOT NULL,
-              label TEXT, created REAL NOT NULL);
+              hash BLOB PRIMARY KEY, username TEXT NOT NULL,
+              scoped_roles TEXT, label TEXT,
+              created REAL NOT NULL);
             """)
         // Migration for stores created before M12.6 (no IF NOT
         // EXISTS for columns; the dup-column error is expected and
@@ -316,12 +320,23 @@ public actor AthenaStore {
     }
 
     // MARK: Auth — users (PBKDF2 salt/hash computed by the caller;
-    // this layer only stores opaque bytes) and token hashes.
+    // this layer only stores opaque bytes), per-user role grants, and
+    // token hashes bound to a user with an optional scoped-role
+    // narrowing. Role names are opaque strings here — the RBAC
+    // catalog (AthenaCore) is the sole authority on what they mean.
 
     public struct UserRow: Sendable {
         public let salt: Data
         public let hash: Data
         public let iters: Int
+    }
+
+    /// A managed token: the owning user plus an optional scoped-role
+    /// subset (nil ⇒ inherit the user's full role set; non-nil ⇒
+    /// narrow to the intersection — never widen).
+    public struct TokenRow: Sendable {
+        public let username: String
+        public let scopedRoles: [String]?
     }
 
     public func putUser(
@@ -366,8 +381,21 @@ public actor AthenaStore {
         return out
     }
 
+    /// Delete a user and cascade: their role grants and every token
+    /// they own go too (no orphaned grants/tokens). Returns whether
+    /// the user row existed.
     @discardableResult
     public func deleteUser(username: String) -> Bool {
+        for sql in [
+            "DELETE FROM auth_user_roles WHERE username=?;",
+            "DELETE FROM auth_tokens WHERE username=?;",
+        ] {
+            if let st = try? Self.prepared(db, sql) {
+                sqlite3_bind_text(st, 1, username, -1, Self.transient)
+                _ = sqlite3_step(st)
+                sqlite3_finalize(st)
+            }
+        }
         guard let st = try? Self.prepared(db,
             "DELETE FROM auth_users WHERE username=?;")
         else { return false }
@@ -386,54 +414,137 @@ public actor AthenaStore {
             ? Int(sqlite3_column_int(st, 0)) : 0
     }
 
-    public func putToken(
-        hash: Data, tier: String, label: String?
-    ) throws {
+    // MARK: Auth — role grants (opaque role-name strings)
+
+    public func grantRole(username: String, role: String) throws {
         let st = try Self.prepared(db,
-            "INSERT OR REPLACE INTO auth_tokens"
-                + "(hash,tier,label,created) VALUES(?,?,?,?);")
+            "INSERT OR IGNORE INTO auth_user_roles"
+                + "(username,role) VALUES(?,?);")
         defer { sqlite3_finalize(st) }
-        Self.bindBlob(st, 1, hash)
-        sqlite3_bind_text(st, 2, tier, -1, Self.transient)
-        if let label {
-            sqlite3_bind_text(st, 3, label, -1, Self.transient)
-        } else { sqlite3_bind_null(st, 3) }
-        sqlite3_bind_double(st, 4, Date().timeIntervalSince1970)
+        sqlite3_bind_text(st, 1, username, -1, Self.transient)
+        sqlite3_bind_text(st, 2, role, -1, Self.transient)
         guard sqlite3_step(st) == SQLITE_DONE else {
             throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
         }
     }
 
-    /// Tier for an exact token-hash (SHA-256 bytes). Indexed PK
-    /// lookup — the presented value is already a hash, so a
-    /// byte-probing timing attack is infeasible.
-    public func tokenTier(hash: Data) -> String? {
+    @discardableResult
+    public func revokeRole(username: String, role: String) -> Bool {
         guard let st = try? Self.prepared(db,
-            "SELECT tier FROM auth_tokens WHERE hash=?;")
+            "DELETE FROM auth_user_roles WHERE username=? AND role=?;")
+        else { return false }
+        defer { sqlite3_finalize(st) }
+        sqlite3_bind_text(st, 1, username, -1, Self.transient)
+        sqlite3_bind_text(st, 2, role, -1, Self.transient)
+        return sqlite3_step(st) == SQLITE_DONE
+            && sqlite3_changes(db) > 0
+    }
+
+    public func rolesForUser(username: String) -> [String] {
+        guard let st = try? Self.prepared(db,
+            "SELECT role FROM auth_user_roles WHERE username=? "
+                + "ORDER BY role;")
+        else { return [] }
+        defer { sqlite3_finalize(st) }
+        sqlite3_bind_text(st, 1, username, -1, Self.transient)
+        var out: [String] = []
+        while sqlite3_step(st) == SQLITE_ROW {
+            out.append(String(cString: sqlite3_column_text(st, 0)))
+        }
+        return out
+    }
+
+    /// Usernames holding a given role (drives last-admin protection).
+    public func usersWithRole(_ role: String) -> [String] {
+        guard let st = try? Self.prepared(db,
+            "SELECT username FROM auth_user_roles WHERE role=? "
+                + "ORDER BY username;")
+        else { return [] }
+        defer { sqlite3_finalize(st) }
+        sqlite3_bind_text(st, 1, role, -1, Self.transient)
+        var out: [String] = []
+        while sqlite3_step(st) == SQLITE_ROW {
+            out.append(String(cString: sqlite3_column_text(st, 0)))
+        }
+        return out
+    }
+
+    // MARK: Auth — token hashes (bound to a user; optional scope)
+
+    /// CSV is safe: role names are RBAC catalog identifiers
+    /// (`[a-z]+`), never contain a comma. nil/empty ⇒ NULL (inherit).
+    private static func encodeScope(_ roles: [String]?) -> String? {
+        guard let roles, !roles.isEmpty else { return nil }
+        return roles.joined(separator: ",")
+    }
+    private static func decodeScope(_ csv: String?) -> [String]? {
+        guard let csv, !csv.isEmpty else { return nil }
+        return csv.split(separator: ",").map(String.init)
+    }
+
+    public func putToken(
+        hash: Data, username: String, scopedRoles: [String]?,
+        label: String?
+    ) throws {
+        let st = try Self.prepared(db,
+            "INSERT OR REPLACE INTO auth_tokens"
+                + "(hash,username,scoped_roles,label,created) "
+                + "VALUES(?,?,?,?,?);")
+        defer { sqlite3_finalize(st) }
+        Self.bindBlob(st, 1, hash)
+        sqlite3_bind_text(st, 2, username, -1, Self.transient)
+        if let scope = Self.encodeScope(scopedRoles) {
+            sqlite3_bind_text(st, 3, scope, -1, Self.transient)
+        } else { sqlite3_bind_null(st, 3) }
+        if let label {
+            sqlite3_bind_text(st, 4, label, -1, Self.transient)
+        } else { sqlite3_bind_null(st, 4) }
+        sqlite3_bind_double(st, 5, Date().timeIntervalSince1970)
+        guard sqlite3_step(st) == SQLITE_DONE else {
+            throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
+        }
+    }
+
+    /// The owning user + scoped roles for an exact token-hash
+    /// (SHA-256 bytes). Indexed PK lookup — the presented value is
+    /// already a hash, so a byte-probing timing attack is infeasible.
+    public func tokenPrincipal(hash: Data) -> TokenRow? {
+        guard let st = try? Self.prepared(db,
+            "SELECT username,scoped_roles FROM auth_tokens "
+                + "WHERE hash=?;")
         else { return nil }
         defer { sqlite3_finalize(st) }
         Self.bindBlob(st, 1, hash)
         guard sqlite3_step(st) == SQLITE_ROW else { return nil }
-        return String(cString: sqlite3_column_text(st, 0))
+        let user = String(cString: sqlite3_column_text(st, 0))
+        let scope =
+            sqlite3_column_type(st, 1) == SQLITE_NULL
+            ? nil : String(cString: sqlite3_column_text(st, 1))
+        return TokenRow(
+            username: user, scopedRoles: Self.decodeScope(scope))
     }
 
-    public func listTokens() -> [(hex: String, tier: String,
-        label: String?)]
+    public func listTokens() -> [(hex: String, username: String,
+        scoped: [String]?, label: String?)]
     {
         guard let st = try? Self.prepared(db,
-            "SELECT hash,tier,label FROM auth_tokens "
+            "SELECT hash,username,scoped_roles,label FROM auth_tokens "
                 + "ORDER BY created;")
         else { return [] }
         defer { sqlite3_finalize(st) }
-        var out: [(String, String, String?)] = []
+        var out: [(String, String, [String]?, String?)] = []
         while sqlite3_step(st) == SQLITE_ROW {
             let h = Self.blob(st, 0)
                 .map { String(format: "%02x", $0) }.joined()
-            let tier = String(cString: sqlite3_column_text(st, 1))
-            let label =
+            let user = String(cString: sqlite3_column_text(st, 1))
+            let scope =
                 sqlite3_column_type(st, 2) == SQLITE_NULL
                 ? nil : String(cString: sqlite3_column_text(st, 2))
-            out.append((h, tier, label))
+            let label =
+                sqlite3_column_type(st, 3) == SQLITE_NULL
+                ? nil : String(cString: sqlite3_column_text(st, 3))
+            out.append(
+                (h, user, Self.decodeScope(scope), label))
         }
         return out
     }

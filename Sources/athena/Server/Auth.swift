@@ -1,3 +1,4 @@
+import AthenaCore
 import AthenaStore
 import Crypto
 import Foundation
@@ -6,26 +7,31 @@ import Hummingbird
 import Logging
 import NIOCore
 
-// Inbound bearer-token auth (M12). Passive-oracle intact — this only
-// gates inbound requests. Two tiers: `admin ⊇ inference`. Keys are
-// never stored; only their SHA-256. Constant-time compare. Fail-safe:
-// no keys on a non-loopback bind ⇒ the daemon refuses to start.
+// Inbound bearer-token auth (M12 → M15.2 RBAC). Passive-oracle
+// intact — this only gates inbound requests. Subjects are unified: a
+// bearer token resolves to an owning user; the user holds roles; a
+// token may further *narrow* (never widen) to a scoped subset. Each
+// route requires a `Permission`; the caller's effective permission
+// set must contain it. Keys are never stored; only their SHA-256.
+// Constant-time compare. Fail-safe: no credentials on a non-loopback
+// bind ⇒ the daemon refuses to start.
 
-enum AuthTier: Int, Sendable, Comparable {
-    case inference = 0
-    case admin = 1
-    static func < (a: AuthTier, b: AuthTier) -> Bool {
-        a.rawValue < b.rawValue
-    }
+/// A resolved caller: a stable principal id (for queue ownership)
+/// plus the effective permission set.
+struct AuthSubject: Sendable {
+    let principal: String
+    let permissions: Set<Permission>
 }
 
 struct AuthConfig: Sendable {
-    /// Bootstrap token hashes from env/file (in-memory; checked
-    /// first). The DB (`auth_tokens`) is the managed store, queried
-    /// per request.
-    private let hashes: [[UInt8]: AuthTier]
-    /// SQLite auth store (managed tokens + users). nil = bootstrap
-    /// only.
+    /// Bootstrap token hashes from env/file → the role names they
+    /// confer (admin key ⇒ `admin`, inference key ⇒ `member`). These
+    /// are synthetic principals with NO DB user (no scoped
+    /// narrowing). The DB (`auth_tokens`) is the managed store,
+    /// queried per request.
+    private let hashes: [[UInt8]: [String]]
+    /// SQLite auth store (managed tokens + users + role grants).
+    /// nil = bootstrap only.
     private let store: AthenaStore?
     /// Precomputed at startup: any bootstrap hash, OR any DB token,
     /// OR any DB user. Adding the FIRST credential to an already-
@@ -34,7 +40,7 @@ struct AuthConfig: Sendable {
     var isEnabled: Bool { enabled }
 
     init(
-        hashes: [[UInt8]: AuthTier] = [:],
+        hashes: [[UInt8]: [String]] = [:],
         store: AthenaStore? = nil,
         enabled: Bool? = nil
     ) {
@@ -54,19 +60,6 @@ struct AuthConfig: Sendable {
 
     static func sha(_ s: String) -> [UInt8] {
         Array(SHA256.hash(data: Data(s.utf8)))
-    }
-
-    /// Stable principal id for a bearer token (M12.6) — the token's
-    /// own SHA-256, so the raw key is never needed for ownership.
-    static func principal(forBearer token: String) -> String {
-        "t:" + sha(token).map { String(format: "%02x", $0) }
-            .joined()
-    }
-
-    /// SHA-256 of a raw key, as the `sha256:<hex>` entry persisted by
-    /// `athena auth add` (no secret stored at rest).
-    static func hashEntry(forRawKey key: String) -> String {
-        "sha256:" + hex(sha(key))
     }
 
     static func hex(_ bytes: [UInt8]) -> String {
@@ -94,20 +87,22 @@ struct AuthConfig: Sendable {
         return out
     }
 
-    /// Load keys from the file (lines `tier key`, `#` comments) and
-    /// the env (`ATHENA_ADMIN_KEYS` / `ATHENA_INFERENCE_KEYS`,
-    /// comma-separated). Env augments the file. A given key keeps its
-    /// highest tier if listed twice.
+    /// Load bootstrap keys from the file (lines `admin <key>` /
+    /// `inference <key>`, `#` comments) and the env
+    /// (`ATHENA_ADMIN_KEYS` / `ATHENA_INFERENCE_KEYS`,
+    /// comma-separated). Env augments the file. `admin` ⇒ the
+    /// `admin` role, `inference` ⇒ the `member` role; a key listed
+    /// twice gets the union of its roles.
     static func load(
         file: String?, env: [String: String],
         log: Logger
     ) -> AuthConfig {
-        var map: [[UInt8]: AuthTier] = [:]
-        func add(_ key: String, _ tier: AuthTier) {
+        var map: [[UInt8]: Set<String>] = [:]
+        func add(_ key: String, _ roles: [String]) {
             let k = key.trimmingCharacters(in: .whitespaces)
             guard !k.isEmpty else { return }
             // `sha256:<64-hex>` ⇒ a pre-hashed entry (recommended;
-            // written by `athena auth add` — no secret at rest).
+            // written by `athena auth …` — no secret at rest).
             // Anything else ⇒ a raw key, hashed here.
             let h: [UInt8]
             if let bytes = Self.hashEntry(k) {
@@ -115,9 +110,7 @@ struct AuthConfig: Sendable {
             } else {
                 h = sha(k)
             }
-            if let cur = map[h] { map[h] = max(cur, tier) } else {
-                map[h] = tier
-            }
+            map[h, default: []].formUnion(roles)
         }
         if let file, !file.isEmpty {
             let url = URL(
@@ -142,51 +135,77 @@ struct AuthConfig: Sendable {
                         separator: " ", maxSplits: 1,
                         omittingEmptySubsequences: true)
                     guard parts.count == 2 else { continue }
-                    let tierTok = parts[0]
+                    let tok = parts[0]
                         .trimmingCharacters(in: CharacterSet(
                             charactersIn: ": \t"))
                         .lowercased()
-                    let tier: AuthTier =
-                        tierTok == "admin" ? .admin : .inference
-                    add(String(parts[1]), tier)
+                    add(
+                        String(parts[1]),
+                        tok == "admin" ? ["admin"] : ["member"])
                 }
             } else {
                 log.warning(
                     "auth_keys_file unreadable: \(url.path)")
             }
         }
-        for (envKey, tier) in [
-            ("ATHENA_ADMIN_KEYS", AuthTier.admin),
-            ("ATHENA_INFERENCE_KEYS", AuthTier.inference),
+        for (envKey, roles) in [
+            ("ATHENA_ADMIN_KEYS", ["admin"]),
+            ("ATHENA_INFERENCE_KEYS", ["member"]),
         ] {
             for k in (env[envKey] ?? "").split(separator: ",") {
-                add(String(k), tier)
+                add(String(k), roles)
             }
         }
-        return AuthConfig(hashes: map)
+        return AuthConfig(hashes: map.mapValues(Array.init))
     }
 
-    /// Tier granted to a presented bearer token, or nil. Bootstrap
-    /// hashes (env/file) are checked in-memory with a constant-time
-    /// compare over the fixed 32-byte digest (no early return — no
-    /// timing/count leak). On no match, the DB `auth_tokens` table
-    /// is consulted by exact hash (indexed PK; the lookup key is
-    /// already a SHA-256, so byte-probing is infeasible).
-    func tier(forBearer token: String) async -> AuthTier? {
+    /// Resolve a presented bearer token to a subject, or nil.
+    /// Bootstrap hashes (env/file) are checked in-memory with a
+    /// constant-time compare over the fixed 32-byte digest (no early
+    /// return — no timing/count leak). On no bootstrap match, the DB
+    /// `auth_tokens` table is consulted by exact hash (indexed PK;
+    /// the lookup key is already a SHA-256, so byte-probing is
+    /// infeasible) → owning user → user roles ∩ token scope. Unknown
+    /// role names contribute nothing (fail-closed).
+    func resolve(bearer token: String) async -> AuthSubject? {
         let presented = Self.sha(token)
-        var granted: AuthTier?
-        for (stored, tier) in hashes
+        var bootRoles: Set<String> = []
+        var matched = false
+        for (stored, roles) in hashes
         where Self.constantTimeEqual(presented, stored) {
-            granted = granted.map { max($0, tier) } ?? tier
+            bootRoles.formUnion(roles)
+            matched = true
         }
-        if granted == nil, let store {
-            if let t = await store.tokenTier(
+        if matched {
+            // Synthetic, stable principal (no DB user) — the digest
+            // itself, so per-key queue ownership still works.
+            return AuthSubject(
+                principal: "t:" + Self.hex(presented),
+                permissions: RBAC.permissions(forRoles: bootRoles))
+        }
+        if let store,
+            let tok = await store.tokenPrincipal(
                 hash: Data(presented))
-            {
-                granted = t == "admin" ? .admin : .inference
-            }
+        {
+            let userRoles = await store.rolesForUser(
+                username: tok.username)
+            let perms = RBAC.effectivePermissions(
+                userRoles: userRoles,
+                tokenScopedRoles: tok.scopedRoles)
+            return AuthSubject(
+                principal: "u:" + tok.username, permissions: perms)
         }
-        return granted
+        return nil
+    }
+
+    /// Effective permissions for a logged-in WebUI user (session
+    /// cookie path). Roles drive access — no token scoping applies.
+    func permissions(forUser username: String) async
+        -> Set<Permission>
+    {
+        guard let store else { return [] }
+        let roles = await store.rolesForUser(username: username)
+        return RBAC.permissions(forRoles: roles)
     }
 
     static func constantTimeEqual(_ a: [UInt8], _ b: [UInt8]) -> Bool {
@@ -214,18 +233,23 @@ enum AuthStartupError: Error, CustomStringConvertible {
         case .openOnNonLoopback(let h):
             return
                 "refusing to start: listening on \(h) (non-loopback) "
-                + "with NO auth keys. Set auth_keys_file / "
-                + "ATHENA_ADMIN_KEYS, or bind 127.0.0.1."
+                + "with NO auth credentials. Seed a user/token, set "
+                + "auth_keys_file / ATHENA_ADMIN_KEYS, or bind "
+                + "127.0.0.1."
         }
     }
 }
 
-/// The tier a route requires, or nil = open (no auth). Admin covers
-/// the WebUI, metrics, the shared store, and mutating queue/vector
-/// ops; everything else is the inference surface; `/healthz` and
-/// `/ui/login` are always open.
+/// The permission a route requires, or nil = open (no auth).
+/// `/healthz` + `/ui/login` + `/ui/logout` are always open. Every
+/// other route maps to exactly one `Permission`; an unlisted route
+/// fails closed to `.inference` (the minimum authenticated
+/// capability). Per-owner queue isolation is still enforced in the
+/// handlers (M12.6) on top of the `.queueSubmit` gate.
 enum AuthPolicy {
-    static func required(method: String, path: String) -> AuthTier? {
+    static func required(method: String, path: String)
+        -> Permission?
+    {
         if path == "/healthz" || path == "/ui/login"
             || path == "/ui/logout"
         {
@@ -234,18 +258,19 @@ enum AuthPolicy {
         let mutating =
             method == "POST" || method == "DELETE"
             || method == "PUT" || method == "PATCH"
-        if path == "/metrics" { return .admin }
-        if path == "/ui" || path.hasPrefix("/ui/") { return .admin }
-        if path.hasPrefix("/v1/store") { return .admin }
-        if path == "/api/stop" { return .admin }
-        // /v1/queue is inference-tier; per-submitter OWNERSHIP is
-        // enforced in the handlers (M12.6) — admin tier sees all.
-        // Mutating vectors stay admin (shared resource).
-        if path.hasPrefix("/v1/vectors"), mutating,
-            path != "/v1/vectors/query"
-        {
-            return .admin
+        if path == "/metrics" { return .metricsRead }
+        if path == "/ui" || path.hasPrefix("/ui/") {
+            return .daemonAdmin
         }
+        if path.hasPrefix("/v1/store") { return .storeAdmin }
+        if path == "/api/stop" { return .daemonAdmin }
+        if path.hasPrefix("/v1/vectors") {
+            if path == "/v1/vectors/query" { return .vectorsRead }
+            return mutating ? .vectorsWrite : .vectorsRead
+        }
+        if path.hasPrefix("/v1/queue") { return .queueSubmit }
+        // Inference surface (/v1/chat, /v1/embeddings, /v1/audio/*,
+        // the /api/* shim) and any unlisted route.
         return .inference
     }
 }
@@ -269,13 +294,18 @@ struct AuthMiddleware<Context: RequestContext>: RouterMiddleware {
 
         let isUI = path == "/ui" || path.hasPrefix("/ui/")
 
-        // /ui* also accepts a valid signed session cookie (admin).
+        // /ui* via a valid signed session cookie: the logged-in
+        // user's own roles drive access (not a flat admin tier).
         if isUI,
             let tok = Session.token(
                 fromCookieHeader: request.headers[.cookie]),
-            session.validate(tok) != nil
+            let user = session.validate(tok)
         {
-            return try await next(request, context)
+            let perms = await config.permissions(forUser: user)
+            if perms.contains(required) {
+                return try await next(request, context)
+            }
+            return Self.redirect("/ui/login")
         }
 
         guard
@@ -283,7 +313,7 @@ struct AuthMiddleware<Context: RequestContext>: RouterMiddleware {
             header.hasPrefix("Bearer "),
             case let token = String(header.dropFirst(7)),
             !token.isEmpty,
-            let granted = await config.tier(forBearer: token)
+            let subject = await config.resolve(bearer: token)
         else {
             // Browsers can't send bearer on navigation — send them
             // to the login page instead of a JSON 401.
@@ -294,10 +324,10 @@ struct AuthMiddleware<Context: RequestContext>: RouterMiddleware {
                 .unauthorized, "missing or invalid bearer token",
                 "unauthorized")
         }
-        if granted < required {
+        guard subject.permissions.contains(required) else {
             if isUI { return Self.redirect("/ui/login") }
             return Self.deny(
-                .forbidden, "admin privilege required", "forbidden")
+                .forbidden, "insufficient permissions", "forbidden")
         }
         return try await next(request, context)
     }

@@ -722,9 +722,12 @@ struct AthenaServer {
 
     // MARK: - Async request queue (M8.1)
 
-    /// Per-submitter queue authorization (M12.6). `enforced` is auth
-    /// being on; `principal` identifies the bearer (the route is
-    /// inference-tier — AuthMiddleware already validated the token).
+    /// Per-submitter queue authorization (M12.6 → M15.2). `enforced`
+    /// is auth being on; `principal` identifies the bearer's owning
+    /// subject (`u:<user>` for a managed token, `t:<hash>` for a
+    /// bootstrap key — AuthMiddleware already gated `.queueSubmit`).
+    /// `isAdmin` (sees every tenant's jobs) = the caller holds the
+    /// full permission set, i.e. the `admin` role.
     private func queuePrincipal(_ request: Request) async -> (
         principal: String?, isAdmin: Bool, enforced: Bool
     ) {
@@ -732,12 +735,12 @@ struct AthenaServer {
         guard
             let h = request.headers[.authorization],
             h.hasPrefix("Bearer "),
-            case let tok = String(h.dropFirst(7)), !tok.isEmpty
+            case let tok = String(h.dropFirst(7)), !tok.isEmpty,
+            let subject = await auth.resolve(bearer: tok)
         else { return (nil, false, true) }
-        let isAdmin = await auth.tier(forBearer: tok) == .admin
-        return (
-            AuthConfig.principal(forBearer: tok), isAdmin, true
-        )
+        let isAdmin = Set(Permission.allCases).isSubset(
+            of: subject.permissions)
+        return (subject.principal, isAdmin, true)
     }
 
     /// May this caller see/act on `job`? Open when auth is off;

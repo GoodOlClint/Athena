@@ -267,7 +267,7 @@ struct Load: AsyncParsableCommand {
             listenHost: config.listenHost)
         Logger(label: AthenaLogLabel.daemon).notice(
             authConfig.isEnabled
-                ? "auth: enabled (bearer 2-tier; env/file + DB)"
+                ? "auth: enabled (RBAC; bearer→user→roles, env/file + DB)"
                 : "auth: DISABLED (loopback, no credentials)")
 
         let server = AthenaServer(

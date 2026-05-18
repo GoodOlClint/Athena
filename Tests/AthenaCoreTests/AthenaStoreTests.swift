@@ -97,6 +97,74 @@ final class AthenaStoreTests: XCTestCase {
         XCTAssertEqual(after, 1)
     }
 
+    func testUserRolesAndCascadingDelete() async throws {
+        let url = tmpURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let s = try AthenaStore(path: url)
+
+        let salt = Data(repeating: 7, count: 16)
+        let hash = Data(repeating: 9, count: 32)
+        try await s.putUser(
+            username: "alice", salt: salt, hash: hash, iters: 1000)
+        try await s.grantRole(username: "alice", role: "admin")
+        try await s.grantRole(username: "alice", role: "operator")
+        // INSERT OR IGNORE — re-grant is a no-op, no duplicate.
+        try await s.grantRole(username: "alice", role: "admin")
+
+        let roles = await s.rolesForUser(username: "alice")
+        XCTAssertEqual(roles, ["admin", "operator"])  // ORDER BY role
+
+        try await s.putUser(
+            username: "bob", salt: salt, hash: hash, iters: 1000)
+        try await s.grantRole(username: "bob", role: "admin")
+        let admins = await s.usersWithRole("admin")
+        XCTAssertEqual(admins, ["alice", "bob"])
+
+        let revoked = await s.revokeRole(
+            username: "alice", role: "operator")
+        XCTAssertTrue(revoked)
+        let revMissing = await s.revokeRole(
+            username: "alice", role: "operator")
+        XCTAssertFalse(revMissing)
+        let after = await s.rolesForUser(username: "alice")
+        XCTAssertEqual(after, ["admin"])
+
+        // Token bound to alice + a scoped narrowing.
+        try await s.putToken(
+            hash: Data(repeating: 1, count: 32), username: "alice",
+            scopedRoles: ["member"], label: "scoped")
+        try await s.putToken(
+            hash: Data(repeating: 2, count: 32), username: "alice",
+            scopedRoles: nil, label: nil)
+        let scoped = await s.tokenPrincipal(
+            hash: Data(repeating: 1, count: 32))
+        XCTAssertEqual(scoped?.username, "alice")
+        XCTAssertEqual(scoped?.scopedRoles, ["member"])
+        let unscoped = await s.tokenPrincipal(
+            hash: Data(repeating: 2, count: 32))
+        XCTAssertEqual(unscoped?.username, "alice")
+        XCTAssertNil(unscoped?.scopedRoles)  // NULL ⇒ inherit
+        let toks = await s.listTokens()
+        XCTAssertEqual(toks.count, 2)
+        XCTAssertTrue(toks.allSatisfy { $0.username == "alice" })
+
+        // Deleting alice cascades: her roles AND her tokens vanish;
+        // bob (also admin) is untouched.
+        let delAlice = await s.deleteUser(username: "alice")
+        XCTAssertTrue(delAlice)
+        let aliceRoles = await s.rolesForUser(username: "alice")
+        XCTAssertEqual(aliceRoles, [])
+        let aliceTok = await s.tokenPrincipal(
+            hash: Data(repeating: 1, count: 32))
+        XCTAssertNil(aliceTok)
+        let tokCount = await s.tokenCount()
+        XCTAssertEqual(tokCount, 0)
+        let adminsLeft = await s.usersWithRole("admin")
+        XCTAssertEqual(adminsLeft, ["bob"])
+        let delMissing = await s.deleteUser(username: "ghost")
+        XCTAssertFalse(delMissing)
+    }
+
     func testErrorStatusAndPersistenceAcrossOpen() async throws {
         let url = tmpURL()
         defer { try? FileManager.default.removeItem(at: url) }
