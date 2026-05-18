@@ -86,6 +86,20 @@ extension AthenaServer {
     /// (never exits — a bad field is a 4xx, not a dead daemon).
     /// Most keys need a daemon restart to take effect; the UI says so.
     func handleUIConfigPost(_ request: Request) async -> Response {
+        // CSRF (M18.1) + per-action RBAC re-check (defense-in-depth
+        // ON TOP of AuthPolicy's /ui* daemonAdmin gate — never trust
+        // the page; the logged-in user's OWN perms decide).
+        guard csrfOK(request) else {
+            return Self.json(
+                ["error": "csrf token missing or invalid"],
+                status: .forbidden)
+        }
+        let caller = await uiCaller(request)
+        guard caller.perms.contains(.daemonAdmin) else {
+            return Self.json(
+                ["error": "insufficient permission (daemon.admin)"],
+                status: .forbidden)
+        }
         let body: [String: String]
         do {
             let buf = try await request.body.collect(
@@ -128,73 +142,131 @@ extension AthenaServer {
             status: errors.isEmpty ? .ok : .badRequest)
     }
 
-    static let configPage = #"""
-        <!doctype html><html><head><meta charset="utf-8">
-        <title>athena · config</title>
-        <style>
-        body{background:#0d1117;color:#c9d1d9;font:13px ui-monospace,
-        Menlo,monospace;margin:0;padding:24px}
-        h1{font-size:16px;margin:0 0 4px}
-        a{color:#2f81f7}.sub{color:#8b949e;margin-bottom:20px}
-        .card{background:#161b22;border:1px solid #30363d;
-        border-radius:8px;padding:16px;max-width:640px}
-        label{display:block;color:#8b949e;margin:10px 0 3px}
-        input{width:100%;box-sizing:border-box;background:#0d1117;
-        color:#e6edf3;border:1px solid #30363d;border-radius:6px;
-        padding:7px;font:13px ui-monospace,monospace}
-        button{margin-top:16px;background:#238636;color:#fff;
-        border:0;border-radius:6px;padding:9px 16px;cursor:pointer;
-        font:13px ui-monospace,monospace}
-        #msg{margin-top:14px}.ok{color:#3fb950}.err{color:#f85149}
-        .k{color:#8b949e}
-        </style></head><body>
-        <h1>athena · configuration</h1>
-        <div class="sub"><a href="/ui">← dashboard</a> ·
-          <span id="path" class="k"></span></div>
-        <div class="card"><form id="f"></form>
-          <button onclick="save()">Save</button>
-          <div id="msg"></div></div>
-        <script>
-        const $=i=>document.getElementById(i);
-        let KEYS=[];
-        async function load(){
-          const c=await (await fetch("/ui/api/config")).json();
-          KEYS=c.keys; $("path").textContent=c.path;
-          $("f").innerHTML=c.keys.map(k=>
-            `<label>${k}</label><input id="in_${k}" value="${
-              (c.values[k]||"").replace(/"/g,'&quot;')}">`).join("");
-        }
-        async function save(){
-          const b={};
-          KEYS.forEach(k=>{const v=$("in_"+k).value.trim();
-            if(v)b[k]=v;});
-          const r=await fetch("/ui/api/config",{method:"POST",
-            headers:{"content-type":"application/json"},
-            body:JSON.stringify(b)});
-          const j=await r.json();
-          if(r.ok)$("msg").innerHTML=
-            `<span class=ok>saved ${j.saved.join(", ")}</span>`+
-            `<br><span class=k>${j.note}</span>`;
-          else $("msg").innerHTML=`<span class=err>`+
-            Object.entries(j.errors||{"":j.error}).map(
-              ([k,v])=>`${k}: ${v}`).join("<br>")+`</span>`;
-        }
-        load();
-        </script></body></html>
-        """#
+    // MARK: - RBAC-aware shell + CSRF (M18.1)
 
-    static let uiPage = #"""
-        <!doctype html><html><head><meta charset="utf-8">
-        <title>athena</title>
-        <style>
+    /// Custom CSRF header. A cross-site page cannot set a custom
+    /// request header without a CORS preflight the daemon never
+    /// grants, so requiring it (plus the HMAC value match) is
+    /// defense-in-depth ON TOP of the SameSite=Strict cookie.
+    static let csrfHeaderName = HTTPField.Name("X-CSRF-Token")!
+
+    /// The logged-in /ui caller. AuthMiddleware has ALREADY enforced
+    /// the AuthPolicy `/ui*` daemonAdmin gate (session cookie) before
+    /// any page handler runs; this resolves WHICH user that was so
+    /// pages render RBAC-aware AND each mutation re-checks that user's
+    /// OWN permissions (never the page's word). Auth-off loopback =
+    /// one trusted local operator ⇒ full perms (mirrors
+    /// `callerPermissions`).
+    func uiCaller(_ request: Request)
+        async -> (user: String, perms: Set<Permission>)
+    {
+        guard auth.isEnabled else {
+            return ("(local)", Set(Permission.allCases))
+        }
+        if let tok = Session.token(
+            fromCookieHeader: request.headers[.cookie]),
+            let user = session.validate(tok)
+        {
+            return (user, await auth.permissions(forUser: user))
+        }
+        return ("", [])
+    }
+
+    /// Verify the per-session CSRF token on a mutating /ui/api/*
+    /// request. Auth-off loopback has no session/CSRF (single trusted
+    /// operator) ⇒ allowed.
+    func csrfOK(_ request: Request) -> Bool {
+        guard auth.isEnabled else { return true }
+        guard
+            let tok = Session.token(
+                fromCookieHeader: request.headers[.cookie]),
+            let user = session.validate(tok)
+        else { return false }
+        return session.validateCSRF(
+            request.headers[Self.csrfHeaderName], user: user)
+    }
+
+    /// One nav item: label, href, and the permission required to see
+    /// (and reach) it. Rendered only if the user holds `perm`.
+    private struct NavItem {
+        let label: String
+        let href: String
+        let perm: Permission
+    }
+
+    /// The whole /ui surface in nav order. Pages land slice by slice
+    /// (M18.2 models, M18.3 daemon, M18.4 users); listing them here
+    /// keeps the bar RBAC-aware and avoids dead links (an item shows
+    /// only when its page exists AND the user holds its perm).
+    private static let navItems: [NavItem] = [
+        NavItem(
+            label: "dashboard", href: "/ui", perm: .metricsRead),
+        NavItem(
+            label: "config", href: "/ui/config",
+            perm: .daemonAdmin),
+    ]
+
+    /// Server-rendered page chrome: shared <head>/CSS + an
+    /// RBAC-filtered nav + the signed-in user + logout. Zero JS in
+    /// the shell itself (the page body may carry the inline poller).
+    static func uiShell(
+        title: String, user: String, csrf: String,
+        perms: Set<Permission>, active: String, body: String
+    ) -> String {
+        let links =
+            navItems
+            .filter { perms.contains($0.perm) }
+            .map { it -> String in
+                let on = it.href == active ? " on" : ""
+                return "<a href=\"\(it.href)\" class=\"nav\(on)\">"
+                    + "\(it.label)</a>"
+            }
+            .joined()
+        let who =
+            user.isEmpty
+            ? "" : "<span class=who>\(Self.esc(user))</span>"
+        return "<!doctype html><html><head><meta charset=\"utf-8\">"
+            + "<title>\(title)</title>"
+            + "<meta name=\"csrf\" content=\"\(csrf)\">"
+            + "<style>" + Self.uiCSS + "</style></head><body>"
+            + "<nav class=topbar><span class=brand>athena</span>"
+            + "<span class=navs>" + links + "</span>"
+            + "<span class=right>" + who
+            + "<a href=\"/ui/logout\" class=\"nav\">logout</a>"
+            + "</span></nav><main>" + body + "</main></body></html>"
+    }
+
+    /// Minimal HTML escape for the one piece of caller-influenced
+    /// text rendered into the shell (the username). The RBAC name
+    /// guard already restricts users to `[A-Za-z0-9._-]`; this is
+    /// belt-and-suspenders.
+    static func esc(_ s: String) -> String {
+        s.replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+    }
+
+    static let uiCSS = #"""
         body{background:#0d1117;color:#c9d1d9;font:13px ui-monospace,
-        Menlo,monospace;margin:0;padding:24px}
+        Menlo,monospace;margin:0}
+        nav.topbar{display:flex;align-items:center;gap:14px;
+        padding:12px 24px;border-bottom:1px solid #21262d;
+        background:#161b22}
+        .brand{font-weight:700;color:#e6edf3}
+        .navs{display:flex;gap:14px;flex:1}
+        a.nav{color:#8b949e;text-decoration:none}
+        a.nav:hover{color:#e6edf3}a.nav.on{color:#2f81f7}
+        .right{display:flex;gap:14px;align-items:center}
+        .who{color:#8b949e}
+        main{padding:24px}
         h1{font-size:16px;margin:0 0 4px}
         .sub{color:#8b949e;margin-bottom:20px}
         .grid{display:grid;grid-template-columns:repeat(auto-fit,
         minmax(320px,1fr));gap:16px}
         .card{background:#161b22;border:1px solid #30363d;
         border-radius:8px;padding:14px}
+        .card.form{max-width:640px;padding:16px}
         .card h2{font-size:12px;text-transform:uppercase;
         letter-spacing:.05em;color:#8b949e;margin:0 0 10px}
         table{width:100%;border-collapse:collapse}
@@ -203,15 +275,35 @@ extension AthenaServer {
         .bar{height:10px;background:#21262d;border-radius:5px;
         overflow:hidden;margin:6px 0}
         .bar>i{display:block;height:100%;background:#2f81f7}
+        label{display:block;color:#8b949e;margin:10px 0 3px}
+        input{width:100%;box-sizing:border-box;background:#0d1117;
+        color:#e6edf3;border:1px solid #30363d;border-radius:6px;
+        padding:7px;font:13px ui-monospace,monospace}
+        button{margin-top:16px;background:#238636;color:#fff;
+        border:0;border-radius:6px;padding:9px 16px;cursor:pointer;
+        font:13px ui-monospace,monospace}
+        #msg{margin-top:14px}
         .k{color:#8b949e}.v{color:#e6edf3}
         .ok{color:#3fb950}.warn{color:#d29922}.err{color:#f85149}
-        </style></head><body>
-        <h1>athena</h1>
-        <div class="sub"><span id="sub">connecting…</span>
-          &nbsp;·&nbsp;<a href="/ui/config"
-          style="color:#2f81f7">config</a>
-          &nbsp;·&nbsp;<a href="/ui/logout"
-          style="color:#2f81f7">logout</a></div>
+        """#
+
+    // MARK: - Dashboard (M11.2 → reshelled M18.1)
+
+    /// Live status/metrics dashboard, now inside the RBAC-aware
+    /// shell. The inline poller (`/ui/api/state` every 2s) is
+    /// unchanged — minimal hand-written vanilla JS, zero deps.
+    func handleUIDashboard(_ request: Request) async -> Response {
+        let c = await uiCaller(request)
+        let csrf = c.user.isEmpty ? "" : session.csrf(user: c.user)
+        return Self.html(
+            Self.uiShell(
+                title: "athena", user: c.user, csrf: csrf,
+                perms: c.perms, active: "/ui",
+                body: Self.dashBody))
+    }
+
+    static let dashBody = #"""
+        <div class="sub"><span id="sub">connecting…</span></div>
         <div class="grid">
           <div class="card"><h2>Memory governor</h2>
             <div class="bar"><i id="membar"></i></div>
@@ -275,7 +367,64 @@ extension AthenaServer {
             :"<tr><td class=k>no jobs</td></tr>");
         }
         tick();setInterval(tick,2000);
-        </script></body></html>
+        </script>
+        """#
+
+    // MARK: - Config view + edit (M11.3 → reshelled + CSRF M18.1)
+
+    /// The config editor inside the shell. Defense-in-depth: even
+    /// though AuthPolicy already gated /ui* on daemonAdmin, a user
+    /// lacking it sees a notice (not the form) and the POST
+    /// re-checks the CSRF token + daemonAdmin on the logged-in user.
+    func handleUIConfigPage(_ request: Request) async -> Response {
+        let c = await uiCaller(request)
+        let csrf = c.user.isEmpty ? "" : session.csrf(user: c.user)
+        let body =
+            c.perms.contains(.daemonAdmin)
+            ? Self.configBody
+            : #"<div class="card">insufficient permission "#
+                + #"(need daemon.admin)</div>"#
+        return Self.html(
+            Self.uiShell(
+                title: "athena · config", user: c.user,
+                csrf: csrf, perms: c.perms,
+                active: "/ui/config", body: body))
+    }
+
+    static let configBody = #"""
+        <div class="sub"><span id="path" class="k"></span></div>
+        <div class="card form"><form id="f"></form>
+          <button onclick="save()">Save</button>
+          <div id="msg"></div></div>
+        <script>
+        const $=i=>document.getElementById(i);
+        const CSRF=document.querySelector('meta[name=csrf]').content;
+        let KEYS=[];
+        async function load(){
+          const c=await (await fetch("/ui/api/config")).json();
+          KEYS=c.keys; $("path").textContent=c.path;
+          $("f").innerHTML=c.keys.map(k=>
+            `<label>${k}</label><input id="in_${k}" value="${
+              (c.values[k]||"").replace(/"/g,'&quot;')}">`).join("");
+        }
+        async function save(){
+          const b={};
+          KEYS.forEach(k=>{const v=$("in_"+k).value.trim();
+            if(v)b[k]=v;});
+          const r=await fetch("/ui/api/config",{method:"POST",
+            headers:{"content-type":"application/json",
+              "X-CSRF-Token":CSRF},
+            body:JSON.stringify(b)});
+          const j=await r.json();
+          if(r.ok)$("msg").innerHTML=
+            `<span class=ok>saved ${j.saved.join(", ")}</span>`+
+            `<br><span class=k>${j.note}</span>`;
+          else $("msg").innerHTML=`<span class=err>`+
+            Object.entries(j.errors||{"":j.error}).map(
+              ([k,v])=>`${k}: ${v}`).join("<br>")+`</span>`;
+        }
+        load();
+        </script>
         """#
 }
 

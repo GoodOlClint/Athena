@@ -164,6 +164,57 @@ code 303 GET  /ui "$ALICE_TOK"                          # ∌ daemonAdmin → lo
 code 200 GET  /healthz ""                               # always open
 
 echo
+echo "== phase 2.5: WebUI session cookie + RBAC nav + CSRF (M18.1) =="
+# /ui is SESSION-cookie authed (not bearer). admin (daemonAdmin) gets
+# the control shell; a member is bounced to login; mutations require
+# the per-session CSRF token ON TOP of the cookie. The positive POST
+# uses an EMPTY body {} — it clears CSRF + the per-action daemonAdmin
+# re-check and returns 200 while writing NOTHING (keeps this script's
+# "never touches the real config" invariant).
+UIJAR="$D/ui-admin.jar"; UIJAR_A="$D/ui-alice.jar"
+B="http://127.0.0.1:$PORT"
+LC="$(curl -s -o /dev/null -w '%{http_code}' -c "$UIJAR" \
+  -d 'username=admin&password=adminpass1' "$B/ui/login")"
+[ "$LC" = 303 ] && ok "admin /ui/login → 303" \
+  || bad "admin /ui/login → $LC (want 303)"
+grep -q athena_session "$UIJAR" \
+  && ok "session cookie set" || bad "no session cookie"
+DASH="$(curl -s -b "$UIJAR" "$B/ui")"
+echo "$DASH" | grep -q 'class=topbar' \
+  && ok "/ui renders RBAC shell nav" || bad "/ui missing shell nav"
+echo "$DASH" | grep -q 'href="/ui/config"' \
+  && ok "admin nav exposes config (daemonAdmin)" \
+  || bad "admin nav missing config link"
+CSRF="$(curl -s -b "$UIJAR" "$B/ui/config" \
+  | sed -n 's/.*name="csrf" content="\([^"]*\)".*/\1/p' | head -1)"
+[ -n "$CSRF" ] && ok "per-session CSRF token minted in page" \
+  || bad "no CSRF token in config page"
+NC="$(curl -s -o /dev/null -w '%{http_code}' -b "$UIJAR" -X POST \
+  -H 'Content-Type: application/json' -d '{}' "$B/ui/api/config")"
+[ "$NC" = 403 ] && ok "config POST sans CSRF → 403" \
+  || bad "config POST sans CSRF → $NC (want 403)"
+WC="$(curl -s -o /dev/null -w '%{http_code}' -b "$UIJAR" -X POST \
+  -H 'Content-Type: application/json' -H 'X-CSRF-Token: forged' \
+  -d '{}' "$B/ui/api/config")"
+[ "$WC" = 403 ] && ok "config POST bad CSRF → 403" \
+  || bad "config POST bad CSRF → $WC (want 403)"
+GC="$(curl -s -o /dev/null -w '%{http_code}' -b "$UIJAR" -X POST \
+  -H 'Content-Type: application/json' -H "X-CSRF-Token: $CSRF" \
+  -d '{}' "$B/ui/api/config")"
+[ "$GC" = 200 ] && ok "config POST with valid CSRF → 200" \
+  || bad "config POST with valid CSRF → $GC (want 200)"
+curl -s -o /dev/null -c "$UIJAR_A" \
+  -d 'username=alice&password=alicepass1' "$B/ui/login"
+AC="$(curl -s -o /dev/null -w '%{http_code}' -b "$UIJAR_A" "$B/ui")"
+[ "$AC" = 303 ] && ok "member /ui (cookie) → 303 (∌ daemonAdmin)" \
+  || bad "member /ui (cookie) → $AC (want 303)"
+AM="$(curl -s -o /dev/null -w '%{http_code}' -b "$UIJAR_A" -X POST \
+  -H 'Content-Type: application/json' -H 'X-CSRF-Token: x' \
+  -d '{}' "$B/ui/api/config")"
+[ "$AM" = 303 ] && ok "member config POST → 303 (gated pre-handler)" \
+  || bad "member config POST → $AM (want 303)"
+
+echo
 echo "== phase 3: scoped-token downgrade =="
 # boss is an admin USER, but BOSS_SCOPED narrows to member.
 code 403 GET  /metrics "$BOSS_SCOPED"                   # member perms only

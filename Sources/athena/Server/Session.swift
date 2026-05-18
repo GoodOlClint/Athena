@@ -60,6 +60,31 @@ struct Session: Sendable {
         return String(f[0])
     }
 
+    // MARK: - CSRF (M18.1)
+
+    /// Per-session CSRF token = `HMAC(secret, "csrf:" + user)`,
+    /// b64url. Defense-in-depth ON TOP of the HttpOnly +
+    /// SameSite=Strict cookie: a destructive /ui/api/* form/fetch
+    /// must echo this; an off-site page cannot read it (no cookie
+    /// read, no CORS) so it cannot forge the field. Bound to the
+    /// per-process secret (rotates on restart, like the session) and
+    /// to the user (a different account's token won't validate).
+    func csrf(user: String) -> String {
+        let mac = HMAC<SHA256>.authenticationCode(
+            for: Data("csrf:\(user)".utf8), using: secret)
+        return Self.b64url(Data(mac))
+    }
+
+    /// Constant-time CSRF check (HMAC verify on the fixed digest).
+    func validateCSRF(_ token: String?, user: String) -> Bool {
+        guard let token, let mac = Self.unb64url(token) else {
+            return false
+        }
+        return HMAC<SHA256>.isValidAuthenticationCode(
+            mac, authenticating: Data("csrf:\(user)".utf8),
+            using: secret)
+    }
+
     /// Read our cookie out of a `Cookie:` header value.
     static func token(fromCookieHeader header: String?) -> String? {
         guard let header else { return nil }

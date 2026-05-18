@@ -61,14 +61,14 @@ struct AthenaServer {
         }
 
         // Monitoring dashboard (M11.2) — inbound-only.
-        router.get("/ui") { _, _ -> Response in
-            Self.html(Self.uiPage)
+        router.get("/ui") { request, _ -> Response in
+            await handleUIDashboard(request)
         }
         router.get("/ui/api/state") { _, _ -> Response in
             await handleUIState()
         }
-        router.get("/ui/config") { _, _ -> Response in
-            Self.html(Self.configPage)
+        router.get("/ui/config") { request, _ -> Response in
+            await handleUIConfigPage(request)
         }
         router.get("/ui/api/config") { _, _ -> Response in
             await handleUIConfigGet()
