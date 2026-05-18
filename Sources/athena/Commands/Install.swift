@@ -53,7 +53,7 @@ struct Install: AsyncParsableCommand {
 
         let plistData = try LaunchdPlist.xmlData(
             label: label,
-            executablePath: plan.installedBinary.path,
+            executablePath: plan.installedDaemon.path,
             user: serviceUser,
             workingDirectory: plan.workingDir.path,
             config: cfg)

@@ -121,14 +121,15 @@ final class LaunchdPlistTests: XCTestCase {
     func testDefaultProgramArguments() {
         let d = LaunchdPlist.dictionary(
             label: "me.goodolclint.athena",
-            executablePath: "/usr/local/libexec/athena/athena",
+            executablePath: "/usr/local/libexec/athena/athenad",
             user: "svc", workingDirectory: "/usr/local/var/athena",
             config: cfg())
         XCTAssertEqual(
             d["ProgramArguments"] as? [String],
             [
-                "/usr/local/libexec/athena/athena", "load",
-                "--host", "127.0.0.1", "--port", "7447", "--engine", "mlx",
+                "/usr/local/libexec/athena/athenad",
+                "--host", "127.0.0.1", "--port", "7447",
+                "--engine", "mlx",
             ])
         XCTAssertEqual(d["RunAtLoad"] as? Bool, true)
         XCTAssertEqual(d["Label"] as? String, "me.goodolclint.athena")
@@ -149,7 +150,7 @@ final class LaunchdPlistTests: XCTestCase {
         XCTAssertEqual(
             d["ProgramArguments"] as? [String],
             [
-                "/bin/athena", "load", "--host", "127.0.0.1",
+                "/bin/athena", "--host", "127.0.0.1",
                 "--port", "7447", "--budget-bytes", "36000000000",
                 "--engine", "mlx", "--model", "M",
                 "--model-store", "/srv/models",
@@ -183,6 +184,9 @@ final class InstallPlanTests: XCTestCase {
             label: "me.goodolclint.athena")
         XCTAssertEqual(
             plan.installedBinary.path, "/opt/athena/libexec/athena/athena")
+        XCTAssertEqual(
+            plan.installedDaemon.path,
+            "/opt/athena/libexec/athena/athenad")
         XCTAssertEqual(plan.binSymlink.path, "/opt/athena/bin/athena")
         XCTAssertEqual(
             plan.installedConfig.path, "/opt/athena/etc/athena/athena.toml")
@@ -209,6 +213,9 @@ final class InstallPlanTests: XCTestCase {
             label: "l")
         XCTAssertEqual(
             plan.artifactNames(),
-            ["athena", "mlx-swift_Cmlx.bundle", "swift-nio_NIOPosix.bundle"])
+            [
+                "athena", "athenad", "mlx-swift_Cmlx.bundle",
+                "swift-nio_NIOPosix.bundle",
+            ])
     }
 }

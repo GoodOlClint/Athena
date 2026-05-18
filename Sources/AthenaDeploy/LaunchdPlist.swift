@@ -13,8 +13,10 @@ public enum LaunchdPlist {
         workingDirectory: String,
         config: AthenaConfig
     ) -> [String: Any] {
+        // `executablePath` is the `athenad` launcher (M14.2d): it
+        // execs `athena load` itself, so no "load" arg here.
         var args: [String] = [
-            executablePath, "load",
+            executablePath,
             "--host", config.listenHost,
             "--port", String(config.listenPort),
         ]

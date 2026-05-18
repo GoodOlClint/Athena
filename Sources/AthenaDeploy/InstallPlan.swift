@@ -25,6 +25,11 @@ public struct InstallPlan: Sendable, Equatable {
     public var installedBinary: URL {
         libexecDir.appendingPathComponent("athena")
     }
+    /// The daemon launcher installed beside `athena` (launchd points
+    /// here; it execs the sibling `athena load`). M14.2d.
+    public var installedDaemon: URL {
+        libexecDir.appendingPathComponent("athenad")
+    }
     public var binSymlink: URL {
         prefix.appendingPathComponent("bin/athena")
     }
@@ -47,13 +52,16 @@ public struct InstallPlan: Sendable, Equatable {
             "mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib")
     }
 
-    /// Names to copy from `sourceDir`: the `athena` binary plus every
-    /// `*.bundle` resource directory beside it.
-    public func artifactNames(fileManager: FileManager = .default) -> [String] {
+    /// Names to copy from `sourceDir`: the `athena` binary, the
+    /// `athenad` daemon launcher, plus every `*.bundle` resource
+    /// directory beside them.
+    public func artifactNames(fileManager: FileManager = .default)
+        -> [String]
+    {
         let bundles =
-            (try? fileManager.contentsOfDirectory(atPath: sourceDir.path))
-            ?? []
-        return ["athena"]
+            (try? fileManager.contentsOfDirectory(
+                atPath: sourceDir.path)) ?? []
+        return ["athena", "athenad"]
             + bundles.filter { $0.hasSuffix(".bundle") }.sorted()
     }
 }

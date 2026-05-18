@@ -95,21 +95,32 @@ struct Start: AsyncParsableCommand {
         }
         logFH.seekToEndOfFile()
 
-        var args = ["load", "--host", host, "--port", String(port)]
-        if let engine { args += ["--engine", engine] }
-        if let model { args += ["--model", model] }
-        if let dataDir { args += ["--data-dir", dataDir] }
-        if let logLevel { args += ["--log-level", logLevel] }
+        var flags = ["--host", host, "--port", String(port)]
+        if let engine { flags += ["--engine", engine] }
+        if let model { flags += ["--model", model] }
+        if let dataDir { flags += ["--data-dir", dataDir] }
+        if let logLevel { flags += ["--log-level", logLevel] }
         if let syslogRemote {
-            args += ["--syslog-remote", syslogRemote]
+            flags += ["--syslog-remote", syslogRemote]
         }
         if let authKeysFile {
-            args += ["--auth-keys-file", authKeysFile]
+            flags += ["--auth-keys-file", authKeysFile]
         }
 
+        // Spawn the sibling `athenad` daemon (M14.2d); fall back to
+        // re-exec `athena load` in a tree without it.
+        let selfPath = selfExecutable()
+        let daemonPath =
+            (selfPath as NSString).deletingLastPathComponent
+            + "/athenad"
         let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: selfExecutable())
-        proc.arguments = args
+        if FileManager.default.isExecutableFile(atPath: daemonPath) {
+            proc.executableURL = URL(fileURLWithPath: daemonPath)
+            proc.arguments = flags
+        } else {
+            proc.executableURL = URL(fileURLWithPath: selfPath)
+            proc.arguments = ["load"] + flags
+        }
         proc.standardOutput = logFH
         proc.standardError = logFH
         proc.standardInput = FileHandle.nullDevice
