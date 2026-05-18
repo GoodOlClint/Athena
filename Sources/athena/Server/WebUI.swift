@@ -207,6 +207,8 @@ extension AthenaServer {
             label: "daemon", href: "/ui/daemon",
             perm: .daemonAdmin),
         NavItem(
+            label: "users", href: "/ui/users", perm: .usersRead),
+        NavItem(
             label: "config", href: "/ui/config",
             perm: .daemonAdmin),
     ]
@@ -639,6 +641,179 @@ extension AthenaServer {
           load();
         }
         load();
+        </script>
+        """#
+
+    // MARK: - RBAC admin page (M18.4)
+
+    /// User / role / token admin inside the shell. The user table +
+    /// role catalog need `.usersRead`; the create/grant/revoke/
+    /// delete UI shows only with `.usersAdmin`, the token UI only
+    /// with `.tokensAdmin` — and EVERY /ui/api/{users,tokens,roles}
+    /// call re-checks server-side AND runs the M16.4 canGrant /
+    /// last-admin guards against the LOGGED-IN user (cookie-aware
+    /// `callerPermissions`). A freshly minted token is shown ONCE.
+    func handleUIUsersPage(_ request: Request) async -> Response {
+        let c = await uiCaller(request)
+        let csrf = c.user.isEmpty ? "" : session.csrf(user: c.user)
+        let body: String
+        if c.perms.contains(.usersRead) {
+            let ua = c.perms.contains(.usersAdmin) ? "1" : "0"
+            let ta = c.perms.contains(.tokensAdmin) ? "1" : "0"
+            body =
+                "<meta name=\"uadm\" content=\"\(ua)\">"
+                + "<meta name=\"tadm\" content=\"\(ta)\">"
+                + Self.usersBody
+        } else {
+            body =
+                #"<div class="card">insufficient permission "#
+                + #"(need users.read)</div>"#
+        }
+        return Self.html(
+            Self.uiShell(
+                title: "athena · users", user: c.user,
+                csrf: csrf, perms: c.perms,
+                active: "/ui/users", body: body))
+    }
+
+    static let usersBody = #"""
+        <div class="sub">accounts, role grants & API tokens</div>
+        <div class="grid">
+          <div class="card"><h2>Users</h2>
+            <table id="ul"><tr><td class=k>loading…</td></tr>
+            </table></div>
+          <div class="card mua"><h2>Create user</h2>
+            <label>username</label><input id="nu">
+            <label>password (≥ 8)</label>
+            <input id="np" type="password">
+            <label>role</label><input id="nr" value="member">
+            <button onclick="mkUser()">Create</button>
+            <div id="umsg" class="k"></div></div>
+          <div class="card mua"><h2>Grant / revoke role</h2>
+            <label>username</label><input id="gu">
+            <label>role</label><input id="gr">
+            <button onclick="role('grant')">Grant</button>
+            <button onclick="role('revoke')"
+              style="background:#6e40c9">Revoke</button>
+            <div id="gmsg" class="k"></div></div>
+          <div class="card"><h2>Role catalog</h2>
+            <table id="rl"><tr><td class=k>loading…</td></tr>
+            </table></div>
+          <div class="card mta"><h2>Tokens</h2>
+            <table id="tl"><tr><td class=k>loading…</td></tr>
+            </table></div>
+          <div class="card mta"><h2>Mint / revoke token</h2>
+            <label>user</label><input id="tu">
+            <label>scoped role (optional, narrows)</label>
+            <input id="ts">
+            <label>label (optional)</label><input id="tlb">
+            <button onclick="mkTok()">Mint</button>
+            <div id="tok" class="k"></div>
+            <label>revoke by hash prefix (≥ 6 hex)</label>
+            <input id="tp">
+            <button class=danger onclick="rmTok()"
+              style="padding:9px 16px">Revoke</button>
+            <div id="tmsg" class="k"></div></div>
+        </div>
+        <script>
+        const $=i=>document.getElementById(i);
+        const CSRF=document.querySelector('meta[name=csrf]').content;
+        const M=n=>{const e=document.querySelector(
+          'meta[name='+n+']');return e&&e.content==="1";};
+        const UA=M("uadm"),TA=M("tadm");
+        const jget=async u=>(await fetch(u)).json();
+        const jpost=(u,b)=>fetch(u,{method:"POST",headers:{
+          "content-type":"application/json","X-CSRF-Token":CSRF},
+          body:JSON.stringify(b)});
+        const em=j=>(j&&j.error&&j.error.message)||
+          (j&&j.error)||"error";
+        function show(){
+          [...document.querySelectorAll('.mua')].forEach(e=>
+            e.style.display=UA?'':'none');
+          [...document.querySelectorAll('.mta')].forEach(e=>
+            e.style.display=TA?'':'none');
+        }
+        async function users(){
+          const d=await jget("/ui/api/users");
+          $("ul").innerHTML="<tr><th>user</th><th>roles</th>"+
+            (UA?"<th></th>":"")+"</tr>"+
+            ((d.users||[]).map(u=>`<tr><td>${u.username}</td>
+              <td class=k>${(u.roles||[]).join(", ")}</td>`+
+              (UA?`<td><button class=danger onclick=
+                "delUser('${u.username}')">delete</button></td>`:``)+
+              `</tr>`).join("")||
+            "<tr><td class=k>no users</td></tr>");
+        }
+        async function roles(){
+          const d=await jget("/ui/api/roles");
+          $("rl").innerHTML="<tr><th>role</th><th>permissions</th>"+
+            "</tr>"+(d.roles||[]).map(r=>`<tr><td>${r.role}</td>
+            <td class=k>${(r.permissions||[]).join(" ")}</td></tr>`)
+            .join("");
+        }
+        async function toks(){
+          if(!TA)return;
+          const d=await jget("/ui/api/tokens");
+          $("tl").innerHTML="<tr><th>user</th><th>scope</th>"+
+            "<th>prefix</th><th>label</th></tr>"+
+            ((d.tokens||[]).map(t=>`<tr><td>${t.username}</td>
+              <td class=k>${(t.scope||[]).join(",")||"—"}</td>
+              <td class=k>${t.hash_prefix}</td>
+              <td class=k>${t.label||""}</td></tr>`).join("")||
+            "<tr><td class=k>no tokens</td></tr>");
+        }
+        async function mkUser(){
+          const r=await jpost("/ui/api/users",{
+            username:$("nu").value.trim(),
+            password:$("np").value,role:$("nr").value.trim()});
+          const j=await r.json();
+          $("umsg").innerHTML=r.ok?
+            `<span class=ok>created ${j.username}</span>`:
+            `<span class=err>${em(j)}</span>`;
+          if(r.ok)users();
+        }
+        async function delUser(n){
+          if(!confirm("Delete user '"+n+"'?"))return;
+          const r=await jpost("/ui/api/users/delete",{name:n});
+          if(r.ok)users();
+          else{const j=await r.json();alert("failed: "+em(j));}
+        }
+        async function role(act){
+          const r=await jpost("/ui/api/users/role/"+act,{
+            name:$("gu").value.trim(),role:$("gr").value.trim()});
+          const j=await r.json();
+          $("gmsg").innerHTML=r.ok?
+            `<span class=ok>${act} ok</span>`:
+            `<span class=err>${em(j)}</span>`;
+          if(r.ok)users();
+        }
+        async function mkTok(){
+          const b={user:$("tu").value.trim()};
+          const s=$("ts").value.trim();
+          if(s)b.role=[s];
+          const l=$("tlb").value.trim(); if(l)b.label=l;
+          const r=await jpost("/ui/api/tokens",b);
+          const j=await r.json();
+          if(r.ok)$("tok").innerHTML=
+            `<span class=ok>token (shown once):</span><br>`+
+            `<input readonly value="${j.token}" `+
+            `onclick="this.select()" style="margin-top:6px">`;
+          else $("tok").innerHTML=
+            `<span class=err>${em(j)}</span>`;
+          if(r.ok)toks();
+        }
+        async function rmTok(){
+          const p=$("tp").value.trim();
+          if(!confirm("Revoke token(s) with prefix '"+p+"'?"))
+            return;
+          const r=await jpost("/ui/api/tokens/delete",{prefix:p});
+          const j=await r.json();
+          $("tmsg").innerHTML=r.ok?
+            `<span class=ok>revoked ${j.removed}</span>`:
+            `<span class=err>${em(j)}</span>`;
+          if(r.ok)toks();
+        }
+        show();users();roles();toks();
         </script>
         """#
 }

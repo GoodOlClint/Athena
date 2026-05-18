@@ -301,6 +301,62 @@ SC="$(curl -s -o /dev/null -w '%{http_code}' -b "$UIJAR_A" \
   || bad "member admin stop → $SC (want 303)"
 
 echo
+echo "== phase 2.8: WebUI RBAC admin reuse (cookie-aware) (M18.4) =="
+# REGRESSION-CRITICAL: before M18.4 the M16.4 handlers derived the
+# caller from the BEARER header, so a cookie admin got perms=[] and
+# every canGrant failed (403). callerPermissions is now cookie-aware
+# ⇒ the SAME handlers enforce canGrant / last-admin against the
+# LOGGED-IN user.
+UP="$(curl -s -b "$UIJAR" "$B/ui/users")"
+echo "$UP" | grep -q 'href="/ui/users"' \
+  && ok "users nav link present (users.read)" \
+  || bad "users nav link missing"
+curl -s -b "$UIJAR" "$B/ui/api/users" | grep -q '"admin"' \
+  && ok "/ui/api/users lists accounts (reuse)" \
+  || bad "/ui/api/users missing accounts"
+curl -s -b "$UIJAR" "$B/ui/api/roles" | grep -q '"operator"' \
+  && ok "/ui/api/roles catalog (shared impl)" \
+  || bad "/ui/api/roles missing catalog"
+uic 200 GET  "/ui/api/tokens"
+uic 403 POST "/ui/api/users" ""    '{"username":"webu","password":"webpass12","role":"member"}'
+uic 403 POST "/ui/api/users" "bad" '{"username":"webu","password":"webpass12","role":"member"}'
+# the assertion that would have FAILED pre-M18.4 (cookie admin can
+# canGrant member):
+uic 200 POST "/ui/api/users" "$CSRF" \
+  '{"username":"webu","password":"webpass12","role":"member"}'
+uic 200 POST "/ui/api/users/role/grant"  "$CSRF" \
+  '{"name":"webu","role":"operator"}'
+uic 200 POST "/ui/api/users/role/revoke" "$CSRF" \
+  '{"name":"webu","role":"operator"}'
+uic 404 POST "/ui/api/users/delete" "$CSRF" '{"name":"ghost"}'
+uic 200 POST "/ui/api/users/delete" "$CSRF" '{"name":"webu"}'
+# mint a token for bob over the cookie (admin ⊇ member ⇒ allowed),
+# shown once; then revoke it by its own hash prefix.
+TKR="$(curl -s -b "$UIJAR" -X POST -H "X-CSRF-Token: $CSRF" \
+  -H 'Content-Type: application/json' -d '{"user":"bob"}' \
+  "$B/ui/api/tokens")"
+echo "$TKR" | grep -q '"token":"sk-athena-' \
+  && ok "cookie token mint returns secret ONCE" \
+  || bad "cookie token mint missing secret ($TKR)"
+HP="$(printf '%s' "$TKR" | sed -n \
+  's/.*"hash_prefix":"\([0-9a-f]*\)".*/\1/p')"
+uic 200 POST "/ui/api/tokens/delete" "$CSRF" \
+  "{\"prefix\":\"$HP\"}"
+# entry gate: only daemonAdmin reaches /ui* — a readonly user holds
+# users.read but is still bounced (defense-in-depth design).
+curl -s -o /dev/null -c "$D/ui-ro.jar" \
+  -d 'username=ro&password=ropass1234' "$B/ui/login"
+RR="$(curl -s -o /dev/null -w '%{http_code}' -b "$D/ui-ro.jar" \
+  "$B/ui/users")"
+[ "$RR" = 303 ] && ok "readonly /ui/users → 303 (∌ daemonAdmin gate)" \
+  || bad "readonly /ui/users → $RR (want 303)"
+UC="$(curl -s -o /dev/null -w '%{http_code}' -b "$UIJAR_A" -X POST \
+  -H 'X-CSRF-Token: x' -H 'Content-Type: application/json' \
+  -d '{"username":"x","password":"xxxxxxxx"}' "$B/ui/api/users")"
+[ "$UC" = 303 ] && ok "member user-create → 303 (gated pre-handler)" \
+  || bad "member user-create → $UC (want 303)"
+
+echo
 echo "== phase 3: scoped-token downgrade =="
 # boss is an admin USER, but BOSS_SCOPED narrows to member.
 code 403 GET  /metrics "$BOSS_SCOPED"                   # member perms only

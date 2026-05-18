@@ -180,6 +180,47 @@ struct AthenaServer {
             await uiAdminStop(request)
         }
 
+        // RBAC admin console (M18.4). Cookie + per-action
+        // users.admin/tokens.admin re-check + CSRF, then REUSE the
+        // M16.4 handlers (now cookie-aware via callerPermissions) so
+        // server-side canGrant / last-admin / cross-rank guards bind
+        // to the logged-in user. All static literals (name/role/
+        // prefix ride the JSON body, not a :param) ⇒ no trie hazard.
+        router.get("/ui/users") { request, _ -> Response in
+            await handleUIUsersPage(request)
+        }
+        router.get("/ui/api/users") { request, _ -> Response in
+            await uiUsersList(request)
+        }
+        router.post("/ui/api/users") { request, _ -> Response in
+            await uiUserCreate(request)
+        }
+        router.post("/ui/api/users/delete") { request, _
+            -> Response in
+            await uiUserDelete(request)
+        }
+        router.post("/ui/api/users/role/grant") { request, _
+            -> Response in
+            await uiRoleGrant(request)
+        }
+        router.post("/ui/api/users/role/revoke") { request, _
+            -> Response in
+            await uiRoleRevoke(request)
+        }
+        router.get("/ui/api/roles") { request, _ -> Response in
+            await uiRolesList(request)
+        }
+        router.get("/ui/api/tokens") { request, _ -> Response in
+            await uiTokensList(request)
+        }
+        router.post("/ui/api/tokens") { request, _ -> Response in
+            await uiTokenCreate(request)
+        }
+        router.post("/ui/api/tokens/delete") { request, _
+            -> Response in
+            await uiTokenDelete(request)
+        }
+
         // WebUI session login (M12.2). /ui/login + /ui/logout are
         // open (AuthPolicy); the rest of /ui* needs the cookie.
         router.get("/ui/login") { _, _ -> Response in
@@ -367,14 +408,7 @@ struct AthenaServer {
                 context.parameters.get("role"), request)
         }
         router.get("/api/roles") { _, _ -> Response in
-            Self.json(
-                RolesResponse(
-                    roles: RBAC.roleNames.map { r in
-                        RoleCatalogEntry(
-                            role: r,
-                            permissions: (RBAC.catalog[r] ?? [])
-                                .map(\.rawValue).sorted())
-                    }))
+            Self.rolesCatalogResponse()
         }
         router.get("/api/tokens") { _, _ -> Response in
             await handleTokensList()
@@ -1791,20 +1825,32 @@ struct AthenaServer {
 
     /// The CALLER's effective permission set. Auth-off loopback is a
     /// single trusted operator (mirrors the offline CLI's implicit-
-    /// admin grantor). With auth on, a missing/invalid bearer ⇒ empty
-    /// set ⇒ every escalation check fails closed (AuthMiddleware has
-    /// already gated the route, so this is defense-in-depth).
+    /// admin grantor). With auth on: a Bearer resolves to its
+    /// subject; ELSE (M18.4) a valid WebUI session cookie resolves
+    /// to the logged-in user's role-perms, so the SAME M16.4 RBAC
+    /// handlers (canGrant / last-admin / cross-rank guards) enforce
+    /// against the cookie user when reused by /ui — never the page.
+    /// Bearer `/api/*` requests carry no cookie ⇒ unchanged.
+    /// Anything unresolved ⇒ empty set ⇒ every escalation check
+    /// fails closed (AuthMiddleware already gated the route too).
     private func callerPermissions(_ request: Request) async
         -> Set<Permission>
     {
         guard auth.isEnabled else { return Set(Permission.allCases) }
-        guard
-            let h = request.headers[.authorization],
+        if let h = request.headers[.authorization],
             h.hasPrefix("Bearer "),
             case let tok = String(h.dropFirst(7)), !tok.isEmpty,
             let s = await auth.resolve(bearer: tok)
-        else { return [] }
-        return s.permissions
+        {
+            return s.permissions
+        }
+        if let ck = Session.token(
+            fromCookieHeader: request.headers[.cookie]),
+            let user = session.validate(ck)
+        {
+            return await auth.permissions(forUser: user)
+        }
+        return []
     }
 
     /// Bare identifier guard for network input (username/role names):
@@ -2127,6 +2173,105 @@ struct AthenaServer {
         Self.error(
             status: .forbidden, message: msg,
             type: "auth_error", code: "forbidden")
+    }
+
+    /// The compiled-in RBAC role→perms catalog. Shared by
+    /// `GET /api/roles` (bearer) and `/ui/api/roles` (cookie).
+    private static func rolesCatalogResponse() -> Response {
+        Self.json(
+            RolesResponse(
+                roles: RBAC.roleNames.map { r in
+                    RoleCatalogEntry(
+                        role: r,
+                        permissions: (RBAC.catalog[r] ?? [])
+                            .map(\.rawValue).sorted())
+                }))
+    }
+
+    // MARK: - WebUI RBAC admin reuse (M18.4)
+
+    /// Small `{key:value}` JSON body → map (for the name/role/prefix
+    /// the M16.4 handlers take as path params over `/api/*`; the
+    /// cookie /ui passes them in the body instead). Only consumed
+    /// for delete/grant/revoke — handlers that DON'T re-read the
+    /// body; create/token-create are passed the Request untouched so
+    /// they decode their own typed DTO.
+    private func uiJSONMap(_ r: Request) async -> [String: String] {
+        guard
+            let buf = try? await r.body.collect(upTo: 64 * 1024),
+            let m = try? JSONDecoder().decode(
+                [String: String].self, from: Data(buffer: buf))
+        else { return [:] }
+        return m
+    }
+
+    /// Cookie + per-action perm re-check (+ CSRF when `mutating`),
+    /// then run `op`. Reuses the M16.4 handlers as-is: their inner
+    /// `callerPermissions` is now cookie-aware (M18.4) so canGrant /
+    /// last-admin / cross-rank guards bind to the LOGGED-IN user.
+    private func uiRBAC(
+        _ r: Request, _ need: Permission, mutating: Bool,
+        _ op: (Request) async -> Response
+    ) async -> Response {
+        if mutating, !csrfOK(r) {
+            return Self.uiDeny("csrf token missing or invalid")
+        }
+        guard await uiCaller(r).perms.contains(need) else {
+            return Self.uiDeny("need \(need.rawValue)")
+        }
+        return await op(r)
+    }
+
+    private func uiUsersList(_ r: Request) async -> Response {
+        await uiRBAC(r, .usersRead, mutating: false) { _ in
+            await self.handleUsersList()
+        }
+    }
+    private func uiRolesList(_ r: Request) async -> Response {
+        await uiRBAC(r, .usersRead, mutating: false) { _ in
+            Self.rolesCatalogResponse()
+        }
+    }
+    private func uiUserCreate(_ r: Request) async -> Response {
+        await uiRBAC(r, .usersAdmin, mutating: true) { req in
+            await self.handleUserCreate(req)
+        }
+    }
+    private func uiUserDelete(_ r: Request) async -> Response {
+        await uiRBAC(r, .usersAdmin, mutating: true) { req in
+            let f = await self.uiJSONMap(req)
+            return await self.handleUserDelete(f["name"], req)
+        }
+    }
+    private func uiRoleGrant(_ r: Request) async -> Response {
+        await uiRBAC(r, .usersAdmin, mutating: true) { req in
+            let f = await self.uiJSONMap(req)
+            return await self.handleRoleGrant(
+                f["name"], f["role"], req)
+        }
+    }
+    private func uiRoleRevoke(_ r: Request) async -> Response {
+        await uiRBAC(r, .usersAdmin, mutating: true) { req in
+            let f = await self.uiJSONMap(req)
+            return await self.handleRoleRevoke(
+                f["name"], f["role"], req)
+        }
+    }
+    private func uiTokensList(_ r: Request) async -> Response {
+        await uiRBAC(r, .tokensAdmin, mutating: false) { _ in
+            await self.handleTokensList()
+        }
+    }
+    private func uiTokenCreate(_ r: Request) async -> Response {
+        await uiRBAC(r, .tokensAdmin, mutating: true) { req in
+            await self.handleTokenCreate(req)
+        }
+    }
+    private func uiTokenDelete(_ r: Request) async -> Response {
+        await uiRBAC(r, .tokensAdmin, mutating: true) { req in
+            let f = await self.uiJSONMap(req)
+            return await self.handleTokenDelete(f["prefix"])
+        }
     }
 
     // MARK: - Response helpers
