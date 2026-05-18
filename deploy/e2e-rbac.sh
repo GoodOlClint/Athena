@@ -450,6 +450,65 @@ else
 fi
 
 echo
+echo "== phase 10: remote RBAC admin via the CLIENT (M17.2) =="
+# Same portable client, the /api/users|tokens|roles surface. Asserts
+# the server's users.read/users.admin/tokens.admin gating + canGrant
+# + last-admin protection is faithfully surfaced as the client's
+# EXIT STATUS (no client-side trust).
+if [ ! -x "$CLIENT" ]; then
+  echo "  skip (no portable client at $CLIENT)"
+elif start_daemon "$D2" 127.0.0.1; then
+  # read = users.read (admin, readonly); member lacks it => 403
+  clic 0  "auth user list (admin)"        auth user list --key "$A2"
+  clic 0  "auth user list (readonly)"     auth user list --key "$R2"
+  clic nz "auth user list (member=403)"   auth user list --key "$M2"
+  clic 0  "auth role list (readonly)"     auth role list --key "$R2"
+  clic nz "auth role list (member=403)"   auth role list --key "$M2"
+  # users.admin: create/delete/grant (admin only)
+  clic nz "auth user add (readonly=403)"  auth user add e2c \
+    --password pw12345678 --role member --key "$R2"
+  clic 0  "auth user add (admin)"         auth user add e2c \
+    --password pw12345678 --role member --key "$A2"
+  clic 0  "auth role grant (admin)"  auth role grant e2c operator --key "$A2"
+  clic nz "auth role grant bad role=400" auth role grant e2c nope --key "$A2"
+  clic nz "auth role grant ghost=404" auth role grant gh member --key "$A2"
+  clic 0  "auth role revoke (admin)" auth role revoke e2c operator --key "$A2"
+  clic 0  "auth user rm e2c (admin)"      auth user rm e2c --key "$A2"
+  clic nz "auth user rm e2c again=404"    auth user rm e2c --key "$A2"
+  # tokens.admin only
+  clic nz "auth list tokens (member=403)" auth list --key "$M2"
+  clic nz "auth list tokens (readonly=403)" auth list --key "$R2"
+  clic 0  "auth list tokens (admin)"      auth list --key "$A2"
+  clic nz "auth token add (readonly=403)" auth token add --user mem --key "$R2"
+  clic 0  "auth token add (admin)"        auth token add --user mem --key "$A2"
+  clic nz "auth rm bogus prefix=404"      auth rm deadbeef9999 --key "$A2"
+  clic nz "auth rm short prefix=400"      auth rm abc --key "$A2"
+  # last-admin protection over HTTP, surfaced by the client.
+  clic nz "auth user rm sole admin=403"   auth user rm admin --key "$A2"
+  clic nz "auth role revoke sole admin=403" \
+    auth role revoke admin admin --key "$A2"
+  # The client must render server data (a positive token delete too).
+  UO="$("$CLIENT" auth user list --host 127.0.0.1 --port "$PORT" \
+    --key "$A2" 2>/dev/null)"
+  echo "$UO" | grep -q 'admin' \
+    && ok "client auth user list renders accounts" \
+    || bad "client user list missing admin ($UO)"
+  HP="$(curl -s -X POST "http://127.0.0.1:$PORT/api/tokens" \
+    -H "Authorization: Bearer $A2" -H 'Content-Type: application/json' \
+    -d '{"user":"mem","label":"p10"}' \
+    | grep -o '"hash_prefix":"[0-9a-f]*"' | sed 's/.*:"//;s/"//')"
+  if [ -n "$HP" ]; then
+    clic 0 "auth rm real prefix (admin)" auth rm "$HP" --key "$A2"
+  else
+    bad "could not mint a token to delete"
+  fi
+  stop_daemon
+else
+  bad "daemon failed to start for RBAC client phase"
+  cat "$D/daemon.log"
+fi
+
+echo
 echo "════════════════════════════════════════"
 echo "  PASS=$PASS  FAIL=$FAIL"
 echo "════════════════════════════════════════"

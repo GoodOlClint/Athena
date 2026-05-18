@@ -12,14 +12,20 @@ import Foundation
 // Portable client surface (M14.2a). Server-side `auth add/list/rm` and
 // `auth user …` stay in the daemon binary.
 
-/// `athena auth …` on the thin client: only the credential-management
-/// verbs. (`athenad auth` additionally exposes add/list/rm/user.)
+/// `athena auth …` on the portable client: this host's stored bearer
+/// key (login/logout/status) PLUS remote RBAC administration of a
+/// daemon (M17.2 — user/role/token over `/api/*`; the server enforces
+/// RBAC). On macOS the same `auth user/role/token` are the LOCAL
+/// offline verbs and route to the remote ones when `--host` is
+/// off-box.
 public struct AuthClient: AsyncParsableCommand {
     public static let configuration = CommandConfiguration(
         commandName: "auth",
-        abstract: "Manage this host's stored daemon bearer key.",
+        abstract: "Stored daemon key + remote RBAC administration.",
         subcommands: [
             AuthLogin.self, AuthLogout.self, AuthStatus.self,
+            CAuthUser.self, CAuthRole.self, CAuthToken.self,
+            CAuthList.self, CAuthRemove.self,
         ])
     public init() {}
 }

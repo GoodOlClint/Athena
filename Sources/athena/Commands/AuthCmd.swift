@@ -104,8 +104,16 @@ struct AuthUserAdd: AsyncParsableCommand {
     var role: String = "member"
     @Option(help: "Data dir (default: configured / ~/.athena).")
     var dataDir: String?
+    @OptionGroup var daemon: DaemonOptions
 
     func run() async throws {
+        if daemon.isRemote {
+            let pw = RemoteAuth.resolvePassword(password)
+            try await RemoteAuth.userCreate(
+                daemon, username: username, password: pw,
+                role: role)
+            return
+        }
         requireValidRole(role)
         let pw: String
         if let password, !password.isEmpty {
@@ -148,7 +156,12 @@ struct AuthUserList: AsyncParsableCommand {
         commandName: "list", abstract: "List accounts and roles.")
     @Option(help: "Data dir (default: configured / ~/.athena).")
     var dataDir: String?
+    @OptionGroup var daemon: DaemonOptions
     func run() async throws {
+        if daemon.isRemote {
+            try await RemoteAuth.usersList(daemon)
+            return
+        }
         guard let db = try? AthenaStore(path: storeDBPath(dataDir))
         else {
             print("no store at \(storeDBPath(dataDir).path)")
@@ -173,7 +186,13 @@ struct AuthUserRemove: AsyncParsableCommand {
     @Argument(help: "Username.") var username: String
     @Option(help: "Data dir (default: configured / ~/.athena).")
     var dataDir: String?
+    @OptionGroup var daemon: DaemonOptions
     func run() async throws {
+        if daemon.isRemote {
+            try await RemoteAuth.userDelete(
+                daemon, username: username)
+            return
+        }
         guard let db = try? AthenaStore(path: storeDBPath(dataDir))
         else {
             FailableExit.die(
@@ -190,8 +209,32 @@ struct AuthUserRemove: AsyncParsableCommand {
 struct AuthRole: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "role",
-        abstract: "Grant or revoke a role on a user.",
-        subcommands: [AuthRoleGrant.self, AuthRoleRevoke.self])
+        abstract: "Grant or revoke a role; list the role catalog.",
+        subcommands: [
+            AuthRoleGrant.self, AuthRoleRevoke.self,
+            AuthRoleList.self,
+        ])
+}
+
+/// `athena auth role list` — the role → permission catalog. Local:
+/// the compiled-in `RBAC` catalog (no daemon needed). Off-box: the
+/// daemon's `GET /api/roles` (M17.2).
+struct AuthRoleList: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "list",
+        abstract: "List the role → permission catalog.")
+    @OptionGroup var daemon: DaemonOptions
+    func run() async throws {
+        if daemon.isRemote {
+            try await RemoteAuth.rolesList(daemon)
+            return
+        }
+        for r in RBAC.roleNames {
+            let perms = (RBAC.catalog[r] ?? [])
+                .map(\.rawValue).sorted()
+            print("\(r)\t[\(perms.joined(separator: ", "))]")
+        }
+    }
 }
 
 struct AuthRoleGrant: AsyncParsableCommand {
@@ -201,7 +244,13 @@ struct AuthRoleGrant: AsyncParsableCommand {
     @Argument(help: "Role to grant.") var role: String
     @Option(help: "Data dir (default: configured / ~/.athena).")
     var dataDir: String?
+    @OptionGroup var daemon: DaemonOptions
     func run() async throws {
+        if daemon.isRemote {
+            try await RemoteAuth.roleGrant(
+                daemon, username: user, role: role)
+            return
+        }
         requireValidRole(role)
         guard
             RBAC.canGrant(
@@ -232,7 +281,13 @@ struct AuthRoleRevoke: AsyncParsableCommand {
     @Argument(help: "Role to revoke.") var role: String
     @Option(help: "Data dir (default: configured / ~/.athena).")
     var dataDir: String?
+    @OptionGroup var daemon: DaemonOptions
     func run() async throws {
+        if daemon.isRemote {
+            try await RemoteAuth.roleRevoke(
+                daemon, username: user, role: role)
+            return
+        }
         let db = openStore(dataDir)
         if role == "admin" {
             await guardLastAdmin(db, losing: user)
@@ -268,8 +323,14 @@ struct AuthTokenAdd: AsyncParsableCommand {
     var label: String?
     @Option(help: "Data dir (default: configured / ~/.athena).")
     var dataDir: String?
+    @OptionGroup var daemon: DaemonOptions
 
     func run() async throws {
+        if daemon.isRemote {
+            try await RemoteAuth.tokenCreate(
+                daemon, user: user, roles: role, label: label)
+            return
+        }
         for r in role { requireValidRole(r) }
         let db = openStore(dataDir)
         guard await db.getUser(username: user) != nil else {
@@ -323,8 +384,13 @@ struct AuthList: AsyncParsableCommand {
         abstract: "List tokens: user, scope, hash prefix (no secrets).")
     @Option(help: "Data dir (default: configured / ~/.athena).")
     var dataDir: String?
+    @OptionGroup var daemon: DaemonOptions
 
     func run() async throws {
+        if daemon.isRemote {
+            try await RemoteAuth.tokensList(daemon)
+            return
+        }
         guard let db = try? AthenaStore(path: storeDBPath(dataDir))
         else {
             print("no store at \(storeDBPath(dataDir).path)")
@@ -351,8 +417,13 @@ struct AuthRemove: AsyncParsableCommand {
     @Argument(help: "Hash hex prefix (>= 6 chars).") var prefix: String
     @Option(help: "Data dir (default: configured / ~/.athena).")
     var dataDir: String?
+    @OptionGroup var daemon: DaemonOptions
 
     func run() async throws {
+        if daemon.isRemote {
+            try await RemoteAuth.tokenDelete(daemon, prefix: prefix)
+            return
+        }
         guard prefix.count >= 6 else {
             FailableExit.die("error: prefix must be >= 6 hex chars")
         }
