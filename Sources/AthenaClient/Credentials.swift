@@ -8,7 +8,7 @@ import Foundation
 /// Portable by design: the Keychain calls are `#if os(macOS)`-gated;
 /// other platforms resolve via flag/env only (a future portable
 /// client target compiles unchanged).
-enum Secrets {
+public enum Secrets {
     static let service = "athena"
 
     #if os(macOS)
@@ -34,7 +34,7 @@ enum Secrets {
             )
         }
 
-        static func read(account: String) -> String? {
+        public static func read(account: String) -> String? {
             let (rc, val) = security([
                 "find-generic-password", "-s", service, "-a",
                 account, "-w",
@@ -42,7 +42,7 @@ enum Secrets {
             return rc == 0 && !val.isEmpty ? val : nil
         }
 
-        static func store(
+        public static func store(
             _ value: String, account: String
         ) throws {
             // -U updates an existing item rather than erroring.
@@ -57,19 +57,21 @@ enum Secrets {
         }
 
         @discardableResult
-        static func remove(account: String) -> Bool {
+        public static func remove(account: String) -> Bool {
             security([
                 "delete-generic-password", "-s", service, "-a",
                 account,
             ]).0 == 0
         }
     #else
-        static func read(account: String) -> String? { nil }
-        static func store(_ value: String, account: String) throws {
+        public static func read(account: String) -> String? { nil }
+        public static func store(_ value: String, account: String)
+            throws
+        {
             throw CredentialError.unsupported
         }
         @discardableResult
-        static func remove(account: String) -> Bool { false }
+        public static func remove(account: String) -> Bool { false }
     #endif
 }
 
@@ -78,7 +80,7 @@ enum Secrets {
 /// `ATHENA_KEY` env > the platform secret store > none. One Keychain
 /// item per daemon endpoint, so local + remote daemons keep distinct
 /// keys. M12.3 (now backed by the keyed `Secrets` store, M13).
-enum Credentials {
+public enum Credentials {
     private static func account(_ host: String, _ port: Int)
         -> String
     {
@@ -86,7 +88,7 @@ enum Credentials {
     }
 
     /// Resolve the bearer key for a daemon endpoint, or nil.
-    static func resolve(
+    public static func resolve(
         explicit: String?, host: String, port: Int
     ) -> String? {
         if let explicit, !explicit.isEmpty { return explicit }
@@ -98,18 +100,20 @@ enum Credentials {
         return Secrets.read(account: account(host, port))
     }
 
-    static func keychainRead(host: String, port: Int) -> String? {
+    public static func keychainRead(host: String, port: Int)
+        -> String?
+    {
         Secrets.read(account: account(host, port))
     }
 
-    static func store(
+    public static func store(
         _ key: String, host: String, port: Int
     ) throws {
         try Secrets.store(key, account: account(host, port))
     }
 
     @discardableResult
-    static func remove(host: String, port: Int) -> Bool {
+    public static func remove(host: String, port: Int) -> Bool {
         Secrets.remove(account: account(host, port))
     }
 }
@@ -120,7 +124,7 @@ enum Credentials {
 /// integration is: resolve a stored token and export it to the env
 /// before any `#hubDownloader()` — exactly the `HF_HOME` convention
 /// in `serve`. An operator-set token env is NEVER overridden.
-enum HFAuth {
+public enum HFAuth {
     /// Keychain account under the shared `athena` service.
     static let account = "hf:token"
 
@@ -135,7 +139,7 @@ enum HFAuth {
 
     /// Precedence: explicit > HF_TOKEN / HUGGING_FACE_HUB_TOKEN env >
     /// Keychain. (Token files are left to the Hub client itself.)
-    static func resolve(explicit: String? = nil) -> String? {
+    public static func resolve(explicit: String? = nil) -> String? {
         if let explicit, !explicit.isEmpty { return explicit }
         if let t = envToken() { return t }
         return Secrets.read(account: account)
@@ -144,7 +148,7 @@ enum HFAuth {
     /// If no token env is already set, export a Keychain-stored token
     /// as `HF_TOKEN` so the Hub client picks it up. Operator env wins
     /// (never overridden), mirroring the `HF_HOME` rule in `serve`.
-    static func exportToEnv() {
+    public static func exportToEnv() {
         if envToken() != nil { return }
         if let t = Secrets.read(account: account), !t.isEmpty {
             setenv("HF_TOKEN", t, 1)
@@ -153,7 +157,7 @@ enum HFAuth {
 
     /// How `resolve()` would source the token, for `hf status`
     /// (no secret printed).
-    static func source() -> String {
+    public static func source() -> String {
         let e = ProcessInfo.processInfo.environment
         if let t = e["HF_TOKEN"], !t.isEmpty {
             return "HF_TOKEN env"
@@ -165,12 +169,14 @@ enum HFAuth {
         return "none (run `athena hf login`, or set HF_TOKEN)"
     }
 
-    static func store(_ token: String) throws {
+    public static func store(_ token: String) throws {
         try Secrets.store(token, account: account)
     }
 
     @discardableResult
-    static func remove() -> Bool { Secrets.remove(account: account) }
+    public static func remove() -> Bool {
+        Secrets.remove(account: account)
+    }
 }
 
 /// Egress-proxy Basic-auth credentials (M13.2). One global proxy ⇒ a
@@ -178,12 +184,12 @@ enum HFAuth {
 /// Stored via `athena proxy login`; never written to disk in
 /// plaintext. Inline `user:pass@host` in the proxy URL is also
 /// accepted, but a Keychain credential takes precedence.
-enum ProxyAuth {
+public enum ProxyAuth {
     static let account = "proxy:auth"
 
     /// (user, pass) split on the FIRST `:`; usernames containing a
     /// colon are unsupported (documented).
-    static func read() -> (user: String, pass: String)? {
+    public static func read() -> (user: String, pass: String)? {
         guard let raw = Secrets.read(account: account),
             let i = raw.firstIndex(of: ":")
         else { return nil }
@@ -192,22 +198,24 @@ enum ProxyAuth {
         return u.isEmpty ? nil : (u, p)
     }
 
-    static func store(user: String, pass: String) throws {
+    public static func store(user: String, pass: String) throws {
         try Secrets.store("\(user):\(pass)", account: account)
     }
 
     @discardableResult
-    static func remove() -> Bool { Secrets.remove(account: account) }
+    public static func remove() -> Bool {
+        Secrets.remove(account: account)
+    }
 
-    static func source() -> String {
+    public static func source() -> String {
         read() != nil ? "Keychain" : "none (inline URL or unset)"
     }
 }
 
-enum CredentialError: Error, CustomStringConvertible {
+public enum CredentialError: Error, CustomStringConvertible {
     case keychain(String)
     case unsupported
-    var description: String {
+    public var description: String {
         switch self {
         case .keychain(let m): return m
         case .unsupported:

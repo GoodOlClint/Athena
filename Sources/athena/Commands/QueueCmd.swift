@@ -1,4 +1,5 @@
 import ArgumentParser
+import AthenaClient
 import Foundation
 
 /// `athena queue …` — manage the async request queue (M9.1). Thin

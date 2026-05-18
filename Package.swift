@@ -160,12 +160,28 @@ let package = Package(
             path: "Sources/AthenaStore",
             linkerSettings: [.linkedLibrary("sqlite3")]),
 
+        // Portable client surface (M14.1): Keychain `Secrets`,
+        // `Credentials`/`HFAuth`/`ProxyAuth`, `DaemonOptions`, the
+        // `HTTPClient`. Foundation + ArgumentParser only; the
+        // AthenaCore dep (for `GovernorConfig.defaultPort`) is
+        // temporary — severed in M14.3 for the Linux build.
+        .target(
+            name: "AthenaClient",
+            dependencies: [
+                "AthenaCore",
+                .product(
+                    name: "ArgumentParser",
+                    package: "swift-argument-parser"),
+            ],
+            path: "Sources/AthenaClient"),
+
         // The `athena` executable: CLI (serve/run/pull/list/ps/...) and the
         // governed HTTP surface.
         .executableTarget(
             name: "athena",
             dependencies: [
                 "AthenaCore",
+                "AthenaClient",
                 "AthenaDeploy",
                 "AthenaLLM",
                 "AthenaStructured",
@@ -188,8 +204,9 @@ let package = Package(
         .testTarget(
             name: "AthenaCoreTests",
             dependencies: [
-                "AthenaCore", "AthenaDeploy", "AthenaLLM", "AthenaModels",
-                "AthenaStructured", "AthenaTranscription", "AthenaEmbedding",
+                "AthenaCore", "AthenaClient", "AthenaDeploy",
+                "AthenaLLM", "AthenaModels", "AthenaStructured",
+                "AthenaTranscription", "AthenaEmbedding",
                 "AthenaStore",
             ],
             path: "Tests/AthenaCoreTests",

@@ -1,4 +1,5 @@
 import ArgumentParser
+import AthenaClient
 import Foundation
 
 /// `athena vectors …` — drive the built-in vector DB (M9.2). Thin HTTP

@@ -1,3 +1,4 @@
+import AthenaClient
 import AthenaDeploy
 import Foundation
 
