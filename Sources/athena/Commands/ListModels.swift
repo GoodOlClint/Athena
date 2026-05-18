@@ -1,9 +1,10 @@
 import ArgumentParser
+import AthenaClient
 import AthenaLLM
 import Foundation
 
 /// `athena list` (alias `ls`) — local models in the store, ollama-style.
-struct ListModels: ParsableCommand {
+struct ListModels: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "list",
         abstract: "List models available in the local model store.",
@@ -13,7 +14,13 @@ struct ListModels: ParsableCommand {
     @Option(help: "Model store root. Default: external SSD mlx-models.")
     var modelStore: String?
 
-    func run() throws {
+    @OptionGroup var daemon: DaemonOptions
+
+    func run() async throws {
+        if daemon.isRemote {
+            try await RemoteModels.list(daemon)
+            return
+        }
         let root =
             modelStore.map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? ModelStore.defaultRoot

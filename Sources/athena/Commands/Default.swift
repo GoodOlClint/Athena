@@ -1,4 +1,5 @@
 import ArgumentParser
+import AthenaClient
 import AthenaDeploy
 import AthenaLLM
 import Foundation
@@ -17,7 +18,18 @@ struct Default: AsyncParsableCommand {
     @Option(help: "Config file (overrides auto-resolution).")
     var config: String?
 
+    @OptionGroup var daemon: DaemonOptions
+
     func run() async throws {
+        if daemon.isRemote {
+            if let name {
+                try await RemoteModels.setDefault(
+                    daemon, name: name)
+            } else {
+                try await RemoteModels.getDefault(daemon)
+            }
+            return
+        }
         let url = ConfigEditor.resolvePath(config)
         if let name {
             ConfigEditor.setScalar(key: "model", value: name, in: url)

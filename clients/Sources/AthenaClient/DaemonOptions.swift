@@ -25,6 +25,22 @@ public struct DaemonOptions: ParsableArguments {
     public var authKey: String? {
         Credentials.resolve(explicit: key, host: host, port: port)
     }
+
+    /// True when `--host` points OFF-BOX. The macOS full `athena`
+    /// overloads its local model/RBAC verbs: a loopback host keeps the
+    /// pre-existing LOCAL behavior (operate on this box's store/DB
+    /// directly); an off-box host routes the SAME verb to that
+    /// daemon's `/api/*` over HTTP. The portable client has no local
+    /// path, so its command structs always go remote regardless of
+    /// this. Loopback = `127.0.0.1` / `localhost` / `::1` (the address
+    /// `athena start` binds by default).
+    public var isRemote: Bool {
+        !Self.loopback.contains(host.lowercased())
+    }
+
+    private static let loopback: Set<String> = [
+        "127.0.0.1", "localhost", "::1", "[::1]",
+    ]
 }
 
 /// Minimal JSON HTTP helpers for the thin-client subcommands.

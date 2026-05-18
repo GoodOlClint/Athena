@@ -1,9 +1,10 @@
 import ArgumentParser
+import AthenaClient
 import AthenaLLM
 import Foundation
 
 /// `athena rm MODEL` — delete a model directory from the store.
-struct Rm: ParsableCommand {
+struct Rm: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "rm",
         abstract: "Remove a model from the local model store."
@@ -15,7 +16,13 @@ struct Rm: ParsableCommand {
     @Option(help: "Model store root. Default: external SSD mlx-models.")
     var modelStore: String?
 
-    func run() throws {
+    @OptionGroup var daemon: DaemonOptions
+
+    func run() async throws {
+        if daemon.isRemote {
+            try await RemoteModels.remove(daemon, name: model)
+            return
+        }
         let root =
             modelStore.map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? ModelStore.defaultRoot
@@ -36,7 +43,7 @@ struct Rm: ParsableCommand {
 }
 
 /// `athena show MODEL` — print a model's config + on-disk size.
-struct Show: ParsableCommand {
+struct Show: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "show",
         abstract: "Show a model's config and size."
@@ -48,7 +55,13 @@ struct Show: ParsableCommand {
     @Option(help: "Model store root. Default: external SSD mlx-models.")
     var modelStore: String?
 
-    func run() throws {
+    @OptionGroup var daemon: DaemonOptions
+
+    func run() async throws {
+        if daemon.isRemote {
+            try await RemoteModels.show(daemon, name: model)
+            return
+        }
         let root =
             modelStore.map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? ModelStore.defaultRoot

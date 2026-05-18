@@ -385,6 +385,71 @@ code 403 DELETE /api/users/admin/roles/admin "$A2"  # revoke sole admin
 stop_daemon
 
 echo
+echo "== phase 9: remote model verbs via the CLIENT (M17.1) =="
+# Prove the portable `athena` (RemoteModels over /api/models) surfaces
+# the server's RBAC outcome as the client's EXIT STATUS. The portable
+# client always takes the HTTP path (no local daemon off-Apple); the
+# macOS overload reuses the SAME RemoteModels code when --host is
+# off-box. Build it with:  (cd clients && swift build) — or set
+# ATHENA_CLIENT. Skipped (not failed) when absent, so CI without the
+# portable build still passes the curl phases.
+CLIENT="${ATHENA_CLIENT:-clients/.build/debug/athena}"
+clic() { # WANT(0|nz) DESC SUBCMD ARGS...
+  local want="$1" desc="$2"
+  shift 2
+  "$CLIENT" "$@" --host 127.0.0.1 --port "$PORT" \
+    >/dev/null 2>&1
+  local got=$?
+  if [ "$want" = 0 ]; then
+    if [ "$got" -eq 0 ]; then ok "$desc (rc=0)"
+    else bad "$desc (rc=${got}, want 0)"; fi
+  else
+    if [ "$got" -ne 0 ]; then ok "$desc (rc=${got} nonzero)"
+    else bad "$desc (rc=0, want nonzero)"; fi
+  fi
+}
+if [ ! -x "$CLIENT" ]; then
+  echo "  skip (no portable client at $CLIENT — build: cd clients"\
+       "&& swift build)"
+else
+  # Re-seed fake-model: phase 3.7's real prune legitimately removed it
+  # (0-byte safetensors ⇒ "truncated" ⇒ broken). Phase 9 needs a model
+  # present, independent of earlier phases.
+  mkdir -p "$MSTORE/fake-model"
+  printf '{"model_type":"test","hidden_size":8}' \
+    > "$MSTORE/fake-model/config.json"
+  : > "$MSTORE/fake-model/model.safetensors"
+  if start_daemon "$D2" 127.0.0.1; then
+  # read = model.read (admin, readonly); member lacks model.read => 403
+  clic 0  "client list (admin -> model.read)"    list --key "$A2"
+  clic 0  "client list (readonly -> model.read)" list --key "$R2"
+  clic nz "client list (member !model.read=403)" list --key "$M2"
+  clic 0  "client show fake-model (readonly)"  show fake-model --key "$R2"
+  clic nz "client show ghost (404 surfaced)"   show ghost --key "$R2"
+  clic 0  "client default get (readonly)"       default --key "$R2"
+  clic nz "client default set (member !write)"  default zz --key "$M2"
+  clic nz "client cp (member !model.write=403)" cp fake-model c9 --key "$M2"
+  clic 0  "client cp (admin -> model.write)"    cp fake-model c9 --key "$A2"
+  clic 0  "client rm c9 (admin)"                rm c9 --key "$A2"
+  clic nz "client rm c9 again (404 surfaced)"   rm c9 --key "$A2"
+  # The client must render the server's data, not merely exit 0.
+  # Asserted BEFORE the prune submit so the async prune worker can't
+  # race-delete the (deliberately broken) seed first.
+  LO="$("$CLIENT" list --host 127.0.0.1 --port "$PORT" \
+    --key "$A2" 2>/dev/null)"
+  echo "$LO" | grep -q 'fake-model' \
+    && ok "client list renders the seeded model" \
+    || bad "client list missing fake-model ($LO)"
+  clic nz "client prune (member !model.write)"  prune --key "$M2"
+  clic 0  "client prune submit (admin -> job)"  prune --key "$A2"
+  stop_daemon
+  else
+    bad "daemon failed to start for client phase"
+    cat "$D/daemon.log"
+  fi
+fi
+
+echo
 echo "════════════════════════════════════════"
 echo "  PASS=$PASS  FAIL=$FAIL"
 echo "════════════════════════════════════════"

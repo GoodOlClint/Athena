@@ -24,7 +24,15 @@ struct Cp: AsyncParsableCommand {
     @Option(help: "Model store root. Default: external SSD mlx-models.")
     var modelStore: String?
 
+    @OptionGroup var daemon: DaemonOptions
+
     func run() async throws {
+        if daemon.isRemote {
+            try await RemoteModels.copy(
+                daemon, src: src, dst: dst, deepCopy: copy,
+                force: force)
+            return
+        }
         let root =
             modelStore.map {
                 URL(fileURLWithPath: $0, isDirectory: true)
