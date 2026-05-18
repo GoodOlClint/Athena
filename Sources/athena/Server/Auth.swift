@@ -183,7 +183,11 @@ enum AuthStartupError: Error, CustomStringConvertible {
 /// `/ui/login` are always open.
 enum AuthPolicy {
     static func required(method: String, path: String) -> AuthTier? {
-        if path == "/healthz" || path == "/ui/login" { return nil }
+        if path == "/healthz" || path == "/ui/login"
+            || path == "/ui/logout"
+        {
+            return nil
+        }
         let mutating =
             method == "POST" || method == "DELETE"
             || method == "PUT" || method == "PATCH"
@@ -204,6 +208,7 @@ enum AuthPolicy {
 
 struct AuthMiddleware<Context: RequestContext>: RouterMiddleware {
     let config: AuthConfig
+    let session: Session
 
     func handle(
         _ request: Request, context: Context,
@@ -212,11 +217,22 @@ struct AuthMiddleware<Context: RequestContext>: RouterMiddleware {
         guard config.isEnabled else {
             return try await next(request, context)  // open mode
         }
+        let path = request.uri.path
         guard
             let required = AuthPolicy.required(
-                method: request.method.rawValue,
-                path: request.uri.path)
+                method: request.method.rawValue, path: path)
         else { return try await next(request, context) }
+
+        let isUI = path == "/ui" || path.hasPrefix("/ui/")
+
+        // /ui* also accepts a valid signed session cookie (admin).
+        if isUI,
+            let tok = Session.token(
+                fromCookieHeader: request.headers[.cookie]),
+            session.validate(tok) != nil
+        {
+            return try await next(request, context)
+        }
 
         guard
             let header = request.headers[.authorization],
@@ -225,15 +241,27 @@ struct AuthMiddleware<Context: RequestContext>: RouterMiddleware {
             !token.isEmpty,
             let granted = config.tier(forBearer: token)
         else {
+            // Browsers can't send bearer on navigation — send them
+            // to the login page instead of a JSON 401.
+            if isUI {
+                return Self.redirect("/ui/login")
+            }
             return Self.deny(
                 .unauthorized, "missing or invalid bearer token",
                 "unauthorized")
         }
         if granted < required {
+            if isUI { return Self.redirect("/ui/login") }
             return Self.deny(
                 .forbidden, "admin privilege required", "forbidden")
         }
         return try await next(request, context)
+    }
+
+    private static func redirect(_ location: String) -> Response {
+        var headers = HTTPFields()
+        headers[.location] = location
+        return Response(status: .seeOther, headers: headers)
     }
 
     private static func deny(

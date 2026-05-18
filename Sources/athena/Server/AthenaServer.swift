@@ -34,11 +34,16 @@ struct AthenaServer {
     /// loaded config. `var` (not `let`) so it's a memberwise-init
     /// parameter — set once at construction, never mutated after.
     var auth: AuthConfig = AuthConfig()
+    /// WebUI session signer (M12.2). Per-process random secret —
+    /// sessions invalidate on restart (acceptable for an appliance).
+    let session = Session()
 
     func run() async throws {
         let router = Router()
         // Auth outermost — reject at the edge, before timing work.
-        router.add(middleware: AuthMiddleware(config: auth))
+        router.add(
+            middleware: AuthMiddleware(
+                config: auth, session: session))
         router.add(middleware: MetricsMiddleware(metrics: metrics))
 
         router.get("/healthz") { _, _ -> Response in
@@ -65,6 +70,20 @@ struct AthenaServer {
         }
         router.post("/ui/api/config") { request, _ -> Response in
             await handleUIConfigPost(request)
+        }
+        // WebUI session login (M12.2). /ui/login + /ui/logout are
+        // open (AuthPolicy); the rest of /ui* needs the cookie.
+        router.get("/ui/login") { _, _ -> Response in
+            Self.html(Self.loginPage(error: nil))
+        }
+        router.post("/ui/login") { request, _ -> Response in
+            await handleUILoginPost(request)
+        }
+        router.get("/ui/logout") { _, _ -> Response in
+            Self.logoutResponse()
+        }
+        router.post("/ui/logout") { _, _ -> Response in
+            Self.logoutResponse()
         }
 
         router.post("/v1/chat/completions") { request, _ -> Response in

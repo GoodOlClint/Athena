@@ -209,7 +209,9 @@ extension AthenaServer {
         <h1>athena</h1>
         <div class="sub"><span id="sub">connecting…</span>
           &nbsp;·&nbsp;<a href="/ui/config"
-          style="color:#2f81f7">config</a></div>
+          style="color:#2f81f7">config</a>
+          &nbsp;·&nbsp;<a href="/ui/logout"
+          style="color:#2f81f7">logout</a></div>
         <div class="grid">
           <div class="card"><h2>Memory governor</h2>
             <div class="bar"><i id="membar"></i></div>
@@ -275,4 +277,106 @@ extension AthenaServer {
         tick();setInterval(tick,2000);
         </script></body></html>
         """#
+}
+
+// MARK: - WebUI session login (M12.2)
+
+extension AthenaServer {
+    static func htmlStatus(
+        _ s: String, _ status: HTTPResponse.Status
+    ) -> Response {
+        var buf = ByteBuffer()
+        buf.writeBytes(Data(s.utf8))
+        var h = HTTPFields()
+        h[.contentType] = "text/html; charset=utf-8"
+        return Response(
+            status: status, headers: h,
+            body: ResponseBody(byteBuffer: buf))
+    }
+
+    static func loginPage(error: String?) -> String {
+        let banner =
+            error.map {
+                "<p class=err>\($0)</p>"
+            } ?? ""
+        return #"""
+            <!doctype html><html><head><meta charset="utf-8">
+            <title>athena · sign in</title><style>
+            body{background:#0d1117;color:#c9d1d9;font:13px
+            ui-monospace,Menlo,monospace;display:flex;height:100vh;
+            margin:0;align-items:center;justify-content:center}
+            form{background:#161b22;border:1px solid #30363d;
+            border-radius:8px;padding:28px;width:280px}
+            h1{font-size:15px;margin:0 0 16px}
+            input{width:100%;box-sizing:border-box;background:#0d1117;
+            color:#e6edf3;border:1px solid #30363d;border-radius:6px;
+            padding:8px;margin:6px 0;font:13px ui-monospace,monospace}
+            button{width:100%;margin-top:14px;background:#238636;
+            color:#fff;border:0;border-radius:6px;padding:9px;
+            cursor:pointer;font:13px ui-monospace,monospace}
+            .err{color:#f85149;margin:0 0 10px}
+            </style></head><body>
+            <form method="post" action="/ui/login">
+            <h1>athena</h1>
+            """# + banner + #"""
+            <input name="username" placeholder="username" autofocus>
+            <input name="password" type="password"
+              placeholder="password">
+            <button>Sign in</button></form></body></html>
+            """#
+    }
+
+    private static func formField(
+        _ name: String, in body: String
+    ) -> String? {
+        for pair in body.split(separator: "&") {
+            let kv = pair.split(separator: "=", maxSplits: 1)
+            guard kv.first == name[...] else { continue }
+            let raw =
+                kv.count == 2 ? String(kv[1]) : ""
+            return raw.replacingOccurrences(of: "+", with: " ")
+                .removingPercentEncoding ?? raw
+        }
+        return nil
+    }
+
+    func handleUILoginPost(_ request: Request) async -> Response {
+        let body: String
+        if let buf = try? await request.body.collect(
+            upTo: 64 * 1024)
+        {
+            body = String(buffer: buf)
+        } else {
+            body = ""
+        }
+        guard
+            let user = Self.formField("username", in: body),
+            let pass = Self.formField("password", in: body),
+            !user.isEmpty
+        else {
+            return Self.htmlStatus(
+                Self.loginPage(error: "missing credentials"),
+                .badRequest)
+        }
+        guard let row = await store.getUser(username: user),
+            Passwords.verify(
+                password: pass, salt: row.salt, hash: row.hash,
+                iters: row.iters)
+        else {
+            return Self.htmlStatus(
+                Self.loginPage(error: "invalid credentials"),
+                .unauthorized)
+        }
+        var h = HTTPFields()
+        h[.location] = "/ui"
+        h[.setCookie] = Session.setCookie(session.mint(user: user))
+        return Response(status: .seeOther, headers: h)
+    }
+
+    static func logoutResponse() -> Response {
+        var h = HTTPFields()
+        h[.location] = "/ui/login"
+        h[.setCookie] = Session.clearCookie
+        return Response(status: .seeOther, headers: h)
+    }
 }
