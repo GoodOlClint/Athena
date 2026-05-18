@@ -254,7 +254,7 @@ struct Install: AsyncParsableCommand {
             print("  │   username: admin                         │")
             print("  │   password: \(pw.padding(toLength: 30, withPad: " ", startingAt: 0))│")
             print("  │ SAVE THIS — shown once. Change it via     │")
-            print("  │ `athena auth user add admin`.             │")
+            print("  │ `athena auth user passwd admin`.          │")
             print("  └──────────────────────────────────────────┘")
             if let tok = seededToken {
                 print("")
@@ -270,6 +270,11 @@ struct Install: AsyncParsableCommand {
         } else {
             print(
                 "  auth: existing accounts kept (no admin seeded)")
+            print(
+                "  locked out? reset offline (no token needed):")
+            print(
+                "    \(plan.binSymlink.path) auth user passwd admin "
+                    + "--data-dir \(dataDir.path)")
         }
         print(
             "  health: curl -s http://\(cfg.listenHost):\(cfg.listenPort)/healthz")

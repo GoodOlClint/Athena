@@ -89,7 +89,8 @@ struct AuthUser: AsyncParsableCommand {
         commandName: "user",
         abstract: "Manage accounts (username/password + roles).",
         subcommands: [
-            AuthUserAdd.self, AuthUserList.self, AuthUserRemove.self,
+            AuthUserAdd.self, AuthUserPasswd.self,
+            AuthUserList.self, AuthUserRemove.self,
         ])
 }
 
@@ -148,6 +149,72 @@ struct AuthUserAdd: AsyncParsableCommand {
         print(
             "user '\(username)' saved with role '\(role)' "
                 + "(\(storeDBPath(dataDir).path))")
+    }
+}
+
+/// Offline password recovery: reset an EXISTING account's password
+/// without touching its roles/tokens. Local-only by design — the
+/// locked-out-admin case has no token; the trust boundary is OS
+/// ownership of the data-dir DB.
+struct AuthUserPasswd: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "passwd",
+        abstract:
+            "Reset an existing account's password (roles kept).")
+    @Argument(help: "Username.") var username: String
+    @Option(
+        help: "Password (omit to prompt; avoid in shell history).")
+    var password: String?
+    @Option(help: "Data dir (default: configured / ~/.athena).")
+    var dataDir: String?
+    @OptionGroup var daemon: DaemonOptions
+
+    func run() async throws {
+        if daemon.isRemote {
+            FailableExit.die(
+                "error: `passwd` is offline recovery only — run it "
+                    + "on the daemon host. Remotely, an admin can "
+                    + "replace the account via `auth user add`.")
+        }
+        let db = openStore(dataDir)
+        guard await db.getUser(username: username) != nil else {
+            FailableExit.die(
+                "error: no such user '\(username)' — create it "
+                    + "with `athena auth user add`")
+        }
+        let pw: String
+        if let password, !password.isEmpty {
+            pw = password
+        } else if isatty(0) == 0 {
+            pw = (readLine() ?? "")
+        } else {
+            let a = String(cString: getpass("new password: "))
+            let b = String(cString: getpass("confirm:      "))
+            guard a == b else {
+                FailableExit.die("error: passwords do not match")
+            }
+            pw = a
+        }
+        guard pw.count >= 8 else {
+            FailableExit.die("error: password must be >= 8 chars")
+        }
+        let salt = Passwords.randomSalt()
+        let hash = Passwords.derive(
+            password: pw, salt: salt,
+            iters: Passwords.defaultIterations)
+        do {
+            try await db.putUser(
+                username: username, salt: salt, hash: hash,
+                iters: Passwords.defaultIterations)
+        } catch {
+            FailableExit.die("error: \(error)")
+        }
+        let roles = await db.rolesForUser(username: username)
+        print(
+            "password reset for '\(username)' — roles kept: "
+                + (roles.isEmpty
+                    ? "(none)" : roles.joined(separator: ", "))
+                + " (\(storeDBPath(dataDir).path))")
     }
 }
 
