@@ -136,6 +136,11 @@ struct Load: AsyncParsableCommand {
             }
         }
 
+        // HF token for gated/private on-demand fetches: export the
+        // Keychain-stored token unless the operator already set one
+        // (same never-override rule as HF_HOME above). M13.
+        HFAuth.exportToEnv()
+
         let config = GovernorConfig(
             totalBudgetBytes: budgetBytes,
             listenHost: host,

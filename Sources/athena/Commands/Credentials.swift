@@ -1,32 +1,15 @@
 import Foundation
 
-/// Client-side bearer-credential resolution for the thin CLI commands
-/// that talk to a (local or remote) daemon. Single point of use:
-/// precedence is `--key` > `ATHENA_KEY` env > the platform secret
-/// store > none. macOS backend = the login Keychain (one entry per
-/// daemon endpoint, so local + remote daemons keep distinct keys).
+/// One keyed secret store for the thin CLI (M13). A single login-
+/// Keychain service (`athena`) with an arbitrary `account` per secret,
+/// so the daemon bearer key (`<host>:<port>`) and the Hugging Face
+/// token (`hf:token`) share one backend, one point of use.
 ///
 /// Portable by design: the Keychain calls are `#if os(macOS)`-gated;
 /// other platforms resolve via flag/env only (a future portable
-/// client target compiles unchanged). M12.3.
-enum Credentials {
-    private static let service = "athena"
-    private static func account(_ host: String, _ port: Int) -> String {
-        "\(host):\(port)"
-    }
-
-    /// Resolve the bearer key for a daemon endpoint, or nil.
-    static func resolve(
-        explicit: String?, host: String, port: Int
-    ) -> String? {
-        if let explicit, !explicit.isEmpty { return explicit }
-        if let env = ProcessInfo.processInfo
-            .environment["ATHENA_KEY"], !env.isEmpty
-        {
-            return env
-        }
-        return keychainRead(host: host, port: port)
-    }
+/// client target compiles unchanged).
+enum Secrets {
+    static let service = "athena"
 
     #if os(macOS)
         @discardableResult
@@ -51,21 +34,21 @@ enum Credentials {
             )
         }
 
-        static func keychainRead(host: String, port: Int) -> String? {
+        static func read(account: String) -> String? {
             let (rc, val) = security([
                 "find-generic-password", "-s", service, "-a",
-                account(host, port), "-w",
+                account, "-w",
             ])
             return rc == 0 && !val.isEmpty ? val : nil
         }
 
         static func store(
-            _ key: String, host: String, port: Int
+            _ value: String, account: String
         ) throws {
             // -U updates an existing item rather than erroring.
             let (rc, _) = security([
                 "add-generic-password", "-U", "-s", service, "-a",
-                account(host, port), "-w", key,
+                account, "-w", value,
             ])
             guard rc == 0 else {
                 throw CredentialError.keychain(
@@ -74,24 +57,120 @@ enum Credentials {
         }
 
         @discardableResult
-        static func remove(host: String, port: Int) -> Bool {
+        static func remove(account: String) -> Bool {
             security([
                 "delete-generic-password", "-s", service, "-a",
-                account(host, port),
+                account,
             ]).0 == 0
         }
     #else
-        static func keychainRead(host: String, port: Int) -> String? {
-            nil
-        }
-        static func store(
-            _ key: String, host: String, port: Int
-        ) throws {
+        static func read(account: String) -> String? { nil }
+        static func store(_ value: String, account: String) throws {
             throw CredentialError.unsupported
         }
         @discardableResult
-        static func remove(host: String, port: Int) -> Bool { false }
+        static func remove(account: String) -> Bool { false }
     #endif
+}
+
+/// Client-side bearer-credential resolution for the CLI commands that
+/// talk to a (local or remote) daemon. Precedence: `--key` >
+/// `ATHENA_KEY` env > the platform secret store > none. One Keychain
+/// item per daemon endpoint, so local + remote daemons keep distinct
+/// keys. M12.3 (now backed by the keyed `Secrets` store, M13).
+enum Credentials {
+    private static func account(_ host: String, _ port: Int)
+        -> String
+    {
+        "\(host):\(port)"
+    }
+
+    /// Resolve the bearer key for a daemon endpoint, or nil.
+    static func resolve(
+        explicit: String?, host: String, port: Int
+    ) -> String? {
+        if let explicit, !explicit.isEmpty { return explicit }
+        if let env = ProcessInfo.processInfo
+            .environment["ATHENA_KEY"], !env.isEmpty
+        {
+            return env
+        }
+        return Secrets.read(account: account(host, port))
+    }
+
+    static func keychainRead(host: String, port: Int) -> String? {
+        Secrets.read(account: account(host, port))
+    }
+
+    static func store(
+        _ key: String, host: String, port: Int
+    ) throws {
+        try Secrets.store(key, account: account(host, port))
+    }
+
+    @discardableResult
+    static func remove(host: String, port: Int) -> Bool {
+        Secrets.remove(account: account(host, port))
+    }
+}
+
+/// Hugging Face token resolution for gated/private model downloads
+/// (M13). The `swift-huggingface` client auto-detects `HF_TOKEN`
+/// (then `HUGGING_FACE_HUB_TOKEN`, then token files), so the whole
+/// integration is: resolve a stored token and export it to the env
+/// before any `#hubDownloader()` — exactly the `HF_HOME` convention
+/// in `serve`. An operator-set token env is NEVER overridden.
+enum HFAuth {
+    /// Keychain account under the shared `athena` service.
+    static let account = "hf:token"
+
+    private static func envToken() -> String? {
+        let e = ProcessInfo.processInfo.environment
+        if let t = e["HF_TOKEN"], !t.isEmpty { return t }
+        if let t = e["HUGGING_FACE_HUB_TOKEN"], !t.isEmpty {
+            return t
+        }
+        return nil
+    }
+
+    /// Precedence: explicit > HF_TOKEN / HUGGING_FACE_HUB_TOKEN env >
+    /// Keychain. (Token files are left to the Hub client itself.)
+    static func resolve(explicit: String? = nil) -> String? {
+        if let explicit, !explicit.isEmpty { return explicit }
+        if let t = envToken() { return t }
+        return Secrets.read(account: account)
+    }
+
+    /// If no token env is already set, export a Keychain-stored token
+    /// as `HF_TOKEN` so the Hub client picks it up. Operator env wins
+    /// (never overridden), mirroring the `HF_HOME` rule in `serve`.
+    static func exportToEnv() {
+        if envToken() != nil { return }
+        if let t = Secrets.read(account: account), !t.isEmpty {
+            setenv("HF_TOKEN", t, 1)
+        }
+    }
+
+    /// How `resolve()` would source the token, for `hf status`
+    /// (no secret printed).
+    static func source() -> String {
+        let e = ProcessInfo.processInfo.environment
+        if let t = e["HF_TOKEN"], !t.isEmpty {
+            return "HF_TOKEN env"
+        }
+        if let t = e["HUGGING_FACE_HUB_TOKEN"], !t.isEmpty {
+            return "HUGGING_FACE_HUB_TOKEN env"
+        }
+        if Secrets.read(account: account) != nil { return "Keychain" }
+        return "none (run `athena hf login`, or set HF_TOKEN)"
+    }
+
+    static func store(_ token: String) throws {
+        try Secrets.store(token, account: account)
+    }
+
+    @discardableResult
+    static func remove() -> Bool { Secrets.remove(account: account) }
 }
 
 enum CredentialError: Error, CustomStringConvertible {
@@ -103,7 +182,7 @@ enum CredentialError: Error, CustomStringConvertible {
         case .unsupported:
             return
                 "secret store unavailable on this platform — use "
-                + "ATHENA_KEY or --key"
+                + "env (ATHENA_KEY / HF_TOKEN) or the matching flag"
         }
     }
 }

@@ -190,6 +190,10 @@ struct Doctor: AsyncParsableCommand {
                     + "— daemon will REFUSE to start")
         }
 
+        // 10. HF token posture (informational — only gated/private
+        // model fetches need it; public repos work without).
+        say(.ok, "hf token: \(HFAuth.source())")
+
         if fails > 0 {
             print("\n\(fails) critical issue(s).")
             throw ExitCode.failure

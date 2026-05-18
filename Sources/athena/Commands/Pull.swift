@@ -20,6 +20,7 @@ struct Pull: AsyncParsableCommand {
         let root =
             modelStore.map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? ModelStore.defaultRoot
+        HFAuth.exportToEnv()  // gated/private repos (M13)
         print("pulling \(model) …")
         do {
             let dest = try await ModelPull.pull(id: model, into: root)
