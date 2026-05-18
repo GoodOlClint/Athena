@@ -280,8 +280,14 @@ struct Install: AsyncParsableCommand {
             "  health: curl -s http://\(cfg.listenHost):\(cfg.listenPort)/healthz")
         print("  logs:   tail -f \(cfg.logDir)/athena.err.log")
         print(
-            "  note: the daemon serves /healthz + /ui even with no "
-                + "model loaded; pull/convert a model for inference.")
+            "  console: http://\(cfg.listenHost):\(cfg.listenPort)/ui"
+                + " — sign in to control this RUNNING daemon "
+                + "(models, daemon, users, config)")
+        print(
+            "  note: the daemon serves /healthz + the /ui console "
+                + "even with no model loaded; the console controls a "
+                + "running daemon — it cannot cold-start a stopped "
+                + "one (use launchctl / `athena start`).")
     }
 
     /// A human-typeable random password (~62 bits): 12 chars from an
