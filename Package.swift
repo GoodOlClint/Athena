@@ -171,10 +171,11 @@ let package = Package(
         // `Credentials`/`HFAuth`/`ProxyAuth`, `DaemonOptions`, the
         // `HTTPClient`. Foundation + ArgumentParser only; the
         // AthenaCore dep (for `GovernorConfig.defaultPort`) is
-        // temporary — severed in M14.3 for the Linux build.
         // Foundation + ArgumentParser ONLY — no AthenaCore/Darwin/MLX
         // graph, so the portable `athena` client is Linux-clean
-        // (M14.3). Platform bits are `#if canImport`-guarded.
+        // (M14.3). Platform bits are `#if canImport`-guarded. Sources
+        // live under `clients/` and are ALSO built by the standalone
+        // cross-platform `clients/Package.swift` (M14.4) — one copy.
         .target(
             name: "AthenaClient",
             dependencies: [
@@ -182,7 +183,7 @@ let package = Package(
                     name: "ArgumentParser",
                     package: "swift-argument-parser"),
             ],
-            path: "Sources/AthenaClient"),
+            path: "clients/Sources/AthenaClient"),
 
         // The unified macOS `athena` CLI: full surface — local daemon
         // lifecycle + Apple-host operator ops + the HTTP client verbs
