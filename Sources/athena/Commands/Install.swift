@@ -1,6 +1,7 @@
 import ArgumentParser
 import AthenaCore
 import AthenaDeploy
+import AthenaStore
 import Darwin
 import Foundation
 
@@ -8,7 +9,7 @@ import Foundation
 /// Collapses the old deploy/athena-install.sh. The one thing it cannot do
 /// is *build* (MLX's Metal shaders need xcodebuild — a binary can't build
 /// itself); run `deploy/build.sh` first, then this from the build output.
-struct Install: ParsableCommand {
+struct Install: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "install",
         abstract: "Install Athena as a boot-time launchd system daemon."
@@ -32,7 +33,7 @@ struct Install: ParsableCommand {
     @Flag(help: "Print the plan and rendered plist; change nothing.")
     var dryRun = false
 
-    func run() throws {
+    func run() async throws {
         let cfg = try AthenaConfig.parse(
             file: URL(fileURLWithPath: config))
 
@@ -158,6 +159,36 @@ struct Install: ParsableCommand {
         try ensureDir(dataDir, owner: serviceUser)
         try ensureDir(modelStore, owner: serviceUser)
 
+        // Seed a default `admin` WebUI account on a fresh store so
+        // the UI is usable immediately. Idempotent: never touch an
+        // existing user (no password reset on reinstall).
+        let dbURL = dataDir.appendingPathComponent("athena.sqlite")
+        var seededPassword: String?
+        if let db = try? AthenaStore(path: dbURL) {
+            if await db.userCount() == 0 {
+                let pw = Self.simplePassword()
+                let salt = Passwords.randomSalt()
+                let hash = Passwords.derive(
+                    password: pw, salt: salt,
+                    iters: Passwords.defaultIterations)
+                try? await db.putUser(
+                    username: "admin", salt: salt, hash: hash,
+                    iters: Passwords.defaultIterations)
+                seededPassword = pw
+            }
+        }
+        // The daemon runs as the service user and must own the DB
+        // (install runs as root, so it would otherwise be root-owned
+        // and unwritable by the daemon).
+        for ext in ["", "-wal", "-shm"] {
+            let p = dbURL.path + ext
+            if fm.fileExists(atPath: p) {
+                try? fm.setAttributes(
+                    [.ownerAccountName: serviceUser],
+                    ofItemAtPath: p)
+            }
+        }
+
         for name in plan.artifactNames(fileManager: fm) {
             let src = plan.sourceDir.appendingPathComponent(name)
             let dst = plan.libexecDir.appendingPathComponent(name)
@@ -188,12 +219,37 @@ struct Install: ParsableCommand {
         print("installed \(label) (service user: \(serviceUser)).")
         print("  model store: \(modelStore.path)")
         print("  data dir:    \(dataDir.path)")
+        if let pw = seededPassword {
+            print("")
+            print("  ┌──────────────────────────────────────────┐")
+            print("  │ WebUI admin account created               │")
+            print("  │   username: admin                         │")
+            print("  │   password: \(pw.padding(toLength: 30, withPad: " ", startingAt: 0))│")
+            print("  │ SAVE THIS — shown once. Change it via     │")
+            print("  │ `athena auth user add admin`.             │")
+            print("  └──────────────────────────────────────────┘")
+            print("")
+        } else {
+            print(
+                "  webui: existing accounts kept (no admin seeded)")
+        }
         print(
             "  health: curl -s http://\(cfg.listenHost):\(cfg.listenPort)/healthz")
         print("  logs:   tail -f \(cfg.logDir)/athena.err.log")
         print(
             "  note: the daemon serves /healthz + /ui even with no "
                 + "model loaded; pull/convert a model for inference.")
+    }
+
+    /// A human-typeable random password (~62 bits): 12 chars from an
+    /// unambiguous alphabet (no l/1/o/0). PBKDF2-hashed at rest;
+    /// meant to be rotated.
+    static func simplePassword() -> String {
+        let alpha = Array(
+            "abcdefghijkmnpqrstuvwxyz23456789ABCDEFGHJKLMNPQRSTUVWXYZ")
+        var rng = SystemRandomNumberGenerator()
+        return String(
+            (0..<12).map { _ in alpha.randomElement(using: &rng)! })
     }
 
     @discardableResult

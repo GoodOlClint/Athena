@@ -2,6 +2,7 @@ import ArgumentParser
 import AthenaCore
 import AthenaDeploy
 import AthenaLLM
+import AthenaStore
 import Foundation
 
 /// `athena doctor` — read-only environment preflight. Surfaces the
@@ -142,6 +143,51 @@ struct Doctor: AsyncParsableCommand {
             say(.ok, "daemon responding at \(host):\(port)")
         } else {
             say(.warn, "daemon not responding at \(host):\(port)")
+        }
+
+        // 9. Auth posture (mirrors the daemon's fail-safe gate so
+        //    this predicts startup).
+        let env = ProcessInfo.processInfo.environment
+        let envKeys =
+            !(env["ATHENA_ADMIN_KEYS"] ?? "").isEmpty
+            || !(env["ATHENA_INFERENCE_KEYS"] ?? "").isEmpty
+        let fileKeys =
+            (parsed?.authKeysFile).map {
+                fm.fileExists(
+                    atPath: ($0 as NSString).expandingTildeInPath)
+            } ?? false
+        var nTok = 0
+        var nUsr = 0
+        if let db = try? AthenaStore(
+            path: dataDir.appendingPathComponent("athena.sqlite"))
+        {
+            nTok = await db.tokenCount()
+            nUsr = await db.userCount()
+        }
+        let anyCreds = envKeys || fileKeys || nTok > 0 || nUsr > 0
+        let loopback: Set<String> = [
+            "127.0.0.1", "::1", "localhost",
+        ]
+        if anyCreds {
+            var src: [String] = []
+            if nTok > 0 { src.append("\(nTok) token(s)") }
+            if nUsr > 0 { src.append("\(nUsr) user(s)") }
+            if envKeys { src.append("env") }
+            if fileKeys { src.append("file") }
+            say(
+                .ok,
+                "auth: enabled — "
+                    + src.joined(separator: ", "))
+        } else if loopback.contains(host) {
+            say(
+                .warn,
+                "auth: disabled — loopback open (dev). Add "
+                    + "credentials before exposing.")
+        } else {
+            say(
+                .fail,
+                "auth: disabled and listen=\(host) is non-loopback "
+                    + "— daemon will REFUSE to start")
         }
 
         if fails > 0 {
