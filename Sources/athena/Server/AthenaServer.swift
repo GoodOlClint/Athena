@@ -177,6 +177,18 @@ struct AthenaServer {
                 AthenaStopResponse(
                     status: "unloaded", model: modelName))
         }
+        router.get("/api/admin/status") { _, _ -> Response in
+            Self.json(
+                AdminStatusResponse(
+                    model: modelName,
+                    listen:
+                        "\(config.listenHost):\(config.listenPort)",
+                    auth_enabled: auth.isEnabled,
+                    users: await store.userCount(),
+                    tokens: await store.tokenCount(),
+                    admins: await store.usersWithRole("admin")
+                        .count))
+        }
 
         // Model store (M16.2). Literal sub-paths are registered
         // BEFORE `:name` so Hummingbird's trie (sibling match in

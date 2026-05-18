@@ -14,7 +14,7 @@ public struct Unload: AsyncParsableCommand {
         abstract: "Unload the running model and free its budget."
     )
 
-    @Argument(help: "Model name (single-model shim: passed through).")
+    @Argument(help: "Model name (single-model: passed through).")
     public var model: String?
 
     @Option(help: "Daemon host.")

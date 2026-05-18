@@ -66,6 +66,18 @@ struct AthenaStopResponse: Codable {
     let model: String
 }
 
+/// `/api/admin/status` — native daemon + RBAC posture for a remote
+/// admin (distinct from open `/healthz` governor state and
+/// `/metrics`). M16.5.
+struct AdminStatusResponse: Codable {
+    let model: String
+    let listen: String
+    let auth_enabled: Bool
+    let users: Int
+    let tokens: Int
+    let admins: Int
+}
+
 // MARK: - /api/models (M16.2 — model-store read + sync ops)
 
 struct ModelEntryDTO: Codable {

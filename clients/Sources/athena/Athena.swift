@@ -12,7 +12,7 @@ struct Athena: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "athena",
         abstract: "Project the platform client (talks to a daemon).",
-        version: "0.9.51",
+        version: "0.9.52",
         subcommands: [
             Run.self, Ps.self, Unload.self,
             Queue.self, Vectors.self, Store.self, AuthClient.self,

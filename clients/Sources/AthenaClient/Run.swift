@@ -19,7 +19,7 @@ public struct Run: AsyncParsableCommand {
         abstract: "Run a one-shot prompt against a running daemon."
     )
 
-    @Argument(help: "Model name (single-model shim: passed through).")
+    @Argument(help: "Model name (single-model: passed through).")
     public var model: String
 
     @Argument(

@@ -347,6 +347,15 @@ code 403 POST   /api/users  "$R2" '{"username":"x","password":"abcdefgh"}'
 code 403 GET    /api/tokens "$R2"     # tokens.admin only
 code 403 GET    /api/tokens "$M2"
 code 200 GET    /api/tokens "$A2"
+# /api/admin/status (M16.5) — daemon.admin only
+code 200 GET    /api/admin/status "$A2"
+code 403 GET    /api/admin/status "$R2"   # readonly ∌ daemon.admin
+code 403 GET    /api/admin/status "$M2"
+AS="$(curl -s -H "Authorization: Bearer $A2" \
+  "http://127.0.0.1:$PORT/api/admin/status")"
+echo "$AS" | grep -q '"auth_enabled":true' \
+  && ok "admin status reports auth posture" \
+  || bad "admin status shape ($AS)"
 # Functional CRUD round-trip (admin) + fail-closed validation
 code 200 POST   /api/users "$A2" '{"username":"e2e1","password":"pw123456","role":"member"}'
 code 200 POST   /api/users/e2e1/roles/operator "$A2"
