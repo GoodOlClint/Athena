@@ -47,7 +47,8 @@ private func postJSON(
     else { FailableExit.die("error: could not encode request") }
     do {
         return try await HTTPClient.send(
-            "POST", daemon.base + path, body: data)
+            "POST", daemon.base + path, body: data,
+            key: daemon.authKey)
     } catch { HTTPClient.noDaemon(daemon, error) }
 }
 
@@ -72,7 +73,8 @@ struct VectorsAdd: AsyncParsableCommand {
             let raw = try Data(contentsOf: URL(fileURLWithPath: file))
             do {
                 (code, data) = try await HTTPClient.send(
-                    "POST", daemon.base + "/v1/vectors", body: raw)
+                    "POST", daemon.base + "/v1/vectors", body: raw,
+                    key: daemon.authKey)
             } catch { HTTPClient.noDaemon(daemon, error) }
         } else {
             guard (text == nil) != (vector == nil) else {
@@ -151,7 +153,8 @@ struct VectorsRm: AsyncParsableCommand {
         let (code, data): (Int, Data)
         do {
             (code, data) = try await HTTPClient.send(
-                "DELETE", daemon.base + "/v1/vectors/\(id)")
+                "DELETE", daemon.base + "/v1/vectors/\(id)",
+                key: daemon.authKey)
         } catch { HTTPClient.noDaemon(daemon, error) }
         HTTPClient.printJSON(data)
         if code >= 400 { throw ExitCode.failure }
@@ -168,7 +171,8 @@ struct VectorsStats: AsyncParsableCommand {
         let (code, data): (Int, Data)
         do {
             (code, data) = try await HTTPClient.send(
-                "GET", daemon.base + "/v1/vectors/stats")
+                "GET", daemon.base + "/v1/vectors/stats",
+                key: daemon.authKey)
         } catch { HTTPClient.noDaemon(daemon, error) }
         HTTPClient.printJSON(data)
         if code >= 400 { throw ExitCode.failure }

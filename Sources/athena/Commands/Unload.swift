@@ -24,6 +24,12 @@ struct Unload: AsyncParsableCommand {
         var req = URLRequest(
             url: URL(string: "http://\(host):\(port)/api/stop")!)
         req.httpMethod = "POST"
+        if let k = Credentials.resolve(
+            explicit: nil, host: host, port: port), !k.isEmpty
+        {
+            req.setValue(
+                "Bearer \(k)", forHTTPHeaderField: "Authorization")
+        }
         let data: Data
         do {
             (data, _) = try await URLSession.shared.data(for: req)

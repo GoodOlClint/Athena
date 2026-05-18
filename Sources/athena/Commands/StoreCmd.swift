@@ -52,7 +52,8 @@ struct StoreExport: AsyncParsableCommand {
         let (code, data): (Int, Data)
         do {
             (code, data) = try await HTTPClient.send(
-                "POST", daemon.base + "/v1/store/export", body: body)
+                "POST", daemon.base + "/v1/store/export",
+                body: body, key: daemon.authKey)
         } catch { HTTPClient.noDaemon(daemon, error) }
         HTTPClient.printJSON(data)
         if code >= 400 { throw ExitCode.failure }
@@ -112,7 +113,8 @@ struct StoreStats: AsyncParsableCommand {
         let (code, data): (Int, Data)
         do {
             (code, data) = try await HTTPClient.send(
-                "GET", daemon.base + "/v1/store/stats")
+                "GET", daemon.base + "/v1/store/stats",
+                key: daemon.authKey)
         } catch { HTTPClient.noDaemon(daemon, error) }
         HTTPClient.printJSON(data)
         if code >= 400 { throw ExitCode.failure }

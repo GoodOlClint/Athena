@@ -47,6 +47,12 @@ struct Run: AsyncParsableCommand {
             url: URL(string: "http://\(host):\(port)/api/chat")!)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let k = Credentials.resolve(
+            explicit: nil, host: host, port: port), !k.isEmpty
+        {
+            req.setValue(
+                "Bearer \(k)", forHTTPHeaderField: "Authorization")
+        }
         req.httpBody = try JSONSerialization.data(withJSONObject: [
             "model": model,
             "messages": [["role": "user", "content": text]],

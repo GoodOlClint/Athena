@@ -11,16 +11,29 @@ struct DaemonOptions: ParsableArguments {
     @Option(help: "Daemon port.")
     var port: Int = GovernorConfig.defaultPort
 
+    @Option(help: "Bearer key (else ATHENA_KEY env, else Keychain).")
+    var key: String?
+
     var base: String { "http://\(host):\(port)" }
+
+    /// Resolved bearer key for this endpoint (flag > env > Keychain).
+    var authKey: String? {
+        Credentials.resolve(explicit: key, host: host, port: port)
+    }
 }
 
 /// Minimal JSON HTTP helpers for the thin-client subcommands.
 enum HTTPClient {
     static func send(
-        _ method: String, _ url: String, body: Data? = nil
+        _ method: String, _ url: String, body: Data? = nil,
+        key: String? = nil
     ) async throws -> (Int, Data) {
         var req = URLRequest(url: URL(string: url)!)
         req.httpMethod = method
+        if let key, !key.isEmpty {
+            req.setValue(
+                "Bearer \(key)", forHTTPHeaderField: "Authorization")
+        }
         if let body {
             req.httpBody = body
             req.setValue(

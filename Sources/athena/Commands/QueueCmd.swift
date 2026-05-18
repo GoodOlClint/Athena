@@ -25,7 +25,7 @@ struct QueueLs: AsyncParsableCommand {
             + (status.map { "?status=\($0)" } ?? "")
         let (_, data): (Int, Data)
         do {
-            (_, data) = try await HTTPClient.send("GET", url)
+            (_, data) = try await HTTPClient.send("GET", url, key: daemon.authKey)
         } catch { HTTPClient.noDaemon(daemon, error) }
         struct R: Decodable {
             struct J: Decodable {
@@ -79,7 +79,8 @@ struct QueueSubmit: AsyncParsableCommand {
         let (code, data): (Int, Data)
         do {
             (code, data) = try await HTTPClient.send(
-                "POST", daemon.base + "/v1/queue/\(kind)", body: body)
+                "POST", daemon.base + "/v1/queue/\(kind)",
+                body: body, key: daemon.authKey)
         } catch { HTTPClient.noDaemon(daemon, error) }
         HTTPClient.printJSON(data)
         if code >= 400 { throw ExitCode.failure }
@@ -98,9 +99,14 @@ struct QueueGet: AsyncParsableCommand {
 
     func run() async throws {
         if follow {
-            let req = URLRequest(
+            var req = URLRequest(
                 url: URL(
                     string: daemon.base + "/v1/queue/\(id)/events")!)
+            if let k = daemon.authKey, !k.isEmpty {
+                req.setValue(
+                    "Bearer \(k)",
+                    forHTTPHeaderField: "Authorization")
+            }
             do {
                 let (bytes, _) = try await URLSession.shared.bytes(
                     for: req)
@@ -118,7 +124,7 @@ struct QueueGet: AsyncParsableCommand {
             + (wait.map { "?wait=\($0)" } ?? "")
         let (code, data): (Int, Data)
         do {
-            (code, data) = try await HTTPClient.send("GET", url)
+            (code, data) = try await HTTPClient.send("GET", url, key: daemon.authKey)
         } catch { HTTPClient.noDaemon(daemon, error) }
         HTTPClient.printJSON(data)
         if code >= 400 { throw ExitCode.failure }
@@ -135,7 +141,8 @@ struct QueueRm: AsyncParsableCommand {
         let (code, data): (Int, Data)
         do {
             (code, data) = try await HTTPClient.send(
-                "DELETE", daemon.base + "/v1/queue/\(id)")
+                "DELETE", daemon.base + "/v1/queue/\(id)",
+                key: daemon.authKey)
         } catch { HTTPClient.noDaemon(daemon, error) }
         HTTPClient.printJSON(data)
         if code >= 400 { throw ExitCode.failure }
