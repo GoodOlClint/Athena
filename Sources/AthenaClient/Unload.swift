@@ -1,27 +1,28 @@
 import ArgumentParser
-import AthenaClient
 import AthenaCore
 import Foundation
 
 /// `athena unload [MODEL]` — unload the running model so the governor
 /// reclaims its budget; the daemon keeps running. (Was `stop`; `stop`
 /// now controls the daemon process — M9.4.)
-struct Unload: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
+public struct Unload: AsyncParsableCommand {
+    public static let configuration = CommandConfiguration(
         commandName: "unload",
         abstract: "Unload the running model and free its budget."
     )
 
     @Argument(help: "Model name (single-model shim: passed through).")
-    var model: String?
+    public var model: String?
 
     @Option(help: "Daemon host.")
-    var host: String = "127.0.0.1"
+    public var host: String = "127.0.0.1"
 
     @Option(help: "Daemon port.")
-    var port: Int = GovernorConfig.defaultPort
+    public var port: Int = GovernorConfig.defaultPort
 
-    func run() async throws {
+    public init() {}
+
+    public func run() async throws {
         var req = URLRequest(
             url: URL(string: "http://\(host):\(port)/api/stop")!)
         req.httpMethod = "POST"
@@ -43,6 +44,8 @@ struct Unload: AsyncParsableCommand {
         let obj =
             (try? JSONSerialization.jsonObject(with: data))
             as? [String: Any]
-        print("unloaded \(obj?["model"] as? String ?? model ?? "model")")
+        print(
+            "unloaded "
+                + "\(obj?["model"] as? String ?? model ?? "model")")
     }
 }

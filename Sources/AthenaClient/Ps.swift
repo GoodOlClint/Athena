@@ -3,24 +3,27 @@ import AthenaCore
 import Foundation
 
 /// `athena ps` — governed module state from a running daemon
-/// (`GET /healthz`), formatted ollama-style.
-struct Ps: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
+/// (`GET /healthz`), formatted compactly.
+public struct Ps: AsyncParsableCommand {
+    public static let configuration = CommandConfiguration(
         commandName: "ps",
         abstract: "Show governed module state from a running daemon."
     )
 
     @Option(help: "Daemon host.")
-    var host: String = "127.0.0.1"
+    public var host: String = "127.0.0.1"
 
     @Option(help: "Daemon port.")
-    var port: Int = GovernorConfig.defaultPort
+    public var port: Int = GovernorConfig.defaultPort
 
-    func run() async throws {
+    public init() {}
+
+    public func run() async throws {
         let url = URL(string: "http://\(host):\(port)/healthz")!
         let snap: GovernorSnapshot
         do {
-            let (data, _) = try await URLSession.shared.data(from: url)
+            let (data, _) = try await URLSession.shared.data(
+                from: url)
             snap = try JSONDecoder().decode(
                 GovernorSnapshot.self, from: data)
         } catch {
@@ -37,7 +40,8 @@ struct Ps: AsyncParsableCommand {
                 + "prompt-cache cap "
                 + "\(humanBytes(snap.promptCacheCapBytes))")
         print(
-            "MODULE".padding(toLength: 16, withPad: " ", startingAt: 0)
+            "MODULE".padding(
+                toLength: 16, withPad: " ", startingAt: 0)
                 + "STATE".padding(
                     toLength: 12, withPad: " ", startingAt: 0)
                 + "RESERVED".padding(
@@ -55,9 +59,5 @@ struct Ps: AsyncParsableCommand {
                         toLength: 12, withPad: " ", startingAt: 0)
                     + (m.evictable ? "yes" : "no"))
         }
-    }
-
-    private func humanBytes(_ n: Int) -> String {
-        ListModels.humanBytes(n)
     }
 }

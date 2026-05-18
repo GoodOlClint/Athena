@@ -10,7 +10,7 @@ struct Athenad: AsyncParsableCommand {
         commandName: "athenad",
         abstract:
             "Project the platform inference daemon (passive oracle).",
-        version: "0.9.40",
+        version: "0.9.41",
         subcommands: [
             Load.self, Install.self, ListModels.self, Ps.self,
             Run.self, Pull.self, Convert.self, Verify.self,

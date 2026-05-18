@@ -1,32 +1,34 @@
 import ArgumentParser
-import AthenaClient
 import AthenaCore
+import Darwin
 import Foundation
 
 /// `athena run MODEL [PROMPT]` — one-shot generation against a running
-/// daemon (ollama-style). PROMPT from args or piped stdin. An
-/// interactive REPL (tty, no prompt) is a documented later addition.
-struct Run: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
+/// daemon. PROMPT from args or piped stdin. An interactive REPL (tty,
+/// no prompt) is a documented later addition.
+public struct Run: AsyncParsableCommand {
+    public static let configuration = CommandConfiguration(
         commandName: "run",
         abstract: "Run a one-shot prompt against a running daemon."
     )
 
     @Argument(help: "Model name (single-model shim: passed through).")
-    var model: String
+    public var model: String
 
     @Argument(
         parsing: .captureForPassthrough,
         help: "Prompt. Omit to read from piped stdin.")
-    var prompt: [String] = []
+    public var prompt: [String] = []
 
     @Option(help: "Daemon host.")
-    var host: String = "127.0.0.1"
+    public var host: String = "127.0.0.1"
 
     @Option(help: "Daemon port.")
-    var port: Int = GovernorConfig.defaultPort
+    public var port: Int = GovernorConfig.defaultPort
 
-    func run() async throws {
+    public init() {}
+
+    public func run() async throws {
         var text = prompt.joined(separator: " ")
         if text.isEmpty {
             if isatty(FileHandle.standardInput.fileDescriptor) != 0 {
@@ -35,7 +37,8 @@ struct Run: AsyncParsableCommand {
                         + "(interactive REPL is a later addition)")
                 throw ExitCode.failure
             }
-            let data = FileHandle.standardInput.readDataToEndOfFile()
+            let data = FileHandle.standardInput
+                .readDataToEndOfFile()
             text = String(data: data, encoding: .utf8) ?? ""
         }
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -47,7 +50,8 @@ struct Run: AsyncParsableCommand {
         var req = URLRequest(
             url: URL(string: "http://\(host):\(port)/api/chat")!)
         req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue(
+            "application/json", forHTTPHeaderField: "Content-Type")
         if let k = Credentials.resolve(
             explicit: nil, host: host, port: port), !k.isEmpty
         {
@@ -76,7 +80,8 @@ struct Run: AsyncParsableCommand {
         else {
             print(
                 "unexpected response: "
-                    + (String(data: data, encoding: .utf8) ?? "<binary>"))
+                    + (String(data: data, encoding: .utf8)
+                        ?? "<binary>"))
             throw ExitCode.failure
         }
         if let err = obj["error"] as? [String: Any],
