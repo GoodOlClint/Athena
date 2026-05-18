@@ -1,3 +1,4 @@
+import AthenaStore
 import Crypto
 import Foundation
 import HTTPTypes
@@ -19,13 +20,39 @@ enum AuthTier: Int, Sendable, Comparable {
 }
 
 struct AuthConfig: Sendable {
-    /// SHA-256(key) → highest tier granted to that key.
+    /// Bootstrap token hashes from env/file (in-memory; checked
+    /// first). The DB (`auth_tokens`) is the managed store, queried
+    /// per request.
     private let hashes: [[UInt8]: AuthTier]
-    var isEnabled: Bool { !hashes.isEmpty }
+    /// SQLite auth store (managed tokens + users). nil = bootstrap
+    /// only.
+    private let store: AthenaStore?
+    /// Precomputed at startup: any bootstrap hash, OR any DB token,
+    /// OR any DB user. Adding the FIRST credential to an already-
+    /// running open daemon needs a restart to begin enforcing.
+    private let enabled: Bool
+    var isEnabled: Bool { enabled }
 
-    init(hashes: [[UInt8]: AuthTier] = [:]) { self.hashes = hashes }
+    init(
+        hashes: [[UInt8]: AuthTier] = [:],
+        store: AthenaStore? = nil,
+        enabled: Bool? = nil
+    ) {
+        self.hashes = hashes
+        self.store = store
+        self.enabled = enabled ?? !hashes.isEmpty
+    }
 
-    private static func sha(_ s: String) -> [UInt8] {
+    /// Bind the DB and (re)compute `enabled` including DB rows.
+    func bound(to store: AthenaStore, dbHasCredentials: Bool)
+        -> AuthConfig
+    {
+        AuthConfig(
+            hashes: hashes, store: store,
+            enabled: !hashes.isEmpty || dbHasCredentials)
+    }
+
+    static func sha(_ s: String) -> [UInt8] {
         Array(SHA256.hash(data: Data(s.utf8)))
     }
 
@@ -132,16 +159,25 @@ struct AuthConfig: Sendable {
         return AuthConfig(hashes: map)
     }
 
-    /// Tier granted to a presented bearer token, or nil. Hashes the
-    /// token then constant-time-compares the fixed 32-byte digest
-    /// against every stored hash (no early return — no timing/҂count
-    /// leak); returns the highest matching tier.
-    func tier(forBearer token: String) -> AuthTier? {
+    /// Tier granted to a presented bearer token, or nil. Bootstrap
+    /// hashes (env/file) are checked in-memory with a constant-time
+    /// compare over the fixed 32-byte digest (no early return — no
+    /// timing/count leak). On no match, the DB `auth_tokens` table
+    /// is consulted by exact hash (indexed PK; the lookup key is
+    /// already a SHA-256, so byte-probing is infeasible).
+    func tier(forBearer token: String) async -> AuthTier? {
         let presented = Self.sha(token)
         var granted: AuthTier?
         for (stored, tier) in hashes
         where Self.constantTimeEqual(presented, stored) {
             granted = granted.map { max($0, tier) } ?? tier
+        }
+        if granted == nil, let store {
+            if let t = await store.tokenTier(
+                hash: Data(presented))
+            {
+                granted = t == "admin" ? .admin : .inference
+            }
         }
         return granted
     }
@@ -239,7 +275,7 @@ struct AuthMiddleware<Context: RequestContext>: RouterMiddleware {
             header.hasPrefix("Bearer "),
             case let token = String(header.dropFirst(7)),
             !token.isEmpty,
-            let granted = config.tier(forBearer: token)
+            let granted = await config.tier(forBearer: token)
         else {
             // Browsers can't send bearer on navigation — send them
             // to the login page instead of a JSON 401.

@@ -244,16 +244,20 @@ struct Load: AsyncParsableCommand {
 
         // Inbound bearer auth (M12). Fail-safe: a non-loopback bind
         // with no keys refuses to start.
+        let nTokens = await athenaStore.tokenCount()
+        let nUsers = await athenaStore.userCount()
+        let dbHasCreds = nTokens > 0 || nUsers > 0
         let authConfig = AuthConfig.load(
             file: authKeysFile,
             env: ProcessInfo.processInfo.environment,
-            log: Logger(label: AthenaLogLabel.daemon))
+            log: Logger(label: AthenaLogLabel.daemon)
+        ).bound(to: athenaStore, dbHasCredentials: dbHasCreds)
         try authConfig.validateStartup(
             listenHost: config.listenHost)
         Logger(label: AthenaLogLabel.daemon).notice(
             authConfig.isEnabled
-                ? "auth: enabled (bearer, 2-tier)"
-                : "auth: DISABLED (loopback, no keys)")
+                ? "auth: enabled (bearer 2-tier; env/file + DB)"
+                : "auth: DISABLED (loopback, no credentials)")
 
         let server = AthenaServer(
             config: config, governor: governor, llm: llm,

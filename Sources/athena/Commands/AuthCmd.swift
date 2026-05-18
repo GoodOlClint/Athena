@@ -214,23 +214,18 @@ struct AuthStatus: AsyncParsableCommand {
     }
 }
 
-/// Keyfile: `--file` wins; else the configured `auth_keys_file`;
-/// else `~/.athena/auth.keys`.
-private func keyfile(_ override: String?) -> URL {
-    if let override, !override.isEmpty {
-        return URL(
-            fileURLWithPath:
-                (override as NSString).expandingTildeInPath)
+/// 64-char hex → bytes (for `auth rm <hashprefix>` reconstruction).
+private func hexBytes(_ s: Substring) -> [UInt8]? {
+    guard s.count == 64 else { return nil }
+    var out: [UInt8] = []
+    var i = s.startIndex
+    while i < s.endIndex {
+        let j = s.index(i, offsetBy: 2)
+        guard let b = UInt8(s[i..<j], radix: 16) else { return nil }
+        out.append(b)
+        i = j
     }
-    if let cfg = try? AthenaConfig.parse(
-        file: ConfigEditor.resolvePath(nil)),
-        let f = cfg.authKeysFile, !f.isEmpty
-    {
-        return URL(
-            fileURLWithPath: (f as NSString).expandingTildeInPath)
-    }
-    return AthenaEnv.userHome()
-        .appendingPathComponent(".athena/auth.keys")
+    return out
 }
 
 private func validTier(_ s: String) -> String {
@@ -246,12 +241,13 @@ struct AuthAdd: AsyncParsableCommand {
         commandName: "add",
         abstract: "Generate a key for a tier (shown once).")
     @Argument(help: "Tier: admin | inference.") var tier: String
-    @Option(help: "Keys file (default: configured / ~/.athena/auth.keys).")
-    var file: String?
+    @Option(help: "Optional label (shown by `auth list`).")
+    var label: String?
+    @Option(help: "Data dir (default: configured / ~/.athena).")
+    var dataDir: String?
 
     func run() async throws {
         let t = validTier(tier)
-        let url = keyfile(file)
         // 32 bytes CSPRNG → sk-athena-<base64url>.
         let raw = SymmetricKey(size: .bits256).withUnsafeBytes {
             Data($0)
@@ -262,26 +258,18 @@ struct AuthAdd: AsyncParsableCommand {
             .replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "=", with: "")
-        let entry = AuthConfig.hashEntry(forRawKey: key)
-
-        let fm = FileManager.default
-        try? fm.createDirectory(
-            at: url.deletingLastPathComponent(),
-            withIntermediateDirectories: true)
-        var contents =
-            (try? String(contentsOf: url, encoding: .utf8)) ?? ""
-        if !contents.isEmpty, !contents.hasSuffix("\n") {
-            contents += "\n"
-        }
-        contents += "\(t) \(entry)\n"
+        let db: AthenaStore
         do {
-            try contents.write(
-                to: url, atomically: true, encoding: .utf8)
-            try fm.setAttributes(
-                [.posixPermissions: 0o600],
-                ofItemAtPath: url.path)
+            db = try AthenaStore(path: storeDBPath(dataDir))
         } catch {
-            FailableExit.die("error: cannot write \(url.path): \(error)")
+            FailableExit.die("error: cannot open store: \(error)")
+        }
+        do {
+            try await db.putToken(
+                hash: Data(AuthConfig.sha(key)), tier: t,
+                label: label)
+        } catch {
+            FailableExit.die("error: \(error)")
         }
         print(
             """
@@ -289,7 +277,7 @@ struct AuthAdd: AsyncParsableCommand {
 
               \(key)
 
-            stored as a hash in \(url.path)
+            stored as a hash in \(storeDBPath(dataDir).path)
             use:  Authorization: Bearer \(key)
             """)
     }
@@ -298,72 +286,58 @@ struct AuthAdd: AsyncParsableCommand {
 struct AuthList: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "list",
-        abstract: "List key tiers + hash prefixes (no secrets).")
-    @Option(help: "Keys file.") var file: String?
+        abstract: "List token tiers + hash prefixes (no secrets).")
+    @Option(help: "Data dir (default: configured / ~/.athena).")
+    var dataDir: String?
 
     func run() async throws {
-        let url = keyfile(file)
-        guard
-            let text = try? String(contentsOf: url, encoding: .utf8)
+        guard let db = try? AthenaStore(path: storeDBPath(dataDir))
         else {
-            print("no keys file at \(url.path)")
+            print("no store at \(storeDBPath(dataDir).path)")
             return
         }
-        var n = 0
-        for raw in text.split(separator: "\n") {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            if line.isEmpty || line.hasPrefix("#") { continue }
-            let parts = line.split(
-                separator: " ", maxSplits: 1,
-                omittingEmptySubsequences: true)
-            guard parts.count == 2 else { continue }
-            n += 1
-            let val = String(parts[1])
-            let shown =
-                val.hasPrefix("sha256:")
-                ? String(val.prefix(20)) + "…" : "(raw key)"
-            print("\(parts[0])\t\(shown)")
+        let toks = await db.listTokens()
+        if toks.isEmpty { print("no tokens"); return }
+        for t in toks {
+            print(
+                "\(t.tier)\tsha256:\(t.hex.prefix(12))…"
+                    + (t.label.map { "\t\($0)" } ?? ""))
         }
-        print(n == 0 ? "no keys" : "\(n) key(s) — \(url.path)")
+        print("\(toks.count) token(s) — \(storeDBPath(dataDir).path)")
     }
 }
 
 struct AuthRemove: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "rm",
-        abstract: "Remove key entries whose hash hex starts with PREFIX.")
+        abstract: "Remove tokens whose hash hex starts with PREFIX.")
     @Argument(help: "Hash hex prefix (>= 6 chars).") var prefix: String
-    @Option(help: "Keys file.") var file: String?
+    @Option(help: "Data dir (default: configured / ~/.athena).")
+    var dataDir: String?
 
     func run() async throws {
         guard prefix.count >= 6 else {
             FailableExit.die("error: prefix must be >= 6 hex chars")
         }
-        let url = keyfile(file)
-        guard
-            let text = try? String(contentsOf: url, encoding: .utf8)
-        else { FailableExit.die("error: no keys file at \(url.path)") }
-        var kept: [String] = []
+        guard let db = try? AthenaStore(path: storeDBPath(dataDir))
+        else {
+            FailableExit.die(
+                "error: no store at \(storeDBPath(dataDir).path)")
+        }
+        let matches = await db.listTokens().filter {
+            $0.hex.hasPrefix(prefix)
+        }
+        if matches.isEmpty {
+            FailableExit.die("error: no token matched \(prefix)")
+        }
         var removed = 0
-        for raw in text.split(
-            separator: "\n", omittingEmptySubsequences: false)
-        {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            if line.contains("sha256:\(prefix)") {
+        for m in matches {
+            if let bytes = hexBytes(Substring(m.hex)),
+                await db.deleteToken(hash: Data(bytes))
+            {
                 removed += 1
-                continue
             }
-            kept.append(String(raw))
         }
-        if removed == 0 {
-            FailableExit.die("error: no entry matched \(prefix)")
-        }
-        do {
-            try kept.joined(separator: "\n").write(
-                to: url, atomically: true, encoding: .utf8)
-        } catch {
-            FailableExit.die("error: cannot write \(url.path): \(error)")
-        }
-        print("removed \(removed) entr\(removed == 1 ? "y" : "ies")")
+        print("removed \(removed) token(s)")
     }
 }
