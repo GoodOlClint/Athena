@@ -1,18 +1,18 @@
 import ArgumentParser
-import AthenaClient
 import AthenaCore
 import Foundation
 
 /// `athena store …` — admin the shared SQLite store (M9.3). `export`
 /// and `stats` talk to a running daemon; `import` is deliberately
 /// offline-only (swapping the DB file under a live daemon corrupts it).
-struct Store: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
+public struct Store: AsyncParsableCommand {
+    public static let configuration = CommandConfiguration(
         commandName: "store",
         abstract: "Export, import, and inspect the shared store.",
         subcommands: [
             StoreExport.self, StoreImport.self, StoreStats.self,
         ])
+    public init() {}
 }
 
 /// Default store path mirrors `serve` (`<data-dir>/athena.sqlite`,
@@ -21,7 +21,8 @@ private func storeFile(_ dataDir: String?) -> URL {
     let root =
         dataDir.map {
             URL(
-                fileURLWithPath: ($0 as NSString).expandingTildeInPath,
+                fileURLWithPath: ($0 as NSString)
+                    .expandingTildeInPath,
                 isDirectory: true)
         }
         ?? AthenaEnv.userHome()
@@ -32,20 +33,22 @@ private func storeFile(_ dataDir: String?) -> URL {
 /// A fast liveness probe so `import` can refuse while a daemon holds
 /// the DB open. Short timeout — absence is the common, fast path.
 private func daemonReachable(_ d: DaemonOptions) async -> Bool {
-    var req = URLRequest(url: URL(string: d.base + "/v1/store/stats")!)
+    var req = URLRequest(
+        url: URL(string: d.base + "/v1/store/stats")!)
     req.timeoutInterval = 1.5
     return (try? await URLSession.shared.data(for: req)) != nil
 }
 
-struct StoreExport: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
+public struct StoreExport: AsyncParsableCommand {
+    public static let configuration = CommandConfiguration(
         commandName: "export",
         abstract: "Snapshot the live store (VACUUM INTO) to a path.")
-    @OptionGroup var daemon: DaemonOptions
+    @OptionGroup public var daemon: DaemonOptions
     @Argument(help: "Destination file (written by the daemon host).")
-    var path: String
+    public var path: String
+    public init() {}
 
-    func run() async throws {
+    public func run() async throws {
         guard
             let body = try? JSONSerialization.data(
                 withJSONObject: ["path": path])
@@ -61,25 +64,29 @@ struct StoreExport: AsyncParsableCommand {
     }
 }
 
-struct StoreImport: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
+public struct StoreImport: AsyncParsableCommand {
+    public static let configuration = CommandConfiguration(
         commandName: "import",
-        abstract: "Replace the local store from a snapshot (offline).")
-    @OptionGroup var daemon: DaemonOptions
+        abstract:
+            "Replace the local store from a snapshot (offline).")
+    @OptionGroup public var daemon: DaemonOptions
     @Option(help: "Store data dir (default ~/.athena).")
-    var dataDir: String?
-    @Argument(help: "Snapshot file to import.") var path: String
+    public var dataDir: String?
+    @Argument(help: "Snapshot file to import.") public var path:
+        String
+    public init() {}
 
-    func run() async throws {
+    public func run() async throws {
         if await daemonReachable(daemon) {
             FailableExit.die(
                 "error: a daemon is running at "
-                    + "\(daemon.host):\(daemon.port) — stop it before "
-                    + "import (swapping the DB under a live daemon "
-                    + "corrupts it)")
+                    + "\(daemon.host):\(daemon.port) — stop it "
+                    + "before import (swapping the DB under a live "
+                    + "daemon corrupts it)")
         }
         let src = URL(
-            fileURLWithPath: (path as NSString).expandingTildeInPath)
+            fileURLWithPath: (path as NSString)
+                .expandingTildeInPath)
         let fm = FileManager.default
         guard fm.fileExists(atPath: src.path) else {
             FailableExit.die("error: no such file: \(src.path)")
@@ -104,13 +111,14 @@ struct StoreImport: AsyncParsableCommand {
     }
 }
 
-struct StoreStats: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
+public struct StoreStats: AsyncParsableCommand {
+    public static let configuration = CommandConfiguration(
         commandName: "stats",
         abstract: "Vector + job counts and on-disk size.")
-    @OptionGroup var daemon: DaemonOptions
+    @OptionGroup public var daemon: DaemonOptions
+    public init() {}
 
-    func run() async throws {
+    public func run() async throws {
         let (code, data): (Int, Data)
         do {
             (code, data) = try await HTTPClient.send(

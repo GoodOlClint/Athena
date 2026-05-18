@@ -1,0 +1,97 @@
+import ArgumentParser
+import AthenaCore
+import Darwin
+import Foundation
+
+// Client-side credential store (login/logout/status) — manages THIS
+// host's stored bearer key for talking to a (local or remote) daemon.
+// Portable client surface (M14.2a). Server-side `auth add/list/rm` and
+// `auth user …` stay in the daemon binary.
+
+/// `athena auth …` on the thin client: only the credential-management
+/// verbs. (`athenad auth` additionally exposes add/list/rm/user.)
+public struct AuthClient: AsyncParsableCommand {
+    public static let configuration = CommandConfiguration(
+        commandName: "auth",
+        abstract: "Manage this host's stored daemon bearer key.",
+        subcommands: [
+            AuthLogin.self, AuthLogout.self, AuthStatus.self,
+        ])
+    public init() {}
+}
+
+public struct AuthLogin: AsyncParsableCommand {
+    public static let configuration = CommandConfiguration(
+        commandName: "login",
+        abstract: "Store a bearer key for a daemon (macOS Keychain).")
+    @Option(help: "Daemon host.") public var host: String =
+        "127.0.0.1"
+    @Option(help: "Daemon port.")
+    public var port: Int = GovernorConfig.defaultPort
+    @Option(help: "Key (omit to read stdin / prompt, no echo).")
+    public var key: String?
+    public init() {}
+
+    public func run() async throws {
+        let k: String
+        if let key, !key.isEmpty {
+            k = key
+        } else if isatty(0) == 0 {
+            k = (readLine() ?? "").trimmingCharacters(
+                in: .whitespacesAndNewlines)
+        } else {
+            k = String(cString: getpass("daemon bearer key: "))
+        }
+        guard !k.isEmpty else {
+            FailableExit.die("error: empty key")
+        }
+        do {
+            try Credentials.store(k, host: host, port: port)
+        } catch {
+            FailableExit.die("error: \(error)")
+        }
+        print("stored key for \(host):\(port) (not echoed)")
+    }
+}
+
+public struct AuthLogout: AsyncParsableCommand {
+    public static let configuration = CommandConfiguration(
+        commandName: "logout",
+        abstract: "Remove this host's stored key for a daemon.")
+    @Option(help: "Daemon host.") public var host: String =
+        "127.0.0.1"
+    @Option(help: "Daemon port.")
+    public var port: Int = GovernorConfig.defaultPort
+    public init() {}
+    public func run() async throws {
+        print(
+            Credentials.remove(host: host, port: port)
+                ? "removed stored key for \(host):\(port)"
+                : "no stored key for \(host):\(port)")
+    }
+}
+
+public struct AuthStatus: AsyncParsableCommand {
+    public static let configuration = CommandConfiguration(
+        commandName: "status",
+        abstract: "Report how the daemon key resolves (no secret).")
+    @Option(help: "Daemon host.") public var host: String =
+        "127.0.0.1"
+    @Option(help: "Daemon port.")
+    public var port: Int = GovernorConfig.defaultPort
+    public init() {}
+    public func run() async throws {
+        let env = ProcessInfo.processInfo.environment["ATHENA_KEY"]
+        let source: String
+        if let env, !env.isEmpty {
+            source = "ATHENA_KEY env"
+        } else if Credentials.resolve(
+            explicit: nil, host: host, port: port) != nil
+        {
+            source = "Keychain"
+        } else {
+            source = "none (set --key / ATHENA_KEY / auth login)"
+        }
+        print("\(host):\(port) — credential source: \(source)")
+    }
+}

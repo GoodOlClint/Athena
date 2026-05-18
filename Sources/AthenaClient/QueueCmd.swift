@@ -1,32 +1,35 @@
 import ArgumentParser
-import AthenaClient
 import Foundation
 
 /// `athena queue …` — manage the async request queue (M9.1). Thin
 /// HTTP client to a running daemon's `/v1/queue` surface.
-struct Queue: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
+public struct Queue: AsyncParsableCommand {
+    public static let configuration = CommandConfiguration(
         commandName: "queue",
         abstract: "Inspect and manage the async request queue.",
         subcommands: [
-            QueueLs.self, QueueGet.self, QueueSubmit.self, QueueRm.self,
+            QueueLs.self, QueueGet.self, QueueSubmit.self,
+            QueueRm.self,
         ])
+    public init() {}
 }
 
-struct QueueLs: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
+public struct QueueLs: AsyncParsableCommand {
+    public static let configuration = CommandConfiguration(
         commandName: "ls", abstract: "List queued/processed jobs.")
-    @OptionGroup var daemon: DaemonOptions
+    @OptionGroup public var daemon: DaemonOptions
     @Option(help: "Filter by status (queued|running|done|error).")
-    var status: String?
+    public var status: String?
+    public init() {}
 
-    func run() async throws {
+    public func run() async throws {
         let url =
             daemon.base + "/v1/queue"
             + (status.map { "?status=\($0)" } ?? "")
         let (_, data): (Int, Data)
         do {
-            (_, data) = try await HTTPClient.send("GET", url, key: daemon.authKey)
+            (_, data) = try await HTTPClient.send(
+                "GET", url, key: daemon.authKey)
         } catch { HTTPClient.noDaemon(daemon, error) }
         struct R: Decodable {
             struct J: Decodable {
@@ -49,7 +52,8 @@ struct QueueLs: AsyncParsableCommand {
                 + "STATUS")
         for j in r.jobs {
             print(
-                j.id.padding(toLength: 38, withPad: " ", startingAt: 0)
+                j.id.padding(
+                    toLength: 38, withPad: " ", startingAt: 0)
                     + j.kind.padding(
                         toLength: 16, withPad: " ", startingAt: 0)
                     + j.status)
@@ -57,17 +61,18 @@ struct QueueLs: AsyncParsableCommand {
     }
 }
 
-struct QueueSubmit: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
+public struct QueueSubmit: AsyncParsableCommand {
+    public static let configuration = CommandConfiguration(
         commandName: "submit",
         abstract: "Enqueue a job (body from --file or stdin).")
-    @OptionGroup var daemon: DaemonOptions
+    @OptionGroup public var daemon: DaemonOptions
     @Argument(help: "Kind: conversation | embeddings.")
-    var kind: String
+    public var kind: String
     @Option(help: "JSON body file. Omit to read stdin.")
-    var file: String?
+    public var file: String?
+    public init() {}
 
-    func run() async throws {
+    public func run() async throws {
         let body: Data
         if let file {
             body = try Data(contentsOf: URL(fileURLWithPath: file))
@@ -88,17 +93,18 @@ struct QueueSubmit: AsyncParsableCommand {
     }
 }
 
-struct QueueGet: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
+public struct QueueGet: AsyncParsableCommand {
+    public static let configuration = CommandConfiguration(
         commandName: "get", abstract: "Get a job's status/result.")
-    @OptionGroup var daemon: DaemonOptions
-    @Argument(help: "Job id.") var id: String
+    @OptionGroup public var daemon: DaemonOptions
+    @Argument(help: "Job id.") public var id: String
     @Option(help: "Long-poll up to N seconds for completion.")
-    var wait: Int?
+    public var wait: Int?
     @Flag(help: "Stream status transitions (SSE) until terminal.")
-    var follow = false
+    public var follow = false
+    public init() {}
 
-    func run() async throws {
+    public func run() async throws {
         if follow {
             var req = URLRequest(
                 url: URL(
@@ -125,20 +131,22 @@ struct QueueGet: AsyncParsableCommand {
             + (wait.map { "?wait=\($0)" } ?? "")
         let (code, data): (Int, Data)
         do {
-            (code, data) = try await HTTPClient.send("GET", url, key: daemon.authKey)
+            (code, data) = try await HTTPClient.send(
+                "GET", url, key: daemon.authKey)
         } catch { HTTPClient.noDaemon(daemon, error) }
         HTTPClient.printJSON(data)
         if code >= 400 { throw ExitCode.failure }
     }
 }
 
-struct QueueRm: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
+public struct QueueRm: AsyncParsableCommand {
+    public static let configuration = CommandConfiguration(
         commandName: "rm", abstract: "Remove (cancel/delete) a job.")
-    @OptionGroup var daemon: DaemonOptions
-    @Argument(help: "Job id.") var id: String
+    @OptionGroup public var daemon: DaemonOptions
+    @Argument(help: "Job id.") public var id: String
+    public init() {}
 
-    func run() async throws {
+    public func run() async throws {
         let (code, data): (Int, Data)
         do {
             (code, data) = try await HTTPClient.send(

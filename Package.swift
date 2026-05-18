@@ -13,8 +13,12 @@ let package = Package(
         .macOS(.v14)
     ],
     products: [
+        // Portable cross-platform client (M14.2a).
         .executable(name: "athena", targets: ["athena"]),
+        // Apple-only daemon + operator CLI.
+        .executable(name: "athenad", targets: ["athenad"]),
         .library(name: "AthenaCore", targets: ["AthenaCore"]),
+        .library(name: "AthenaClient", targets: ["AthenaClient"]),
     ],
     dependencies: [
         .package(
@@ -175,10 +179,23 @@ let package = Package(
             ],
             path: "Sources/AthenaClient"),
 
-        // The `athena` executable: CLI (serve/run/pull/list/ps/...) and the
-        // governed HTTP surface.
+        // The portable cross-platform client (M14.2a): thin HTTP CLI
+        // to a daemon. AthenaClient + ArgumentParser only — no MLX,
+        // no Hummingbird, no rust-shim.
         .executableTarget(
             name: "athena",
+            dependencies: [
+                "AthenaClient",
+                .product(
+                    name: "ArgumentParser",
+                    package: "swift-argument-parser"),
+            ],
+            path: "Sources/athena"),
+
+        // The `athenad` daemon + Apple-host operator CLI: the governed
+        // HTTP surface + MLX/Metal modules (macOS-only).
+        .executableTarget(
+            name: "athenad",
             dependencies: [
                 "AthenaCore",
                 "AthenaClient",
@@ -194,7 +211,7 @@ let package = Package(
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "Crypto", package: "swift-crypto"),
             ],
-            path: "Sources/athena",
+            path: "Sources/athenad",
             linkerSettings: [
                 .unsafeFlags([
                     "-L\(Context.packageDirectory)/rust-shim/target/release"
