@@ -97,9 +97,7 @@ public struct Run: AsyncParsableCommand {
             print("error: \(msg)")
             throw ExitCode.failure
         }
-        if let message = obj["message"] as? [String: Any],
-            let content = message["content"] as? String
-        {
+        if let content = obj["content"] as? String {
             print(content)
         } else {
             print(

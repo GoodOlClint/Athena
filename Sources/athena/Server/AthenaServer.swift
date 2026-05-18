@@ -24,7 +24,7 @@ struct AthenaServer {
     let queue: RequestQueue
     /// Shared SQLite store (vectors + queue) — backs `/v1/store/*`.
     let store: AthenaStore
-    /// Display name reported by the Ollama shim (`/api/tags` etc.).
+    /// Served model's display name, echoed in native `/api/*` replies.
     let modelName: String
     /// In-process request metrics (M11.1). Defaulted so the
     /// memberwise init is unchanged for existing call sites.
@@ -155,36 +155,22 @@ struct AthenaServer {
                 context.parameters.get("arg"), request)
         }
 
-        // Ollama-compatible shim (M6.1, non-streaming).
-        router.get("/api/version") { _, _ -> Response in
-            Self.json(OllamaVersionResponse(version: OllamaShim.version))
-        }
-        router.get("/api/tags") { _, _ -> Response in
-            Self.json(
-                OllamaTagsResponse(models: [
-                    OllamaModelInfo(
-                        name: modelName, model: modelName,
-                        modified_at: Self.now(), size: 0,
-                        digest: "")
-                ]))
-        }
+        // Athena-native API (M16). `/v1/*` stays OpenAI-compatible;
+        // `/api/*` is Athena's OWN dialect (clean minimal JSON, NOT
+        // Ollama, NOT OpenAI), routed through the SAME governed module
+        // paths. Ollama was deleted entirely (no /api/version, /tags,
+        // /generate, /embeddings).
         router.post("/api/chat") { request, _ -> Response in
-            await handleOllamaChat(request)
-        }
-        router.post("/api/generate") { request, _ -> Response in
-            await handleOllamaGenerate(request)
-        }
-        router.post("/api/embeddings") { request, _ -> Response in
-            await handleOllamaEmbeddings(request)
+            await handleNativeChat(request)
         }
         router.post("/api/embed") { request, _ -> Response in
-            await handleOllamaEmbed(request)
+            await handleNativeEmbed(request)
         }
-        router.post("/api/stop") { _, _ -> Response in
+        router.post("/api/admin/stop") { _, _ -> Response in
             await governor.unload(.llm)
-            return Self.json([
-                "status": "unloaded", "model": modelName,
-            ])
+            return Self.json(
+                AthenaStopResponse(
+                    status: "unloaded", model: modelName))
         }
 
         // Wire the queue executor to the governed module paths and
@@ -575,7 +561,7 @@ struct AthenaServer {
                     type: "invalid_request_error",
                     code: "missing_vector"))
         }
-        switch await ollamaEmbed([text], module: .textEmbedding) {
+        switch await governedEmbed([text], module: .textEmbedding) {
         case .fail(let r): return .fail(r)
         case .ok(let vs):
             return .ok(vs.first ?? [])
@@ -971,7 +957,7 @@ struct AthenaServer {
         case "conversation":
             guard
                 let req = try? JSONDecoder().decode(
-                    OllamaChatRequest.self, from: request)
+                    AthenaChatRequest.self, from: request)
             else { return (nil, "invalid conversation body") }
             let prompt = req.messages
                 .filter { $0.role == "user" }
@@ -994,7 +980,7 @@ struct AthenaServer {
         case "embeddings":
             guard
                 let req = try? JSONDecoder().decode(
-                    OllamaEmbedRequest.self, from: request)
+                    AthenaEmbedRequest.self, from: request)
             else { return (nil, "invalid embeddings body") }
             do {
                 try await governor.ensureLoaded(.textEmbedding)
@@ -1013,16 +999,12 @@ struct AthenaServer {
         }
     }
 
-    // MARK: - Ollama shim (M6.1)
+    // MARK: - Native /api inference (M16)
 
     /// `Response` isn't `Error`, so a plain success-or-error-response.
     private enum Outcome<T> {
         case ok(T)
         case fail(Response)
-    }
-
-    private static func now() -> String {
-        ISO8601DateFormatter().string(from: Date())
     }
 
     private func decodeJSON<T: Decodable>(
@@ -1041,12 +1023,8 @@ struct AthenaServer {
         }
     }
 
-    /// The governed text path shared by `/api/chat` + `/api/generate`:
-    /// ensureLoaded(.llm) + the 4b prompt-cache preflight (both
-    /// classified), then non-streamed accumulation. Mirrors the
-    /// OpenAI non-stream path.
-    /// Governed gate shared by chat/generate: ensureLoaded(.llm) + the
-    /// 4b prompt-cache preflight, both classified. Returns an error
+    /// Governed gate for `/api/chat`: ensureLoaded(.llm) + the 4b
+    /// prompt-cache preflight, both classified. Returns an error
     /// `Response` to send, or nil when the request may proceed.
     private func governedPreflight(
         prompt: String
@@ -1064,8 +1042,8 @@ struct AthenaServer {
         }
     }
 
-    /// Newline-delimited JSON streamer (Ollama's stream format). Each
-    /// generated piece → one JSON line; a final `done` line closes it.
+    /// Newline-delimited JSON streamer. Each generated piece → one
+    /// JSON line; a final `done` line closes the stream.
     private static func streamNDJSON(
         tokens: AsyncStream<String>,
         line: @escaping @Sendable (_ content: String, _ done: Bool)
@@ -1093,8 +1071,12 @@ struct AthenaServer {
             body: ResponseBody(asyncSequence: stream))
     }
 
-    private func handleOllamaChat(_ request: Request) async -> Response {
-        let decoded = await decodeJSON(request, OllamaChatRequest.self)
+    /// `POST /api/chat` — Athena-native chat. Same governed LLM path as
+    /// `/v1/chat/completions`; only the JSON dialect differs. Non-
+    /// stream → one `AthenaChatResponse`; `stream:true` → NDJSON
+    /// `AthenaChatChunk` lines, final `{content:"",done:true}`.
+    private func handleNativeChat(_ request: Request) async -> Response {
+        let decoded = await decodeJSON(request, AthenaChatRequest.self)
         guard case .ok(let body) = decoded else {
             if case .fail(let r) = decoded { return r }
             fatalError()
@@ -1107,62 +1089,25 @@ struct AthenaServer {
             return err
         }
         let model = body.model ?? modelName
-        if body.stream == false {
-            var text = ""
-            for await c in llm.generate(prompt: prompt) { text += c }
-            return Self.json(
-                OllamaChatResponse(
-                    model: model, created_at: Self.now(),
-                    message: OllamaMessage(
-                        role: "assistant", content: text),
-                    done: true, done_reason: "stop"))
-        }
-        return Self.streamNDJSON(tokens: llm.generate(prompt: prompt)) {
-            content, done in
-            try? JSONEncoder().encode(
-                OllamaChatResponse(
-                    model: model, created_at: Self.now(),
-                    message: OllamaMessage(
-                        role: "assistant",
-                        content: done ? "" : content),
-                    done: done, done_reason: done ? "stop" : ""))
-        }
-    }
-
-    private func handleOllamaGenerate(_ request: Request) async -> Response
-    {
-        let decoded = await decodeJSON(
-            request, OllamaGenerateRequest.self)
-        guard case .ok(let body) = decoded else {
-            if case .fail(let r) = decoded { return r }
-            fatalError()
-        }
-        if let err = await governedPreflight(prompt: body.prompt) {
-            return err
-        }
-        let model = body.model ?? modelName
-        if body.stream == false {
-            var text = ""
-            for await c in llm.generate(prompt: body.prompt) {
-                text += c
+        if body.stream == true {
+            return Self.streamNDJSON(
+                tokens: llm.generate(prompt: prompt)
+            ) { content, done in
+                try? JSONEncoder().encode(
+                    AthenaChatChunk(
+                        content: done ? "" : content, done: done))
             }
-            return Self.json(
-                OllamaGenerateResponse(
-                    model: model, created_at: Self.now(),
-                    response: text, done: true, done_reason: "stop"))
         }
-        return Self.streamNDJSON(
-            tokens: llm.generate(prompt: body.prompt)
-        ) { content, done in
-            try? JSONEncoder().encode(
-                OllamaGenerateResponse(
-                    model: model, created_at: Self.now(),
-                    response: done ? "" : content,
-                    done: done, done_reason: done ? "stop" : ""))
-        }
+        var text = ""
+        for await c in llm.generate(prompt: prompt) { text += c }
+        return Self.json(
+            AthenaChatResponse(
+                model: model, content: text, done: true))
     }
 
-    private func ollamaEmbed(_ inputs: [String], module: ModuleID)
+    /// Governed embedding helper shared by `/api/embed`, `/v1/vectors`
+    /// text resolution, and the queued `embeddings` kind.
+    private func governedEmbed(_ inputs: [String], module: ModuleID)
         async -> Outcome<[[Float]]>
     {
         do {
@@ -1183,25 +1128,10 @@ struct AthenaServer {
         }
     }
 
-    private func handleOllamaEmbeddings(_ request: Request) async
-        -> Response
-    {
-        let decoded = await decodeJSON(
-            request, OllamaEmbeddingsRequest.self)
-        guard case .ok(let body) = decoded else {
-            if case .fail(let r) = decoded { return r }
-            fatalError()
-        }
-        switch await ollamaEmbed([body.prompt], module: .textEmbedding) {
-        case .fail(let r): return r
-        case .ok(let v):
-            return Self.json(
-                OllamaEmbeddingsResponse(embedding: v.first ?? []))
-        }
-    }
-
-    private func handleOllamaEmbed(_ request: Request) async -> Response {
-        let decoded = await decodeJSON(request, OllamaEmbedRequest.self)
+    /// `POST /api/embed` — Athena-native embeddings. `input` is a
+    /// string or `[string]`; reply is `{model, embeddings:[[Float]]}`.
+    private func handleNativeEmbed(_ request: Request) async -> Response {
+        let decoded = await decodeJSON(request, AthenaEmbedRequest.self)
         guard case .ok(let body) = decoded else {
             if case .fail(let r) = decoded { return r }
             fatalError()
@@ -1211,11 +1141,11 @@ struct AthenaServer {
                 status: .badRequest, message: "'input' is required",
                 type: "invalid_request_error", code: "invalid_input")
         }
-        switch await ollamaEmbed(body.input, module: .textEmbedding) {
+        switch await governedEmbed(body.input, module: .textEmbedding) {
         case .fail(let r): return r
         case .ok(let v):
             return Self.json(
-                OllamaEmbedResponse(
+                AthenaEmbedResponse(
                     model: body.model ?? modelName, embeddings: v))
         }
     }

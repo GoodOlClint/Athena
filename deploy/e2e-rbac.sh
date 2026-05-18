@@ -160,6 +160,33 @@ code 403 GET  /v1/store/stats "$BOSS_SCOPED"
 code 200 POST /v1/chat/completions "$BOSS_SCOPED" "$CHAT"  # inference ok
 
 echo
+echo "== phase 3.5: native /api inference + admin (M16.1) =="
+code 200 POST /api/chat       "$ALICE_TOK" "$CHAT"  # member: inference
+code 401 POST /api/chat       "" "$CHAT"            # no token
+code 403 POST /api/chat       "$RO_TOK" "$CHAT"     # readonly ∌ infer
+code 200 POST /api/embed      "$ALICE_TOK" '{"input":"hi"}'
+code 403 POST /api/admin/stop "$ALICE_TOK"          # ∌ daemonAdmin
+code 200 POST /api/admin/stop "$ADMIN_TOK"          # admin: daemonAdmin
+# Ollama is GONE — deleted routes 404 (auth passes; no route).
+code 404 GET  /api/tags       "$ALICE_TOK"
+code 404 GET  /api/version    "$ALICE_TOK"
+code 404 POST /api/generate   "$ALICE_TOK" "$CHAT"
+code 404 POST /api/embeddings "$ALICE_TOK" '{"prompt":"hi"}'
+code 404 POST /api/stop       "$ADMIN_TOK"          # renamed → /admin
+# Native chat shape: has "content", NOT Ollama message/done_reason.
+CB="$(curl -s -X POST "http://127.0.0.1:$PORT/api/chat" \
+  -H "Authorization: Bearer $ALICE_TOK" \
+  -H "Content-Type: application/json" -d "$CHAT")"
+echo "$CB" | grep -q '"content"' \
+  && ok "native chat reply carries content" \
+  || bad "native chat missing content ($CB)"
+if echo "$CB" | grep -q '"done_reason"\|"message"'; then
+  bad "native chat still Ollama-shaped ($CB)"
+else
+  ok "native chat is not Ollama-shaped"
+fi
+
+echo
 echo "== phase 4: cross-tenant queue isolation =="
 JID="$(curl -s -X POST "http://127.0.0.1:$PORT/v1/queue/conversation" \
   -H "Authorization: Bearer $ALICE_TOK" \

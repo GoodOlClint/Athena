@@ -27,7 +27,7 @@ public struct Unload: AsyncParsableCommand {
 
     public func run() async throws {
         var req = URLRequest(
-            url: URL(string: "http://\(host):\(port)/api/stop")!)
+            url: URL(string: "http://\(host):\(port)/api/admin/stop")!)
         req.httpMethod = "POST"
         if let k = Credentials.resolve(
             explicit: nil, host: host, port: port), !k.isEmpty

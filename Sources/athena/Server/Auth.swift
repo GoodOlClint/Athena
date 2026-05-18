@@ -263,14 +263,16 @@ enum AuthPolicy {
             return .daemonAdmin
         }
         if path.hasPrefix("/v1/store") { return .storeAdmin }
-        if path == "/api/stop" { return .daemonAdmin }
+        if path == "/api/admin" || path.hasPrefix("/api/admin/") {
+            return .daemonAdmin
+        }
         if path.hasPrefix("/v1/vectors") {
             if path == "/v1/vectors/query" { return .vectorsRead }
             return mutating ? .vectorsWrite : .vectorsRead
         }
         if path.hasPrefix("/v1/queue") { return .queueSubmit }
         // Inference surface (/v1/chat, /v1/embeddings, /v1/audio/*,
-        // the /api/* shim) and any unlisted route.
+        // native /api/chat + /api/embed) and any unlisted route.
         return .inference
     }
 }
