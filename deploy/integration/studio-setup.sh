@@ -23,11 +23,12 @@
 #                 SET THIS to the external SSD path on the Studio)
 #   DATA_DIR      runtime/data dir (default: ~/.athena)
 #   TEST_MODEL    pinned real model (HF id or store name) — REQUIRED
-#   KV_COMPRESSION  kv-cache codec: none|turboquant (default: unset →
-#                 leaves the config default `none`). Set to turboquant
-#                 to bring the host up in the TurboQuant posture for
-#                 RUNBOOK scenario G. The ATHENA_KV_COMPRESSION env var
-#                 still overrides this at daemon start (G2).
+#   KV_COMPRESSION  kv-cache compression: none|turboquant|triattention
+#                 (default: unset → leaves the config default `none`).
+#                 Set to turboquant (RUNBOOK scenario G) or
+#                 triattention (scenario H) to bring the host up in
+#                 that posture. The ATHENA_KV_COMPRESSION env var still
+#                 overrides this at daemon start (G3/H3).
 #   ADMIN_USER    seeded admin account (default: admin)
 #   ADMIN_PASS    admin password (default: prompted, no echo)
 #

@@ -61,10 +61,12 @@ engine = "mlx"
 # Bare boolean.
 # speculative = false
 
-# KV-cache compression codec (default "none"): "none" or
-# "turboquant" (TurboQuant quantized KV cache). "triattention" is
-# reserved for a later milestone. The ATHENA_KV_COMPRESSION env var
-# overrides this; an unrecognized value is a hard startup error.
+# KV-cache compression (default "none"): "none", "turboquant"
+# (TurboQuant quantized KV cache), or "triattention" (norm-only
+# TriAttention token eviction — caps the cache by dropping
+# low-importance decode tokens; inert on the MTP/speculative path).
+# The ATHENA_KV_COMPRESSION env var overrides this; an unrecognized
+# value is a hard startup error.
 # kv_compression = "none"
 
 # Built-in vector-store byte cap (default: memory budget / 8).

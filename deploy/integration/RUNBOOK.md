@@ -35,10 +35,11 @@ deploy/integration/studio-setup.sh
 ```
 Copy the printed **admin bearer token** (shown once) and the LAN IP.
 
-For scenario **G** (TurboQuant) you can bring the host up already in
-the compressed posture by adding `KV_COMPRESSION=turboquant` to that
-invocation; G1/G3/G4 instead toggle it live via `athena config set` /
-the `ATHENA_KV_COMPRESSION` env, each followed by a daemon restart
+For scenario **G** (TurboQuant) or **H** (TriAttention) you can bring
+the host up already in the compressed posture by adding
+`KV_COMPRESSION=turboquant` (or `=triattention`) to that invocation;
+the G/H steps instead toggle it live via `athena config set` / the
+`ATHENA_KV_COMPRESSION` env, each followed by a daemon restart
 (`kv_compression` is resolved once at start).
 
 **On the MacBook:**
@@ -158,9 +159,31 @@ that touches the kv_compression / KV-codec path** — otherwise N/A
 | G1 | Studio: `athena config set kv_compression turboquant` → `athena stop` → `athena start …` ; `curl $B/healthz` | daemon healthy with TurboQuant active | ☐ |
 | G2 | MacBook: `ath run "$TEST_MODEL" "name three primary colors"` (daemon from G1) | coherent real completion (no degenerate single-token/char loops) | ☐ |
 | G3 | Studio: keep TOML `kv_compression = none`; restart daemon with `ATHENA_KV_COMPRESSION=turboquant` in its env ; check `athena logs --source start` | env wins over TOML — TurboQuant active (precedence env > TOML) | ☐ |
-| G4 | Studio: `athena config set kv_compression bogus` (then also try `triattention`) → restart | daemon **refuses to start**; clear "unrecognized kv_compression" error; **no silent fallback to none** (fail-closed) | ☐ |
+| G4 | Studio: `athena config set kv_compression bogus` (also try an unknown like `snapkv`) → restart | daemon **refuses to start**; clear "unrecognized kv_compression" error; **no silent fallback to none** (fail-closed). `triattention` is now a valid value — see scenario H | ☐ |
 | G5 | Restore `kv_compression = none`, restart; `ath run "$TEST_MODEL" "<fixed long-ish prompt>"`, note output; repeat with `turboquant` (G1) | both coherent; outputs need **not** match (numerics differ by design) — neither degenerates | ☐ (P1) |
 | G6 | At a low `--prompt-cache-cap-bytes`, send a context that **503s `prompt_cache_cap_exceeded`** under `none`; restart with `turboquant`, resend | same context now **admitted** (per-token KV 256→64 KiB accounting); cap still enforced for an even larger context | ☐ (P1) |
+
+## H — KV-cache compression / TriAttention (Studio + MacBook) · P0*
+
+Exercises the `kv_compression = triattention` value (M21) on the
+**real model**. TriAttention is **token EVICTION**, not quantization:
+it drops low-`‖k‖` decode tokens once the cache exceeds its budget
+(norm-only mode; calibrated trig scoring is a deferred follow-up).
+Off by default; bring the host up with
+`KV_COMPRESSION=triattention … studio-setup.sh`, or per H1 toggle it
+live. Resolved **once at daemon start** — every change needs a
+restart. Unlike TurboQuant, eviction does **not** lower the
+per-token KV figure (the prefill is pinned full-precision), so the
+prompt-cache-cap accounting is unchanged from `none`. `*`P0 **only
+for a release that touches the kv_compression / KV path** — else N/A.
+
+| # | Action | Expected | Result |
+|---|---|---|---|
+| H1 | Studio: `athena config set kv_compression triattention` → `athena stop` → `athena start …` ; `curl $B/healthz` | daemon healthy, starts cleanly (triattention is a valid value) | ☐ |
+| H2 | MacBook: `ath run "$TEST_MODEL" "name three primary colors"` (daemon from H1) | coherent real completion (no degenerate loops) — the evicting cache is a correct drop-in even when the budget is not hit | ☐ |
+| H3 | Studio: TOML `kv_compression = none`; restart with `ATHENA_KV_COMPRESSION=triattention` in env; `athena logs --source start` | env wins over TOML — TriAttention active (precedence env > TOML) | ☐ |
+| H4 | MacBook: with speculative/MTP enabled on the daemon AND `kv_compression=triattention` (H1), run a fixed greedy (temp 0) prompt; repeat with `kv_compression=none` + speculative | **identical** output both runs — eviction is inert on the MTP/speculative path (it cannot un-mix GDN/Mamba recurrent state); bit-identical greedy preserved | ☐ |
+| H5 | MacBook: send a **long** context/generation (enough decode tokens to exceed the eviction budget) under `triattention`; watch `/healthz` governor memory across the run; repeat under `none` | both coherent; under `triattention` resident KV stays **bounded** (eviction caps growth) while `none` grows unbounded — neither degenerates; outputs need **not** match | ☐ (P1) |
 
 ---
 
@@ -183,13 +206,15 @@ deploy/integration/studio-setup.sh --teardown --purge    # + creds
 | Pinned model | |
 | Studio macOS / hardware | |
 | P0 result (A–E + F4) | ☐ all PASS / ☐ blocked |
-| G result (kv_compression) | ☐ N/A (release untouched) / ☐ G1–G4 PASS / ☐ blocked |
+| G result (kv_compression / TurboQuant) | ☐ N/A (release untouched) / ☐ G1–G4 PASS / ☐ blocked |
+| H result (kv_compression / TriAttention) | ☐ N/A (release untouched) / ☐ H1–H4 PASS / ☐ blocked |
 | P1 result | |
 | Notes / filed issues | |
 
 > Release rule: a version tag is **not** shipped until every **P0**
 > row (A, B, C, D1–D6, E, F4) is PASS on the two boxes — **plus
-> G1–G4 for any release that touches the `kv_compression` / KV-codec
-> path** (else G is N/A). Archive this completed file to
+> G1–G4 (TurboQuant) and/or H1–H4 (TriAttention) for any release
+> that touches the `kv_compression` / KV path** (else G/H are N/A).
+> Archive this completed file to
 > `results/<tag>-<date>.md`. The automated stub gate stays the
 > per-PR gate; this is the pre-release gate.
