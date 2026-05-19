@@ -13,6 +13,9 @@
 #   5. CLI escalation guards   (unknown role / unknown user refused)
 #   6. fail-safe startup       (no creds + non-loopback ⇒ refuse)
 #   7. auth-disabled loopback  (no creds + loopback ⇒ open)
+#   8. kv_compression knob     (triattention/turboquant accepted at
+#                               daemon start; unknown ⇒ fail-closed
+#                               start refusal, not a silent fallback)
 #
 # It touches ONLY an ephemeral temp data dir + a loopback port, never
 # the real ~/.athena or the login Keychain (bearer tokens are passed
@@ -721,6 +724,54 @@ elif start_daemon "$D2" 127.0.0.1; then
 else
   bad "daemon failed to start for status client phase"
   cat "$D/daemon.log"
+fi
+
+echo
+echo "== phase 12: kv_compression knob — daemon-start contract (M20/M21) =="
+# `kv_compression` is resolved ONCE at daemon start (Load.swift),
+# independent of the engine — so the stub daemon exercises the real
+# accept / fail-closed contract. TriAttention (M21) is token eviction;
+# turboquant (M20) is a quant codec; both must be accepted. An unknown
+# value must REFUSE to start (no silent fallback to none). Honors this
+# script's invariants: --engine stub, loopback, ephemeral data dir.
+kv_daemon() { # KVVALUE  -> rc 0 = came up healthy, 1 = process exited
+  local kv="$1" dd rc=1
+  dd="$(mktemp -d)"
+  ATHENA_KV_COMPRESSION="$kv" "$ATHENA" load --engine stub \
+    --host 127.0.0.1 --port "$PORT" --data-dir "$dd" \
+    --model-store "$MSTORE" > "$D/kv-$kv.log" 2>&1 &
+  DPID=$!
+  for _ in $(seq 1 30); do
+    if curl -s -o /dev/null "http://127.0.0.1:$PORT/healthz"; then
+      rc=0; break
+    fi
+    if ! kill -0 "$DPID" 2>/dev/null; then rc=1; break; fi
+    sleep 0.5
+  done
+  stop_daemon
+  rm -rf "$dd"
+  return $rc
+}
+if kv_daemon triattention; then
+  ok "kv_compression=triattention accepted (daemon healthy)"
+else
+  bad "kv_compression=triattention rejected"; cat "$D/kv-triattention.log"
+fi
+if kv_daemon turboquant; then
+  ok "kv_compression=turboquant accepted (daemon healthy)"
+else
+  bad "kv_compression=turboquant rejected"; cat "$D/kv-turboquant.log"
+fi
+if kv_daemon bogus; then
+  bad "kv_compression=bogus started (should fail closed, no fallback)"
+else
+  ok "kv_compression=bogus fail-closed (daemon refused to start)"
+fi
+if grep -qi "unrecognized kv_compression" "$D/kv-bogus.log"; then
+  ok "fail-closed surfaces a clear 'unrecognized kv_compression' error"
+else
+  bad "fail-closed error message missing/unclear"
+  cat "$D/kv-bogus.log"
 fi
 
 echo
