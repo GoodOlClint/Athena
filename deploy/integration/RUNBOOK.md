@@ -35,6 +35,12 @@ deploy/integration/studio-setup.sh
 ```
 Copy the printed **admin bearer token** (shown once) and the LAN IP.
 
+For scenario **G** (TurboQuant) you can bring the host up already in
+the compressed posture by adding `KV_COMPRESSION=turboquant` to that
+invocation; G1/G3/G4 instead toggle it live via `athena config set` /
+the `ATHENA_KV_COMPRESSION` env, each followed by a daemon restart
+(`kv_compression` is resolved once at start).
+
 **On the MacBook:**
 ```
 source deploy/integration/macbook-env.sh <studio-lan-ip> 7447
@@ -134,6 +140,28 @@ Open `ath_web` (`http://<studio>:7447/ui`) in Safari/Chrome.
 | F3 | Fill the store volume; `ath store export` | graceful error, daemon survives | ☐ |
 | F4 | Governor stress: 1 model + concurrent requests until budget hit | **503 `metal_oom`** (not a crash); eviction/reconcile/prompt-cache-cap visible in `/healthz` | ☐ |
 
+## G — KV-cache compression / TurboQuant (Studio + MacBook) · P0*
+
+Exercises the `kv_compression` knob (M20) on the **real model** — the
+codec changes KV-cache numerics under genuine MLX inference and the
+governor's prompt-cache accounting, which the stub gate and the
+single-node automated `TurboQuantE2ETests` cannot cover off-box.
+TurboQuant is **off by default**; bring the host up in the TurboQuant
+posture with `KV_COMPRESSION=turboquant … studio-setup.sh`, or per G1
+toggle it live. `kv_compression` is resolved **once at daemon start**,
+so every change needs a daemon restart. `*`P0 **only for a release
+that touches the kv_compression / KV-codec path** — otherwise N/A
+(opt-in feature, default off; do not block unrelated releases).
+
+| # | Action | Expected | Result |
+|---|---|---|---|
+| G1 | Studio: `athena config set kv_compression turboquant` → `athena stop` → `athena start …` ; `curl $B/healthz` | daemon healthy with TurboQuant active | ☐ |
+| G2 | MacBook: `ath run "$TEST_MODEL" "name three primary colors"` (daemon from G1) | coherent real completion (no degenerate single-token/char loops) | ☐ |
+| G3 | Studio: keep TOML `kv_compression = none`; restart daemon with `ATHENA_KV_COMPRESSION=turboquant` in its env ; check `athena logs --source start` | env wins over TOML — TurboQuant active (precedence env > TOML) | ☐ |
+| G4 | Studio: `athena config set kv_compression bogus` (then also try `triattention`) → restart | daemon **refuses to start**; clear "unrecognized kv_compression" error; **no silent fallback to none** (fail-closed) | ☐ |
+| G5 | Restore `kv_compression = none`, restart; `ath run "$TEST_MODEL" "<fixed long-ish prompt>"`, note output; repeat with `turboquant` (G1) | both coherent; outputs need **not** match (numerics differ by design) — neither degenerates | ☐ (P1) |
+| G6 | At a low `--prompt-cache-cap-bytes`, send a context that **503s `prompt_cache_cap_exceeded`** under `none`; restart with `turboquant`, resend | same context now **admitted** (per-token KV 256→64 KiB accounting); cap still enforced for an even larger context | ☐ (P1) |
+
 ---
 
 ## Teardown
@@ -155,10 +183,13 @@ deploy/integration/studio-setup.sh --teardown --purge    # + creds
 | Pinned model | |
 | Studio macOS / hardware | |
 | P0 result (A–E + F4) | ☐ all PASS / ☐ blocked |
+| G result (kv_compression) | ☐ N/A (release untouched) / ☐ G1–G4 PASS / ☐ blocked |
 | P1 result | |
 | Notes / filed issues | |
 
 > Release rule: a version tag is **not** shipped until every **P0**
-> row (A, B, C, D1–D6, E, F4) is PASS on the two boxes. Archive this
-> completed file to `results/<tag>-<date>.md`. The automated stub
-> gate stays the per-PR gate; this is the pre-release gate.
+> row (A, B, C, D1–D6, E, F4) is PASS on the two boxes — **plus
+> G1–G4 for any release that touches the `kv_compression` / KV-codec
+> path** (else G is N/A). Archive this completed file to
+> `results/<tag>-<date>.md`. The automated stub gate stays the
+> per-PR gate; this is the pre-release gate.

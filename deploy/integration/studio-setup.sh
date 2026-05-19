@@ -23,6 +23,11 @@
 #                 SET THIS to the external SSD path on the Studio)
 #   DATA_DIR      runtime/data dir (default: ~/.athena)
 #   TEST_MODEL    pinned real model (HF id or store name) — REQUIRED
+#   KV_COMPRESSION  kv-cache codec: none|turboquant (default: unset →
+#                 leaves the config default `none`). Set to turboquant
+#                 to bring the host up in the TurboQuant posture for
+#                 RUNBOOK scenario G. The ATHENA_KV_COMPRESSION env var
+#                 still overrides this at daemon start (G2).
 #   ADMIN_USER    seeded admin account (default: admin)
 #   ADMIN_PASS    admin password (default: prompted, no echo)
 #
@@ -39,6 +44,7 @@ BIND_HOST="${BIND_HOST:-0.0.0.0}"
 PORT="${PORT:-7447}"
 DATA_DIR="${DATA_DIR:-$HOME/.athena}"
 MODEL_STORE="${MODEL_STORE:-$HOME/.athena/models}"
+KV_COMPRESSION="${KV_COMPRESSION:-}"
 ADMIN_USER="${ADMIN_USER:-admin}"
 TEARDOWN=0
 PURGE=0
@@ -115,6 +121,7 @@ echo "   bind        : $BIND_HOST:$PORT"
 echo "   data dir    : $DATA_DIR"
 echo "   model store : $MODEL_STORE"
 echo "   test model  : $TEST_MODEL  (engine: mlx — REAL)"
+echo "   kv compress : ${KV_COMPRESSION:-none (config default)}"
 echo "════════════════════════════════════════════════════════════"
 case "$MODEL_STORE" in
   /Volumes/*) : ;;
@@ -130,6 +137,9 @@ echo "== writing config =="
 "$ATHENA_BIN" config set data_dir    "$DATA_DIR"
 "$ATHENA_BIN" config set engine      mlx
 "$ATHENA_BIN" config set model       "$TEST_MODEL"
+if [ -n "$KV_COMPRESSION" ]; then
+  "$ATHENA_BIN" config set kv_compression "$KV_COMPRESSION"
+fi
 "$ATHENA_BIN" config path
 
 # 2. Seed the admin account BEFORE start (fail-safe needs creds for a
