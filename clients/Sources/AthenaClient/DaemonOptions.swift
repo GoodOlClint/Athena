@@ -45,24 +45,72 @@ public struct DaemonOptions: ParsableArguments {
 
 /// Minimal JSON HTTP helpers for the thin-client subcommands.
 public enum HTTPClient {
+    /// Bounded-retry HTTP call (M19). Idempotency-safe: see
+    /// `RetryPolicy`. Backoff sleeps between attempts; the final
+    /// outcome (status or thrown `URLError`) is returned/rethrown so
+    /// callers behave exactly as before once retries are exhausted.
     public static func send(
         _ method: String, _ url: String, body: Data? = nil,
         key: String? = nil
     ) async throws -> (Int, Data) {
-        var req = URLRequest(url: URL(string: url)!)
-        req.httpMethod = method
-        if let key, !key.isEmpty {
-            req.setValue(
-                "Bearer \(key)", forHTTPHeaderField: "Authorization")
+        let policy = RetryPolicy.fromEnvironment()
+        var attempt = 0
+        while true {
+            var req = URLRequest(url: URL(string: url)!)
+            req.httpMethod = method
+            if let key, !key.isEmpty {
+                req.setValue(
+                    "Bearer \(key)",
+                    forHTTPHeaderField: "Authorization")
+            }
+            if let body {
+                req.httpBody = body
+                req.setValue(
+                    "application/json",
+                    forHTTPHeaderField: "Content-Type")
+            }
+            do {
+                let (data, resp) =
+                    try await URLSession.shared.data(for: req)
+                let http = resp as? HTTPURLResponse
+                let code = http?.statusCode ?? 0
+                if let d = policy.delay(
+                    attempt: attempt, method: method,
+                    outcome: .status(code),
+                    retryAfter: Self.retryAfter(http))
+                {
+                    try? await Task.sleep(
+                        nanoseconds: UInt64(d * 1_000_000_000))
+                    attempt += 1
+                    continue
+                }
+                return (code, data)
+            } catch let e as URLError {
+                if let d = policy.delay(
+                    attempt: attempt, method: method,
+                    outcome: .transport(e.code))
+                {
+                    try? await Task.sleep(
+                        nanoseconds: UInt64(d * 1_000_000_000))
+                    attempt += 1
+                    continue
+                }
+                throw e
+            }
         }
-        if let body {
-            req.httpBody = body
-            req.setValue(
-                "application/json", forHTTPHeaderField: "Content-Type")
-        }
-        let (data, resp) = try await URLSession.shared.data(for: req)
-        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-        return (code, data)
+    }
+
+    /// `Retry-After` in delta-seconds form (HTTP-date form ignored;
+    /// the cap in `RetryPolicy` bounds it regardless).
+    private static func retryAfter(_ r: HTTPURLResponse?)
+        -> TimeInterval?
+    {
+        guard
+            let v = r?.value(forHTTPHeaderField: "Retry-After"),
+            let s = TimeInterval(
+                v.trimmingCharacters(in: .whitespaces)), s >= 0
+        else { return nil }
+        return s
     }
 
     /// Pretty-print JSON `data`, or raw text on failure.
