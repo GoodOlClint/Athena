@@ -23,7 +23,9 @@ import MLXNN
 /// attention path only; it is never substituted for `MambaCache`/GDN
 /// layers nor on the MTP/speculative path.
 public final class TriAttentionKVCache: KVCache {
-    public let config: TriAttentionConfig
+    /// `private(set)`: fixed for normal use, but `fromState` rebuilds it
+    /// from `metaState` during prompt-cache restore.
+    public private(set) var config: TriAttentionConfig
 
     public var offset: Int = 0
     public var maxSize: Int? { nil }
@@ -125,6 +127,10 @@ public final class TriAttentionKVCache: KVCache {
         return trimmed
     }
 
+    /// Keys/values sliced to the live offset (2 arrays, or empty when
+    /// the cache has never been updated). Reconstruction goes through
+    /// `fromState` (or set `metaState` *then* `state`): `metaState` owns
+    /// `offset`/config, so the `state` setter only binds the arrays.
     public var state: [MLXArray] {
         get {
             guard let k = keys, let v = values else { return [] }
@@ -135,21 +141,83 @@ public final class TriAttentionKVCache: KVCache {
             ]
         }
         set {
-            guard newValue.count == 2 else {
+            switch newValue.count {
+            case 0:
+                keys = nil
+                values = nil
+            case 2:
+                keys = newValue[0]
+                values = newValue[1]
+            default:
                 fatalError(
-                    "TriAttentionKVCache state must have exactly 2 arrays")
+                    "TriAttentionKVCache state must have 0 or 2 arrays")
             }
-            keys = newValue[0]
-            values = newValue[1]
-            offset = keys!.dim(2)
         }
     }
 
-    /// Minimal placeholder; full prompt-cache round-trip
-    /// (prefix/step/config metadata + `fromState`) is M21.3.
+    /// `[kvBudget, divideLength, scoreAggregation, prefillPin, offset,
+    /// prefixLength, sawPrefill, stepCount]` — fully reconstructs the
+    /// eviction policy and bookkeeping. The substrate's prompt-cache
+    /// registry (`cacheClassName`/`restoreCacheFromMetaState`) is
+    /// `private` + hardcoded and Athena's standard path does not invoke
+    /// the substrate persistence, so this cache is deliberately
+    /// self-describing rather than substrate-registered (keeping the
+    /// substrate clone pristine — the M21 fork decision). `fromState`
+    /// is the canonical round-trip.
     public var metaState: [String] {
-        get { [""] }
-        set {}
+        get {
+            [
+                String(config.kvBudget),
+                String(config.divideLength),
+                config.scoreAggregation.rawValue,
+                String(config.prefillPin),
+                String(offset),
+                String(prefixLength),
+                String(sawPrefill),
+                String(stepCount),
+            ]
+        }
+        set { applyMetaState(newValue) }
+    }
+
+    struct CacheError: Error, CustomStringConvertible {
+        let message: String
+        var description: String { message }
+    }
+
+    private func applyMetaState(_ m: [String]) {
+        guard m.count >= 8,
+            let budget = Int(m[0]), let divide = Int(m[1]),
+            let agg = TriAttentionConfig.ScoreAggregation(rawValue: m[2]),
+            let off = Int(m[4]), let prefix = Int(m[5]),
+            let step = Int(m[7])
+        else { return }
+        config = TriAttentionConfig(
+            kvBudget: budget, divideLength: divide,
+            scoreAggregation: agg, prefillPin: m[3] == "true")
+        offset = off
+        prefixLength = prefix
+        sawPrefill = m[6] == "true"
+        stepCount = step
+    }
+
+    /// Canonical round-trip: parse `metaState` first (it owns offset and
+    /// the eviction policy), then bind the saved arrays.
+    public static func fromState(
+        state: [MLXArray], metaState: [String]
+    ) throws -> TriAttentionKVCache {
+        guard metaState.count >= 8 else {
+            throw CacheError(
+                message: "TriAttentionKVCache: metaState needs 8 fields")
+        }
+        guard state.count == 0 || state.count == 2 else {
+            throw CacheError(
+                message: "TriAttentionKVCache: state must be 0 or 2 arrays")
+        }
+        let cache = TriAttentionKVCache()
+        cache.metaState = metaState
+        cache.state = state
+        return cache
     }
 
     /// Mirrors `BaseKVCache`'s default mask logic (single token ⇒ none;
