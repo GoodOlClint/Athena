@@ -31,6 +31,10 @@ public struct AthenaConfig: Sendable, Equatable {
     public var temperature: String?
     public var speculative: Bool?
     public var vectorCapBytes: Int?
+    /// KV-cache compression codec: `none` (default), `turboquant`, or
+    /// `triattention`. Optional — daemon defaults to `none` when absent.
+    /// The `ATHENA_KV_COMPRESSION` env var overrides this at startup.
+    public var kvCompression: String?
     /// Bearer-auth keys file. Optional — no keys + loopback = open;
     /// no keys + non-loopback = the daemon refuses to start.
     public var authKeysFile: String?
@@ -49,6 +53,7 @@ public struct AthenaConfig: Sendable, Equatable {
         logLevel: String? = nil, syslogRemote: String? = nil,
         maxTokens: Int? = nil, temperature: String? = nil,
         speculative: Bool? = nil, vectorCapBytes: Int? = nil,
+        kvCompression: String? = nil,
         authKeysFile: String? = nil,
         httpsProxy: String? = nil, httpProxy: String? = nil,
         allProxy: String? = nil, noProxy: String? = nil,
@@ -67,6 +72,7 @@ public struct AthenaConfig: Sendable, Equatable {
         self.temperature = temperature
         self.speculative = speculative
         self.vectorCapBytes = vectorCapBytes
+        self.kvCompression = kvCompression
         self.authKeysFile = authKeysFile
         self.httpsProxy = httpsProxy
         self.httpProxy = httpProxy
@@ -152,6 +158,7 @@ public struct AthenaConfig: Sendable, Equatable {
             temperature: scalar("temperature", in: toml),
             speculative: spec,
             vectorCapBytes: vecCap,
+            kvCompression: scalar("kv_compression", in: toml),
             authKeysFile: scalar("auth_keys_file", in: toml),
             httpsProxy: scalar("https_proxy", in: toml),
             httpProxy: scalar("http_proxy", in: toml),

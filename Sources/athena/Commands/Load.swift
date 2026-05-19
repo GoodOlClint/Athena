@@ -1,6 +1,7 @@
 import ArgumentParser
 import AthenaClient
 import AthenaCore
+import AthenaDeploy
 import AthenaEmbedding
 import AthenaLLM
 import AthenaStore
@@ -147,6 +148,15 @@ struct Load: AsyncParsableCommand {
         // (same never-override rule as HF_HOME above). M13.
         HFAuth.exportToEnv()
 
+        // KV-cache compression codec: env ATHENA_KV_COMPRESSION > TOML
+        // kv_compression > built-in none. Resolved once at startup; an
+        // unrecognized value throws here and aborts the daemon
+        // (fail-closed — never a silent fallback). M20.2.
+        let tomlCfg = try? AthenaConfig.parse(
+            file: ConfigEditor.resolvePath(nil))
+        let kvCompression = try KVCompression.resolve(
+            config: tomlCfg?.kvCompression)
+
         let config = GovernorConfig(
             totalBudgetBytes: budgetBytes,
             listenHost: host,
@@ -188,7 +198,8 @@ struct Load: AsyncParsableCommand {
                 parameters: .init(
                     maxTokens: maxTokens,
                     temperature: Float(temperature ?? 0.7),
-                    speculative: speculative),
+                    speculative: speculative,
+                    kvCompression: kvCompression),
                 promptCacheCapBytes: config.promptCacheCapBytes)
         }
         // Embeddings: real MLX module under the mlx engine, stub under

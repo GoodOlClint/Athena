@@ -18,15 +18,19 @@ public struct LLMGenerationParameters: Sendable {
     /// when temperature == 0 AND the model has an MTP head; otherwise the
     /// standard path is used (temp>0 speculative is the M2.3 named risk).
     public var speculative: Bool
+    /// KV-cache compression codec (the `kv_compression` knob). M20.
+    public var kvCompression: KVCompression
 
     public init(
         maxTokens: Int = 1024, temperature: Float = 0.7,
-        topP: Float = 0.95, speculative: Bool = false
+        topP: Float = 0.95, speculative: Bool = false,
+        kvCompression: KVCompression = .none
     ) {
         self.maxTokens = maxTokens
         self.temperature = temperature
         self.topP = topP
         self.speculative = speculative
+        self.kvCompression = kvCompression
     }
 
     /// MTP speculative decoding is **greedy-only**: it engages only at
@@ -66,7 +70,13 @@ public actor MLXLLMModule: LLMModule {
     /// the cap errs toward refusing early — the safe direction for an
     /// OOM guard. Brief 4b.
     private let promptCacheCapBytes: Int
-    private let perTokenKVBytes = 256 * 1024
+    /// Conservative per-token KV upper bound, fed to the governor's
+    /// prompt-cache cap. TurboQuant stores quantized K/V (~4-bit + small
+    /// fp16 norm overhead) so its real footprint is well under a quarter
+    /// of the fp16 bound; 64 KiB still over-estimates — the safe
+    /// direction for an OOM guard. M20.2 (refined when the prompt-cache
+    /// round-trip lands in M20.3).
+    private let perTokenKVBytes: Int
 
     public init(
         modelDirectory: URL,
@@ -77,6 +87,8 @@ public actor MLXLLMModule: LLMModule {
         self.params = parameters
         self.estimatedBytes = Self.estimateBytes(forModelAt: modelDirectory)
         self.promptCacheCapBytes = promptCacheCapBytes
+        self.perTokenKVBytes =
+            parameters.kvCompression == .none ? 256 * 1024 : 64 * 1024
     }
 
     /// Brief 4b: refuse a prompt whose KV/prompt-cache would exceed the
@@ -262,8 +274,11 @@ public actor MLXLLMModule: LLMModule {
         }
         let userInput = UserInput(chat: [.user(prompt)], tools: tools)
         let lmInput = try await container.prepare(input: userInput)
+        let gen = params.kvCompression.generation
         let gp = GenerateParameters(
             maxTokens: params.maxTokens,
+            kvBits: gen.kvBits,
+            kvQuantizationScheme: gen.scheme,
             temperature: params.temperature,
             topP: params.topP)
         return try await container.generate(input: lmInput, parameters: gp)

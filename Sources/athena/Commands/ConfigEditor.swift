@@ -19,6 +19,7 @@ enum ConfigEditor {
         "syslog_remote", "log_dir", "max_tokens", "temperature",
         "speculative", "vector_cap_bytes", "auth_keys_file",
         "https_proxy", "http_proxy", "all_proxy", "no_proxy",
+        "kv_compression",
     ]
 
     /// `--config` wins; else the installed file if present; else the
@@ -70,6 +71,7 @@ enum ConfigEditor {
         case "http_proxy": return cfg.httpProxy
         case "all_proxy": return cfg.allProxy
         case "no_proxy": return cfg.noProxy
+        case "kv_compression": return cfg.kvCompression
         default: FailableExit.die("error: unknown key '\(key)'")
         }
     }
