@@ -1,9 +1,14 @@
+import AthenaModels
 import Foundation
 import MLXLMCommon
 
 /// Cross-cutting KV-cache compression selector (the shared `kv_compression`
 /// knob). M20 introduces the key + full plumbing with the `none` and
-/// `turboquant` cases; M21 adds only the `triattention` case.
+/// `turboquant` cases; M21 adds the `triattention` case.
+///
+/// `turboquant` *quantizes* KV numerics (the `generation` tuple);
+/// `triattention` *evicts* low-importance tokens (the `eviction`
+/// accessor — a distinct seam, since eviction is not a quant scheme).
 ///
 /// Precedence: env `ATHENA_KV_COMPRESSION` > TOML `kv_compression` >
 /// built-in default `none`. An unrecognized value is a hard error at
@@ -11,8 +16,7 @@ import MLXLMCommon
 public enum KVCompression: String, Sendable, CaseIterable, Equatable {
     case none
     case turboquant
-    // `triattention` is added by M21 (its codec does not exist yet);
-    // until then it resolves as unrecognized → fail-closed.
+    case triattention
 
     public struct ResolutionError: Error, CustomStringConvertible {
         public let value: String
@@ -46,13 +50,24 @@ public enum KVCompression: String, Sendable, CaseIterable, Equatable {
             toml: tomlValue)
     }
 
-    /// Substrate scheme + the kvBits the codec needs. `turboquant`
-    /// defaults to 4-bit (the codec default); `none` disables KV
-    /// quantization (nil kvBits).
+    /// Substrate KV-quantization scheme + kvBits. `turboquant` defaults
+    /// to 4-bit; `none` and `triattention` perform no KV quantization
+    /// (`triattention` evicts tokens instead — see `eviction`).
     public var generation: (scheme: KVQuantizationScheme, kvBits: Float?) {
         switch self {
-        case .none: return (.uniform, nil)
+        case .none, .triattention: return (.uniform, nil)
         case .turboquant: return (.turboQuant, 4.0)
+        }
+    }
+
+    /// Token-eviction policy. Non-nil only for `triattention`; this is
+    /// the separate seam (the `generation` quant tuple does not model
+    /// eviction). Wired into the vendored model's cache construction for
+    /// the standard attention path only (inert on MTP/speculative).
+    public var eviction: TriAttentionConfig? {
+        switch self {
+        case .none, .turboquant: return nil
+        case .triattention: return TriAttentionConfig()
         }
     }
 }

@@ -636,6 +636,13 @@ public class AthenaQwen35TextModel: Module, LLMModel, KVCacheDimensionProvider {
     /// wired into generation in M2.2c.
     @ModuleInfo(key: "mtp") var mtp: AthenaQwen35MTPModule?
 
+    /// When non-nil, `newCache` builds self-evicting `TriAttentionKVCache`
+    /// for attention layers (the M21 norm-only eviction seam). Set only
+    /// by the standard generation path; the MTP/speculative path clears
+    /// it so eviction is inert there (it can't un-mix GDN recurrent
+    /// state). Not a model weight — plain transient generation state.
+    public var triAttentionEviction: TriAttentionConfig?
+
     public init(_ args: AthenaQwen35TextConfiguration) {
         self.configuration = args
         self.vocabularySize = args.vocabularySize
@@ -704,6 +711,9 @@ public class AthenaQwen35TextModel: Module, LLMModel, KVCacheDimensionProvider {
         return model.layers.map { layer in
             if layer.isLinear {
                 return MambaCache()
+            }
+            if let evict = triAttentionEviction {
+                return TriAttentionKVCache(config: evict)
             }
             return KVCacheSimple()
         }
@@ -800,6 +810,13 @@ public class AthenaQwen35Model: Module, LLMModel, KVCacheDimensionProvider {
 
     public func newCache(parameters: GenerateParameters?) -> [KVCache] {
         languageModel.newCache(parameters: parameters)
+    }
+
+    /// M21 norm-only TriAttention eviction policy (set-through to the
+    /// text model). Set by the standard path; cleared by the MTP path.
+    public var triAttentionEviction: TriAttentionConfig? {
+        get { languageModel.triAttentionEviction }
+        set { languageModel.triAttentionEviction = newValue }
     }
 
     // MARK: - MTP (M2.2b) passthrough — the speculative path uses these.

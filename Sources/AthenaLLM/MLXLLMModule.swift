@@ -87,8 +87,15 @@ public actor MLXLLMModule: LLMModule {
         self.params = parameters
         self.estimatedBytes = Self.estimateBytes(forModelAt: modelDirectory)
         self.promptCacheCapBytes = promptCacheCapBytes
-        self.perTokenKVBytes =
-            parameters.kvCompression == .none ? 256 * 1024 : 64 * 1024
+        // TurboQuant stores ~4-bit quantized K/V → the 64 KiB bound
+        // over-estimates (safe for an OOM guard). TriAttention does NOT
+        // shrink per-token bytes — it caps token COUNT and pins the
+        // prefill (the prompt cache the preflight sizes) at full
+        // precision — so it keeps the full 256 KiB bound like `none`.
+        switch parameters.kvCompression {
+        case .turboquant: self.perTokenKVBytes = 64 * 1024
+        case .none, .triattention: self.perTokenKVBytes = 256 * 1024
+        }
     }
 
     /// Brief 4b: refuse a prompt whose KV/prompt-cache would exceed the
@@ -228,6 +235,13 @@ public actor MLXLLMModule: LLMModule {
             guard let model = ctx.model as? AthenaQwen35Model
             else { return nil }
 
+            // TriAttention is inert on the MTP/speculative + guided
+            // paths: eviction can't un-mix the GDN/Mamba recurrent
+            // state, and these paths must stay bit-identical greedy.
+            // Clear any policy a prior standard request left on the
+            // shared model instance before building caches here.
+            model.triAttentionEviction = nil
+
             // Structured ⇒ NO-THINK by construction: the Guide masks
             // from token 0, so the schema is enforced immediately and
             // the model's <think>…</think> is suppressed (matches
@@ -274,6 +288,15 @@ public actor MLXLLMModule: LLMModule {
         }
         let userInput = UserInput(chat: [.user(prompt)], tools: tools)
         let lmInput = try await container.prepare(input: userInput)
+        // The standard attention path is the ONLY place TriAttention
+        // eviction applies. Set it on the model so the substrate's
+        // newCache(parameters:) builds evicting attention caches; nil
+        // (any non-triattention knob) leaves KVCacheSimple intact.
+        let evictionPolicy = params.kvCompression.eviction
+        try await container.perform { (ctx: ModelContext) in
+            (ctx.model as? AthenaQwen35Model)?.triAttentionEviction =
+                evictionPolicy
+        }
         let gen = params.kvCompression.generation
         let gp = GenerateParameters(
             maxTokens: params.maxTokens,

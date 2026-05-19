@@ -41,12 +41,14 @@ final class KVCompressionTests: XCTestCase {
             try KVCompression.resolve(env: nil, toml: "bogus"))
     }
 
-    /// `triattention` is a documented future value but its codec does
-    /// not exist until M21 — selecting it now must fail closed, not
-    /// silently degrade to `none`.
-    func testTriattentionNotYetAvailableFailsClosed() {
-        XCTAssertThrowsError(
-            try KVCompression.resolve(env: nil, toml: "triattention"))
+    /// M21: `triattention` now resolves (its eviction path exists).
+    func testTriattentionResolves() throws {
+        XCTAssertEqual(
+            try KVCompression.resolve(env: nil, toml: "triattention"),
+            .triattention)
+        XCTAssertEqual(
+            try KVCompression.resolve(env: "TriAttention ", toml: "none"),
+            .triattention)
     }
 
     func testGenerationMapping() {
@@ -55,5 +57,18 @@ final class KVCompressionTests: XCTestCase {
         XCTAssertEqual(KVCompression.turboquant.generation.kvBits, 4.0)
         XCTAssertEqual(
             KVCompression.turboquant.generation.scheme, .turboQuant)
+        // TriAttention evicts, it does not quantize KV: no kvBits, the
+        // plain (uniform) scheme — the eviction lives on `eviction`.
+        XCTAssertNil(KVCompression.triattention.generation.kvBits)
+        XCTAssertEqual(
+            KVCompression.triattention.generation.scheme, .uniform)
+    }
+
+    /// The eviction seam is distinct from the quant tuple: non-nil only
+    /// for `triattention`.
+    func testEvictionAccessor() {
+        XCTAssertNil(KVCompression.none.eviction)
+        XCTAssertNil(KVCompression.turboquant.eviction)
+        XCTAssertNotNil(KVCompression.triattention.eviction)
     }
 }
