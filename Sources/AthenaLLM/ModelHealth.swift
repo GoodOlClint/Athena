@@ -85,9 +85,14 @@ public enum ModelHealth {
         let headerLen = lead.reduce(into: UInt64(0)) { acc, b in
             acc = (acc >> 8) | (UInt64(b) << 56)
         }
-        let attrs = try? FileManager.default.attributesOfItem(
-            atPath: url.path)
-        let fileSize = (attrs?[.size] as? Int) ?? 0
+        // Size from the OPEN handle, not `attributesOfItem`: `pull` stores
+        // shards in the HF-cache layout where each shard is a SYMLINK to
+        // ../../blobs/<sha>. `attributesOfItem` lstats the link (tens of
+        // bytes) and would spuriously fail the bound below ("corrupt
+        // header") on every pulled model; the handle follows the link to
+        // the real blob, matching the bytes we actually read.
+        let fileSize = Int((try? fh.seekToEnd()) ?? 0)
+        try? fh.seek(toOffset: 8)
         // Compare in UInt64: a corrupt all-0xFF length is UInt64.max,
         // and `Int(UInt64.max)` traps — never convert before bounding.
         let avail = fileSize >= 8 ? UInt64(fileSize - 8) : 0
