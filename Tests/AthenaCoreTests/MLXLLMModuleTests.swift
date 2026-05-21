@@ -113,6 +113,26 @@ final class MLXLLMModuleEstimateTests: XCTestCase {
         XCTAssertEqual(
             MLXLLMModule.estimateBytes(forModelAt: snap), 10_000)
     }
+
+    /// The store entry itself is a symlink for pulled models
+    /// (~/.athena/models/<name> → snapshot). The estimate must follow that
+    /// ROOT symlink too — `contentsOfDirectory` won't traverse a symlinked
+    /// root, which left the estimate at 0 B for every pulled model.
+    func testEstimateFollowsRootSymlink() throws {
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("athena-est-root-\(UUID().uuidString)")
+        let real = base.appendingPathComponent("real", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: real, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+        try Data(count: 7_000).write(
+            to: real.appendingPathComponent("model-00001.safetensors"))
+        let link = base.appendingPathComponent("entry")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+
+        XCTAssertEqual(
+            MLXLLMModule.estimateBytes(forModelAt: link), 7_000)
+    }
 }
 
 /// Real end-to-end generation through the governor. Gated: loading a 27B
@@ -149,5 +169,46 @@ final class MLXLLMGenerationIntegrationTests: XCTestCase {
         }
         XCTAssertFalse(
             out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
+
+    /// Regression for F10: `athena pull` lands a model as a SYMLINK
+    /// (~/.athena/models/<name> → HF snapshot). The substrate weight loader
+    /// doesn't follow a symlinked root dir, so a pulled model loaded ZERO
+    /// shards and failed with keyNotFound. Load via a symlink and assert it
+    /// resolves + loads + generates. (Heavy — gated like the test above.)
+    func testLoadsViaStoreSymlink() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard env["ATHENA_RUN_MODEL_TESTS"] == "1" else {
+            throw XCTSkip("set ATHENA_RUN_MODEL_TESTS=1 to run (heavy)")
+        }
+        let realURL = ModelStore().resolve(env["ATHENA_TEST_MODEL"])
+            .resolvingSymlinksInPath()
+        guard
+            FileManager.default.fileExists(
+                atPath: realURL.appendingPathComponent("config.json").path)
+        else {
+            throw XCTSkip("model not present at \(realURL.path)")
+        }
+        // Mimic the pull layout: a symlink store entry → the real model dir.
+        let link = FileManager.default.temporaryDirectory
+            .appendingPathComponent("athena-symlink-\(UUID().uuidString)")
+        try FileManager.default.createSymbolicLink(
+            at: link, withDestinationURL: realURL)
+        defer { try? FileManager.default.removeItem(at: link) }
+
+        let llm = MLXLLMModule(
+            modelDirectory: link,
+            parameters: .init(maxTokens: 16, temperature: 0))
+        let gov = MemoryGovernor(totalBudgetBytes: Int(96) << 30)
+        await gov.register(llm, evictable: false)
+        try await gov.ensureLoaded(.llm)  // would throw keyNotFound pre-fix
+
+        var out = ""
+        for await chunk in llm.generate(prompt: "Reply with exactly: ok") {
+            out += chunk
+        }
+        XCTAssertFalse(
+            out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            "model loaded via a symlinked store entry must generate")
     }
 }

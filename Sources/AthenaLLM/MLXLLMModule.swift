@@ -139,8 +139,15 @@ public actor MLXLLMModule: LLMModule {
                 reason:
                     "no model at \(modelDirectory.path) (missing config.json)")
         }
+        // Resolve the store-entry symlink: `athena pull` lands a model as
+        // a symlink (~/.athena/models/<name> → HF snapshot dir). The
+        // substrate's weight loader enumerates the directory but does NOT
+        // follow a symlinked ROOT, so it would load ZERO shards → the model
+        // fails with keyNotFound on its first parameter. Convert-produced
+        // models are real dirs and were unaffected; every pulled model was.
         self.container = try await loadModelContainer(
-            from: modelDirectory, using: #huggingFaceTokenizerLoader())
+            from: modelDirectory.resolvingSymlinksInPath(),
+            using: #huggingFaceTokenizerLoader())
     }
 
     public func unload() async {
@@ -312,9 +319,15 @@ public actor MLXLLMModule: LLMModule {
     /// MLX maps resident, so it is an honest governor admission estimate.
     static func estimateBytes(forModelAt directory: URL) -> Int {
         let fm = FileManager.default
+        // Resolve the store-entry symlink first: `pull` lands a model as a
+        // symlink (~/.athena/models/<name> → HF snapshot). `contentsOfDirectory`
+        // does NOT traverse a symlinked root, so a pulled model would
+        // enumerate to nothing → 0 B estimate → defeated OOM gate. (Then the
+        // per-shard resolve below handles the blob symlinks inside.)
+        let dir = directory.resolvingSymlinksInPath()
         guard
             let entries = try? fm.contentsOfDirectory(
-                at: directory,
+                at: dir,
                 includingPropertiesForKeys: [.fileSizeKey])
         else { return 0 }
         var total = 0
