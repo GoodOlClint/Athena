@@ -319,8 +319,14 @@ public actor MLXLLMModule: LLMModule {
         else { return 0 }
         var total = 0
         for url in entries where url.pathExtension == "safetensors" {
+            // Resolve the shard symlink before sizing: `pull` stores
+            // shards in the HF-cache layout (each a symlink to
+            // ../../blobs/<sha>). Sizing the link itself (~76 B) would
+            // make the governor's pre-load estimate ~0 and defeat its OOM
+            // admission gate — same root cause as ModelHealth's size check.
             let size =
-                (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
+                (try? url.resolvingSymlinksInPath()
+                    .resourceValues(forKeys: [.fileSizeKey]))?.fileSize
                 ?? 0
             total += size
         }

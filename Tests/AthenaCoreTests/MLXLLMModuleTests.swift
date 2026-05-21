@@ -82,6 +82,37 @@ final class MLXLLMModuleEstimateTests: XCTestCase {
             fileURLWithPath: "/nonexistent/athena/\(UUID().uuidString)")
         XCTAssertEqual(MLXLLMModule.estimateBytes(forModelAt: missing), 0)
     }
+
+    /// `pull`'s HF-cache layout points each shard at ../../blobs/<sha>.
+    /// The estimate must follow the symlink to the real blob size — not
+    /// the ~tens-of-bytes link path — or the governor's pre-load OOM
+    /// admission gate sees ~0 B for every pulled model.
+    func testEstimateFollowsBlobSymlinks() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("athena-est-sym-\(UUID().uuidString)")
+        let blobs = root.appendingPathComponent("blobs", isDirectory: true)
+        let snap = root.appendingPathComponent(
+            "snapshots/rev", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: blobs, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: snap, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try Data(count: 4_000).write(
+            to: blobs.appendingPathComponent("aaa"))
+        try Data(count: 6_000).write(
+            to: blobs.appendingPathComponent("bbb"))
+        try FileManager.default.createSymbolicLink(
+            atPath: snap.appendingPathComponent("model-00001.safetensors").path,
+            withDestinationPath: "../../blobs/aaa")
+        try FileManager.default.createSymbolicLink(
+            atPath: snap.appendingPathComponent("model-00002.safetensors").path,
+            withDestinationPath: "../../blobs/bbb")
+
+        XCTAssertEqual(
+            MLXLLMModule.estimateBytes(forModelAt: snap), 10_000)
+    }
 }
 
 /// Real end-to-end generation through the governor. Gated: loading a 27B
