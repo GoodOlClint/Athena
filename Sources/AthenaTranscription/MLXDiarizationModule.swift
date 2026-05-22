@@ -72,14 +72,35 @@ public actor MLXDiarizationModule: DiarizationModule {
 
         let pcm = try AudioDecode.pcm16kMono(from: tmp)
         let audio = MLXArray(pcm).asType(.float32)
-        return try await Self.run(Send((model, audio)))
+
+        // M24.4b: the offline single-pass path is capped by the
+        // transformer encoder's positional table (~120s); longer audio is
+        // routed to the model's native streaming path (chunked, with a
+        // persistent speaker cache so ids stay stable across chunks). A
+        // small margin keeps clips near the boundary on streaming so they
+        // never overrun the offline table.
+        let cfg = model.config
+        let frameDuration =
+            Double(
+                cfg.processorConfig.hopLength
+                    * cfg.fcEncoderConfig.subsamplingFactor)
+            / Double(cfg.processorConfig.samplingRate)
+        let offlineMaxSeconds =
+            Double(cfg.tfEncoderConfig.maxSourcePositions) * frameDuration
+        let durationSeconds =
+            Double(pcm.count) / Double(AudioDecode.sampleRate)
+
+        if durationSeconds <= offlineMaxSeconds * 0.95 {
+            return try await Self.runOffline(Send((model, audio)))
+        }
+        return try await Self.runStreaming(Send((model, audio)))
     }
 
     /// nonisolated: the model/audio arrive boxed-Sendable and the
     /// non-Sendable `DiarizationOutput` is reduced to the Sendable
     /// `DiarizationResult` here, so nothing non-Sendable crosses back
     /// to the actor.
-    private static func run(
+    private static func runOffline(
         _ b: Send<(SortformerModel, MLXArray)>
     ) async throws -> DiarizationResult {
         let (model, audio) = b.v
@@ -92,5 +113,30 @@ public actor MLXDiarizationModule: DiarizationModule {
                     speaker: $0.speaker)
             },
             numSpeakers: out.numSpeakers)
+    }
+
+    /// Long-audio path (M24.4b): drain the model's streaming generator
+    /// and aggregate every chunk's turns. The streaming state carries a
+    /// persistent speaker cache, so speaker ids are consistent across
+    /// chunks; the union is the speaker count. Same Sendable-reduction
+    /// contract as `runOffline`.
+    private static func runStreaming(
+        _ b: Send<(SortformerModel, MLXArray)>
+    ) async throws -> DiarizationResult {
+        let (model, audio) = b.v
+        var turns: [DiarizationTurn] = []
+        for try await out in model.generateStream(
+            audio: audio, sampleRate: 16_000, chunkDuration: 10.0)
+        {
+            for s in out.segments {
+                turns.append(
+                    DiarizationTurn(
+                        start: Double(s.start), end: Double(s.end),
+                        speaker: s.speaker))
+            }
+        }
+        turns.sort { $0.start < $1.start }
+        let speakers = Set(turns.map { $0.speaker }).count
+        return DiarizationResult(turns: turns, numSpeakers: speakers)
     }
 }
