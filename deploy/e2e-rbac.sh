@@ -788,6 +788,48 @@ adb1="$D/athena.sqlite"
   && ok "audit: cookie token.create bob ok (u:admin)" \
   || bad "audit: missing cookie token.create bob"
 
+echo
+echo "== phase 8.6: audit read API + CLI (M30.2) =="
+# GET /api/audit is admin-only (daemon.admin); readonly + member are
+# refused. Filterable by action/principal/since/limit. Pull only.
+code 200 GET /api/audit "$A2"
+code 403 GET /api/audit "$R2"          # readonly ∌ daemon.admin
+code 403 GET /api/audit "$M2"          # member ∌ daemon.admin
+AJ="$(curl -s -H "Authorization: Bearer $A2" \
+  "http://127.0.0.1:$PORT/api/audit")"
+echo "$AJ" | grep -q '"action":"user.create"' \
+  && ok "audit API returns recorded actions" \
+  || bad "audit API missing user.create ($AJ)"
+echo "$AJ" | grep -q '"result":"denied"' \
+  && ok "audit API surfaces denied outcomes" \
+  || bad "audit API missing denied rows"
+AF="$(curl -s -H "Authorization: Bearer $A2" \
+  "http://127.0.0.1:$PORT/api/audit?action=user.delete")"
+if echo "$AF" | grep -q '"action":"user.delete"' \
+   && ! echo "$AF" | grep -q '"action":"user.create"'; then
+  ok "audit API action filter narrows results"
+else
+  bad "audit API action filter leaked other actions"
+fi
+AP="$(curl -s -H "Authorization: Bearer $A2" \
+  "http://127.0.0.1:$PORT/api/audit?principal=u:admin&limit=5")"
+echo "$AP" | grep -q '"principal":"u:admin"' \
+  && ok "audit API principal filter + limit" \
+  || bad "audit API principal filter empty ($AP)"
+# Local CLI reads the store directly (loopback default host).
+CLIO="$("$ATHENA" audit --data-dir "$D2" 2>/dev/null)"
+echo "$CLIO" | grep -q "user.create" \
+  && ok "athena audit (local) renders the trail" \
+  || bad "athena audit (local) empty ($CLIO)"
+CLIF="$("$ATHENA" audit --action user.delete --data-dir "$D2" \
+  2>/dev/null)"
+if echo "$CLIF" | grep -q "user.delete" \
+   && ! echo "$CLIF" | grep -q "user.create"; then
+  ok "athena audit --action filters locally"
+else
+  bad "athena audit --action did not filter ($CLIF)"
+fi
+
 stop_daemon
 
 echo

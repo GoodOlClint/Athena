@@ -381,6 +381,12 @@ struct AthenaServer {
             await handleUsage(request)
         }
 
+        // Append-only RBAC/admin audit trail (M30.2). Admin-only
+        // (AuthPolicy → daemon.admin); filterable, pull only.
+        router.get("/api/audit") { request, _ -> Response in
+            await handleAudit(request)
+        }
+
         // Model store (M16.2). Literal sub-paths are registered
         // BEFORE `:name` so Hummingbird's trie (sibling match in
         // registration order) resolves them first; `default`/`copy`
@@ -1359,6 +1365,49 @@ struct AthenaServer {
                         completion_tokens: $0.completionTokens,
                         total_tokens: $0.totalTokens,
                         updated: $0.updated)
+                }))
+    }
+
+    /// `GET /api/audit` (M30.2). Admin-only (AuthPolicy →
+    /// `daemon.admin`), so no owner-scoping is needed — the trail is a
+    /// privileged oversight view. Filterable by `principal`, `action`,
+    /// `since` (epoch seconds) and `limit` (default 100, capped 1000);
+    /// rows come back most-recent-first. Pull only — the passive
+    /// oracle never pushes the audit trail out.
+    private func handleAudit(_ request: Request) async -> Response {
+        var principal: String?
+        var action: String?
+        var since: Double?
+        var limit = 100
+        if let q = request.uri.query {
+            for kv in q.split(separator: "&") {
+                let p = kv.split(separator: "=", maxSplits: 1)
+                guard let k = p.first.map(String.init) else {
+                    continue
+                }
+                let raw = p.count == 2 ? String(p[1]) : ""
+                let v = raw.removingPercentEncoding ?? raw
+                switch k {
+                case "principal": principal = v.isEmpty ? nil : v
+                case "action": action = v.isEmpty ? nil : v
+                case "since": since = Double(v)
+                case "limit":
+                    limit = min(1000, max(1, Int(v) ?? 100))
+                default: break
+                }
+            }
+        }
+        let rows = await store.listAudit(
+            principal: principal, action: action, since: since,
+            limit: limit)
+        return Self.json(
+            AuditReportResponse(
+                audit: rows.map {
+                    AuditEntryDTO(
+                        id: $0.id, ts: $0.ts,
+                        principal: $0.principal, action: $0.action,
+                        target: $0.target, result: $0.result,
+                        detail: $0.detail)
                 }))
     }
 

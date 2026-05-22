@@ -225,6 +225,23 @@ struct UsageEntryDTO: Codable {
 /// renders one table shape.
 struct UsageReportResponse: Codable { let usage: [UsageEntryDTO] }
 
+// MARK: - /api/audit (M30.2 — append-only RBAC/admin audit trail)
+
+/// One audit entry. `ts` is epoch seconds; `target`/`detail` may be
+/// absent for actions with no single subject or context.
+struct AuditEntryDTO: Codable {
+    let id: Int
+    let ts: Double
+    let principal: String
+    let action: String
+    let target: String?
+    let result: String
+    let detail: String?
+}
+
+/// `GET /api/audit` — admin-only oversight view, most-recent-first.
+struct AuditReportResponse: Codable { let audit: [AuditEntryDTO] }
+
 /// Generic mutation acknowledgements.
 struct OkResponse: Codable { let ok: Bool }
 struct UserRemovedResponse: Codable {

@@ -283,6 +283,9 @@ enum AuthPolicy {
         if path == "/api/admin" || path.hasPrefix("/api/admin/") {
             return .daemonAdmin
         }
+        // The audit trail is a privileged oversight view — admin-only
+        // (daemon.admin), no owner-scoping (M30.2).
+        if path == "/api/audit" { return .daemonAdmin }
         // Usage is inference-tier: any authenticated caller sees its OWN
         // counters (handler owner-scopes); an admin sees all. Billing-
         // sensitive, so NOT exposed to the read-only role (M27.3).
