@@ -91,6 +91,30 @@ final class AthenaConfigTests: XCTestCase {
         XCTAssertNil(c.tlsKey)
     }
 
+    func testRateLimitKeysParse() throws {
+        let toml = """
+            listen_host = "127.0.0.1"
+            listen_port = 7447
+            log_dir = "/l"
+            rate_limit = 10
+            rate_burst = 20
+            """
+        let c = try AthenaConfig.parse(toml: toml)
+        XCTAssertEqual(c.rateLimit, "10")
+        XCTAssertEqual(c.rateBurst, 20)
+    }
+
+    func testRateLimitKeysAbsentAreNil() throws {
+        let toml = """
+            listen_host = "127.0.0.1"
+            listen_port = 7447
+            log_dir = "/l"
+            """
+        let c = try AthenaConfig.parse(toml: toml)
+        XCTAssertNil(c.rateLimit)
+        XCTAssertNil(c.rateBurst)
+    }
+
     func testMissingRequiredKeyThrows() {
         let toml = "listen_host = \"h\"\nlog_dir = \"/l\""
         XCTAssertThrowsError(try AthenaConfig.parse(toml: toml)) {
@@ -170,7 +194,8 @@ final class LaunchdPlistTests: XCTestCase {
         maxTokens: Int? = nil, temperature: String? = nil,
         speculative: Bool? = nil, vectorCapBytes: Int? = nil,
         authKeysFile: String? = nil,
-        tlsCert: String? = nil, tlsKey: String? = nil
+        tlsCert: String? = nil, tlsKey: String? = nil,
+        rateLimit: String? = nil, rateBurst: Int? = nil
     ) -> AthenaConfig {
         AthenaConfig(
             listenHost: "127.0.0.1", listenPort: 7447, budgetBytes: budget,
@@ -180,7 +205,9 @@ final class LaunchdPlistTests: XCTestCase {
             temperature: temperature, speculative: speculative,
             vectorCapBytes: vectorCapBytes,
             authKeysFile: authKeysFile,
-            tlsCert: tlsCert, tlsKey: tlsKey, logDir: "/var/log/athena")
+            tlsCert: tlsCert, tlsKey: tlsKey,
+            rateLimit: rateLimit, rateBurst: rateBurst,
+            logDir: "/var/log/athena")
     }
 
     func testDefaultProgramArguments() {
@@ -213,7 +240,8 @@ final class LaunchdPlistTests: XCTestCase {
                 speculative: true, vectorCapBytes: 1_000_000,
                 authKeysFile: "/etc/athena/auth.keys",
                 tlsCert: "/etc/athena/tls/fullchain.pem",
-                tlsKey: "/etc/athena/tls/privkey.pem"))
+                tlsKey: "/etc/athena/tls/privkey.pem",
+                rateLimit: "10", rateBurst: 20))
         XCTAssertEqual(
             d["ProgramArguments"] as? [String],
             [
@@ -228,6 +256,7 @@ final class LaunchdPlistTests: XCTestCase {
                 "--auth-keys-file", "/etc/athena/auth.keys",
                 "--tls-cert", "/etc/athena/tls/fullchain.pem",
                 "--tls-key", "/etc/athena/tls/privkey.pem",
+                "--rate-limit", "10", "--rate-burst", "20",
             ])
     }
 

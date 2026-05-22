@@ -62,6 +62,12 @@ public enum LaunchdPlist {
         if let tlsKey = config.tlsKey {
             args += ["--tls-key", tlsKey]
         }
+        if let rateLimit = config.rateLimit {
+            args += ["--rate-limit", rateLimit]
+        }
+        if let rateBurst = config.rateBurst {
+            args += ["--rate-burst", String(rateBurst)]
+        }
 
         return [
             "Label": label,

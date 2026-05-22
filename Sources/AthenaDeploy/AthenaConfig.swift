@@ -44,6 +44,13 @@ public struct AthenaConfig: Sendable, Equatable {
     /// a TLS reverse proxy — see docs/reverse-proxy.md).
     public var tlsCert: String?
     public var tlsKey: String?
+    /// Inbound per-principal rate limiting (M29.1). `rateLimit` =
+    /// sustained requests/sec per caller (kept as the raw scalar so it
+    /// passes straight to `--rate-limit`); `rateBurst` = token-bucket
+    /// capacity. Both optional — absent / non-positive ⇒ disabled
+    /// (opt-in, off by default).
+    public var rateLimit: String?
+    public var rateBurst: Int?
     /// `[network]` egress-proxy keys (M13.2). An operator-set
     /// `*_PROXY` env var always wins over these.
     public var httpsProxy: String?
@@ -62,6 +69,7 @@ public struct AthenaConfig: Sendable, Equatable {
         kvCompression: String? = nil,
         authKeysFile: String? = nil,
         tlsCert: String? = nil, tlsKey: String? = nil,
+        rateLimit: String? = nil, rateBurst: Int? = nil,
         httpsProxy: String? = nil, httpProxy: String? = nil,
         allProxy: String? = nil, noProxy: String? = nil,
         logDir: String
@@ -83,6 +91,8 @@ public struct AthenaConfig: Sendable, Equatable {
         self.authKeysFile = authKeysFile
         self.tlsCert = tlsCert
         self.tlsKey = tlsKey
+        self.rateLimit = rateLimit
+        self.rateBurst = rateBurst
         self.httpsProxy = httpsProxy
         self.httpProxy = httpProxy
         self.allProxy = allProxy
@@ -151,6 +161,10 @@ public struct AthenaConfig: Sendable, Equatable {
         if let v = scalar("vector_cap_bytes", in: toml) {
             vecCap = try int("vector_cap_bytes", v)
         }
+        var rateBurst: Int?
+        if let rb = scalar("rate_burst", in: toml) {
+            rateBurst = try int("rate_burst", rb)
+        }
         let spec = scalar("speculative", in: toml).map { $0 == "true" }
 
         return AthenaConfig(
@@ -171,6 +185,8 @@ public struct AthenaConfig: Sendable, Equatable {
             authKeysFile: scalar("auth_keys_file", in: toml),
             tlsCert: scalar("tls_cert", in: toml),
             tlsKey: scalar("tls_key", in: toml),
+            rateLimit: scalar("rate_limit", in: toml),
+            rateBurst: rateBurst,
             httpsProxy: scalar("https_proxy", in: toml),
             httpProxy: scalar("http_proxy", in: toml),
             allProxy: scalar("all_proxy", in: toml),

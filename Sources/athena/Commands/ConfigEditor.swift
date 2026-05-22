@@ -9,16 +9,18 @@ enum ConfigEditor {
     /// String-valued keys are quoted; these two are bare ints.
     static let intKeys: Set<String> = [
         "listen_port", "budget_bytes", "max_tokens",
-        "vector_cap_bytes",
+        "vector_cap_bytes", "rate_burst",
     ]
-    /// Written bare (unquoted), like ints: a float and a bool.
-    static let rawKeys: Set<String> = ["temperature", "speculative"]
+    /// Written bare (unquoted), like ints: floats and a bool.
+    static let rawKeys: Set<String> = [
+        "temperature", "speculative", "rate_limit",
+    ]
     static let knownKeys: Set<String> = [
         "listen_host", "listen_port", "budget_bytes", "engine",
         "model", "model_store", "data_dir", "log_level",
         "syslog_remote", "log_dir", "max_tokens", "temperature",
         "speculative", "vector_cap_bytes", "auth_keys_file",
-        "tls_cert", "tls_key",
+        "tls_cert", "tls_key", "rate_limit", "rate_burst",
         "https_proxy", "http_proxy", "all_proxy", "no_proxy",
         "kv_compression",
     ]
@@ -70,6 +72,8 @@ enum ConfigEditor {
         case "auth_keys_file": return cfg.authKeysFile
         case "tls_cert": return cfg.tlsCert
         case "tls_key": return cfg.tlsKey
+        case "rate_limit": return cfg.rateLimit
+        case "rate_burst": return cfg.rateBurst.map(String.init)
         case "https_proxy": return cfg.httpsProxy
         case "http_proxy": return cfg.httpProxy
         case "all_proxy": return cfg.allProxy
@@ -146,6 +150,9 @@ enum ConfigEditor {
         } else if rawKeys.contains(key) {
             // Bare, unquoted. Validate the two raw keys' shapes.
             if key == "temperature", Double(value) == nil {
+                throw Failure.badValue(key, "a number")
+            }
+            if key == "rate_limit", Double(value) == nil {
                 throw Failure.badValue(key, "a number")
             }
             if key == "speculative",

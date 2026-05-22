@@ -132,6 +132,18 @@ struct Load: AsyncParsableCommand {
     )
     var tlsKey: String?
 
+    @Option(
+        help:
+            "Per-principal rate limit (sustained requests/sec). 0/absent ⇒ disabled (opt-in). Over the limit ⇒ 429 + Retry-After. Only enforced when auth is on."
+    )
+    var rateLimit: Double?
+
+    @Option(
+        help:
+            "Rate-limit token-bucket capacity (max burst). Defaults to one second's worth of --rate-limit when unset."
+    )
+    var rateBurst: Int?
+
     mutating func run() async throws {
         // Centralized logging first — must precede any Logger creation
         // (Hummingbird/NIO included) so everything routes through the
@@ -347,7 +359,8 @@ struct Load: AsyncParsableCommand {
             queue: queue, store: athenaStore,
             modelName: modelURL.lastPathComponent,
             modelStoreRoot: store.rootDirectory, auth: authConfig,
-            tlsCertPath: tlsCert, tlsKeyPath: tlsKey)
+            tlsCertPath: tlsCert, tlsKeyPath: tlsKey,
+            rateLimit: rateLimit ?? 0, rateBurst: rateBurst ?? 0)
         try await server.run()
     }
 }

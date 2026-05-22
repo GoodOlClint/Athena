@@ -89,9 +89,10 @@ code() {
   fi
 }
 
-start_daemon() { # DATADIR HOST
-  "$ATHENA" load --engine stub --host "$2" --port "$PORT" \
-    --data-dir "$1" --model-store "$MSTORE" \
+start_daemon() { # DATADIR HOST [EXTRA-FLAGS...]
+  local dd="$1" host="$2"; shift 2
+  "$ATHENA" load --engine stub --host "$host" --port "$PORT" \
+    --data-dir "$dd" --model-store "$MSTORE" "$@" \
     > "$D/daemon.log" 2>&1 &
   DPID=$!
   for _ in $(seq 1 40); do
@@ -1186,6 +1187,45 @@ else
     && ok "guide tells operators to seed auth creds behind loopback" \
     || bad "guide missing the seed-credentials warning"
 fi
+
+echo
+echo "== phase 19: per-principal rate limiting — 429 + Retry-After (M29.1) =="
+# Rate limiting is resolved at daemon start (--rate-limit), keyed by the
+# authenticated principal. With auth enabled (the $D realm has users), a
+# rate of 1 req/s and a burst of 1 means a principal's FIRST request is
+# admitted (200) and the immediate SECOND is throttled (429 +
+# Retry-After), while a DIFFERENT principal (its own bucket) and the
+# exempt /healthz are unaffected. Same invariants: --engine stub,
+# loopback, ephemeral data dir, port 17447.
+stop_daemon
+start_daemon "$D" 127.0.0.1 --rate-limit 1 --rate-burst 1 \
+  || { echo "rate-limited daemon failed"; cat "$D/daemon.log"; exit 1; }
+grep -q "auth: enabled (RBAC" "$D/daemon.log" \
+  && ok "rate-limited daemon still enforces auth" \
+  || bad "rate-limited daemon auth-enabled log line"
+# alice's first request consumes her one token (200)…
+code 200 POST /v1/chat/completions "$ALICE_TOK" "$CHAT"
+# …the immediate second is throttled. One -i curl captures the status
+# line, the Retry-After header, and the error body together (so all three
+# assertions read the SAME response, with no extra request to refill).
+RL="$(curl -s -i -H "Authorization: Bearer $ALICE_TOK" \
+  -H "Content-Type: application/json" -d "$CHAT" \
+  "http://127.0.0.1:$PORT/v1/chat/completions")"
+echo "$RL" | head -1 | grep -q " 429" \
+  && ok "second back-to-back request from one principal → 429" \
+  || bad "expected 429 on alice's burst ($(echo "$RL" | head -1))"
+echo "$RL" | grep -qi "^Retry-After: *[0-9]" \
+  && ok "429 carries a numeric Retry-After header" \
+  || bad "429 missing/non-numeric Retry-After"
+echo "$RL" | grep -q '"type":"rate_limit_error"' \
+  && ok "429 body is the standard {error:…} rate_limit_error" \
+  || bad "429 body shape unexpected"
+# A different principal has its own bucket — bob is NOT throttled by
+# alice's exhausted one.
+code 200 POST /v1/chat/completions "$BOB_TOK" "$CHAT"
+# /healthz is exempt from rate limiting (launchd / monitoring probes).
+code 200 GET /healthz "$ALICE_TOK"
+stop_daemon
 
 echo
 echo "════════════════════════════════════════"

@@ -49,6 +49,13 @@ struct AthenaServer {
     /// memberwise-init params (same convention as `auth`/`modelStoreRoot`).
     var tlsCertPath: String? = nil
     var tlsKeyPath: String? = nil
+    /// Inbound rate limiting (M29.1). `rateLimit` = sustained
+    /// requests/sec per principal; `rateBurst` = bucket capacity. A
+    /// non-positive `rateLimit` disables it (no middleware installed) —
+    /// opt-in, off by default. `var = 0` so they're memberwise-init
+    /// params (same convention as `auth`/`tlsCertPath`).
+    var rateLimit: Double = 0
+    var rateBurst: Int = 0
     /// WebUI session signer (M12.2). Per-process random secret —
     /// sessions invalidate on restart (acceptable for an appliance).
     let session = Session()
@@ -59,6 +66,18 @@ struct AthenaServer {
         router.add(
             middleware: AuthMiddleware(
                 config: auth, session: session))
+        // Rate limiting just inside auth (M29.1): only authenticated
+        // callers reach it, keyed by their resolved principal. Opt-in —
+        // installed only when a positive rate is configured; auth-off
+        // loopback bypasses inside the middleware.
+        if rateLimit > 0 {
+            let burst = rateBurst > 0
+                ? Double(rateBurst) : max(1, rateLimit.rounded(.up))
+            router.add(
+                middleware: RateLimitMiddleware(
+                    limiter: RateLimiter(rate: rateLimit, burst: burst),
+                    auth: auth))
+        }
         router.add(middleware: MetricsMiddleware(metrics: metrics))
 
         router.get("/healthz") { _, _ -> Response in

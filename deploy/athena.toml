@@ -110,6 +110,18 @@ engine = "mlx"
 # tls_cert = "/usr/local/etc/athena/tls/fullchain.pem"
 # tls_key  = "/usr/local/etc/athena/tls/privkey.pem"
 
+# Inbound rate limiting (per principal). rate_limit is the sustained
+# requests/sec each caller (user — shared across that user's tokens) may
+# make; rate_burst is the token-bucket capacity (the largest momentary
+# burst above the sustained rate). Over the limit ⇒ HTTP 429 with a
+# Retry-After header. Composes with — but is distinct from — the
+# governor's memory 503. Commented / non-positive ⇒ DISABLED (default).
+# Only enforced when auth is enabled; an auth-off loopback dev bind is
+# never throttled. Health checks, /metrics, and the WebUI are exempt.
+# If rate_burst is omitted it defaults to one second's worth of rate.
+# rate_limit = 10        # 10 req/s sustained per principal
+# rate_burst = 20        # allow a 20-request burst
+
 
 # ── Network (egress proxy) ───────────────────────────────────────────
 
