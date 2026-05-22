@@ -16,8 +16,11 @@ struct Install: AsyncParsableCommand {
         abstract: "Install Athena as a boot-time launchd system daemon."
     )
 
-    @Option(help: "Path to the TOML config.")
-    var config: String = "deploy/athena.toml"
+    @Option(
+        help:
+            "Path to the TOML config. Omit to use ./deploy/athena.toml if present, else synthesize a documented default."
+    )
+    var config: String?
 
     @Option(help: "Install prefix.")
     var prefix: String = "/usr/local"
@@ -35,8 +38,37 @@ struct Install: AsyncParsableCommand {
     var dryRun = false
 
     func run() async throws {
-        let cfg = try AthenaConfig.parse(
-            file: URL(fileURLWithPath: config))
+        // Resolve the config. Explicit --config is unchanged: parse it,
+        // throwing if absent. With no --config, fall back to the in-repo
+        // dev copy if present, else synthesize a documented default from
+        // the built-in per-key defaults so a bare appliance installs
+        // with no config authoring. `configData` is what gets written to
+        // the install dir, so the operator always has a file to edit.
+        let cfg: AthenaConfig
+        let configData: Data
+        let synthesized: Bool
+        if let config {
+            let url = URL(fileURLWithPath: config)
+            cfg = try AthenaConfig.parse(file: url)
+            configData = try Data(contentsOf: url)
+            synthesized = false
+        } else {
+            let dev = URL(fileURLWithPath: "deploy/athena.toml")
+            if FileManager.default.fileExists(atPath: dev.path) {
+                cfg = try AthenaConfig.parse(file: dev)
+                configData = try Data(contentsOf: dev)
+                synthesized = false
+            } else {
+                let logDir = URL(fileURLWithPath: prefix)
+                    .appendingPathComponent("var/log/athena").path
+                let toml = DefaultConfig.toml(
+                    listenPort: GovernorConfig.defaultPort,
+                    logDir: logDir)
+                cfg = try AthenaConfig.parse(toml: toml)
+                configData = Data(toml.utf8)
+                synthesized = true
+            }
+        }
 
         let sourceDir =
             from.map { URL(fileURLWithPath: $0, isDirectory: true) }
@@ -64,10 +96,17 @@ struct Install: AsyncParsableCommand {
             print("  from:    \(plan.sourceDir.path)")
             print("  libexec: \(plan.libexecDir.path)")
             print("  symlink: \(plan.binSymlink.path)")
-            print("  config:  \(plan.installedConfig.path)")
+            print(
+                "  config:  \(plan.installedConfig.path)"
+                    + (synthesized
+                        ? "  (synthesized defaults — none supplied)" : ""))
             print("  plist:   \(plan.plistPath.path)")
             print("  user:    \(serviceUser)")
             print("  copy:    \(plan.artifactNames(fileManager: fm).joined(separator: ", "))")
+            if synthesized {
+                print("--- athena.toml (synthesized) ---")
+                print(String(data: configData, encoding: .utf8) ?? "")
+            }
             print("--- \(label).plist ---")
             print(String(data: plistData, encoding: .utf8) ?? "")
             return
@@ -226,8 +265,7 @@ struct Install: AsyncParsableCommand {
             try fm.copyItem(at: src, to: dst)
         }
 
-        try Data(contentsOf: URL(fileURLWithPath: config))
-            .write(to: plan.installedConfig)
+        try configData.write(to: plan.installedConfig)
 
         try? fm.removeItem(at: plan.binSymlink)
         try fm.createSymbolicLink(

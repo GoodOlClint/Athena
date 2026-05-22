@@ -861,6 +861,34 @@ echo "$IO" | grep -qi "LLM is NOT included" \
 rm -rf "$IS"
 
 echo
+echo "== phase 15: athena install — default-config synthesis (M22.3) =="
+# With NO config supplied AND no ./deploy/athena.toml in cwd, install
+# must synthesize a documented default (not throw). Run --dry-run from
+# an empty temp dir so the dev copy isn't found; an absolute binary
+# path is needed since we cd away from the repo. --dry-run returns
+# before the root/metallib checks, so this is safe as a normal user.
+IT="$(mktemp -d)"
+DR="$(cd "$IT" && "$ATHENA_ABS" install --dry-run 2>&1)"; rc=$?
+[ $rc -eq 0 ] && ok "install --dry-run (no config) does not throw" \
+  || bad "install --dry-run rc=$rc: $DR"
+echo "$DR" | grep -qi "synthesized" \
+  && ok "dry-run reports synthesized defaults" \
+  || bad "dry-run did not mention synthesis ($DR)"
+echo "$DR" | grep -q "listen_port = 7447" \
+  && ok "synthesized config carries listen_port 7447" \
+  || bad "synthesized config missing listen_port ($DR)"
+echo "$DR" | grep -q "<key>Label</key>" \
+  && ok "dry-run still renders the launchd plist" \
+  || bad "dry-run plist missing"
+rm -rf "$IT"
+# Explicit --config to a missing path still errors (unchanged behavior).
+EC="$("$ATHENA_ABS" install --config /no/such/athena.toml --dry-run 2>&1)"
+rc=$?
+[ $rc -ne 0 ] \
+  && ok "explicit missing --config still errors (unchanged)" \
+  || bad "explicit missing --config did not error ($EC)"
+
+echo
 echo "════════════════════════════════════════"
 echo "  PASS=$PASS  FAIL=$FAIL"
 echo "════════════════════════════════════════"

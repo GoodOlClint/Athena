@@ -98,6 +98,44 @@ final class AthenaConfigTests: XCTestCase {
     }
 }
 
+final class DefaultConfigTests: XCTestCase {
+
+    func testSynthesizedConfigRoundTrips() throws {
+        // The synthesizer's whole contract: its output must parse, with
+        // the supplied required keys present and the optional keys left
+        // commented (⇒ nil ⇒ the daemon's built-in defaults apply).
+        let toml = DefaultConfig.toml(
+            listenPort: 7447, logDir: "/usr/local/var/log/athena")
+        let c = try AthenaConfig.parse(toml: toml)
+        XCTAssertEqual(c.listenHost, "127.0.0.1")
+        XCTAssertEqual(c.listenPort, 7447)
+        XCTAssertEqual(c.engine, "mlx")
+        XCTAssertEqual(c.logDir, "/usr/local/var/log/athena")
+        // Optionals stay commented ⇒ built-in defaults at runtime.
+        XCTAssertNil(c.budgetBytes)
+        XCTAssertNil(c.model)
+        XCTAssertNil(c.modelStore)
+        XCTAssertNil(c.dataDir)
+        XCTAssertNil(c.maxTokens)
+        XCTAssertNil(c.temperature)
+        XCTAssertNil(c.speculative)
+        XCTAssertNil(c.kvCompression)
+        XCTAssertNil(c.authKeysFile)
+        XCTAssertNil(c.httpsProxy)
+    }
+
+    func testSynthesizedConfigHonorsParameters() throws {
+        let toml = DefaultConfig.toml(
+            listenHost: "0.0.0.0", listenPort: 9000, engine: "stub",
+            logDir: "/var/log/x")
+        let c = try AthenaConfig.parse(toml: toml)
+        XCTAssertEqual(c.listenHost, "0.0.0.0")
+        XCTAssertEqual(c.listenPort, 9000)
+        XCTAssertEqual(c.engine, "stub")
+        XCTAssertEqual(c.logDir, "/var/log/x")
+    }
+}
+
 final class LaunchdPlistTests: XCTestCase {
 
     private func cfg(
