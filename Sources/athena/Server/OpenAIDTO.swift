@@ -298,8 +298,8 @@ struct QueueStatusResponse: Codable {
 }
 
 /// Stored job results (encoded into the job row; surfaced under
-/// `result` on status).
-struct QueuedTextResult: Codable { let text: String }
+/// `result` on status). Conversation jobs store a full
+/// `ChatCompletionResponse` (M24.6); embeddings store this.
 struct QueuedEmbeddingResult: Codable { let embeddings: [[Float]] }
 
 struct QueueJobSummary: Codable {

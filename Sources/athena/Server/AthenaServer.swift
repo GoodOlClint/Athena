@@ -518,10 +518,20 @@ struct AthenaServer {
             text += chunk
         }
 
-        // Tool call: the enforced JSON span is the {"name","arguments"}
-        // object — surface it as OpenAI tool_calls, not content.
-        let choice: ChatChoice
-        if effective?.isToolCall == true,
+        return Self.json(
+            Self.chatCompletionResponse(
+                id: id, model: model, created: created, text: text,
+                isToolCall: effective?.isToolCall == true))
+    }
+
+    /// Build one `ChatChoice` from generated text: a tool-call object is
+    /// surfaced as OpenAI `tool_calls`; everything else as `content`.
+    /// Shared by the sync `/v1/chat/completions` handler and the queued
+    /// `conversation` executor so both emit the identical OpenAI shape.
+    private static func chatChoice(
+        text: String, isToolCall: Bool
+    ) -> ChatChoice {
+        if isToolCall,
             let data = text.data(using: .utf8),
             let obj = try? JSONSerialization.jsonObject(with: data)
                 as? [String: Any],
@@ -532,7 +542,7 @@ struct AthenaServer {
                 (try? JSONSerialization.data(
                     withJSONObject: args, options: [.sortedKeys]))
                 .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-            choice = ChatChoice(
+            return ChatChoice(
                 index: 0,
                 message: ChatMessage(
                     role: "assistant", content: nil,
@@ -544,19 +554,24 @@ struct AthenaServer {
                                 name: name, arguments: argsJSON))
                     ]),
                 finish_reason: "tool_calls")
-        } else {
-            choice = ChatChoice(
-                index: 0,
-                message: ChatMessage(role: "assistant", content: text),
-                finish_reason: "stop")
         }
-        let response = ChatCompletionResponse(
+        return ChatChoice(
+            index: 0,
+            message: ChatMessage(role: "assistant", content: text),
+            finish_reason: "stop")
+    }
+
+    /// Assemble a full OpenAI `ChatCompletionResponse` around one choice.
+    private static func chatCompletionResponse(
+        id: String, model: String, created: Int, text: String,
+        isToolCall: Bool
+    ) -> ChatCompletionResponse {
+        ChatCompletionResponse(
             id: id, object: "chat.completion", created: created,
-            model: model, choices: [choice],
+            model: model,
+            choices: [chatChoice(text: text, isToolCall: isToolCall)],
             usage: Usage(
-                prompt_tokens: 0, completion_tokens: 0, total_tokens: 0)
-        )
-        return Self.json(response)
+                prompt_tokens: 0, completion_tokens: 0, total_tokens: 0))
     }
 
     private func handleEmbeddings(_ request: Request) async -> Response {
@@ -1241,9 +1256,18 @@ struct AthenaServer {
             {
                 text += c
             }
+            // M24.6: store the full OpenAI ChatCompletionResponse as the
+            // job result so a polled queued job carries the SAME
+            // `choices[0].message.{content,tool_calls}` shape as the sync
+            // endpoint — one result envelope across sync and async.
             return (
                 try? JSONEncoder().encode(
-                    QueuedTextResult(text: text)), nil
+                    Self.chatCompletionResponse(
+                        id: "chatcmpl-\(UUID().uuidString)",
+                        model: req.model ?? modelName,
+                        created: Int(Date().timeIntervalSince1970),
+                        text: text,
+                        isToolCall: effective?.isToolCall == true)), nil
             )
         case "embeddings":
             guard
