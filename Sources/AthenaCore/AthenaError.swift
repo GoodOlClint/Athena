@@ -24,6 +24,10 @@ public enum AthenaError: Error, Sendable, Equatable {
     /// (400) — split the audio into shorter segments — NOT a silent
     /// empty result.
     case audioTooLong(module: ModuleID, seconds: Double, maxSeconds: Double)
+    /// A requested audio segment is empty/out-of-range or too short to
+    /// yield any feature frame. A client error (400) — never a silent
+    /// zero embedding.
+    case audioSegmentInvalid(module: ModuleID, detail: String)
 
     /// HTTP status the serve path should return for this error.
     public var httpStatus: Int {
@@ -34,6 +38,7 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .metalOutOfMemory: return 503
         case .promptCacheCapExceeded: return 503
         case .audioTooLong: return 400
+        case .audioSegmentInvalid: return 400
         }
     }
 
@@ -46,6 +51,7 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .metalOutOfMemory: return "metal_oom"
         case .promptCacheCapExceeded: return "prompt_cache_cap_exceeded"
         case .audioTooLong: return "audio_too_long"
+        case .audioSegmentInvalid: return "audio_segment_invalid"
         }
     }
 
@@ -71,6 +77,8 @@ public enum AthenaError: Error, Sendable, Equatable {
                     + "limit of ~%.0fs. Split it into shorter segments "
                     + "and submit them separately.",
                 seconds, module.rawValue, maxSeconds)
+        case let .audioSegmentInvalid(module, detail):
+            return "Invalid audio segment for \(module.rawValue): \(detail)"
         }
     }
 

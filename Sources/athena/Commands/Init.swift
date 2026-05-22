@@ -17,7 +17,8 @@ struct Init: AsyncParsableCommand {
         commandName: "init",
         abstract:
             "Pull the default auxiliary models (embeddings, "
-            + "transcription, diarization) into the model store."
+            + "transcription, diarization, speaker-embeddings) into "
+            + "the model store."
     )
 
     @Option(help: "Model store root. Default: ~/.athena/models.")
@@ -34,6 +35,7 @@ struct Init: AsyncParsableCommand {
             ("embeddings", Load.defaultEmbeddingModel),
             ("transcription", Load.defaultTranscriptionModel),
             ("diarization", Load.defaultDiarizationModel),
+            ("speaker-embeddings", Load.defaultSpeakerEmbeddingModel),
         ]
 
         print(

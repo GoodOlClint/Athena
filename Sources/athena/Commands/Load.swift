@@ -33,6 +33,8 @@ struct Load: AsyncParsableCommand {
         "mlx-community/whisper-large-v3-turbo"
     static let defaultDiarizationModel =
         "mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16"
+    static let defaultSpeakerEmbeddingModel =
+        "aufklarer/WeSpeaker-ResNet34-LM-MLX"
 
     @Option(help: "Listen host.")
     var host: String = "127.0.0.1"
@@ -83,6 +85,12 @@ struct Load: AsyncParsableCommand {
             "Speaker-diarization model HF id (default mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16)."
     )
     var diarizationModel: String = Load.defaultDiarizationModel
+
+    @Option(
+        help:
+            "Speaker-embedding (voice/speaker-verification) model HF id (default aufklarer/WeSpeaker-ResNet34-LM-MLX)."
+    )
+    var speakerEmbeddingModel: String = Load.defaultSpeakerEmbeddingModel
 
     @Option(
         help:
@@ -256,10 +264,21 @@ struct Load: AsyncParsableCommand {
             diarization = MLXDiarizationModule(
                 modelId: diarizationModel)
         }
+        // Speaker embeddings: vendored WeSpeaker under mlx, stub under
+        // stub. Evictable — the LLM is the primary workload.
+        let speakerEmbedding: any SpeakerEmbeddingModule
+        switch engine {
+        case .stub:
+            speakerEmbedding = StubSpeakerEmbeddingModule()
+        case .mlx:
+            speakerEmbedding = MLXSpeakerEmbeddingModule(
+                modelId: speakerEmbeddingModel)
+        }
         await governor.register(llm, evictable: false)
         await governor.register(transcription, evictable: true)
         await governor.register(embedding, evictable: true)
         await governor.register(diarization, evictable: true)
+        await governor.register(speakerEmbedding, evictable: true)
 
         print(
             "athena: engine=\(engine.rawValue) "

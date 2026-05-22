@@ -7,6 +7,7 @@ public enum ModuleID: String, Sendable, CaseIterable, Codable {
     case transcription
     case textEmbedding
     case diarization
+    case speakerEmbedding
 
     /// Friendly token for the unified-log category (`model.<token>`).
     public var logCategory: String {
@@ -15,6 +16,7 @@ public enum ModuleID: String, Sendable, CaseIterable, Codable {
         case .transcription: return "transcription"
         case .textEmbedding: return "embedding"
         case .diarization: return "diarization"
+        case .speakerEmbedding: return "speaker-embedding"
         }
     }
 }
