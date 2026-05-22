@@ -25,6 +25,15 @@ struct Load: AsyncParsableCommand {
         aliases: ["serve"]
     )
 
+    // Default auxiliary-module HF ids — the single source of truth for
+    // both `load`'s option defaults below and `athena init`. The LLM has
+    // no hard default (the operator picks one via `athena default`).
+    static let defaultEmbeddingModel = "BAAI/bge-small-en-v1.5"
+    static let defaultTranscriptionModel =
+        "mlx-community/whisper-large-v3-turbo"
+    static let defaultDiarizationModel =
+        "mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16"
+
     @Option(help: "Listen host.")
     var host: String = "127.0.0.1"
 
@@ -61,21 +70,19 @@ struct Load: AsyncParsableCommand {
     @Option(
         help:
             "Text-embedding model HF id (default BAAI/bge-small-en-v1.5).")
-    var embeddingModel: String = "BAAI/bge-small-en-v1.5"
+    var embeddingModel: String = Load.defaultEmbeddingModel
 
     @Option(
         help:
             "Speech-to-text model HF id (default mlx-community/whisper-large-v3-turbo)."
     )
-    var transcriptionModel: String =
-        "mlx-community/whisper-large-v3-turbo"
+    var transcriptionModel: String = Load.defaultTranscriptionModel
 
     @Option(
         help:
             "Speaker-diarization model HF id (default mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16)."
     )
-    var diarizationModel: String =
-        "mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16"
+    var diarizationModel: String = Load.defaultDiarizationModel
 
     @Option(
         help:

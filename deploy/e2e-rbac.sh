@@ -835,6 +835,32 @@ else
 fi
 
 echo
+echo "== phase 14: athena init — aux-model pull (help + idempotent) (M22.2) =="
+# `init` pulls only the aux modules (no LLM). We don't fetch multi-GB
+# weights in CI; instead assert the help text and the idempotent skip
+# path by pre-seeding all three aux model dirs so init does no network.
+"$ATHENA" init --help 2>&1 \
+  | grep -qi "auxiliary" \
+  && ok "init --help documents the auxiliary pulls" \
+  || bad "init --help missing description"
+IS="$(mktemp -d)"
+for n in bge-small-en-v1.5 whisper-large-v3-turbo \
+         diar_streaming_sortformer_4spk-v2.1-fp16; do
+  mkdir -p "$IS/$n"
+  printf '{"model_type":"test"}' > "$IS/$n/config.json"
+done
+IO="$("$ATHENA" init --model-store "$IS" 2>&1)"; rc=$?
+[ $rc -eq 0 ] && ok "init all-present exits 0 (idempotent, no network)" \
+  || bad "init idempotent rc=$rc: $IO"
+SKIPN="$(printf '%s\n' "$IO" | grep -ci "already present")"
+[ "$SKIPN" -eq 3 ] && ok "init skipped all 3 pre-seeded aux models" \
+  || bad "init skip count = $SKIPN (want 3): $IO"
+echo "$IO" | grep -qi "LLM is NOT included" \
+  && ok "init states the LLM is not auto-pulled" \
+  || bad "init missing the no-LLM note ($IO)"
+rm -rf "$IS"
+
+echo
 echo "════════════════════════════════════════"
 echo "  PASS=$PASS  FAIL=$FAIL"
 echo "════════════════════════════════════════"
