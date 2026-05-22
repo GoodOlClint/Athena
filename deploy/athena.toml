@@ -99,6 +99,17 @@ engine = "mlx"
 # key is shown ONCE and only its sha256:<hex> is written here (no
 # secret at rest). Raw `tier <key>` lines are still accepted.
 
+# In-daemon TLS (HTTPS). Point both keys at PEM files: tls_cert is the
+# certificate chain (leaf first, then any intermediates), tls_key the
+# matching private key. BOTH must be set together — setting only one is
+# a hard startup error. Commented ⇒ plaintext HTTP, in which case
+# bearer tokens and the WebUI cookie are only safe on a loopback bind
+# or behind a TLS reverse proxy (see docs/reverse-proxy.md). Keep the
+# private key chmod 600 and owned by the daemon user; `athena doctor`
+# reports cert/key posture (existence, expiry, key perms).
+# tls_cert = "/usr/local/etc/athena/tls/fullchain.pem"
+# tls_key  = "/usr/local/etc/athena/tls/privkey.pem"
+
 
 # ── Network (egress proxy) ───────────────────────────────────────────
 

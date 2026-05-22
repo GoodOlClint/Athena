@@ -1036,6 +1036,76 @@ rc=$?
   || bad "explicit missing --config did not error ($EC)"
 
 echo
+echo "== phase 16: in-daemon TLS — HTTPS + fail-closed (M28.1) =="
+# TLS is resolved at daemon start (AthenaServer.serverBuilder), engine-
+# independent — so the stub daemon exercises the real contract:
+#   • both cert+key ⇒ serves HTTPS (handshake + 200 on /healthz);
+#   • plaintext HTTP to the TLS port fails (no silent downgrade);
+#   • exactly one of cert/key ⇒ refuse to start (fail-closed).
+# Honors this script's invariants: --engine stub, loopback, ephemeral
+# data dir, port derived from 7447 (17451 here).
+TPORT=17451
+TLSDIR="$(mktemp -d)"
+CERT="$TLSDIR/cert.pem"; KEY="$TLSDIR/key.pem"
+if ! command -v openssl >/dev/null 2>&1; then
+  echo "  skip TLS phase (openssl not available)"
+elif ! openssl req -x509 -newkey rsa:2048 -nodes \
+        -keyout "$KEY" -out "$CERT" -days 1 -subj "/CN=athena-e2e" \
+        -addext "subjectAltName=IP:127.0.0.1" \
+        >/dev/null 2>&1; then
+  echo "  skip TLS phase (self-signed cert generation failed)"
+else
+  chmod 600 "$KEY"
+  # 16a: both keys ⇒ HTTPS comes up; verify against the self-signed CA.
+  "$ATHENA" load --engine stub --host 127.0.0.1 --port "$TPORT" \
+    --data-dir "$(mktemp -d)" --model-store "$MSTORE" \
+    --tls-cert "$CERT" --tls-key "$KEY" \
+    > "$D/tls.log" 2>&1 &
+  DPID=$!
+  up=0
+  for _ in $(seq 1 40); do
+    if curl -s -o /dev/null --cacert "$CERT" \
+         "https://127.0.0.1:$TPORT/healthz"; then up=1; break; fi
+    if ! kill -0 "$DPID" 2>/dev/null; then break; fi
+    sleep 0.5
+  done
+  [ "$up" = 1 ] \
+    && ok "HTTPS /healthz 200 (cert verified against self-signed CA)" \
+    || { bad "TLS daemon did not serve HTTPS"; cat "$D/tls.log"; }
+  # 16b: plaintext HTTP to a TLS port must fail (handshake mismatch),
+  # never silently downgrade.
+  if [ "$up" = 1 ]; then
+    curl -s -o /dev/null "http://127.0.0.1:$TPORT/healthz" \
+      && bad "plaintext HTTP accepted on the TLS port" \
+      || ok "plaintext HTTP to the TLS port is refused (no downgrade)"
+  fi
+  stop_daemon
+  # 16c: fail-closed — cert without key refuses to start, with a clear
+  # message; the daemon must NOT come up serving plaintext.
+  "$ATHENA" load --engine stub --host 127.0.0.1 --port "$TPORT" \
+    --data-dir "$(mktemp -d)" --model-store "$MSTORE" \
+    --tls-cert "$CERT" \
+    > "$D/tls-incomplete.log" 2>&1 &
+  DPID=$!
+  half_up=0
+  for _ in $(seq 1 16); do
+    if curl -s -o /dev/null "http://127.0.0.1:$TPORT/healthz" \
+       || curl -s -o /dev/null -k \
+            "https://127.0.0.1:$TPORT/healthz"; then half_up=1; break; fi
+    if ! kill -0 "$DPID" 2>/dev/null; then break; fi
+    sleep 0.5
+  done
+  stop_daemon
+  [ "$half_up" = 0 ] \
+    && ok "tls_cert without tls_key fail-closed (daemon refused to start)" \
+    || bad "half-configured TLS started anyway (should fail closed)"
+  grep -qi "TLS misconfigured" "$D/tls-incomplete.log" \
+    && ok "fail-closed surfaces a clear 'TLS misconfigured' error" \
+    || { bad "fail-closed message missing"; cat "$D/tls-incomplete.log"; }
+fi
+rm -rf "$TLSDIR"
+
+echo
 echo "════════════════════════════════════════"
 echo "  PASS=$PASS  FAIL=$FAIL"
 echo "════════════════════════════════════════"

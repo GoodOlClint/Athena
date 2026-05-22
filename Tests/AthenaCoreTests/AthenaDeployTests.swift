@@ -66,6 +66,31 @@ final class AthenaConfigTests: XCTestCase {
         XCTAssertEqual(c.noProxy, "127.0.0.1,localhost,.internal")
     }
 
+    func testTLSKeysParse() throws {
+        let toml = """
+            listen_host = "127.0.0.1"
+            listen_port = 7447
+            log_dir = "/l"
+            tls_cert = "/etc/athena/tls/fullchain.pem"
+            tls_key = "/etc/athena/tls/privkey.pem"
+            """
+        let c = try AthenaConfig.parse(toml: toml)
+        XCTAssertEqual(c.tlsCert, "/etc/athena/tls/fullchain.pem")
+        XCTAssertEqual(c.tlsKey, "/etc/athena/tls/privkey.pem")
+    }
+
+    func testTLSKeysAbsentAreNil() throws {
+        let toml = """
+            listen_host = "127.0.0.1"
+            listen_port = 7447
+            log_dir = "/l"
+            # tls_cert = "/etc/athena/tls/fullchain.pem"
+            """
+        let c = try AthenaConfig.parse(toml: toml)
+        XCTAssertNil(c.tlsCert)
+        XCTAssertNil(c.tlsKey)
+    }
+
     func testMissingRequiredKeyThrows() {
         let toml = "listen_host = \"h\"\nlog_dir = \"/l\""
         XCTAssertThrowsError(try AthenaConfig.parse(toml: toml)) {
@@ -144,7 +169,8 @@ final class LaunchdPlistTests: XCTestCase {
         logLevel: String? = nil, syslogRemote: String? = nil,
         maxTokens: Int? = nil, temperature: String? = nil,
         speculative: Bool? = nil, vectorCapBytes: Int? = nil,
-        authKeysFile: String? = nil
+        authKeysFile: String? = nil,
+        tlsCert: String? = nil, tlsKey: String? = nil
     ) -> AthenaConfig {
         AthenaConfig(
             listenHost: "127.0.0.1", listenPort: 7447, budgetBytes: budget,
@@ -153,7 +179,8 @@ final class LaunchdPlistTests: XCTestCase {
             syslogRemote: syslogRemote, maxTokens: maxTokens,
             temperature: temperature, speculative: speculative,
             vectorCapBytes: vectorCapBytes,
-            authKeysFile: authKeysFile, logDir: "/var/log/athena")
+            authKeysFile: authKeysFile,
+            tlsCert: tlsCert, tlsKey: tlsKey, logDir: "/var/log/athena")
     }
 
     func testDefaultProgramArguments() {
@@ -184,7 +211,9 @@ final class LaunchdPlistTests: XCTestCase {
                 syslogRemote: "udp://10.0.0.5:514",
                 maxTokens: 2048, temperature: "0.2",
                 speculative: true, vectorCapBytes: 1_000_000,
-                authKeysFile: "/etc/athena/auth.keys"))
+                authKeysFile: "/etc/athena/auth.keys",
+                tlsCert: "/etc/athena/tls/fullchain.pem",
+                tlsKey: "/etc/athena/tls/privkey.pem"))
         XCTAssertEqual(
             d["ProgramArguments"] as? [String],
             [
@@ -197,6 +226,8 @@ final class LaunchdPlistTests: XCTestCase {
                 "--max-tokens", "2048", "--temperature", "0.2",
                 "--speculative", "--vector-cap-bytes", "1000000",
                 "--auth-keys-file", "/etc/athena/auth.keys",
+                "--tls-cert", "/etc/athena/tls/fullchain.pem",
+                "--tls-key", "/etc/athena/tls/privkey.pem",
             ])
     }
 

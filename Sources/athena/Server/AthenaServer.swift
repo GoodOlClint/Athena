@@ -8,8 +8,11 @@ import AthenaTranscription
 import Foundation
 import HTTPTypes
 import Hummingbird
+import HummingbirdCore
+import HummingbirdTLS
 import Logging
 import NIOCore
+import NIOSSL
 
 /// The single Athena HTTP listener. Passive oracle: it only answers inbound
 /// inference queries and exposes governor state — it initiates no
@@ -40,6 +43,12 @@ struct AthenaServer {
     /// loaded config. `var` (not `let`) so it's a memberwise-init
     /// parameter — set once at construction, never mutated after.
     var auth: AuthConfig = AuthConfig()
+    /// In-daemon TLS (M28). PEM cert-chain + private-key paths. Both
+    /// set ⇒ serve HTTPS; both nil ⇒ plaintext HTTP; exactly one set ⇒
+    /// `run()` throws (fail-closed). `var = nil` so they're
+    /// memberwise-init params (same convention as `auth`/`modelStoreRoot`).
+    var tlsCertPath: String? = nil
+    var tlsKeyPath: String? = nil
     /// WebUI session signer (M12.2). Per-process random secret —
     /// sessions invalidate on restart (acceptable for an appliance).
     let session = Session()
@@ -446,6 +455,8 @@ struct AthenaServer {
 
         let app = Application(
             router: router,
+            server: try Self.serverBuilder(
+                tlsCertPath: tlsCertPath, tlsKeyPath: tlsKeyPath),
             configuration: .init(
                 address: .hostname(
                     config.listenHost, port: config.listenPort),
@@ -453,6 +464,32 @@ struct AthenaServer {
             )
         )
         try await app.runService()
+    }
+
+    /// Build the HTTP(S) listener. Both cert+key ⇒ TLS; neither ⇒
+    /// plaintext HTTP; exactly one ⇒ a hard error (fail-closed — never
+    /// silently fall back to plaintext when TLS was half-configured).
+    /// PEM load failures (missing/unreadable/malformed) propagate from
+    /// NIOSSL and abort daemon start with a clear error.
+    static func serverBuilder(
+        tlsCertPath: String?, tlsKeyPath: String?
+    ) throws -> HTTPServerBuilder {
+        switch (tlsCertPath, tlsKeyPath) {
+        case (nil, nil):
+            return .http1()
+        case (let cert?, let key?):
+            let chain = try NIOSSLCertificate.fromPEMFile(cert)
+                .map { NIOSSLCertificateSource.certificate($0) }
+            let pkey = try NIOSSLPrivateKey(file: key, format: .pem)
+            let tls = TLSConfiguration.makeServerConfiguration(
+                certificateChain: chain,
+                privateKey: .privateKey(pkey))
+            Logger(label: AthenaLogLabel.daemon).notice(
+                "TLS: serving HTTPS (cert \(cert))")
+            return try .tls(.http1(), tlsConfiguration: tls)
+        case (.some, nil), (nil, .some):
+            throw TLSConfigError.incomplete
+        }
     }
 
     private func handleChatCompletions(_ request: Request) async -> Response {
@@ -2762,5 +2799,18 @@ struct AthenaServer {
         return error(
             status: HTTPResponse.Status(code: e.httpStatus),
             message: e.message, type: "server_error", code: e.code)
+    }
+}
+
+enum TLSConfigError: Error, CustomStringConvertible {
+    case incomplete
+    var description: String {
+        switch self {
+        case .incomplete:
+            return
+                "TLS misconfigured: set BOTH tls_cert and tls_key (or "
+                + "neither). One without the other refuses to start so "
+                + "the daemon never silently serves plaintext."
+        }
     }
 }

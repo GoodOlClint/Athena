@@ -204,6 +204,11 @@ let package = Package(
                 "AthenaStore",
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "Hummingbird", package: "hummingbird"),
+                // In-daemon TLS (M28). Pulls swift-nio-ssl, but ONLY into
+                // the macOS `athena`/daemon graph — the portable
+                // AthenaClient target stays Foundation+ArgumentParser, so
+                // the cross-platform client package is unaffected.
+                .product(name: "HummingbirdTLS", package: "hummingbird"),
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "Crypto", package: "swift-crypto"),

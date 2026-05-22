@@ -56,6 +56,12 @@ public enum LaunchdPlist {
         if let authKeysFile = config.authKeysFile {
             args += ["--auth-keys-file", authKeysFile]
         }
+        if let tlsCert = config.tlsCert {
+            args += ["--tls-cert", tlsCert]
+        }
+        if let tlsKey = config.tlsKey {
+            args += ["--tls-key", tlsKey]
+        }
 
         return [
             "Label": label,

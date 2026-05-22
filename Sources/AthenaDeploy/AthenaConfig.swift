@@ -38,6 +38,12 @@ public struct AthenaConfig: Sendable, Equatable {
     /// Bearer-auth keys file. Optional — no keys + loopback = open;
     /// no keys + non-loopback = the daemon refuses to start.
     public var authKeysFile: String?
+    /// In-daemon TLS (M28). PEM certificate chain + private key paths.
+    /// Both must be set together to serve HTTPS; setting only one is a
+    /// hard startup error. Absent ⇒ plaintext HTTP (loopback or behind
+    /// a TLS reverse proxy — see docs/reverse-proxy.md).
+    public var tlsCert: String?
+    public var tlsKey: String?
     /// `[network]` egress-proxy keys (M13.2). An operator-set
     /// `*_PROXY` env var always wins over these.
     public var httpsProxy: String?
@@ -55,6 +61,7 @@ public struct AthenaConfig: Sendable, Equatable {
         speculative: Bool? = nil, vectorCapBytes: Int? = nil,
         kvCompression: String? = nil,
         authKeysFile: String? = nil,
+        tlsCert: String? = nil, tlsKey: String? = nil,
         httpsProxy: String? = nil, httpProxy: String? = nil,
         allProxy: String? = nil, noProxy: String? = nil,
         logDir: String
@@ -74,6 +81,8 @@ public struct AthenaConfig: Sendable, Equatable {
         self.vectorCapBytes = vectorCapBytes
         self.kvCompression = kvCompression
         self.authKeysFile = authKeysFile
+        self.tlsCert = tlsCert
+        self.tlsKey = tlsKey
         self.httpsProxy = httpsProxy
         self.httpProxy = httpProxy
         self.allProxy = allProxy
@@ -160,6 +169,8 @@ public struct AthenaConfig: Sendable, Equatable {
             vectorCapBytes: vecCap,
             kvCompression: scalar("kv_compression", in: toml),
             authKeysFile: scalar("auth_keys_file", in: toml),
+            tlsCert: scalar("tls_cert", in: toml),
+            tlsKey: scalar("tls_key", in: toml),
             httpsProxy: scalar("https_proxy", in: toml),
             httpProxy: scalar("http_proxy", in: toml),
             allProxy: scalar("all_proxy", in: toml),

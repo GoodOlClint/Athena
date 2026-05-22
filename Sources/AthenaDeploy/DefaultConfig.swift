@@ -70,6 +70,11 @@ public enum DefaultConfig {
         # Bearer-token keys file. Commented + loopback ⇒ auth OFF (dev);
         # commented + non-loopback ⇒ the daemon REFUSES to start.
         # auth_keys_file = "/usr/local/etc/athena/auth.keys"
+        # In-daemon TLS (HTTPS). Set BOTH (cert chain + private key, PEM);
+        # only one ⇒ a hard startup error. Commented ⇒ plaintext HTTP
+        # (loopback or a TLS reverse proxy only — see docs/reverse-proxy.md).
+        # tls_cert = "/usr/local/etc/athena/tls/fullchain.pem"
+        # tls_key  = "/usr/local/etc/athena/tls/privkey.pem"
 
 
         # ── Network (egress proxy) ───────────────────────────────────

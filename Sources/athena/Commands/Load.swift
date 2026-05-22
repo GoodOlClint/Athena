@@ -120,6 +120,18 @@ struct Load: AsyncParsableCommand {
     )
     var authKeysFile: String?
 
+    @Option(
+        help:
+            "TLS certificate chain (PEM, leaf first). Set with --tls-key to serve HTTPS; one without the other is a startup error. Absent ⇒ plaintext HTTP."
+    )
+    var tlsCert: String?
+
+    @Option(
+        help:
+            "TLS private key (PEM) matching --tls-cert. Keep it chmod 600."
+    )
+    var tlsKey: String?
+
     mutating func run() async throws {
         // Centralized logging first — must precede any Logger creation
         // (Hummingbird/NIO included) so everything routes through the
@@ -334,7 +346,8 @@ struct Load: AsyncParsableCommand {
             vectorStore: vectorStore,
             queue: queue, store: athenaStore,
             modelName: modelURL.lastPathComponent,
-            modelStoreRoot: store.rootDirectory, auth: authConfig)
+            modelStoreRoot: store.rootDirectory, auth: authConfig,
+            tlsCertPath: tlsCert, tlsKeyPath: tlsKey)
         try await server.run()
     }
 }
