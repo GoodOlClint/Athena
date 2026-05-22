@@ -71,6 +71,14 @@ These come from the daemon's own limits — keep the proxy in sync:
   truncated/stalled streams.
 - **Authorization header:** bearer auth and the WebUI session cookie ride
   on the request — pass `Authorization` and `Cookie` through untouched.
+- **Rate / concurrency limits:** the daemon does its own per-principal
+  rate limiting (`rate_limit`/`rate_burst`) and in-flight concurrency caps
+  (`max_concurrency`/`max_concurrency_per_principal`), keyed by the
+  authenticated principal — so you generally don't need to duplicate them
+  at the proxy. When over a limit it returns **HTTP 429** with a
+  `Retry-After` header; pass that response through unbuffered so clients
+  can back off. (These limits are opt-in and only enforced when auth is
+  enabled — see `deploy/athena.toml`.)
 
 ---
 

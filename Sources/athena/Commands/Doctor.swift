@@ -299,6 +299,53 @@ struct Doctor: AsyncParsableCommand {
         // model fetches need it; public repos work without).
         say(.ok, "hf token: \(HFAuth.source())")
 
+        // 12. Abuse-protection posture (rate limit + concurrency caps;
+        //     M29). Both are keyed by the auth principal and enforced
+        //     ONLY when auth is enabled — so a config'd limit on an
+        //     auth-off bind does nothing, and an authed non-loopback
+        //     bind with NO limit can be flooded by a single key.
+        let rate = parsed?.rateLimit.flatMap(Double.init) ?? 0
+        let burst = parsed?.rateBurst ?? 0
+        let gConc = parsed?.maxConcurrency ?? 0
+        let pConc = parsed?.maxConcurrencyPerPrincipal ?? 0
+        let rateOn = rate > 0
+        let concOn = gConc > 0 || pConc > 0
+        if rateOn {
+            let b = burst > 0 ? "\(burst)" : "auto"
+            say(
+                .ok,
+                "rate limiting: \(rate)/s per principal (burst \(b))")
+        }
+        if concOn {
+            var parts: [String] = []
+            if gConc > 0 { parts.append("global \(gConc)") }
+            if pConc > 0 { parts.append("per-principal \(pConc)") }
+            say(
+                .ok,
+                "concurrency caps: " + parts.joined(separator: ", "))
+        }
+        if rateOn || concOn, !anyCreds {
+            say(
+                .warn,
+                "rate/concurrency limits are configured but auth is "
+                    + "disabled — they are NOT enforced on an auth-off "
+                    + "bind (only authenticated callers are throttled)")
+        } else if !rateOn, !concOn {
+            if anyCreds, !loopback.contains(host) {
+                say(
+                    .warn,
+                    "abuse protection: no rate_limit or "
+                        + "max_concurrency on non-loopback \(host) — one "
+                        + "key can flood the sync path. Set rate_limit "
+                        + "and/or max_concurrency.")
+            } else {
+                say(
+                    .ok,
+                    "abuse protection: none configured "
+                        + "(rate/concurrency limits off)")
+            }
+        }
+
         if fails > 0 {
             print("\n\(fails) critical issue(s).")
             throw ExitCode.failure

@@ -1287,6 +1287,56 @@ wait "$HPID" 2>/dev/null
 stop_daemon
 
 echo
+echo "== phase 21: athena doctor — abuse-protection posture (M29.3) =="
+# doctor reads the config and PREDICTS the daemon's throttle behavior
+# without starting it. It derives data_dir from the config (no
+# --data-dir flag), so each test config pins data_dir explicitly to
+# control which credentials doctor sees. We grep its output (its overall
+# exit is governed by the CI temp env's other checks).
+DOC2="$(mktemp -d)"
+dcfg() { # CFGPATH HOST DATADIR extra-lines…
+  local p="$1" host="$2" dd="$3"; shift 3
+  { echo "listen_host = \"$host\""
+    echo 'listen_port = 7447'
+    echo 'log_dir = "/usr/local/var/log/athena"'
+    echo "data_dir = \"$dd\""
+    for l in "$@"; do echo "$l"; done
+  } > "$p"
+}
+# 21a: limits set (+ authed data dir) ⇒ doctor reports both.
+C1="$DOC2/limits.toml"
+dcfg "$C1" 127.0.0.1 "$D" "rate_limit = 10" "rate_burst = 20" \
+  "max_concurrency = 8" "max_concurrency_per_principal = 2"
+O1="$("$ATHENA" doctor --config "$C1" --model-store "$MSTORE" 2>&1)"
+echo "$O1" | grep -qi "rate limiting:.*per principal" \
+  && ok "doctor reports configured rate limiting" \
+  || { bad "doctor missing rate-limiting line"; echo "$O1" | grep -i rate; }
+echo "$O1" | grep -qi "concurrency caps:.*global 8.*per-principal 2" \
+  && ok "doctor reports configured concurrency caps" \
+  || { bad "doctor missing concurrency-caps line"
+       echo "$O1" | grep -i concurrency; }
+# 21b: limits set but NO auth creds (empty data dir, loopback) ⇒ warns
+# the limits are inert (throttling only applies to authed callers).
+ED="$(mktemp -d)"
+C1b="$DOC2/limits-noauth.toml"
+dcfg "$C1b" 127.0.0.1 "$ED" "rate_limit = 10"
+O2="$("$ATHENA" doctor --config "$C1b" --model-store "$MSTORE" 2>&1)"
+echo "$O2" | grep -qi "configured but auth is disabled" \
+  && ok "doctor warns limits are inert when auth is off" \
+  || { bad "doctor missed the auth-off-limits warning"
+       echo "$O2" | grep -i auth; }
+rm -rf "$ED"
+# 21c: NO limits + authed ($D) + non-loopback ⇒ flood warning.
+C2="$DOC2/none.toml"
+dcfg "$C2" 0.0.0.0 "$D"
+O3="$("$ATHENA" doctor --config "$C2" --model-store "$MSTORE" 2>&1)"
+echo "$O3" | grep -qi "no rate_limit or max_concurrency on non-loopback" \
+  && ok "doctor warns an authed non-loopback bind has no throttle" \
+  || { bad "doctor missed the no-throttle warning"
+       echo "$O3" | grep -i "abuse\|throttle\|flood"; }
+rm -rf "$DOC2"
+
+echo
 echo "════════════════════════════════════════"
 echo "  PASS=$PASS  FAIL=$FAIL"
 echo "════════════════════════════════════════"
