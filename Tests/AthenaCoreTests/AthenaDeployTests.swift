@@ -115,6 +115,30 @@ final class AthenaConfigTests: XCTestCase {
         XCTAssertNil(c.rateBurst)
     }
 
+    func testConcurrencyKeysParse() throws {
+        let toml = """
+            listen_host = "127.0.0.1"
+            listen_port = 7447
+            log_dir = "/l"
+            max_concurrency = 8
+            max_concurrency_per_principal = 2
+            """
+        let c = try AthenaConfig.parse(toml: toml)
+        XCTAssertEqual(c.maxConcurrency, 8)
+        XCTAssertEqual(c.maxConcurrencyPerPrincipal, 2)
+    }
+
+    func testConcurrencyKeysAbsentAreNil() throws {
+        let toml = """
+            listen_host = "127.0.0.1"
+            listen_port = 7447
+            log_dir = "/l"
+            """
+        let c = try AthenaConfig.parse(toml: toml)
+        XCTAssertNil(c.maxConcurrency)
+        XCTAssertNil(c.maxConcurrencyPerPrincipal)
+    }
+
     func testMissingRequiredKeyThrows() {
         let toml = "listen_host = \"h\"\nlog_dir = \"/l\""
         XCTAssertThrowsError(try AthenaConfig.parse(toml: toml)) {
@@ -195,7 +219,9 @@ final class LaunchdPlistTests: XCTestCase {
         speculative: Bool? = nil, vectorCapBytes: Int? = nil,
         authKeysFile: String? = nil,
         tlsCert: String? = nil, tlsKey: String? = nil,
-        rateLimit: String? = nil, rateBurst: Int? = nil
+        rateLimit: String? = nil, rateBurst: Int? = nil,
+        maxConcurrency: Int? = nil,
+        maxConcurrencyPerPrincipal: Int? = nil
     ) -> AthenaConfig {
         AthenaConfig(
             listenHost: "127.0.0.1", listenPort: 7447, budgetBytes: budget,
@@ -207,6 +233,8 @@ final class LaunchdPlistTests: XCTestCase {
             authKeysFile: authKeysFile,
             tlsCert: tlsCert, tlsKey: tlsKey,
             rateLimit: rateLimit, rateBurst: rateBurst,
+            maxConcurrency: maxConcurrency,
+            maxConcurrencyPerPrincipal: maxConcurrencyPerPrincipal,
             logDir: "/var/log/athena")
     }
 
@@ -241,7 +269,9 @@ final class LaunchdPlistTests: XCTestCase {
                 authKeysFile: "/etc/athena/auth.keys",
                 tlsCert: "/etc/athena/tls/fullchain.pem",
                 tlsKey: "/etc/athena/tls/privkey.pem",
-                rateLimit: "10", rateBurst: 20))
+                rateLimit: "10", rateBurst: 20,
+                maxConcurrency: 8,
+                maxConcurrencyPerPrincipal: 2))
         XCTAssertEqual(
             d["ProgramArguments"] as? [String],
             [
@@ -257,6 +287,8 @@ final class LaunchdPlistTests: XCTestCase {
                 "--tls-cert", "/etc/athena/tls/fullchain.pem",
                 "--tls-key", "/etc/athena/tls/privkey.pem",
                 "--rate-limit", "10", "--rate-burst", "20",
+                "--max-concurrency", "8",
+                "--max-concurrency-per-principal", "2",
             ])
     }
 

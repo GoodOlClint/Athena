@@ -144,6 +144,18 @@ struct Load: AsyncParsableCommand {
     )
     var rateBurst: Int?
 
+    @Option(
+        help:
+            "Max in-flight requests daemon-wide. 0/absent ⇒ unlimited. Over the cap ⇒ 429 (concurrency_limit). Only enforced when auth is on."
+    )
+    var maxConcurrency: Int?
+
+    @Option(
+        help:
+            "Max in-flight requests per principal. 0/absent ⇒ unlimited. Over the cap ⇒ 429 (concurrency_limit)."
+    )
+    var maxConcurrencyPerPrincipal: Int?
+
     mutating func run() async throws {
         // Centralized logging first — must precede any Logger creation
         // (Hummingbird/NIO included) so everything routes through the
@@ -360,7 +372,9 @@ struct Load: AsyncParsableCommand {
             modelName: modelURL.lastPathComponent,
             modelStoreRoot: store.rootDirectory, auth: authConfig,
             tlsCertPath: tlsCert, tlsKeyPath: tlsKey,
-            rateLimit: rateLimit ?? 0, rateBurst: rateBurst ?? 0)
+            rateLimit: rateLimit ?? 0, rateBurst: rateBurst ?? 0,
+            maxConcurrency: maxConcurrency ?? 0,
+            maxConcurrencyPerPrincipal: maxConcurrencyPerPrincipal ?? 0)
         try await server.run()
     }
 }

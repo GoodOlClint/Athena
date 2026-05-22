@@ -122,6 +122,17 @@ engine = "mlx"
 # rate_limit = 10        # 10 req/s sustained per principal
 # rate_burst = 20        # allow a 20-request burst
 
+# Inbound concurrency caps — bound how many requests may be IN FLIGHT at
+# once (orthogonal to the rate limit, which bounds requests over time).
+# max_concurrency caps the whole daemon; max_concurrency_per_principal
+# caps any single caller. Over a cap ⇒ HTTP 429 with code
+# concurrency_limit + Retry-After. Distinct from the governor's memory
+# 503 (this admits by count, not bytes). Commented / non-positive ⇒
+# UNLIMITED (default). Only enforced when auth is enabled. Health checks,
+# /metrics, and the WebUI are exempt.
+# max_concurrency = 8                  # daemon-wide in-flight cap
+# max_concurrency_per_principal = 2    # per-caller in-flight cap
+
 
 # ── Network (egress proxy) ───────────────────────────────────────────
 

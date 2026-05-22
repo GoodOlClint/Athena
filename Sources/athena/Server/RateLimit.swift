@@ -116,3 +116,111 @@ struct RateLimitMiddleware<Context: RequestContext>: RouterMiddleware {
             body: ResponseBody(byteBuffer: buf))
     }
 }
+
+// Concurrency caps (M29.2). A second, orthogonal abuse control: instead
+// of capping the request *rate* over time, this bounds the number of
+// requests a caller (and the whole daemon) can have IN FLIGHT at once,
+// so a handful of slow inference calls from one key can't tie up the
+// box. Distinct from the governor's memory 503 (this is admission
+// control on count, not memory) — rejection is a 429 with a distinct
+// `concurrency_limit` code. Opt-in: both caps non-positive ⇒ no
+// middleware installed.
+
+/// In-flight request accounting against a global cap and a per-principal
+/// cap. A cap of 0 means "unlimited" for that dimension. `acquire`
+/// reserves a slot in BOTH dimensions atomically (so a per-principal
+/// rejection never burns a global slot); the caller MUST `release`
+/// exactly once for every successful `acquire`.
+actor ConcurrencyLimiter {
+    /// Max simultaneous in-flight requests across all principals
+    /// (0 = unlimited).
+    let global: Int
+    /// Max simultaneous in-flight requests for any single principal
+    /// (0 = unlimited).
+    let perPrincipal: Int
+    private var globalInFlight = 0
+    private var perPrincipalInFlight: [String: Int] = [:]
+
+    init(global: Int, perPrincipal: Int) {
+        self.global = global
+        self.perPrincipal = perPrincipal
+    }
+
+    /// Reserve one slot for `principal`. Returns true if admitted (the
+    /// caller owns a slot it must release); false if either cap is full.
+    func acquire(_ principal: String) -> Bool {
+        if global > 0, globalInFlight >= global { return false }
+        if perPrincipal > 0,
+            (perPrincipalInFlight[principal] ?? 0) >= perPrincipal
+        {
+            return false
+        }
+        globalInFlight += 1
+        perPrincipalInFlight[principal, default: 0] += 1
+        return true
+    }
+
+    func release(_ principal: String) {
+        globalInFlight = max(0, globalInFlight - 1)
+        if let n = perPrincipalInFlight[principal] {
+            if n <= 1 { perPrincipalInFlight[principal] = nil } else {
+                perPrincipalInFlight[principal] = n - 1
+            }
+        }
+    }
+}
+
+struct ConcurrencyMiddleware<Context: RequestContext>: RouterMiddleware {
+    let limiter: ConcurrencyLimiter
+    let auth: AuthConfig
+
+    func handle(
+        _ request: Request, context: Context,
+        next: (Request, Context) async throws -> Response
+    ) async throws -> Response {
+        // Same scope as the rate limiter: auth-off loopback (dev) and
+        // the exempt non-work paths bypass entirely.
+        guard auth.isEnabled,
+            RateLimitMiddleware<Context>.throttled(request.uri.path)
+        else { return try await next(request, context) }
+
+        guard
+            let header = request.headers[.authorization],
+            header.hasPrefix("Bearer "),
+            case let token = String(header.dropFirst(7)), !token.isEmpty,
+            let subject = await auth.resolve(bearer: token)
+        else { return try await next(request, context) }
+
+        guard await limiter.acquire(subject.principal) else {
+            return Self.tooBusy()
+        }
+        // `defer` can't await, so release explicitly on BOTH the success
+        // and the throwing path — a slot must never leak.
+        do {
+            let response = try await next(request, context)
+            await limiter.release(subject.principal)
+            return response
+        } catch {
+            await limiter.release(subject.principal)
+            throw error
+        }
+    }
+
+    /// Retry-After hint for a concurrency rejection: a slot frees when an
+    /// in-flight request finishes, so "try again shortly" (1s) — there's
+    /// no time-based refill to compute, unlike the rate limiter.
+    private static func tooBusy() -> Response {
+        let body =
+            #"{"error":{"message":"too many concurrent requests","#
+            + #""type":"concurrency_limit_error","#
+            + #""code":"concurrency_limit"}}"#
+        var buf = ByteBuffer()
+        buf.writeBytes(Data(body.utf8))
+        var headers = HTTPFields()
+        headers[.contentType] = "application/json"
+        headers[.retryAfter] = "1"
+        return Response(
+            status: .tooManyRequests, headers: headers,
+            body: ResponseBody(byteBuffer: buf))
+    }
+}

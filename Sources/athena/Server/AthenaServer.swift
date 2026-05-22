@@ -56,6 +56,13 @@ struct AthenaServer {
     /// params (same convention as `auth`/`tlsCertPath`).
     var rateLimit: Double = 0
     var rateBurst: Int = 0
+    /// Inbound concurrency caps (M29.2). `maxConcurrency` = max in-flight
+    /// requests daemon-wide; `maxConcurrencyPerPrincipal` = max in-flight
+    /// per caller. 0 ⇒ unlimited (that dimension off). Both 0 ⇒ no
+    /// middleware installed — opt-in, off by default. `var = 0` so
+    /// they're memberwise-init params.
+    var maxConcurrency: Int = 0
+    var maxConcurrencyPerPrincipal: Int = 0
     /// WebUI session signer (M12.2). Per-process random secret —
     /// sessions invalidate on restart (acceptable for an appliance).
     let session = Session()
@@ -76,6 +83,16 @@ struct AthenaServer {
             router.add(
                 middleware: RateLimitMiddleware(
                     limiter: RateLimiter(rate: rateLimit, burst: burst),
+                    auth: auth))
+        }
+        // Concurrency caps just inside the rate limiter (M29.2): admit by
+        // in-flight COUNT, holding a slot for the handler's full duration.
+        if maxConcurrency > 0 || maxConcurrencyPerPrincipal > 0 {
+            router.add(
+                middleware: ConcurrencyMiddleware(
+                    limiter: ConcurrencyLimiter(
+                        global: maxConcurrency,
+                        perPrincipal: maxConcurrencyPerPrincipal),
                     auth: auth))
         }
         router.add(middleware: MetricsMiddleware(metrics: metrics))

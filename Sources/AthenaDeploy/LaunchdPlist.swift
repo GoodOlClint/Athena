@@ -68,6 +68,14 @@ public enum LaunchdPlist {
         if let rateBurst = config.rateBurst {
             args += ["--rate-burst", String(rateBurst)]
         }
+        if let maxConcurrency = config.maxConcurrency {
+            args += ["--max-concurrency", String(maxConcurrency)]
+        }
+        if let maxConcPP = config.maxConcurrencyPerPrincipal {
+            args += [
+                "--max-concurrency-per-principal", String(maxConcPP),
+            ]
+        }
 
         return [
             "Label": label,

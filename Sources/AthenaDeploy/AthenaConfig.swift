@@ -51,6 +51,12 @@ public struct AthenaConfig: Sendable, Equatable {
     /// (opt-in, off by default).
     public var rateLimit: String?
     public var rateBurst: Int?
+    /// Inbound concurrency caps (M29.2). `maxConcurrency` = max in-flight
+    /// requests daemon-wide; `maxConcurrencyPerPrincipal` = max in-flight
+    /// per caller. Both optional — absent / non-positive ⇒ unlimited
+    /// (opt-in, off by default).
+    public var maxConcurrency: Int?
+    public var maxConcurrencyPerPrincipal: Int?
     /// `[network]` egress-proxy keys (M13.2). An operator-set
     /// `*_PROXY` env var always wins over these.
     public var httpsProxy: String?
@@ -70,6 +76,8 @@ public struct AthenaConfig: Sendable, Equatable {
         authKeysFile: String? = nil,
         tlsCert: String? = nil, tlsKey: String? = nil,
         rateLimit: String? = nil, rateBurst: Int? = nil,
+        maxConcurrency: Int? = nil,
+        maxConcurrencyPerPrincipal: Int? = nil,
         httpsProxy: String? = nil, httpProxy: String? = nil,
         allProxy: String? = nil, noProxy: String? = nil,
         logDir: String
@@ -93,6 +101,8 @@ public struct AthenaConfig: Sendable, Equatable {
         self.tlsKey = tlsKey
         self.rateLimit = rateLimit
         self.rateBurst = rateBurst
+        self.maxConcurrency = maxConcurrency
+        self.maxConcurrencyPerPrincipal = maxConcurrencyPerPrincipal
         self.httpsProxy = httpsProxy
         self.httpProxy = httpProxy
         self.allProxy = allProxy
@@ -165,6 +175,14 @@ public struct AthenaConfig: Sendable, Equatable {
         if let rb = scalar("rate_burst", in: toml) {
             rateBurst = try int("rate_burst", rb)
         }
+        var maxConc: Int?
+        if let mc = scalar("max_concurrency", in: toml) {
+            maxConc = try int("max_concurrency", mc)
+        }
+        var maxConcPP: Int?
+        if let mp = scalar("max_concurrency_per_principal", in: toml) {
+            maxConcPP = try int("max_concurrency_per_principal", mp)
+        }
         let spec = scalar("speculative", in: toml).map { $0 == "true" }
 
         return AthenaConfig(
@@ -187,6 +205,8 @@ public struct AthenaConfig: Sendable, Equatable {
             tlsKey: scalar("tls_key", in: toml),
             rateLimit: scalar("rate_limit", in: toml),
             rateBurst: rateBurst,
+            maxConcurrency: maxConc,
+            maxConcurrencyPerPrincipal: maxConcPP,
             httpsProxy: scalar("https_proxy", in: toml),
             httpProxy: scalar("http_proxy", in: toml),
             allProxy: scalar("all_proxy", in: toml),

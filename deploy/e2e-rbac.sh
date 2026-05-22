@@ -1228,6 +1228,65 @@ code 200 GET /healthz "$ALICE_TOK"
 stop_daemon
 
 echo
+echo "== phase 20: concurrency caps — global + per-principal 429 (M29.2) =="
+# Concurrency caps bound IN-FLIGHT request COUNT (orthogonal to the rate
+# limit, which bounds requests over time). The stub chat handler streams
+# 10 chunks at 15 ms each (~150 ms), reliably holding a slot while a
+# second request probes the cap. Two daemon configs isolate the two
+# dimensions. --engine stub, loopback, ephemeral data dir.
+probe() { # WANT-CODE BEARER  → captures $PROBE (status+headers+body)
+  PROBE="$(curl -s -i -H "Authorization: Bearer $2" \
+    -H "Content-Type: application/json" -d "$CHAT" \
+    "http://127.0.0.1:$PORT/v1/chat/completions")"
+  echo "$PROBE" | grep -E "^HTTP/" | tail -1 | grep -q " $1"
+}
+hold() { # BEARER  → backgrounds a ~150 ms in-flight chat, sets $HPID
+  curl -s -o /dev/null -H "Authorization: Bearer $1" \
+    -H "Content-Type: application/json" -d "$CHAT" \
+    "http://127.0.0.1:$PORT/v1/chat/completions" &
+  HPID=$!
+  sleep 0.05   # let the holder acquire its slot before we probe
+}
+
+# 20a: per-principal cap = 1 (global unlimited). alice's in-flight chat
+# holds her one slot, so her concurrent SECOND request is rejected —
+# while a DIFFERENT principal (bob) is unaffected.
+stop_daemon
+start_daemon "$D" 127.0.0.1 --max-concurrency-per-principal 1 \
+  || { echo "concurrency daemon failed"; cat "$D/daemon.log"; exit 1; }
+hold "$ALICE_TOK"
+probe 429 "$ALICE_TOK" \
+  && ok "per-principal cap: alice's concurrent 2nd request → 429" \
+  || bad "per-principal cap: expected 429 ($(echo "$PROBE" | head -1))"
+echo "$PROBE" | grep -qi "^Retry-After: *[0-9]" \
+  && ok "concurrency 429 carries a Retry-After header" \
+  || bad "concurrency 429 missing Retry-After"
+echo "$PROBE" | grep -q '"code":"concurrency_limit"' \
+  && ok "concurrency 429 body uses code concurrency_limit" \
+  || bad "concurrency 429 body shape unexpected"
+probe 200 "$BOB_TOK" \
+  && ok "per-principal cap is per-caller: bob admitted (200)" \
+  || bad "bob should be admitted ($(echo "$PROBE" | head -1))"
+wait "$HPID" 2>/dev/null
+probe 200 "$ALICE_TOK" \
+  && ok "slot released after the in-flight request completes (alice 200)" \
+  || bad "alice not re-admitted after release ($(echo "$PROBE" | head -1))"
+stop_daemon
+
+# 20b: global cap = 1 (per-principal unlimited). One in-flight request
+# fills the whole daemon, so a DIFFERENT principal is rejected — proving
+# the cap is global, not per-caller.
+start_daemon "$D" 127.0.0.1 --max-concurrency 1 \
+  || { echo "global-concurrency daemon failed"; cat "$D/daemon.log"; \
+       exit 1; }
+hold "$ALICE_TOK"
+probe 429 "$BOB_TOK" \
+  && ok "global cap: a different principal is rejected while 1 in flight" \
+  || bad "global cap: expected 429 for bob ($(echo "$PROBE" | head -1))"
+wait "$HPID" 2>/dev/null
+stop_daemon
+
+echo
 echo "════════════════════════════════════════"
 echo "  PASS=$PASS  FAIL=$FAIL"
 echo "════════════════════════════════════════"
