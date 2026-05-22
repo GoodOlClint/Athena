@@ -413,6 +413,47 @@ MT="$(intfield "$MET" llmTokens)"
   || bad "/metrics llmTokens not >0 ($MET)"
 
 echo
+echo "== phase 2.10: per-principal usage counters persist (M27.2) =="
+# Token usage is metered into AthenaStore keyed by the caller's auth
+# principal (u:<user> for a managed token). Read the DB directly to
+# prove independent per-principal rows that survive in SQLite.
+DB="$D/athena.sqlite"
+usagecol() { # PRINCIPAL COLUMN → integer (0 when no row yet)
+  sqlite3 "$DB" \
+    "SELECT COALESCE((SELECT $2 FROM usage_counters \
+       WHERE principal='$1'),0);"
+}
+A0="$(usagecol 'u:alice' requests)"
+AP0="$(usagecol 'u:alice' prompt_tokens)"
+B0="$(usagecol 'u:bob' requests)"
+for _ in 1 2; do
+  curl -s -o /dev/null -X POST -H "Authorization: Bearer $ALICE_TOK" \
+    -H 'Content-Type: application/json' -d "$CHAT" \
+    "http://127.0.0.1:$PORT/v1/chat/completions"
+done
+curl -s -o /dev/null -X POST -H "Authorization: Bearer $BOB_TOK" \
+  -H 'Content-Type: application/json' -d "$CHAT" \
+  "http://127.0.0.1:$PORT/v1/chat/completions"
+A1="$(usagecol 'u:alice' requests)"
+AP1="$(usagecol 'u:alice' prompt_tokens)"
+B1="$(usagecol 'u:bob' requests)"
+# Exactly +2 for alice (not +3) proves bob's request did NOT touch
+# alice's row — i.e. counters are keyed per principal.
+[ "$A1" -eq $((A0 + 2)) ] \
+  && ok "alice requests +2 exactly ($A0 → $A1)" \
+  || bad "alice requests not +2 ($A0 → $A1)"
+[ "$AP1" -gt "$AP0" ] \
+  && ok "alice prompt_tokens accumulated ($AP0 → $AP1)" \
+  || bad "alice prompt_tokens did not grow ($AP0 → $AP1)"
+[ "$B1" -eq $((B0 + 1)) ] \
+  && ok "bob has an independent counter row (+1: $B0 → $B1)" \
+  || bad "bob counter not +1 ($B0 → $B1)"
+NROWS="$(sqlite3 "$DB" 'SELECT COUNT(*) FROM usage_counters;')"
+[ "$NROWS" -ge 2 ] \
+  && ok "usage_counters holds ≥2 principal rows ($NROWS)" \
+  || bad "usage_counters has <2 rows ($NROWS)"
+
+echo
 echo "== phase 3: scoped-token downgrade =="
 # boss is an admin USER, but BOSS_SCOPED narrows to member.
 code 403 GET  /metrics "$BOSS_SCOPED"                   # member perms only

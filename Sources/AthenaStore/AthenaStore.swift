@@ -17,6 +17,27 @@ public struct JobRow: Sendable {
     public let owner: String?
 }
 
+/// One principal's cumulative token usage (M27.2).
+public struct UsageRow: Sendable, Equatable {
+    public let principal: String
+    public let requests: Int
+    public let promptTokens: Int
+    public let completionTokens: Int
+    /// Wall-clock of the last metered request (epoch seconds).
+    public let updated: Double
+    public var totalTokens: Int { promptTokens + completionTokens }
+    public init(
+        principal: String, requests: Int, promptTokens: Int,
+        completionTokens: Int, updated: Double
+    ) {
+        self.principal = principal
+        self.requests = requests
+        self.promptTokens = promptTokens
+        self.completionTokens = completionTokens
+        self.updated = updated
+    }
+}
+
 /// One embedded SQLite store backing the built-in vector DB and the
 /// async request queue (M7). Zero new dependency — system `SQLite3`.
 /// Actor-isolated: SQLite access is single-threaded here.
@@ -78,6 +99,12 @@ public actor AthenaStore {
               hash BLOB PRIMARY KEY, username TEXT NOT NULL,
               scoped_roles TEXT, label TEXT,
               created REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS usage_counters(
+              principal TEXT PRIMARY KEY,
+              requests INTEGER NOT NULL DEFAULT 0,
+              prompt_tokens INTEGER NOT NULL DEFAULT 0,
+              completion_tokens INTEGER NOT NULL DEFAULT 0,
+              updated REAL NOT NULL);
             """)
         // Migration for stores created before M12.6 (no IF NOT
         // EXISTS for columns; the dup-column error is expected and
@@ -317,6 +344,72 @@ public actor AthenaStore {
         defer { sqlite3_finalize(st) }
         return sqlite3_step(st) == SQLITE_ROW
             ? Int(sqlite3_column_int(st, 0)) : 0
+    }
+
+    // MARK: Usage metering (M27.2) — cumulative per-principal token
+    // counters. Persisted so usage survives restarts and is retrievable
+    // locally (pull only; the passive oracle never pushes usage out).
+
+    /// Add one request's token counts to `principal`'s running totals,
+    /// creating the row on first use. Token columns are INTEGER (64-bit)
+    /// so cumulative counts don't overflow over an appliance's lifetime.
+    public func addUsage(
+        principal: String, promptTokens: Int, completionTokens: Int
+    ) throws {
+        let st = try Self.prepared(db,
+            "INSERT INTO usage_counters"
+                + "(principal,requests,prompt_tokens,completion_tokens,"
+                + "updated) VALUES(?,1,?,?,?) "
+                + "ON CONFLICT(principal) DO UPDATE SET "
+                + "requests=requests+1,"
+                + "prompt_tokens=prompt_tokens+excluded.prompt_tokens,"
+                + "completion_tokens=completion_tokens"
+                + "+excluded.completion_tokens,"
+                + "updated=excluded.updated;")
+        defer { sqlite3_finalize(st) }
+        sqlite3_bind_text(st, 1, principal, -1, Self.transient)
+        sqlite3_bind_int64(st, 2, Int64(promptTokens))
+        sqlite3_bind_int64(st, 3, Int64(completionTokens))
+        sqlite3_bind_double(st, 4, Date().timeIntervalSince1970)
+        guard sqlite3_step(st) == SQLITE_DONE else {
+            throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
+        }
+    }
+
+    private func rowToUsage(_ st: OpaquePointer?) -> UsageRow {
+        UsageRow(
+            principal: String(cString: sqlite3_column_text(st, 0)),
+            requests: Int(sqlite3_column_int64(st, 1)),
+            promptTokens: Int(sqlite3_column_int64(st, 2)),
+            completionTokens: Int(sqlite3_column_int64(st, 3)),
+            updated: sqlite3_column_double(st, 4))
+    }
+
+    private static let usageCols =
+        "principal,requests,prompt_tokens,completion_tokens,updated"
+
+    /// One principal's cumulative usage, or nil if it has none yet.
+    public func usage(principal: String) -> UsageRow? {
+        guard let st = try? Self.prepared(db,
+            "SELECT \(Self.usageCols) FROM usage_counters "
+                + "WHERE principal=?;")
+        else { return nil }
+        defer { sqlite3_finalize(st) }
+        sqlite3_bind_text(st, 1, principal, -1, Self.transient)
+        return sqlite3_step(st) == SQLITE_ROW ? rowToUsage(st) : nil
+    }
+
+    /// Every principal's usage, highest total tokens first (admin view).
+    public func allUsage() -> [UsageRow] {
+        guard let st = try? Self.prepared(db,
+            "SELECT \(Self.usageCols) FROM usage_counters "
+                + "ORDER BY (prompt_tokens + completion_tokens) DESC, "
+                + "principal;")
+        else { return [] }
+        defer { sqlite3_finalize(st) }
+        var out: [UsageRow] = []
+        while sqlite3_step(st) == SQLITE_ROW { out.append(rowToUsage(st)) }
+        return out
     }
 
     // MARK: Auth — users (PBKDF2 salt/hash computed by the caller;

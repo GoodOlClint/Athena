@@ -185,4 +185,39 @@ final class AthenaStoreTests: XCTestCase {
         let pv = await s2.getVector(id: "persist")?.vector
         XCTAssertEqual(pv, [3, 1, 4])
     }
+
+    /// M27.2 — per-principal usage counters accumulate, stay keyed by
+    /// principal, persist across reopen, and order by total tokens.
+    func testUsageCountersAccumulatePerPrincipal() async throws {
+        let url = tmpURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        do {
+            let s = try AthenaStore(path: url)
+            try await s.addUsage(
+                principal: "u:alice", promptTokens: 10,
+                completionTokens: 4)
+            try await s.addUsage(
+                principal: "u:alice", promptTokens: 6,
+                completionTokens: 2)
+            try await s.addUsage(
+                principal: "u:bob", promptTokens: 1, completionTokens: 1)
+
+            let a = await s.usage(principal: "u:alice")
+            XCTAssertEqual(a?.requests, 2)
+            XCTAssertEqual(a?.promptTokens, 16)
+            XCTAssertEqual(a?.completionTokens, 6)
+            XCTAssertEqual(a?.totalTokens, 22)
+            // bob's request must NOT have leaked into alice's row.
+            let b = await s.usage(principal: "u:bob")
+            XCTAssertEqual(b?.requests, 1)
+            XCTAssertEqual(b?.totalTokens, 2)
+            let nobody = await s.usage(principal: "u:nobody")
+            XCTAssertNil(nobody)
+        }
+        // Persist across reopen; allUsage orders by total desc.
+        let s2 = try AthenaStore(path: url)
+        let all = await s2.allUsage()
+        XCTAssertEqual(all.map(\.principal), ["u:alice", "u:bob"])
+        XCTAssertEqual(all.first?.totalTokens, 22)
+    }
 }

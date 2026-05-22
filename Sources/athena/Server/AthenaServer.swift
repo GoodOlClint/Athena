@@ -429,8 +429,9 @@ struct AthenaServer {
 
         // Wire the queue executor to the governed module paths and
         // start the single serial worker (M8.1).
-        await queue.setExecutor { kind, data in
-            await self.queuedExecute(kind: kind, request: data)
+        await queue.setExecutor { kind, data, owner in
+            await self.queuedExecute(
+                kind: kind, request: data, owner: owner)
         }
         let worker = Task { await queue.runWorker() }
         defer { worker.cancel() }
@@ -526,9 +527,11 @@ struct AthenaServer {
             case .usage(let u): usage = u
             }
         }
-        // M27.1: real token counts feed both the response `usage` object
-        // and the global metrics counter (was a hardcoded zero / dead).
-        await metrics.addTokens(usage.totalTokens)
+        // M27.1/.2: real token counts feed the response `usage` object,
+        // the global metrics counter, and the persisted per-principal
+        // counter (keyed by the caller's auth principal).
+        await meter(
+            principal: usagePrincipal(request), usage: usage)
 
         return Self.json(
             Self.chatCompletionResponse(
@@ -627,8 +630,11 @@ struct AthenaServer {
         } catch {
             return Self.classified(error, module: .textEmbedding)
         }
-        // M27.1: embeddings have no completion — prompt == total tokens.
-        await metrics.addTokens(batch.promptTokens)
+        // M27.1/.2: embeddings have no completion — prompt == total.
+        await meter(
+            principal: usagePrincipal(request),
+            usage: TokenUsage(
+                promptTokens: batch.promptTokens, completionTokens: 0))
 
         let response = EmbeddingResponse(
             object: "list",
@@ -1211,6 +1217,33 @@ struct AthenaServer {
         return (subject.principal, isAdmin, true)
     }
 
+    /// Metering principal for the unauthenticated loopback caller (auth
+    /// disabled). `xenos` — Greek ξένος, "guest/stranger" — the guest
+    /// who arrives without credentials; distinct from the `u:`/`t:`
+    /// prefixes used for authenticated subjects (M27.2).
+    static let xenos = "xenos"
+
+    /// The principal a (non-queue) request should be metered against:
+    /// the authenticated subject, or nil when auth is off (mapped to
+    /// `xenos` by `meter`). Inference handlers only run after the auth
+    /// middleware admits the request, so an enabled-auth request always
+    /// resolves a real principal here.
+    private func usagePrincipal(_ request: Request) async -> String? {
+        await queuePrincipal(request).principal
+    }
+
+    /// Record one request's token usage (M27): bump the global metrics
+    /// counter and the persisted per-principal counter. nil principal ⇒
+    /// auth off ⇒ the `xenos` sentinel. Persistence failures are
+    /// non-fatal — metering must never break inference.
+    private func meter(principal: String?, usage: TokenUsage) async {
+        await metrics.addTokens(usage.totalTokens)
+        try? await store.addUsage(
+            principal: principal ?? Self.xenos,
+            promptTokens: usage.promptTokens,
+            completionTokens: usage.completionTokens)
+    }
+
     /// May this caller see/act on `job`? Open when auth is off;
     /// admin sees all; a nil-owner row is legacy/unowned (pre-M12.6,
     /// back-compat); otherwise only the submitting principal.
@@ -1432,8 +1465,11 @@ struct AthenaServer {
 
     /// Runs a queued job through the same governed paths as the sync
     /// endpoints. Returns (resultJSON, nil) or (nil, errorMessage).
+    /// `owner` is the submitting principal (M12.6) so token usage is
+    /// metered against the same principal a sync request would be
+    /// (M27.2); nil ⇒ auth disabled, metered under the `xenos` sentinel.
     private func queuedExecute(
-        kind: String, request: Data
+        kind: String, request: Data, owner: String?
     ) async -> (result: Data?, error: String?) {
         switch kind {
         case "conversation":
@@ -1472,7 +1508,7 @@ struct AthenaServer {
                 case .usage(let u): usage = u
                 }
             }
-            await metrics.addTokens(usage.totalTokens)
+            await meter(principal: owner, usage: usage)
             // M24.6: store the full OpenAI ChatCompletionResponse as the
             // job result so a polled queued job carries the SAME
             // `choices[0].message.{content,tool_calls}` shape as the sync
@@ -1495,10 +1531,16 @@ struct AthenaServer {
             else { return (nil, "invalid embeddings body") }
             do {
                 try await governor.ensureLoaded(.textEmbedding)
-                let v = try await embedding.embed(req.input).vectors
+                let batch = try await embedding.embed(req.input)
+                await meter(
+                    principal: owner,
+                    usage: TokenUsage(
+                        promptTokens: batch.promptTokens,
+                        completionTokens: 0))
                 return (
                     try? JSONEncoder().encode(
-                        QueuedEmbeddingResult(embeddings: v)), nil
+                        QueuedEmbeddingResult(embeddings: batch.vectors)),
+                    nil
                 )
             } catch let e as AthenaError {
                 return (nil, e.message)

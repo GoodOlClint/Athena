@@ -9,12 +9,13 @@ import Logging
 /// queued and sync work hit the one governor; natural FIFO there).
 /// Survives restarts (queued/running jobs are re-drained).
 actor RequestQueue {
-    /// (kind, request bytes) → (result bytes, error message). Set by
-    /// `AthenaServer` to dispatch to chat/embeddings/etc.
+    /// (kind, request bytes, owner) → (result bytes, error message).
+    /// Set by `AthenaServer` to dispatch to chat/embeddings/etc.
+    /// `owner` is the submitting principal (M12.6) so the executor can
+    /// meter usage per principal (M27.2); nil when auth is disabled.
     typealias Executor =
-        @Sendable (_ kind: String, _ request: Data) async -> (
-            result: Data?, error: String?
-        )
+        @Sendable (_ kind: String, _ request: Data, _ owner: String?)
+            async -> (result: Data?, error: String?)
 
     /// Kinds a client may submit via the public `/v1/queue/:kind`
     /// route. Model-store ops are deliberately NOT here — they are
@@ -104,7 +105,7 @@ actor RequestQueue {
             }
             log.info("queue job running kind=\(job.kind) id=\(job.id)")
             let (result, error) = await executor(
-                job.kind, job.request)
+                job.kind, job.request, job.owner)
             try? await store.updateJob(
                 id: job.id,
                 status: error == nil ? "done" : "error",
