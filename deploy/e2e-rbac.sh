@@ -16,6 +16,10 @@
 #   8. kv_compression knob     (triattention/turboquant accepted at
 #                               daemon start; unknown ⇒ fail-closed
 #                               start refusal, not a silent fallback)
+#   9. lifecycle UX (M22)       (`stop` halts a user daemon and surfaces
+#                               sudo guidance for a system one; `init`
+#                               aux-pull is idempotent; `install`
+#                               synthesizes a default config)
 #
 # It touches ONLY an ephemeral temp data dir + a loopback port, never
 # the real ~/.athena or the login Keychain (bearer tokens are passed
@@ -37,6 +41,8 @@ if [ -z "$ATHENA" ]; then
 fi
 [ -x "$ATHENA" ] || { echo "no athena binary (build first)"; exit 2; }
 echo "using: $ATHENA"
+# Absolute path for phases that `cd` into a temp dir (install dry-run).
+ATHENA_ABS="$(cd "$(dirname "$ATHENA")" >/dev/null 2>&1 && pwd)/$(basename "$ATHENA")"
 
 D="$(mktemp -d)"
 EMPTY="$(mktemp -d)"
@@ -772,6 +778,60 @@ if grep -qi "unrecognized kv_compression" "$D/kv-bogus.log"; then
 else
   bad "fail-closed error message missing/unclear"
   cat "$D/kv-bogus.log"
+fi
+
+echo
+echo "== phase 13: athena stop — user daemon + system root guidance (M22.1) =="
+# 13a: `athena start` brings up a user-context daemon (no install, no
+# root) and `athena stop` halts it via the pidfile.
+SD="$(mktemp -d)"; SP=17449
+# `start` has no --model-store (stub engine loads no model); just bind.
+"$ATHENA" start --engine stub --host 127.0.0.1 --port "$SP" \
+  --data-dir "$SD" >/dev/null 2>&1
+up=0
+for _ in $(seq 1 40); do
+  if curl -s -o /dev/null "http://127.0.0.1:$SP/healthz"; then up=1; break; fi
+  sleep 0.5
+done
+[ "$up" = 1 ] && ok "athena start brought up a user daemon (no install)" \
+  || bad "athena start failed to come up"
+SO="$("$ATHENA" stop --data-dir "$SD" 2>&1)"; rc=$?
+{ [ $rc -eq 0 ] && echo "$SO" | grep -qi "stopped"; } \
+  && ok "athena stop halts the user daemon (pidfile path)" \
+  || bad "athena stop rc=$rc: $SO"
+sleep 0.5
+curl -s -o /dev/null "http://127.0.0.1:$SP/healthz" \
+  && bad "daemon still serving after stop" \
+  || ok "endpoint down after stop"
+rm -rf "$SD"
+# 13b: invalid --label is rejected before reaching launchctl.
+IL="$("$ATHENA" stop --data-dir "$(mktemp -d)" --label 'bad;rm -rf /' 2>&1)"
+echo "$IL" | grep -qi "invalid --label" \
+  && ok "stop rejects an injection-shaped --label" \
+  || bad "stop did not reject bad label ($IL)"
+# 13c: with no user pidfile, stop takes the system path. We are not
+# root and cannot install a real /Library/LaunchDaemons plist in CI, so
+# assert whichever branch this host is in — both must exit nonzero and
+# touch nothing (skip entirely if running as root, where stop WOULD
+# bootout a real daemon).
+if [ "$(id -u)" -ne 0 ]; then
+  SE="$(mktemp -d)"
+  SYSOUT="$("$ATHENA" stop --data-dir "$SE" 2>&1)"; rc=$?
+  [ $rc -ne 0 ] && ok "stop (no pidfile) exits nonzero" \
+    || bad "stop should fail with nothing user-managed (rc=$rc)"
+  if [ -f /Library/LaunchDaemons/me.goodolclint.athena.plist ] \
+     || launchctl print system/me.goodolclint.athena >/dev/null 2>&1; then
+    echo "$SYSOUT" | grep -qi "sudo athena stop" \
+      && ok "system daemon present + not root → sudo guidance" \
+      || bad "expected sudo guidance ($SYSOUT)"
+  else
+    echo "$SYSOUT" | grep -qi "no athena daemon to stop" \
+      && ok "clean host → clear no-daemon message" \
+      || bad "expected no-daemon message ($SYSOUT)"
+  fi
+  rm -rf "$SE"
+else
+  echo "  skip system-stop probe (running as root would bootout a real daemon)"
 fi
 
 echo

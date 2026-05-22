@@ -1,6 +1,7 @@
 import ArgumentParser
 import AthenaClient
 import AthenaCore
+import AthenaDeploy
 import Darwin
 import Foundation
 
@@ -137,33 +138,92 @@ struct Start: AsyncParsableCommand {
     }
 }
 
+/// A launchd label is reverse-DNS-ish: ASCII letters/digits and the
+/// separators `.`, `-`, `_`. We pass it to `launchctl` as argv (never a
+/// shell string), but validate defensively so a malformed `--label`
+/// fails fast rather than reaching launchctl.
+private func isValidLabel(_ s: String) -> Bool {
+    guard !s.isEmpty, s.count <= 255 else { return false }
+    let allowed = Set(
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_")
+    return s.allSatisfy { allowed.contains($0) }
+}
+
+/// Run `/bin/launchctl` with `args` as argv (no shell), returning its
+/// exit status. Output is discarded — callers only need the status.
+private func launchctl(_ args: [String]) -> Int32 {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+    p.arguments = args
+    p.standardOutput = FileHandle.nullDevice
+    p.standardError = FileHandle.nullDevice
+    do { try p.run() } catch { return -1 }
+    p.waitUntilExit()
+    return p.terminationStatus
+}
+
 struct Stop: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "stop",
-        abstract: "Stop the daemon process.")
+        abstract:
+            "Stop the daemon process (user pidfile, else system launchd)."
+    )
     @Option(help: "Runtime/data dir (default ~/.athena).")
     var dataDir: String?
+    @Option(help: "launchd label for a system (boot) daemon.")
+    var label: String = "me.goodolclint.athena"
 
     func run() async throws {
-        guard let pid = livePid(dataDir) else {
+        // 1. A user-context daemon (from `athena start`) owns a pidfile;
+        //    stop it directly. This path needs no root and no install.
+        if let pid = livePid(dataDir) {
+            kill(pid, SIGTERM)
+            // Up to ~5s for a graceful exit, then SIGKILL.
+            for _ in 0..<50 {
+                if !alive(pid) { break }
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+            if alive(pid) {
+                kill(pid, SIGKILL)
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+            try? FileManager.default.removeItem(at: pidFile(dataDir))
+            print("stopped athena daemon (pid \(pid))")
+            return
+        }
+
+        // 2. No user pidfile → maybe a system (launchd-managed) daemon.
+        guard isValidLabel(label) else {
             FailableExit.die(
-                "error: no daemon pidfile at "
-                    + "\(pidFile(dataDir).path) — if a daemon is "
-                    + "running it is launchd-managed; use "
-                    + "`launchctl` / `athena install`")
+                "error: invalid --label '\(label)' (expected reverse-DNS: "
+                    + "letters, digits, '.', '-', '_')")
         }
-        kill(pid, SIGTERM)
-        // Up to ~5s for a graceful exit, then SIGKILL.
-        for _ in 0..<50 {
-            if !alive(pid) { break }
-            try? await Task.sleep(nanoseconds: 100_000_000)
+        let plist = InstallPlan.plistPath(label: label)
+        let systemPresent =
+            FileManager.default.fileExists(atPath: plist.path)
+            || launchctl(["print", "system/\(label)"]) == 0
+        guard systemPresent else {
+            FailableExit.die(
+                "error: no athena daemon to stop — no user pidfile at "
+                    + "\(pidFile(dataDir).path) and no system LaunchDaemon "
+                    + "'\(label)'. Start one with `athena start`, or "
+                    + "install the boot daemon with `athena install`.")
         }
-        if alive(pid) {
-            kill(pid, SIGKILL)
-            try? await Task.sleep(nanoseconds: 200_000_000)
+
+        // 3. A system daemon exists. Removing it needs root; we surface
+        //    that and never self-escalate (no spawning sudo ourselves).
+        guard geteuid() == 0 else {
+            FailableExit.die(
+                "error: '\(label)' is a system LaunchDaemon — stopping it "
+                    + "needs root. Re-run: sudo athena stop --label \(label)")
         }
-        try? FileManager.default.removeItem(at: pidFile(dataDir))
-        print("stopped athena daemon (pid \(pid))")
+        let status = launchctl(["bootout", "system/\(label)"])
+        guard status == 0 else {
+            FailableExit.die(
+                "error: launchctl bootout system/\(label) failed "
+                    + "(status \(status))")
+        }
+        print("stopped system athena daemon (\(label))")
     }
 }
 

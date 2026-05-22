@@ -42,7 +42,11 @@ public struct InstallPlan: Sendable, Equatable {
     public var workingDir: URL {
         prefix.appendingPathComponent("var/athena", isDirectory: true)
     }
-    public var plistPath: URL {
+    public var plistPath: URL { Self.plistPath(label: label) }
+    /// Canonical system LaunchDaemon plist path for `label`. Static so
+    /// both `athena install` and `athena stop` share one definition
+    /// without building a full plan just to locate the plist.
+    public static func plistPath(label: String) -> URL {
         URL(fileURLWithPath: "/Library/LaunchDaemons/\(label).plist")
     }
     /// Guard: present only in an xcodebuild-produced binary. Absent in a
