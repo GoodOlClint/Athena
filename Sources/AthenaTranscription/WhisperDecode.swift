@@ -66,57 +66,43 @@ public enum WhisperDecode {
         return MLXArray(m)
     }
 
-    /// Greedy-decode one embedded 30 s window → (text, window-relative
-    /// segments). KV-cached, timestamp-aware.
-    private static func decodeWindow(
-        model: WhisperModel, audio: MLXArray,
-        tokenizer: any MLXLMCommon.Tokenizer,
-        langTok: Int, maxTokens: Int
-    ) -> (text: String, segments: [TranscriptionSegment]) {
-        let prefix = [sot, langTok, transcribe]
-        var generated: [Int] = []
-        let limit = min(
-            model.config.n_text_ctx, prefix.count + maxTokens)
-        let mask = specialMask(vocab: model.config.n_vocab)
-        let cache = WhisperKVCache(layers: model.config.n_text_layer)
+    /// A timestamp-delimited span before tokenizer decoding: its
+    /// window-relative bounds, the content token ids it covers, and the
+    /// mean per-token log-probability of those tokens (M26.1). Pure data
+    /// so the parser is unit-testable without a model.
+    struct ParsedSegment {
+        let start: Double
+        let end: Double
+        let tokens: [Int]
+        let avgLogprob: Double?
+    }
 
-        func step(_ ids: [Int], _ offset: Int) -> Int {
-            let inp = MLXArray(ids.map { Int32($0) }, [1, ids.count])
-            let lg = model.logits(
-                inp, audio: audio, offset: offset, cache: cache)
-            let last = lg[0..., -1, 0...] + mask
-            let n = argMax(last, axis: -1).item(Int.self)
-            cache.evalStep()
-            return n
-        }
-
-        var produced = prefix.count
-        var next = step(prefix, 0)
-        while next != eot && produced < limit {
-            generated.append(next)
-            produced += 1
-            if produced >= limit { break }
-            next = step([next], produced - 1)
-        }
-
-        // Parse timestamp-delimited segments.
-        var segments: [TranscriptionSegment] = []
+    /// Split a window's greedy output into timestamp-delimited spans.
+    /// `generated` is the decoded ids (text + `<|t|>` markers, no eot);
+    /// `logprobs` is the parallel per-token log-probability (same count).
+    /// Pure: depends only on the fixed timestamp/eot constants. M26.1.
+    static func parseSegments(
+        generated: [Int], logprobs: [Double]
+    ) -> [ParsedSegment] {
+        var segments: [ParsedSegment] = []
         var buf: [Int] = []
+        var bufLogprobs: [Double] = []
         var segStart: Double?
         var lastTs: Double?
         func flush(_ end: Double) {
             guard !buf.isEmpty else { return }
-            let t = tokenizer.decode(
-                tokenIds: buf, skipSpecialTokens: true
-            ).trimmingCharacters(in: .whitespacesAndNewlines)
-            if !t.isEmpty {
-                segments.append(
-                    TranscriptionSegment(
-                        start: segStart ?? 0, end: end, text: t))
-            }
+            let avg =
+                bufLogprobs.isEmpty
+                ? nil
+                : bufLogprobs.reduce(0, +) / Double(bufLogprobs.count)
+            segments.append(
+                ParsedSegment(
+                    start: segStart ?? 0, end: end, tokens: buf,
+                    avgLogprob: avg))
             buf = []
+            bufLogprobs = []
         }
-        for t in generated {
+        for (i, t) in generated.enumerated() {
             if t >= timestampBegin {
                 let ts = Double(t - timestampBegin) * timeStep
                 lastTs = ts
@@ -128,13 +114,74 @@ public enum WhisperDecode {
                 }
             } else {
                 buf.append(t)
+                if i < logprobs.count { bufLogprobs.append(logprobs[i]) }
             }
         }
         flush(lastTs ?? windowSeconds)
+        return segments
+    }
+
+    /// Greedy-decode one embedded 30 s window → (text, window-relative
+    /// segments, content token ids). KV-cached, timestamp-aware. Tracks
+    /// each step's log-probability so segments carry `avgLogprob` (M26.1)
+    /// and exposes the content tokens for word alignment (M26.2).
+    private static func decodeWindow(
+        model: WhisperModel, audio: MLXArray,
+        tokenizer: any MLXLMCommon.Tokenizer,
+        langTok: Int, maxTokens: Int
+    ) -> (
+        text: String, segments: [TranscriptionSegment],
+        contentTokens: [Int]
+    ) {
+        let prefix = [sot, langTok, transcribe]
+        var generated: [Int] = []
+        var genLogprobs: [Double] = []
+        let limit = min(
+            model.config.n_text_ctx, prefix.count + maxTokens)
+        let mask = specialMask(vocab: model.config.n_vocab)
+        let cache = WhisperKVCache(layers: model.config.n_text_layer)
+
+        func step(_ ids: [Int], _ offset: Int) -> (token: Int, logprob: Double) {
+            let inp = MLXArray(ids.map { Int32($0) }, [1, ids.count])
+            let lg = model.logits(
+                inp, audio: audio, offset: offset, cache: cache)
+            let last = lg[0..., -1, 0...] + mask
+            let n = argMax(last, axis: -1).item(Int.self)
+            // log-softmax of the chosen id under the decode distribution.
+            let lse = logSumExp(last, axis: -1).item(Float.self)
+            let logp = Double(last[0, n].item(Float.self) - lse)
+            cache.evalStep()
+            return (n, logp)
+        }
+
+        var produced = prefix.count
+        var next = step(prefix, 0)
+        while next.token != eot && produced < limit {
+            generated.append(next.token)
+            genLogprobs.append(next.logprob)
+            produced += 1
+            if produced >= limit { break }
+            next = step([next.token], produced - 1)
+        }
+
+        let parsed = parseSegments(
+            generated: generated, logprobs: genLogprobs)
+        var segments: [TranscriptionSegment] = []
+        for p in parsed {
+            let t = tokenizer.decode(
+                tokenIds: p.tokens, skipSpecialTokens: true
+            ).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !t.isEmpty else { continue }
+            segments.append(
+                TranscriptionSegment(
+                    start: p.start, end: p.end, text: t,
+                    avgLogprob: p.avgLogprob))
+        }
 
         let text = segments.map(\.text).joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        return (text, segments)
+        let contentTokens = generated.filter { $0 < eot }
+        return (text, segments, contentTokens)
     }
 
     /// Transcribe full-length PCM (mono 16 kHz) → text + globally-timed
@@ -165,7 +212,7 @@ public enum WhisperDecode {
                 langTok
                 ?? resolveLang(language, model: model, audio: audio)
             langTok = lt
-            let (text, segs) = decodeWindow(
+            let (text, segs, _) = decodeWindow(
                 model: model, audio: audio, tokenizer: tokenizer,
                 langTok: lt, maxTokens: maxTokens)
             let off = Double(i) * windowSeconds
@@ -173,7 +220,7 @@ public enum WhisperDecode {
                 contentsOf: segs.map {
                     TranscriptionSegment(
                         start: $0.start + off, end: $0.end + off,
-                        text: $0.text)
+                        text: $0.text, avgLogprob: $0.avgLogprob)
                 })
             if !text.isEmpty { parts.append(text) }
         }

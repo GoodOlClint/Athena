@@ -226,6 +226,9 @@ struct VerboseSegment: Codable {
     let start: Double
     let end: Double
     let text: String
+    /// Mean per-token log-probability for the span (M26.1) — omitted
+    /// when not tracked (e.g. the stub engine).
+    let avg_logprob: Double?
     /// Speaker id (M4.3c) — present only when the request opted into
     /// diarization (`diarize=true`); omitted otherwise.
     let speaker: Int?

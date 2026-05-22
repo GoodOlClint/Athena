@@ -731,6 +731,7 @@ struct AthenaServer {
                         VerboseSegment(
                             id: $0.offset, start: $0.element.start,
                             end: $0.element.end, text: $0.element.text,
+                            avg_logprob: $0.element.avgLogprob,
                             speaker: turns.isEmpty
                                 ? nil
                                 : Self.speaker(

@@ -6,10 +6,17 @@ public struct TranscriptionSegment: Sendable, Codable {
     public let start: Double
     public let end: Double
     public let text: String
-    public init(start: Double, end: Double, text: String) {
+    /// Mean per-token log-probability of the tokens decoded into this
+    /// span (M26.1). nil when not tracked (e.g. the stub). Surfaced only
+    /// in the `verbose_json` response; other formats ignore it.
+    public let avgLogprob: Double?
+    public init(
+        start: Double, end: Double, text: String, avgLogprob: Double? = nil
+    ) {
         self.start = start
         self.end = end
         self.text = text
+        self.avgLogprob = avgLogprob
     }
 }
 
