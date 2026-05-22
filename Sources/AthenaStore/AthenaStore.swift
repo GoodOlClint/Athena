@@ -38,6 +38,40 @@ public struct UsageRow: Sendable, Equatable {
     }
 }
 
+/// One append-only audit-log entry (M30): a security/admin mutation —
+/// who did it, to what, and the outcome. Rows are inserted, never
+/// updated, so the trail is tamper-evident at the application layer.
+public struct AuditRow: Sendable, Equatable {
+    public let id: Int
+    /// Epoch seconds of the recorded event.
+    public let ts: Double
+    /// The acting subject: `u:<user>` / `t:<hash>` / `xenos`
+    /// (auth-off loopback operator).
+    public let principal: String
+    /// Stable machine action key, e.g. `user.create`, `role.grant`.
+    public let action: String
+    /// What was acted on (username / role / model name …); nil when
+    /// the action has no single subject.
+    public let target: String?
+    /// Outcome: `ok` (mutation applied) or `denied` (authorization
+    /// guard refused it).
+    public let result: String
+    /// Optional human context (e.g. the denial reason).
+    public let detail: String?
+    public init(
+        id: Int, ts: Double, principal: String, action: String,
+        target: String?, result: String, detail: String?
+    ) {
+        self.id = id
+        self.ts = ts
+        self.principal = principal
+        self.action = action
+        self.target = target
+        self.result = result
+        self.detail = detail
+    }
+}
+
 /// One embedded SQLite store backing the built-in vector DB and the
 /// async request queue (M7). Zero new dependency — system `SQLite3`.
 /// Actor-isolated: SQLite access is single-threaded here.
@@ -105,6 +139,12 @@ public actor AthenaStore {
               prompt_tokens INTEGER NOT NULL DEFAULT 0,
               completion_tokens INTEGER NOT NULL DEFAULT 0,
               updated REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS audit_log(
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              ts REAL NOT NULL, principal TEXT NOT NULL,
+              action TEXT NOT NULL, target TEXT,
+              result TEXT NOT NULL, detail TEXT);
+            CREATE INDEX IF NOT EXISTS audit_ts ON audit_log(ts);
             """)
         // Migration for stores created before M12.6 (no IF NOT
         // EXISTS for columns; the dup-column error is expected and
@@ -410,6 +450,97 @@ public actor AthenaStore {
         var out: [UsageRow] = []
         while sqlite3_step(st) == SQLITE_ROW { out.append(rowToUsage(st)) }
         return out
+    }
+
+    // MARK: Audit log (M30) — append-only security/admin trail.
+
+    /// Append one audit entry. Throwing so the caller can decide
+    /// (the server treats a failed audit write as non-fatal, like
+    /// usage metering — an audit hiccup must never sink the mutation
+    /// that already happened).
+    public func addAudit(
+        principal: String, action: String, target: String?,
+        result: String, detail: String? = nil
+    ) throws {
+        let st = try Self.prepared(db,
+            "INSERT INTO audit_log"
+                + "(ts,principal,action,target,result,detail) "
+                + "VALUES(?,?,?,?,?,?);")
+        defer { sqlite3_finalize(st) }
+        sqlite3_bind_double(st, 1, Date().timeIntervalSince1970)
+        sqlite3_bind_text(st, 2, principal, -1, Self.transient)
+        sqlite3_bind_text(st, 3, action, -1, Self.transient)
+        if let target {
+            sqlite3_bind_text(st, 4, target, -1, Self.transient)
+        } else { sqlite3_bind_null(st, 4) }
+        sqlite3_bind_text(st, 5, result, -1, Self.transient)
+        if let detail {
+            sqlite3_bind_text(st, 6, detail, -1, Self.transient)
+        } else { sqlite3_bind_null(st, 6) }
+        guard sqlite3_step(st) == SQLITE_DONE else {
+            throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
+        }
+    }
+
+    private static let auditCols =
+        "id,ts,principal,action,target,result,detail"
+
+    private func rowToAudit(_ st: OpaquePointer?) -> AuditRow {
+        AuditRow(
+            id: Int(sqlite3_column_int64(st, 0)),
+            ts: sqlite3_column_double(st, 1),
+            principal: String(cString: sqlite3_column_text(st, 2)),
+            action: String(cString: sqlite3_column_text(st, 3)),
+            target: sqlite3_column_type(st, 4) == SQLITE_NULL
+                ? nil : String(cString: sqlite3_column_text(st, 4)),
+            result: String(cString: sqlite3_column_text(st, 5)),
+            detail: sqlite3_column_type(st, 6) == SQLITE_NULL
+                ? nil : String(cString: sqlite3_column_text(st, 6)))
+    }
+
+    /// Most-recent-first audit entries, optionally narrowed by
+    /// principal, action prefix, and a lower time bound (epoch
+    /// seconds). `limit` caps the result page.
+    public func listAudit(
+        principal: String? = nil, action: String? = nil,
+        since: Double? = nil, limit: Int = 100
+    ) -> [AuditRow] {
+        var sql = "SELECT \(Self.auditCols) FROM audit_log WHERE 1=1"
+        if principal != nil { sql += " AND principal=?" }
+        if action != nil { sql += " AND action=?" }
+        if since != nil { sql += " AND ts>=?" }
+        sql += " ORDER BY id DESC LIMIT ?;"
+        guard let st = try? Self.prepared(db, sql) else { return [] }
+        defer { sqlite3_finalize(st) }
+        var idx: Int32 = 1
+        if let principal {
+            sqlite3_bind_text(st, idx, principal, -1, Self.transient)
+            idx += 1
+        }
+        if let action {
+            sqlite3_bind_text(st, idx, action, -1, Self.transient)
+            idx += 1
+        }
+        if let since {
+            sqlite3_bind_double(st, idx, since)
+            idx += 1
+        }
+        sqlite3_bind_int(st, idx, Int32(max(1, limit)))
+        var out: [AuditRow] = []
+        while sqlite3_step(st) == SQLITE_ROW {
+            out.append(rowToAudit(st))
+        }
+        return out
+    }
+
+    /// Total audit rows (tests / retention accounting).
+    public func auditCount() -> Int {
+        guard let st = try? Self.prepared(db,
+            "SELECT COUNT(*) FROM audit_log;")
+        else { return 0 }
+        defer { sqlite3_finalize(st) }
+        return sqlite3_step(st) == SQLITE_ROW
+            ? Int(sqlite3_column_int64(st, 0)) : 0
     }
 
     // MARK: Auth — users (PBKDF2 salt/hash computed by the caller;

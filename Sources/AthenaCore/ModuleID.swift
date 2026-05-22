@@ -28,6 +28,10 @@ public enum ModuleID: String, Sendable, CaseIterable, Codable {
 /// "model.llm", …).
 public enum AthenaLogLabel {
     public static let daemon = "athena.daemon"
+    /// Security/admin audit trail (M30). The M10 unified-log bridge
+    /// maps this label to category `audit`; emit at `.notice` so it
+    /// persists to `log show` and rides the opt-in remote syslog.
+    public static let audit = "athena.audit"
     public static func model(_ id: ModuleID) -> String {
         "athena.model.\(id.logCategory)"
     }

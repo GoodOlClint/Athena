@@ -732,6 +732,62 @@ code 400 DELETE /api/tokens/abc "$A2"               # <6 hex
 # Last-admin protection over HTTP (D2 has exactly one admin).
 code 403 DELETE /api/users/admin "$A2"              # sole admin
 code 403 DELETE /api/users/admin/roles/admin "$A2"  # revoke sole admin
+
+echo
+echo "== phase 8.5: audit trail — admin mutations recorded (M30.1) =="
+# Every RBAC/admin mutation writes an append-only audit_log row at the
+# SHARED handler chokepoint, so BOTH the bearer /api path (phase 8, D2)
+# and the cookie /ui path (phase 2.8, D) are captured — each keyed by
+# the acting principal. Read the DBs directly to prove the rows landed
+# (the second sink, a unified-log `audit` line, is verified manually
+# per the M10 unified-log approach — `log show` timing is too flaky for
+# the stub gate).
+adb2="$D2/athena.sqlite"
+arow() { # DB ACTION TARGET RESULT  → count for principal u:admin
+  sqlite3 "$1" "SELECT COUNT(*) FROM audit_log \
+    WHERE action='$2' AND target='$3' AND result='$4' \
+      AND principal='u:admin';"
+}
+[ "$(arow "$adb2" user.create e2e1 ok)" -ge 1 ] \
+  && ok "audit: bearer user.create e2e1 ok" \
+  || bad "audit: missing bearer user.create e2e1"
+[ "$(arow "$adb2" role.grant e2e1:operator ok)" -ge 1 ] \
+  && ok "audit: bearer role.grant e2e1:operator ok" \
+  || bad "audit: missing bearer role.grant"
+[ "$(arow "$adb2" role.revoke e2e1:operator ok)" -ge 1 ] \
+  && ok "audit: bearer role.revoke e2e1:operator ok" \
+  || bad "audit: missing bearer role.revoke"
+[ "$(arow "$adb2" user.delete e2e1 ok)" -ge 1 ] \
+  && ok "audit: bearer user.delete e2e1 ok" \
+  || bad "audit: missing bearer user.delete"
+[ "$(arow "$adb2" token.create mem ok)" -ge 1 ] \
+  && ok "audit: bearer token.create mem ok" \
+  || bad "audit: missing bearer token.create"
+[ "$(arow "$adb2" token.delete "$HP" ok)" -ge 1 ] \
+  && ok "audit: bearer token.delete ok" \
+  || bad "audit: missing bearer token.delete"
+# Denials are recorded too (security-relevant): last-admin protection.
+[ "$(arow "$adb2" user.delete admin denied)" -ge 1 ] \
+  && ok "audit: last-admin user.delete denied recorded" \
+  || bad "audit: missing denied user.delete admin"
+[ "$(arow "$adb2" role.revoke admin:admin denied)" -ge 1 ] \
+  && ok "audit: last-admin role.revoke denied recorded" \
+  || bad "audit: missing denied role.revoke admin"
+# Plain validation 400s change nothing ⇒ NOT audited (no 'weak' row).
+NW="$(sqlite3 "$adb2" "SELECT COUNT(*) FROM audit_log \
+  WHERE target='weak';")"
+[ "$NW" -eq 0 ] \
+  && ok "audit: validation 400 not recorded (no 'weak' row)" \
+  || bad "audit: validation failure leaked a row ($NW)"
+# Cookie /ui path (phase 2.8 on D) records the LOGGED-IN principal.
+adb1="$D/athena.sqlite"
+[ "$(arow "$adb1" user.create webu ok)" -ge 1 ] \
+  && ok "audit: cookie user.create webu ok (u:admin)" \
+  || bad "audit: missing cookie user.create webu"
+[ "$(arow "$adb1" token.create bob ok)" -ge 1 ] \
+  && ok "audit: cookie token.create bob ok (u:admin)" \
+  || bad "audit: missing cookie token.create bob"
+
 stop_daemon
 
 echo

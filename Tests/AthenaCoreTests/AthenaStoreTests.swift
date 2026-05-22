@@ -220,4 +220,43 @@ final class AthenaStoreTests: XCTestCase {
         XCTAssertEqual(all.map(\.principal), ["u:alice", "u:bob"])
         XCTAssertEqual(all.first?.totalTokens, 22)
     }
+
+    func testAuditLogAppendFilterAndPersist() async throws {
+        let url = tmpURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        do {
+            let s = try AthenaStore(path: url)
+            try await s.addAudit(
+                principal: "u:admin", action: "user.create",
+                target: "alice", result: "ok", detail: "role=member")
+            try await s.addAudit(
+                principal: "u:admin", action: "user.delete",
+                target: "admin", result: "denied",
+                detail: "only admin")
+            try await s.addAudit(
+                principal: "u:bob", action: "model.remove",
+                target: "m1", result: "ok", detail: nil)
+
+            let count = await s.auditCount()
+            XCTAssertEqual(count, 3)
+            // Most-recent-first (descending id).
+            let recent = await s.listAudit(limit: 10)
+            XCTAssertEqual(recent.first?.action, "model.remove")
+            XCTAssertEqual(recent.first?.target, "m1")
+            XCTAssertNil(recent.first?.detail)
+            // Filter by principal.
+            let admin = await s.listAudit(principal: "u:admin")
+            XCTAssertEqual(admin.count, 2)
+            XCTAssertTrue(admin.allSatisfy { $0.principal == "u:admin" })
+            // Filter by action.
+            let deletes = await s.listAudit(action: "user.delete")
+            XCTAssertEqual(deletes.count, 1)
+            XCTAssertEqual(deletes.first?.result, "denied")
+            XCTAssertEqual(deletes.first?.detail, "only admin")
+        }
+        // Append-only rows persist across reopen.
+        let s2 = try AthenaStore(path: url)
+        let persisted = await s2.auditCount()
+        XCTAssertEqual(persisted, 3)
+    }
 }

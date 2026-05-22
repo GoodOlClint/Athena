@@ -366,8 +366,8 @@ struct AthenaServer {
         router.post("/api/embed") { request, _ -> Response in
             await handleNativeEmbed(request)
         }
-        router.post("/api/admin/stop") { _, _ -> Response in
-            await adminUnloadLLM()
+        router.post("/api/admin/stop") { request, _ -> Response in
+            await adminUnloadLLM(request)
         }
         router.get("/api/admin/status") { _, _ -> Response in
             await adminStatus()
@@ -433,8 +433,10 @@ struct AthenaServer {
         router.get("/api/models/:name") { _, context -> Response in
             handleModelShow(context.parameters.get("name"))
         }
-        router.delete("/api/models/:name") { _, context -> Response in
-            handleModelRemove(context.parameters.get("name"))
+        router.delete("/api/models/:name") { request, context
+            -> Response in
+            await handleModelRemove(
+                context.parameters.get("name"), request)
         }
 
         // RBAC administration over HTTP (M16.4). Every mutation
@@ -474,10 +476,10 @@ struct AthenaServer {
         router.post("/api/tokens") { request, _ -> Response in
             await handleTokenCreate(request)
         }
-        router.delete("/api/tokens/:prefix") { _, context
+        router.delete("/api/tokens/:prefix") { request, context
             -> Response in
             await handleTokenDelete(
-                context.parameters.get("prefix"))
+                context.parameters.get("prefix"), request)
         }
 
         // Wire the queue executor to the governed module paths and
@@ -1936,7 +1938,9 @@ struct AthenaServer {
                     JSONValue.self, from: d.configJSON)))
     }
 
-    private func handleModelRemove(_ name: String?) -> Response {
+    private func handleModelRemove(
+        _ name: String?, _ request: Request
+    ) async -> Response {
         guard let name = Self.safeModelName(name) else {
             return Self.error(
                 status: .badRequest, message: "invalid model name",
@@ -1954,6 +1958,9 @@ struct AthenaServer {
                 status: .internalServerError, message: "\(error)",
                 type: "server_error", code: "remove_failed")
         }
+        await audit(
+            request, action: "model.remove", target: name,
+            result: "ok")
         return Self.json(
             ModelRemovedResponse(name: name, removed: true))
     }
@@ -2038,6 +2045,9 @@ struct AthenaServer {
                 status: .badRequest, message: "\(error)",
                 type: "invalid_request_error", code: "config_error")
         }
+        await audit(
+            request, action: "model.default_set", target: name,
+            result: "ok")
         return Self.json(
             DefaultModelResponse(model: name, source: "config"))
     }
@@ -2155,7 +2165,7 @@ struct AthenaServer {
                 if case .fail(let f) = decoded { return f }
                 fatalError()
             }
-            return self.handleModelRemove(body.name)
+            return await self.handleModelRemove(body.name, req)
         }
     }
 
@@ -2183,8 +2193,11 @@ struct AthenaServer {
     /// Unload the LLM module (frees its memory). Shared by
     /// `POST /api/admin/stop` (bearer) and the M18.3 `/ui/api/admin/
     /// stop` (cookie) — one implementation, no duplication.
-    private func adminUnloadLLM() async -> Response {
+    private func adminUnloadLLM(_ request: Request) async -> Response {
         await governor.unload(.llm)
+        await audit(
+            request, action: "daemon.unload", target: modelName,
+            result: "ok")
         return Self.json(
             AthenaStopResponse(status: "unloaded", model: modelName))
     }
@@ -2192,9 +2205,12 @@ struct AthenaServer {
     /// Pre-warm the LLM module so the next inference is hot. New
     /// daemon-control verb (M18.3); exposed only on the cookie+CSRF
     /// /ui surface (the public /api admin surface is frozen at M16).
-    private func adminLoadLLM() async -> Response {
+    private func adminLoadLLM(_ request: Request) async -> Response {
         do {
             try await governor.ensureLoaded(.llm)
+            await audit(
+                request, action: "daemon.load", target: modelName,
+                result: "ok")
             return Self.json(
                 AthenaStopResponse(
                     status: "loaded", model: modelName))
@@ -2237,7 +2253,7 @@ struct AthenaServer {
         guard await uiCaller(r).perms.contains(.daemonAdmin) else {
             return Self.uiDeny("need daemon.admin")
         }
-        return await adminUnloadLLM()
+        return await adminUnloadLLM(r)
     }
 
     private func uiAdminLoad(_ r: Request) async -> Response {
@@ -2247,7 +2263,7 @@ struct AthenaServer {
         guard await uiCaller(r).perms.contains(.daemonAdmin) else {
             return Self.uiDeny("need daemon.admin")
         }
-        return await adminLoadLLM()
+        return await adminLoadLLM(r)
     }
 
     // MARK: - RBAC admin (M16.4)
@@ -2280,6 +2296,60 @@ struct AthenaServer {
             return await auth.permissions(forUser: user)
         }
         return []
+    }
+
+    /// The acting principal for an audit record, resolved for BOTH
+    /// surfaces — a Bearer subject (`/api/*`), a WebUI session cookie
+    /// (`/ui/*` → `u:<user>`), or the auth-off loopback operator
+    /// (`xenos`). Mirrors `callerPermissions` so neither path is
+    /// missed.
+    private func auditPrincipal(_ request: Request) async -> String {
+        guard auth.isEnabled else { return Self.xenos }
+        if let h = request.headers[.authorization],
+            h.hasPrefix("Bearer "),
+            case let tok = String(h.dropFirst(7)), !tok.isEmpty,
+            let s = await auth.resolve(bearer: tok)
+        {
+            return s.principal
+        }
+        if let ck = Session.token(
+            fromCookieHeader: request.headers[.cookie]),
+            let user = session.validate(ck)
+        {
+            return "u:" + user
+        }
+        return "unknown"
+    }
+
+    /// Record one admin/security mutation to the M30 audit trail. The
+    /// dual sink chosen for M30: an append-only SQLite row AND a
+    /// `.notice` unified-log line (category `audit`, riding M10 + the
+    /// opt-in remote syslog). Called from inside the shared `handle*`
+    /// chokepoints so the Bearer `/api/*` and cookie `/ui/*` callers
+    /// are both captured. A failed write is swallowed — an audit
+    /// hiccup must never sink a mutation that already happened.
+    /// Outcomes recorded: `ok` (applied) and `denied` (an
+    /// authorization guard refused it); plain input-validation 400s
+    /// and not-found 404s changed nothing and are not audited.
+    private func audit(
+        _ request: Request, action: String, target: String?,
+        result: String, detail: String? = nil
+    ) async {
+        let principal = await auditPrincipal(request)
+        do {
+            try await store.addAudit(
+                principal: principal, action: action,
+                target: target, result: result, detail: detail)
+        } catch {
+            Self.auditLog.warning(
+                "audit write failed action=\(action): \(error)")
+        }
+        Self.auditLog.notice(
+            """
+            audit principal=\(principal) action=\(action) \
+            target=\(target ?? "-") result=\(result)\
+            \(detail.map { " detail=\($0)" } ?? "")
+            """)
     }
 
     /// Bare identifier guard for network input (username/role names):
@@ -2346,6 +2416,10 @@ struct AthenaServer {
         guard
             RBAC.canGrant(role: role, grantorPermissions: caller)
         else {
+            await audit(
+                request, action: "user.create", target: username,
+                result: "denied", detail: "role '\(role)' exceeds "
+                    + "grantor permissions")
             return Self.deny403(
                 "cannot grant a role conferring permissions you do "
                     + "not hold")
@@ -2357,6 +2431,10 @@ struct AthenaServer {
             guard
                 RBAC.permissions(forRoles: cur).isSubset(of: caller)
             else {
+                await audit(
+                    request, action: "user.create",
+                    target: username, result: "denied",
+                    detail: "target outranks caller")
                 return Self.deny403(
                     "refusing to replace a user whose roles exceed "
                         + "your permissions")
@@ -2377,6 +2455,9 @@ struct AthenaServer {
                 status: .internalServerError, message: "\(error)",
                 type: "server_error", code: "store_error")
         }
+        await audit(
+            request, action: "user.create", target: username,
+            result: "ok", detail: "role=\(role)")
         return Self.json(
             UserSummaryDTO(
                 username: username,
@@ -2398,11 +2479,17 @@ struct AthenaServer {
                 type: "invalid_request_error", code: "not_found")
         }
         if await store.usersWithRole("admin") == [username] {
+            await audit(
+                request, action: "user.delete", target: username,
+                result: "denied", detail: "only admin")
             return Self.deny403(
                 "'\(username)' is the only admin — refusing "
                     + "(grant admin to another user first)")
         }
         let ok = await store.deleteUser(username: username)
+        await audit(
+            request, action: "user.delete", target: username,
+            result: ok ? "ok" : "denied")
         return Self.json(
             UserRemovedResponse(username: username, removed: ok))
     }
@@ -2432,6 +2519,10 @@ struct AthenaServer {
         guard
             RBAC.canGrant(role: role, grantorPermissions: caller)
         else {
+            await audit(
+                request, action: "role.grant",
+                target: "\(username):\(role)", result: "denied",
+                detail: "role exceeds grantor permissions")
             return Self.deny403(
                 "cannot grant a role conferring permissions you do "
                     + "not hold")
@@ -2444,6 +2535,9 @@ struct AthenaServer {
                 status: .internalServerError, message: "\(error)",
                 type: "server_error", code: "store_error")
         }
+        await audit(
+            request, action: "role.grant",
+            target: "\(username):\(role)", result: "ok")
         return Self.json(OkResponse(ok: true))
     }
 
@@ -2465,12 +2559,19 @@ struct AthenaServer {
         if role == "admin",
             await store.usersWithRole("admin") == [username]
         {
+            await audit(
+                request, action: "role.revoke",
+                target: "\(username):\(role)", result: "denied",
+                detail: "only admin")
             return Self.deny403(
                 "'\(username)' is the only admin — refusing to "
                     + "revoke admin")
         }
         let ok = await store.revokeRole(
             username: username, role: role)
+        await audit(
+            request, action: "role.revoke",
+            target: "\(username):\(role)", result: ok ? "ok" : "denied")
         return Self.json(OkResponse(ok: ok))
     }
 
@@ -2517,6 +2618,9 @@ struct AthenaServer {
                     code: "unknown_role")
             }
             guard Self.canGrantAll(scoped, caller) else {
+                await audit(
+                    request, action: "token.create", target: user,
+                    result: "denied", detail: "scope exceeds caller")
                 return Self.deny403(
                     "token scope exceeds your permissions")
             }
@@ -2526,6 +2630,10 @@ struct AthenaServer {
             let inherited = RBAC.permissions(
                 forRoles: await store.rolesForUser(username: user))
             guard inherited.isSubset(of: caller) else {
+                await audit(
+                    request, action: "token.create", target: user,
+                    result: "denied",
+                    detail: "unscoped token exceeds caller")
                 return Self.deny403(
                     "an unscoped token for '\(user)' would exceed "
                         + "your permissions — pass an explicit role "
@@ -2542,11 +2650,17 @@ struct AthenaServer {
                 status: .internalServerError, message: "\(error)",
                 type: "server_error", code: "store_error")
         }
+        let hashPrefix = String(
+            AuthConfig.hex(Array(hash)).prefix(12))
+        await audit(
+            request, action: "token.create", target: user,
+            result: "ok",
+            detail: "hash=\(hashPrefix) scope="
+                + (scoped?.joined(separator: ",") ?? "inherit"))
         return Self.json(
             CreateTokenResponse(
                 user: user, scope: scoped, token: key,
-                hash_prefix: String(
-                    AuthConfig.hex(Array(hash)).prefix(12))),
+                hash_prefix: hashPrefix),
             status: .accepted)
     }
 
@@ -2567,9 +2681,9 @@ struct AthenaServer {
         return Data(out)
     }
 
-    private func handleTokenDelete(_ prefix: String?) async
-        -> Response
-    {
+    private func handleTokenDelete(
+        _ prefix: String?, _ request: Request
+    ) async -> Response {
         guard let prefix, prefix.count >= 6,
             prefix.allSatisfy({ $0.isHexDigit })
         else {
@@ -2595,6 +2709,9 @@ struct AthenaServer {
                 removed += 1
             }
         }
+        await audit(
+            request, action: "token.delete", target: prefix,
+            result: "ok", detail: "removed=\(removed)")
         return Self.json(TokensRemovedResponse(removed: removed))
     }
 
@@ -2699,7 +2816,7 @@ struct AthenaServer {
     private func uiTokenDelete(_ r: Request) async -> Response {
         await uiRBAC(r, .tokensAdmin, mutating: true) { req in
             let f = await self.uiJSONMap(req)
-            return await self.handleTokenDelete(f["prefix"])
+            return await self.handleTokenDelete(f["prefix"], req)
         }
     }
 
@@ -2822,6 +2939,7 @@ struct AthenaServer {
     /// becomes a governed 503 (`metal_oom`), never a bare 500 / process
     /// abort (brief item 4a). Existing `AthenaError`s pass through.
     private static let log = Logger(label: AthenaLog.daemonLabel)
+    private static let auditLog = Logger(label: AthenaLogLabel.audit)
 
     private static func classified(
         _ err: any Error, module: ModuleID
