@@ -506,12 +506,14 @@ struct AthenaServer {
                 id: id, model: model, created: created,
                 tokens: llm.generate(
                     messages: turns, schemaJSON: schemaJSON,
-                    tools: toolSpecs))
+                    tools: toolSpecs, maxTokens: body.max_tokens,
+                    temperature: body.temperature))
         }
 
         var text = ""
         for await chunk in llm.generate(
-            messages: turns, schemaJSON: schemaJSON, tools: toolSpecs)
+            messages: turns, schemaJSON: schemaJSON, tools: toolSpecs,
+            maxTokens: body.max_tokens, temperature: body.temperature)
         {
             text += chunk
         }
@@ -1234,7 +1236,8 @@ struct AthenaServer {
             var text = ""
             for await c in llm.generate(
                 messages: turns, schemaJSON: effective?.json,
-                tools: req.toolSpecs())
+                tools: req.toolSpecs(), maxTokens: req.max_tokens,
+                temperature: req.temperature)
             {
                 text += c
             }
@@ -1414,7 +1417,9 @@ struct AthenaServer {
         if body.stream == true {
             return Self.streamNDJSON(
                 tokens: llm.generate(
-                    messages: turns, schemaJSON: nil, tools: nil)
+                    messages: turns, schemaJSON: nil, tools: nil,
+                    maxTokens: body.max_tokens,
+                    temperature: body.temperature)
             ) { content, done in
                 try? JSONEncoder().encode(
                     AthenaChatChunk(
@@ -1423,7 +1428,8 @@ struct AthenaServer {
         }
         var text = ""
         for await c in llm.generate(
-            messages: turns, schemaJSON: nil, tools: nil)
+            messages: turns, schemaJSON: nil, tools: nil,
+            maxTokens: body.max_tokens, temperature: body.temperature)
         {
             text += c
         }

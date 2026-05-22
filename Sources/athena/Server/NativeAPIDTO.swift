@@ -17,6 +17,9 @@ struct AthenaChatRequest: Codable {
     let model: String?
     let messages: [AthenaChatMessage]
     let stream: Bool?
+    /// Per-request generation overrides (M24.3); absent ⇒ loaded defaults.
+    let max_tokens: Int?
+    let temperature: Double?
 }
 
 /// Non-streamed `/api/chat` reply. The full generation is in

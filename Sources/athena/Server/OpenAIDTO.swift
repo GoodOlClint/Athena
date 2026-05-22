@@ -57,6 +57,10 @@ struct ChatCompletionRequest: Codable {
     let response_format: ResponseFormat?
     let tools: [Tool]?
     let tool_choice: JSONValue?
+    /// Per-request generation overrides (M24.3). Absent ⇒ the daemon's
+    /// loaded defaults. Honored on the sync, native, and queued paths.
+    let max_tokens: Int?
+    let temperature: Double?
 
     /// Tools to constrain to: `tool_choice` forcing one ⇒ `[that]`;
     /// `"none"` / no tools ⇒ nil; otherwise (auto/absent/"required") ⇒

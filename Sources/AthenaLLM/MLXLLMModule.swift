@@ -203,12 +203,14 @@ public actor MLXLLMModule: LLMModule {
     ) -> AsyncStream<String> {
         generate(
             messages: [ChatTurn(role: "user", content: prompt)],
-            schemaJSON: schemaJSON, tools: tools)
+            schemaJSON: schemaJSON, tools: tools,
+            maxTokens: nil, temperature: nil)
     }
 
     public nonisolated func generate(
         messages: [ChatTurn], schemaJSON: String?,
-        tools: [[String: any Sendable]]?
+        tools: [[String: any Sendable]]?,
+        maxTokens: Int?, temperature: Double?
     ) -> AsyncStream<String> {
         // `messages` ([ChatTurn]) is Sendable and crosses into the actor;
         // the non-Sendable `Chat.Message` mapping happens INSIDE the actor
@@ -218,7 +220,7 @@ public actor MLXLLMModule: LLMModule {
                 do {
                     if let speculative = try await self.runSpeculative(
                         messages: messages, schemaJSON: schemaJSON,
-                        tools: tools)
+                        tools: tools, maxTokens: maxTokens)
                     {
                         continuation.yield(speculative)
                     } else {
@@ -228,7 +230,8 @@ public actor MLXLLMModule: LLMModule {
                         // always guided: the vendored Qwen3.5 path, or the
                         // substrate-guided path for other arches (M23).
                         let stream = try await self.beginGeneration(
-                            messages: messages, tools: tools)
+                            messages: messages, tools: tools,
+                            maxTokens: maxTokens, temperature: temperature)
                         for await event in stream {
                             if case .chunk(let text) = event {
                                 continuation.yield(text)
@@ -257,7 +260,7 @@ public actor MLXLLMModule: LLMModule {
     /// unstructured request takes the opt-in speculative path only.
     private func runSpeculative(
         messages: [ChatTurn], schemaJSON: String?,
-        tools: [[String: any Sendable]]?
+        tools: [[String: any Sendable]]?, maxTokens: Int?
     ) async throws -> String? {
         guard let container else { return nil }
         let speculativeEligible = params.speculativeGreedyEligible
@@ -267,7 +270,10 @@ public actor MLXLLMModule: LLMModule {
             input: UserInput(
                 chat: Self.chatMessages(messages), tools: tools))
         let promptTokens = lmInput.text.tokens.asArray(Int.self)
-        let maxTokens = params.maxTokens
+        // M24.3: a positive per-request override wins over the loaded
+        // default; the greedy/MTP paths are length-only (temperature is
+        // inert under the Guide / speculative greedy).
+        let maxTokens = Self.effectiveMaxTokens(maxTokens, params.maxTokens)
 
         // Build (or reuse) the structured vocabulary tokens once per
         // model. The ~150k tokenizer.decode calls are the dominant
@@ -366,7 +372,8 @@ public actor MLXLLMModule: LLMModule {
     }
 
     private func beginGeneration(
-        messages: [ChatTurn], tools: [[String: any Sendable]]?
+        messages: [ChatTurn], tools: [[String: any Sendable]]?,
+        maxTokens: Int?, temperature: Double?
     ) async throws -> AsyncStream<Generation> {
         guard let container else {
             throw AthenaError.moduleLoadFailed(
@@ -385,13 +392,26 @@ public actor MLXLLMModule: LLMModule {
                 evictionPolicy
         }
         let gen = params.kvCompression.generation
+        // M24.3: per-request max_tokens/temperature override the loaded
+        // defaults (a negative/zero temperature override is ignored).
+        let temp =
+            (temperature.map { Float($0) }).flatMap { $0 >= 0 ? $0 : nil }
+            ?? params.temperature
         let gp = GenerateParameters(
-            maxTokens: params.maxTokens,
+            maxTokens: Self.effectiveMaxTokens(maxTokens, params.maxTokens),
             kvBits: gen.kvBits,
             kvQuantizationScheme: gen.scheme,
-            temperature: params.temperature,
+            temperature: temp,
             topP: params.topP)
         return try await container.generate(input: lmInput, parameters: gp)
+    }
+
+    /// A positive per-request `max_tokens` override wins; otherwise the
+    /// loaded default. Guards against 0/negative overrides truncating to
+    /// nothing.
+    static func effectiveMaxTokens(_ override: Int?, _ fallback: Int) -> Int {
+        if let o = override, o > 0 { return o }
+        return fallback
     }
 
     /// Resident footprint estimate = sum of the model's `*.safetensors`

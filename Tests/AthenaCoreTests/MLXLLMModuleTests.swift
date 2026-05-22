@@ -183,6 +183,24 @@ final class ChatTurnMappingTests: XCTestCase {
     }
 }
 
+/// M24.3 per-request max_tokens override — a positive value wins over the
+/// loaded default; 0/negative is ignored so a bad override can't truncate
+/// to nothing. Pure, CI-safe.
+final class EffectiveMaxTokensTests: XCTestCase {
+    func testPositiveOverrideWins() {
+        XCTAssertEqual(
+            MLXLLMModule.effectiveMaxTokens(4096, 1024), 4096)
+    }
+    func testNilFallsBackToDefault() {
+        XCTAssertEqual(
+            MLXLLMModule.effectiveMaxTokens(nil, 1024), 1024)
+    }
+    func testZeroOrNegativeIgnored() {
+        XCTAssertEqual(MLXLLMModule.effectiveMaxTokens(0, 1024), 1024)
+        XCTAssertEqual(MLXLLMModule.effectiveMaxTokens(-5, 1024), 1024)
+    }
+}
+
 /// Real end-to-end generation through the governor. Gated: loading a 27B
 /// model is far too heavy for CI, so it runs only when the model is present
 /// AND opted in via ATHENA_RUN_MODEL_TESTS=1.

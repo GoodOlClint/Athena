@@ -21,10 +21,23 @@ public protocol LLMModule: InferenceModule {
     /// conversation (system/user/assistant/tool) so the model's chat
     /// template sees system instructions and prior turns — not just a
     /// user-only join. `schemaJSON`/`tools` behave as in the prompt
-    /// variant. Default bridges to the prompt path by flattening.
+    /// variant. Default bridges to the override-aware variant with no
+    /// per-request overrides.
     nonisolated func generate(
         messages: [ChatTurn], schemaJSON: String?,
         tools: [[String: any Sendable]]?
+    ) -> AsyncStream<String>
+
+    /// Override-aware variant (M24.3). `maxTokens`/`temperature`, when
+    /// non-nil and valid, override the daemon-load defaults for THIS
+    /// request (e.g. OpenAI `max_tokens`/`temperature`). nil ⇒ the loaded
+    /// `LLMGenerationParameters`. The canonical generation entry point;
+    /// the other `generate` overloads funnel here. Default ignores the
+    /// overrides (stub / modules without a model).
+    nonisolated func generate(
+        messages: [ChatTurn], schemaJSON: String?,
+        tools: [[String: any Sendable]]?,
+        maxTokens: Int?, temperature: Double?
     ) -> AsyncStream<String>
 
     /// Reject — before any generation — a prompt whose KV/prompt-cache
@@ -49,6 +62,18 @@ extension LLMModule {
         messages: [ChatTurn], schemaJSON: String?,
         tools: [[String: any Sendable]]?
     ) -> AsyncStream<String> {
+        generate(
+            messages: messages, schemaJSON: schemaJSON, tools: tools,
+            maxTokens: nil, temperature: nil)
+    }
+
+    public nonisolated func generate(
+        messages: [ChatTurn], schemaJSON: String?,
+        tools: [[String: any Sendable]]?,
+        maxTokens: Int?, temperature: Double?
+    ) -> AsyncStream<String> {
+        // Default conformers (the stub) have no per-request knobs; the
+        // overrides are dropped and the turns flatten to a prompt.
         generate(
             prompt: messages.flattenedPrompt(), schemaJSON: schemaJSON,
             tools: tools)
