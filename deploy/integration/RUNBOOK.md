@@ -185,6 +185,27 @@ for a release that touches the kv_compression / KV path** — else N/A.
 | H4 | MacBook: with speculative/MTP enabled on the daemon AND `kv_compression=triattention` (H1), run a fixed greedy (temp 0) prompt; repeat with `kv_compression=none` + speculative | **identical** output both runs — eviction is inert on the MTP/speculative path (it cannot un-mix GDN/Mamba recurrent state); bit-identical greedy preserved | ☐ |
 | H5 | MacBook: send a **long** context/generation (enough decode tokens to exceed the eviction budget) under `triattention`; watch `/healthz` governor memory across the run; repeat under `none` | both coherent; under `triattention` resident KV stays **bounded** (eviction caps growth) while `none` grows unbounded — neither degenerates; outputs need **not** match | ☐ (P1) |
 
+## I — Multi-architecture support (Studio + MacBook) · P0*
+
+Exercises a **non-Qwen** architecture (M23) on the real model path —
+Llama / Gemma / Mistral / Phi / … load through the substrate factory,
+not the vendored Qwen3.5 model. The single-node automated
+`MultiArchE2ETests` covers load + structured output; this checks the
+off-box client + the daemon warnings. Bring the host up with a non-Qwen
+`TEST_MODEL` (e.g. `mlx-community/Llama-3.2-1B-Instruct-4bit`). `*`P0
+**only for a release that touches the model-load / structured-output /
+kv_compression path** — otherwise N/A.
+
+| # | Action | Expected | Result |
+|---|---|---|---|
+| I1 | Studio: `athena show "$TEST_MODEL"` (non-Qwen) | `type:` matches (e.g. `llama`); support line = "validated substrate arch: guided structured output + TurboQuant (no MTP / TriAttention)" (M23 fork D) | ☐ |
+| I2 | MacBook: `ath run "$TEST_MODEL" "name three primary colors"` | coherent real completion from the substrate stream | ☐ |
+| I3 | `curl $B/v1/chat/completions` with `response_format` json_schema (integer field) | **schema-valid JSON** — the substrate-path guided decoder enforces it; before M23 this was unconstrained prose (M23 fork A) | ☐ |
+| I4 | `curl $B/v1/chat/completions` with `tools` + a forced `tool_choice` | a `tool_calls` response with valid JSON arguments (guided on the substrate path) | ☐ |
+| I5 | Studio: start with `kv_compression=triattention` on the non-Qwen model; `athena logs --source start` | startup **warns** "inert for model type … running uncompressed"; generation still works (M23 fork B) | ☐ |
+| I6 | Studio: restart with `kv_compression=turboquant` on the non-Qwen model | **no** inert warning; coherent output (TurboQuant applies to any arch) | ☐ |
+| I7 | (control) point `TEST_MODEL` at the Qwen3.5 model; redo I2–I3 | unchanged — vendored path, MTP/structured intact (no regression) | ☐ (P1) |
+
 ---
 
 ## Teardown
@@ -208,13 +229,16 @@ deploy/integration/studio-setup.sh --teardown --purge    # + creds
 | P0 result (A–E + F4) | ☐ all PASS / ☐ blocked |
 | G result (kv_compression / TurboQuant) | ☐ N/A (release untouched) / ☐ G1–G4 PASS / ☐ blocked |
 | H result (kv_compression / TriAttention) | ☐ N/A (release untouched) / ☐ H1–H4 PASS / ☐ blocked |
+| I result (multi-architecture) | ☐ N/A (release untouched) / ☐ I1–I6 PASS / ☐ blocked |
 | P1 result | |
 | Notes / filed issues | |
 
 > Release rule: a version tag is **not** shipped until every **P0**
 > row (A, B, C, D1–D6, E, F4) is PASS on the two boxes — **plus
 > G1–G4 (TurboQuant) and/or H1–H4 (TriAttention) for any release
-> that touches the `kv_compression` / KV path** (else G/H are N/A).
+> that touches the `kv_compression` / KV path, and I1–I6 (multi-arch)
+> for any release that touches the model-load / structured-output path**
+> (else G/H/I are N/A).
 > Archive this completed file to
 > `results/<tag>-<date>.md`. The automated stub gate stays the
 > per-PR gate; this is the pre-release gate.

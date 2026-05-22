@@ -31,13 +31,15 @@ listen_port = 7447
 
 # ── Model ────────────────────────────────────────────────────────────
 
-# LLM engine: "mlx" (real Qwen3.5 from the model store) or "stub"
-# (no model loaded — health/dev only).
+# LLM engine: "mlx" (a real model from the store — Qwen3.5 plus other
+# substrate architectures: Llama, Gemma, Mistral, Phi, Qwen2/3, …) or
+# "stub" (no model loaded — health/dev only).
 engine = "mlx"
 
 # Model directory path, or a name resolved under the model-store root.
 # Commented ⇒ the built-in default (Qwen3.5-27B-4bit-mtp, MTP weights
-# preserved).
+# preserved). Any architecture the substrate factory supports works
+# here; `athena show <model>` reports its type + capability tier.
 # model = "Qwen3.5-27B-4bit-mtp"
 
 # Model-store ROOT directory (where model dirs / an optional sibling
@@ -57,16 +59,18 @@ engine = "mlx"
 # Bare number, not quoted.
 # temperature = 0.7
 
-# MTP speculative decoding — greedy/temp-0 only (default false).
-# Bare boolean.
+# MTP speculative decoding — greedy/temp-0 + Qwen3.5(-MTP) only; a no-op
+# on other architectures (default false). Bare boolean.
 # speculative = false
 
 # KV-cache compression (default "none"): "none", "turboquant"
-# (TurboQuant quantized KV cache), or "triattention" (norm-only
-# TriAttention token eviction — caps the cache by dropping
-# low-importance decode tokens; inert on the MTP/speculative path).
-# The ATHENA_KV_COMPRESSION env var overrides this; an unrecognized
-# value is a hard startup error.
+# (TurboQuant quantized KV cache — applies to ANY architecture), or
+# "triattention" (norm-only TriAttention token eviction — caps the cache
+# by dropping low-importance decode tokens; Qwen3.5-only, inert on other
+# architectures and on the MTP/speculative path).
+# The ATHENA_KV_COMPRESSION env var overrides this. An unrecognized value
+# is a hard startup error; a valid-but-inert codec (e.g. triattention on
+# a non-Qwen model) warns and runs uncompressed.
 # kv_compression = "none"
 
 # Built-in vector-store byte cap (default: memory budget / 8).
