@@ -122,15 +122,33 @@ public actor MLXLLMModule: LLMModule {
     /// Brief 4b: refuse a prompt whose KV/prompt-cache would exceed the
     /// governor-owned cap, before any generation, as a governed 503.
     public func preflightPromptCache(prompt: String) async throws {
+        try await preflightPromptCache(
+            messages: [ChatTurn(role: "user", content: prompt)])
+    }
+
+    public func preflightPromptCache(messages: [ChatTurn]) async throws {
         guard promptCacheCapBytes > 0, let container else { return }
         let lmInput = try await container.prepare(
-            input: UserInput(chat: [.user(prompt)]))
+            input: UserInput(chat: Self.chatMessages(messages)))
         let tokens = lmInput.text.tokens.size
         let needed = tokens * perTokenKVBytes
         if needed > promptCacheCapBytes {
             throw AthenaError.promptCacheCapExceeded(
                 requestedBytes: needed, capBytes: promptCacheCapBytes)
         }
+    }
+
+    /// Map transport-neutral `ChatTurn`s to substrate `Chat.Message`s so
+    /// the model's chat template sees real roles. Unknown roles fall back
+    /// to `.user`; an empty list becomes a single empty user turn (the
+    /// substrate requires at least one message).
+    static func chatMessages(_ turns: [ChatTurn]) -> [Chat.Message] {
+        let mapped = turns.map { turn in
+            Chat.Message(
+                role: Chat.Message.Role(rawValue: turn.role) ?? .user,
+                content: turn.content)
+        }
+        return mapped.isEmpty ? [.user("")] : mapped
     }
 
     public var residentBytes: Int { container == nil ? 0 : estimatedBytes }
@@ -183,11 +201,23 @@ public actor MLXLLMModule: LLMModule {
         prompt: String, schemaJSON: String?,
         tools: [[String: any Sendable]]?
     ) -> AsyncStream<String> {
+        generate(
+            messages: [ChatTurn(role: "user", content: prompt)],
+            schemaJSON: schemaJSON, tools: tools)
+    }
+
+    public nonisolated func generate(
+        messages: [ChatTurn], schemaJSON: String?,
+        tools: [[String: any Sendable]]?
+    ) -> AsyncStream<String> {
+        // `messages` ([ChatTurn]) is Sendable and crosses into the actor;
+        // the non-Sendable `Chat.Message` mapping happens INSIDE the actor
+        // methods (Swift 6 strict-concurrency).
         AsyncStream { continuation in
             let task = Task {
                 do {
                     if let speculative = try await self.runSpeculative(
-                        prompt: prompt, schemaJSON: schemaJSON,
+                        messages: messages, schemaJSON: schemaJSON,
                         tools: tools)
                     {
                         continuation.yield(speculative)
@@ -198,7 +228,7 @@ public actor MLXLLMModule: LLMModule {
                         // always guided: the vendored Qwen3.5 path, or the
                         // substrate-guided path for other arches (M23).
                         let stream = try await self.beginGeneration(
-                            prompt: prompt, tools: tools)
+                            messages: messages, tools: tools)
                         for await event in stream {
                             if case .chunk(let text) = event {
                                 continuation.yield(text)
@@ -226,7 +256,7 @@ public actor MLXLLMModule: LLMModule {
     /// eligible (faster), else a plain guided-greedy loop. An
     /// unstructured request takes the opt-in speculative path only.
     private func runSpeculative(
-        prompt: String, schemaJSON: String?,
+        messages: [ChatTurn], schemaJSON: String?,
         tools: [[String: any Sendable]]?
     ) async throws -> String? {
         guard let container else { return nil }
@@ -234,7 +264,8 @@ public actor MLXLLMModule: LLMModule {
         if schemaJSON == nil && !speculativeEligible { return nil }
 
         let lmInput = try await container.prepare(
-            input: UserInput(chat: [.user(prompt)], tools: tools))
+            input: UserInput(
+                chat: Self.chatMessages(messages), tools: tools))
         let promptTokens = lmInput.text.tokens.asArray(Int.self)
         let maxTokens = params.maxTokens
 
@@ -335,13 +366,14 @@ public actor MLXLLMModule: LLMModule {
     }
 
     private func beginGeneration(
-        prompt: String, tools: [[String: any Sendable]]?
+        messages: [ChatTurn], tools: [[String: any Sendable]]?
     ) async throws -> AsyncStream<Generation> {
         guard let container else {
             throw AthenaError.moduleLoadFailed(
                 .llm, reason: "generate called before load")
         }
-        let userInput = UserInput(chat: [.user(prompt)], tools: tools)
+        let userInput = UserInput(
+            chat: Self.chatMessages(messages), tools: tools)
         let lmInput = try await container.prepare(input: userInput)
         // The standard attention path is the ONLY place TriAttention
         // eviction applies. Set it on the model so the substrate's

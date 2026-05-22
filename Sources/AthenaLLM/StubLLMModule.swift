@@ -17,16 +17,42 @@ public protocol LLMModule: InferenceModule {
         tools: [[String: any Sendable]]?
     ) -> AsyncStream<String>
 
+    /// Role-aware variant (M24.1). `messages` carries the FULL
+    /// conversation (system/user/assistant/tool) so the model's chat
+    /// template sees system instructions and prior turns — not just a
+    /// user-only join. `schemaJSON`/`tools` behave as in the prompt
+    /// variant. Default bridges to the prompt path by flattening.
+    nonisolated func generate(
+        messages: [ChatTurn], schemaJSON: String?,
+        tools: [[String: any Sendable]]?
+    ) -> AsyncStream<String>
+
     /// Reject — before any generation — a prompt whose KV/prompt-cache
     /// would exceed the governor-owned cap (brief 4b). Default: no cap
     /// (stub / modules without a model). Throws `AthenaError`
     /// (`.promptCacheCapExceeded`) so the serve path returns a
     /// governed 503.
     func preflightPromptCache(prompt: String) async throws
+
+    /// Role-aware preflight (M24.1). Default bridges to the prompt path.
+    func preflightPromptCache(messages: [ChatTurn]) async throws
 }
 
 extension LLMModule {
     public func preflightPromptCache(prompt: String) async throws {}
+
+    public func preflightPromptCache(messages: [ChatTurn]) async throws {
+        try await preflightPromptCache(prompt: messages.flattenedPrompt())
+    }
+
+    public nonisolated func generate(
+        messages: [ChatTurn], schemaJSON: String?,
+        tools: [[String: any Sendable]]?
+    ) -> AsyncStream<String> {
+        generate(
+            prompt: messages.flattenedPrompt(), schemaJSON: schemaJSON,
+            tools: tools)
+    }
 
     public nonisolated func generate(
         prompt: String, schemaJSON: String?,

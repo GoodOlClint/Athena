@@ -475,14 +475,18 @@ struct AthenaServer {
         }
 
         let model = body.model ?? "athena-stub"
-        let prompt = body.messages
-            .filter { $0.role == "user" }
-            .compactMap(\.content)
-            .joined(separator: "\n")
+        // M24.1: carry the FULL conversation (system/user/assistant/tool)
+        // into the model, not a user-only join — system instructions and
+        // prior turns must reach the chat template. A message with no text
+        // content (e.g. an assistant tool-call shell) carries nothing.
+        let turns = body.messages.compactMap { m -> ChatTurn? in
+            guard let c = m.content else { return nil }
+            return ChatTurn(role: m.role, content: c)
+        }
         // Brief 4b: refuse an over-cap prompt up front as a governed
         // 503, before any KV cache is allocated.
         do {
-            try await llm.preflightPromptCache(prompt: prompt)
+            try await llm.preflightPromptCache(messages: turns)
         } catch let e as AthenaError {
             return Self.error(
                 status: HTTPResponse.Status(code: e.httpStatus),
@@ -501,13 +505,13 @@ struct AthenaServer {
             return Self.streamSSE(
                 id: id, model: model, created: created,
                 tokens: llm.generate(
-                    prompt: prompt, schemaJSON: schemaJSON,
+                    messages: turns, schemaJSON: schemaJSON,
                     tools: toolSpecs))
         }
 
         var text = ""
         for await chunk in llm.generate(
-            prompt: prompt, schemaJSON: schemaJSON, tools: toolSpecs)
+            messages: turns, schemaJSON: schemaJSON, tools: toolSpecs)
         {
             text += chunk
         }
@@ -1208,20 +1212,23 @@ struct AthenaServer {
                 let req = try? JSONDecoder().decode(
                     AthenaChatRequest.self, from: request)
             else { return (nil, "invalid conversation body") }
-            let prompt = req.messages
-                .filter { $0.role == "user" }
-                .map { $0.content }
-                .joined(separator: "\n")
+            let turns = req.messages.map {
+                ChatTurn(role: $0.role, content: $0.content)
+            }
             do {
                 try await governor.ensureLoaded(.llm)
-                try await llm.preflightPromptCache(prompt: prompt)
+                try await llm.preflightPromptCache(messages: turns)
             } catch let e as AthenaError {
                 return (nil, e.message)
             } catch {
                 return (nil, String(describing: error))
             }
             var text = ""
-            for await c in llm.generate(prompt: prompt) { text += c }
+            for await c in llm.generate(
+                messages: turns, schemaJSON: nil, tools: nil)
+            {
+                text += c
+            }
             return (
                 try? JSONEncoder().encode(
                     QueuedTextResult(text: text)), nil
@@ -1332,11 +1339,11 @@ struct AthenaServer {
     /// prompt-cache preflight, both classified. Returns an error
     /// `Response` to send, or nil when the request may proceed.
     private func governedPreflight(
-        prompt: String
+        messages: [ChatTurn]
     ) async -> Response? {
         do {
             try await governor.ensureLoaded(.llm)
-            try await llm.preflightPromptCache(prompt: prompt)
+            try await llm.preflightPromptCache(messages: messages)
             return nil
         } catch let e as AthenaError {
             return Self.error(
@@ -1386,17 +1393,19 @@ struct AthenaServer {
             if case .fail(let r) = decoded { return r }
             fatalError()
         }
-        let prompt = body.messages
-            .filter { $0.role == "user" }
-            .map { $0.content }
-            .joined(separator: "\n")
-        if let err = await governedPreflight(prompt: prompt) {
+        // M24.1: full conversation reaches the model (system + prior
+        // turns), not a user-only join.
+        let turns = body.messages.map {
+            ChatTurn(role: $0.role, content: $0.content)
+        }
+        if let err = await governedPreflight(messages: turns) {
             return err
         }
         let model = body.model ?? modelName
         if body.stream == true {
             return Self.streamNDJSON(
-                tokens: llm.generate(prompt: prompt)
+                tokens: llm.generate(
+                    messages: turns, schemaJSON: nil, tools: nil)
             ) { content, done in
                 try? JSONEncoder().encode(
                     AthenaChatChunk(
@@ -1404,7 +1413,11 @@ struct AthenaServer {
             }
         }
         var text = ""
-        for await c in llm.generate(prompt: prompt) { text += c }
+        for await c in llm.generate(
+            messages: turns, schemaJSON: nil, tools: nil)
+        {
+            text += c
+        }
         return Self.json(
             AthenaChatResponse(
                 model: model, content: text, done: true))

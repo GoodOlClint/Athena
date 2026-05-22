@@ -1,5 +1,6 @@
 import AthenaCore
 import Foundation
+import MLXLMCommon
 import XCTest
 
 @testable import AthenaLLM
@@ -132,6 +133,53 @@ final class MLXLLMModuleEstimateTests: XCTestCase {
 
         XCTAssertEqual(
             MLXLLMModule.estimateBytes(forModelAt: link), 7_000)
+    }
+}
+
+/// M24.1 chat role fidelity — the model input must carry the FULL
+/// conversation (system/user/assistant/tool), not a user-only join. Pure
+/// mapping logic, no MLX/model, always runs in CI.
+final class ChatTurnMappingTests: XCTestCase {
+    func testRolesMapToSubstrateRoles() {
+        let turns = [
+            ChatTurn(role: "system", content: "sys"),
+            ChatTurn(role: "user", content: "u"),
+            ChatTurn(role: "assistant", content: "a"),
+            ChatTurn(role: "tool", content: "t"),
+        ]
+        let msgs = MLXLLMModule.chatMessages(turns)
+        XCTAssertEqual(
+            msgs.map(\.role),
+            [.system, .user, .assistant, .tool])
+        XCTAssertEqual(msgs.map(\.content), ["sys", "u", "a", "t"])
+    }
+
+    func testUnknownRoleFallsBackToUser() {
+        let msgs = MLXLLMModule.chatMessages([
+            ChatTurn(role: "function", content: "x")
+        ])
+        XCTAssertEqual(msgs.map(\.role), [.user])
+    }
+
+    /// The substrate requires at least one message; an empty turn list
+    /// must not crash `UserInput(chat:)`.
+    func testEmptyTurnsBecomeSingleEmptyUser() {
+        let msgs = MLXLLMModule.chatMessages([])
+        XCTAssertEqual(msgs.count, 1)
+        XCTAssertEqual(msgs[0].role, .user)
+        XCTAssertEqual(msgs[0].content, "")
+    }
+
+    /// The protocol's default bridge (used by the stub and any non-role
+    /// conformer) flattens turns in order — system + prior turns included,
+    /// not dropped.
+    func testFlattenedPromptKeepsAllTurnsInOrder() {
+        let turns = [
+            ChatTurn(role: "system", content: "S"),
+            ChatTurn(role: "user", content: "U"),
+            ChatTurn(role: "assistant", content: "A"),
+        ]
+        XCTAssertEqual(turns.flattenedPrompt(), "S\nU\nA")
     }
 }
 
