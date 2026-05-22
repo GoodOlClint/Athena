@@ -329,7 +329,9 @@ struct Load: AsyncParsableCommand {
         let server = AthenaServer(
             config: config, governor: governor, llm: llm,
             embedding: embedding, transcription: transcription,
-            diarization: diarization, vectorStore: vectorStore,
+            diarization: diarization,
+            speakerEmbedding: speakerEmbedding,
+            vectorStore: vectorStore,
             queue: queue, store: athenaStore,
             modelName: modelURL.lastPathComponent,
             modelStoreRoot: store.rootDirectory, auth: authConfig)

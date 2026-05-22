@@ -21,6 +21,7 @@ struct AthenaServer {
     let embedding: any EmbeddingModule
     let transcription: any TranscriptionModule
     let diarization: any DiarizationModule
+    let speakerEmbedding: any SpeakerEmbeddingModule
     let vectorStore: VectorStore
     let queue: RequestQueue
     /// Shared SQLite store (vectors + queue) — backs `/v1/store/*`.
@@ -250,6 +251,10 @@ struct AthenaServer {
 
         router.post("/v1/audio/diarizations") { request, _ -> Response in
             await handleDiarizations(request)
+        }
+
+        router.post("/v1/audio/embeddings") { request, _ -> Response in
+            await handleSpeakerEmbeddings(request)
         }
 
         // Built-in vector DB (M7.2).
@@ -813,6 +818,100 @@ struct AthenaServer {
                         start: $0.start, end: $0.end,
                         speaker: $0.speaker)
                 }))
+    }
+
+    /// M25.2 — voice/speaker embeddings. Multipart `file` (audio) + an
+    /// optional `segments` JSON field (`[{start,end}]`, seconds); absent
+    /// ⇒ the whole clip is embedded as one segment. Returns one 256-d
+    /// L2-normalized vector per segment for cross-recording speaker ID.
+    private func handleSpeakerEmbeddings(_ request: Request) async
+        -> Response
+    {
+        guard
+            let ct = request.headers[.contentType],
+            let boundary = MultipartForm.boundary(fromContentType: ct)
+        else {
+            return Self.error(
+                status: .badRequest,
+                message: "expected multipart/form-data with a boundary",
+                type: "invalid_request_error",
+                code: "invalid_content_type")
+        }
+        let body: Data
+        do {
+            let buffer = try await request.body.collect(
+                upTo: 25 * 1024 * 1024)
+            body = Data(buffer: buffer)
+        } catch {
+            return Self.error(
+                status: .badRequest,
+                message: "Invalid request body: \(error)",
+                type: "invalid_request_error", code: "invalid_body")
+        }
+        guard
+            let form = MultipartForm(body: body, boundary: boundary),
+            let file = form.first("file"), !file.data.isEmpty
+        else {
+            return Self.error(
+                status: .badRequest,
+                message: "missing required 'file' part",
+                type: "invalid_request_error", code: "missing_file")
+        }
+
+        // Optional `segments` JSON; absent ⇒ embed the whole clip.
+        var segments: [SpeakerSegmentRequest] = []
+        if let segText = form.text("segments"), !segText.isEmpty {
+            do {
+                let specs = try JSONDecoder().decode(
+                    [SpeakerSegmentSpec].self,
+                    from: Data(segText.utf8))
+                segments = specs.map {
+                    SpeakerSegmentRequest(start: $0.start, end: $0.end)
+                }
+            } catch {
+                return Self.error(
+                    status: .badRequest,
+                    message: "invalid 'segments' JSON: \(error)",
+                    type: "invalid_request_error",
+                    code: "invalid_segments")
+            }
+        }
+
+        do {
+            try await governor.ensureLoaded(.speakerEmbedding)
+        } catch let e as AthenaError {
+            return Self.error(
+                status: HTTPResponse.Status(code: e.httpStatus),
+                message: e.message, type: "server_error", code: e.code)
+        } catch {
+            return Self.error(
+                status: .internalServerError,
+                message: String(describing: error),
+                type: "server_error", code: "internal_error")
+        }
+
+        let result: SpeakerEmbeddingResult
+        do {
+            result = try await speakerEmbedding.embed(
+                audio: file.data, filename: file.filename,
+                segments: segments)
+        } catch {
+            return Self.classified(error, module: .speakerEmbedding)
+        }
+
+        return Self.json(
+            SpeakerEmbeddingResponse(
+                object: "list",
+                data: result.segments.enumerated().map { idx, s in
+                    SpeakerEmbeddingObject(
+                        object: "speaker_embedding", index: idx,
+                        segment: SpeakerSegmentSpec(
+                            start: s.start, end: s.end),
+                        embedding: s.embedding,
+                        duration_seconds: s.durationSeconds)
+                },
+                model: form.text("model") ?? "athena-speaker-embedding",
+                dimension: result.dimension))
     }
 
     // MARK: - Built-in vector DB (M7.2)

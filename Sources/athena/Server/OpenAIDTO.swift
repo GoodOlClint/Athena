@@ -253,6 +253,30 @@ struct DiarizationResponse: Codable {
     let segments: [DiarizationSegmentDTO]
 }
 
+// MARK: - /v1/audio/embeddings (M25.2 voice/speaker embeddings)
+
+/// One requested segment (seconds from clip start). Decodable for the
+/// `segments` multipart field; Encodable so it echoes back in the reply.
+struct SpeakerSegmentSpec: Codable {
+    let start: Double
+    let end: Double
+}
+
+struct SpeakerEmbeddingObject: Codable {
+    let object: String  // "speaker_embedding"
+    let index: Int
+    let segment: SpeakerSegmentSpec
+    let embedding: [Float]
+    let duration_seconds: Double
+}
+
+struct SpeakerEmbeddingResponse: Codable {
+    let object: String  // "list"
+    let data: [SpeakerEmbeddingObject]
+    let model: String
+    let dimension: Int
+}
+
 // MARK: - /v1/vectors (M7.2 built-in vector DB)
 
 struct VectorUpsertRequest: Decodable {
