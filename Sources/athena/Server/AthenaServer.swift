@@ -516,17 +516,24 @@ struct AthenaServer {
         }
 
         var text = ""
-        for await chunk in llm.generate(
+        var usage = TokenUsage.zero
+        for await event in llm.generateMetered(
             messages: turns, schemaJSON: schemaJSON, tools: toolSpecs,
             maxTokens: body.max_tokens, temperature: body.temperature)
         {
-            text += chunk
+            switch event {
+            case .text(let chunk): text += chunk
+            case .usage(let u): usage = u
+            }
         }
+        // M27.1: real token counts feed both the response `usage` object
+        // and the global metrics counter (was a hardcoded zero / dead).
+        await metrics.addTokens(usage.totalTokens)
 
         return Self.json(
             Self.chatCompletionResponse(
                 id: id, model: model, created: created, text: text,
-                isToolCall: effective?.isToolCall == true))
+                isToolCall: effective?.isToolCall == true, usage: usage))
     }
 
     /// Build one `ChatChoice` from generated text: a tool-call object is
@@ -569,14 +576,16 @@ struct AthenaServer {
     /// Assemble a full OpenAI `ChatCompletionResponse` around one choice.
     private static func chatCompletionResponse(
         id: String, model: String, created: Int, text: String,
-        isToolCall: Bool
+        isToolCall: Bool, usage: TokenUsage
     ) -> ChatCompletionResponse {
         ChatCompletionResponse(
             id: id, object: "chat.completion", created: created,
             model: model,
             choices: [chatChoice(text: text, isToolCall: isToolCall)],
             usage: Usage(
-                prompt_tokens: 0, completion_tokens: 0, total_tokens: 0))
+                prompt_tokens: usage.promptTokens,
+                completion_tokens: usage.completionTokens,
+                total_tokens: usage.totalTokens))
     }
 
     private func handleEmbeddings(_ request: Request) async -> Response {
@@ -612,23 +621,26 @@ struct AthenaServer {
                 type: "server_error", code: "internal_error")
         }
 
-        let vectors: [[Float]]
+        let batch: EmbeddingBatch
         do {
-            vectors = try await embedding.embed(body.input)
+            batch = try await embedding.embed(body.input)
         } catch {
             return Self.classified(error, module: .textEmbedding)
         }
+        // M27.1: embeddings have no completion — prompt == total tokens.
+        await metrics.addTokens(batch.promptTokens)
 
         let response = EmbeddingResponse(
             object: "list",
-            data: vectors.enumerated().map {
+            data: batch.vectors.enumerated().map {
                 EmbeddingObject(
                     object: "embedding", embedding: $0.element,
                     index: $0.offset)
             },
             model: body.model ?? "athena-embedding",
             usage: Usage(
-                prompt_tokens: 0, completion_tokens: 0, total_tokens: 0))
+                prompt_tokens: batch.promptTokens, completion_tokens: 0,
+                total_tokens: batch.promptTokens))
         return Self.json(response)
     }
 
@@ -1449,17 +1461,23 @@ struct AthenaServer {
             }
             let effective = req.effectiveSchema()
             var text = ""
-            for await c in llm.generate(
+            var usage = TokenUsage.zero
+            for await event in llm.generateMetered(
                 messages: turns, schemaJSON: effective?.json,
                 tools: req.toolSpecs(), maxTokens: req.max_tokens,
                 temperature: req.temperature)
             {
-                text += c
+                switch event {
+                case .text(let c): text += c
+                case .usage(let u): usage = u
+                }
             }
+            await metrics.addTokens(usage.totalTokens)
             // M24.6: store the full OpenAI ChatCompletionResponse as the
             // job result so a polled queued job carries the SAME
             // `choices[0].message.{content,tool_calls}` shape as the sync
             // endpoint — one result envelope across sync and async.
+            // M27.1: the envelope carries real `usage` too.
             return (
                 try? JSONEncoder().encode(
                     Self.chatCompletionResponse(
@@ -1467,7 +1485,8 @@ struct AthenaServer {
                         model: req.model ?? modelName,
                         created: Int(Date().timeIntervalSince1970),
                         text: text,
-                        isToolCall: effective?.isToolCall == true)), nil
+                        isToolCall: effective?.isToolCall == true,
+                        usage: usage)), nil
             )
         case "embeddings":
             guard
@@ -1476,7 +1495,7 @@ struct AthenaServer {
             else { return (nil, "invalid embeddings body") }
             do {
                 try await governor.ensureLoaded(.textEmbedding)
-                let v = try await embedding.embed(req.input)
+                let v = try await embedding.embed(req.input).vectors
                 return (
                     try? JSONEncoder().encode(
                         QueuedEmbeddingResult(embeddings: v)), nil
@@ -1679,7 +1698,7 @@ struct AthenaServer {
             return .fail(Self.classified(error, module: module))
         }
         do {
-            return .ok(try await embedding.embed(inputs))
+            return .ok(try await embedding.embed(inputs).vectors)
         } catch {
             return .fail(Self.classified(error, module: module))
         }

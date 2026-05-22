@@ -9,7 +9,7 @@ final class StubEmbeddingModuleTests: XCTestCase {
 
     func testDeterministicShapeOrderAndNorm() async throws {
         let m = StubEmbeddingModule()
-        let a = try await m.embed(["alpha", "beta", "alpha"])
+        let a = try await m.embed(["alpha", "beta", "alpha"]).vectors
         XCTAssertEqual(a.count, 3)
         XCTAssertEqual(a[0].count, 8)
         XCTAssertEqual(a[0], a[2], "same input ⇒ same vector")
@@ -20,7 +20,7 @@ final class StubEmbeddingModuleTests: XCTestCase {
     }
 
     func testEmptyInputEmptyOutput() async throws {
-        let out = try await StubEmbeddingModule().embed([])
+        let out = try await StubEmbeddingModule().embed([]).vectors
         XCTAssertTrue(out.isEmpty)
     }
 }
@@ -61,6 +61,7 @@ final class MLXEmbeddingIntegrationTests: XCTestCase {
         try await gov.ensureLoaded(.textEmbedding)
 
         let v = try await m.embed(["hello world", "a different sentence"])
+            .vectors
         XCTAssertEqual(v.count, 2)
         XCTAssertEqual(v[0].count, 384, "bge-small is 384-dim")
         XCTAssertEqual(

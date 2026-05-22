@@ -207,14 +207,16 @@ public actor MLXLLMModule: LLMModule {
             maxTokens: nil, temperature: nil)
     }
 
-    public nonisolated func generate(
+    public nonisolated func generateMetered(
         messages: [ChatTurn], schemaJSON: String?,
         tools: [[String: any Sendable]]?,
         maxTokens: Int?, temperature: Double?
-    ) -> AsyncStream<String> {
+    ) -> AsyncStream<GenChunk> {
         // `messages` ([ChatTurn]) is Sendable and crosses into the actor;
         // the non-Sendable `Chat.Message` mapping happens INSIDE the actor
-        // methods (Swift 6 strict-concurrency).
+        // methods (Swift 6 strict-concurrency). A single terminal
+        // `.usage` carries the true token counts (M27.1): prompt = the
+        // tokenized input length, completion = tokens emitted.
         AsyncStream { continuation in
             let task = Task {
                 do {
@@ -222,7 +224,8 @@ public actor MLXLLMModule: LLMModule {
                         messages: messages, schemaJSON: schemaJSON,
                         tools: tools, maxTokens: maxTokens)
                     {
-                        continuation.yield(speculative)
+                        continuation.yield(.text(speculative.text))
+                        continuation.yield(.usage(speculative.usage))
                     } else {
                         // runSpeculative returns nil only for UNstructured
                         // requests (no schema) — those stream from the
@@ -232,15 +235,28 @@ public actor MLXLLMModule: LLMModule {
                         let stream = try await self.beginGeneration(
                             messages: messages, tools: tools,
                             maxTokens: maxTokens, temperature: temperature)
+                        var usage = TokenUsage.zero
                         for await event in stream {
-                            if case .chunk(let text) = event {
-                                continuation.yield(text)
+                            switch event {
+                            case .chunk(let text):
+                                continuation.yield(.text(text))
+                            case .info(let info):
+                                // Substrate's terminal completion record
+                                // carries the real token geometry.
+                                usage = TokenUsage(
+                                    promptTokens: info.promptTokenCount,
+                                    completionTokens:
+                                        info.generationTokenCount)
+                            default:
+                                break
                             }
                         }
+                        continuation.yield(.usage(usage))
                     }
                 } catch {
                     continuation.yield(
-                        "[athena: generation failed: \(error)]")
+                        .text("[athena: generation failed: \(error)]"))
+                    continuation.yield(.usage(.zero))
                 }
                 continuation.finish()
             }
@@ -261,7 +277,7 @@ public actor MLXLLMModule: LLMModule {
     private func runSpeculative(
         messages: [ChatTurn], schemaJSON: String?,
         tools: [[String: any Sendable]]?, maxTokens: Int?
-    ) async throws -> String? {
+    ) async throws -> (text: String, usage: TokenUsage)? {
         guard let container else { return nil }
         let speculativeEligible = params.speculativeGreedyEligible
         if schemaJSON == nil && !speculativeEligible { return nil }
@@ -303,8 +319,11 @@ public actor MLXLLMModule: LLMModule {
         let vocabTokens = cachedVocabTokens
 
         let cfgVocab = configVocabSize
-        return try await container.perform {
-            (ctx: ModelContext) -> String? in
+        // The closure returns the decoded text plus the completion token
+        // count (`ids.count`); the prompt count is `promptTokens.count`
+        // from the outer scope. nil ⇒ fall back to the substrate stream.
+        let decoded = try await container.perform {
+            (ctx: ModelContext) -> (text: String, completion: Int)? in
 
             // Structured ⇒ NO-THINK by construction: the Guide masks
             // from token 0, so the schema is enforced immediately and
@@ -352,7 +371,7 @@ public actor MLXLLMModule: LLMModule {
                 } else {
                     return nil  // unstructured + no MTP ⇒ substrate stream
                 }
-                return ctx.tokenizer.decode(tokenIds: ids)
+                return (ctx.tokenizer.decode(tokenIds: ids), ids.count)
             }
 
             // Any other architecture: schema-guided decoding on the
@@ -367,8 +386,14 @@ public actor MLXLLMModule: LLMModule {
                 model: ctx.model, promptTokens: promptTokens,
                 vocab: vocabSize, maxTokens: maxTokens,
                 eosTokenId: Int(vt.eos), guide: guide)
-            return ctx.tokenizer.decode(tokenIds: ids)
+            return (ctx.tokenizer.decode(tokenIds: ids), ids.count)
         }
+        guard let decoded else { return nil }
+        return (
+            decoded.text,
+            TokenUsage(
+                promptTokens: promptTokens.count,
+                completionTokens: decoded.completion))
     }
 
     private func beginGeneration(

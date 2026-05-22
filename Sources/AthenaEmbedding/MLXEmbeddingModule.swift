@@ -64,19 +64,24 @@ public actor MLXEmbeddingModule: EmbeddingModule {
         container = nil
     }
 
-    /// Embed each input → an L2-normalized vector (order preserved).
-    /// Mirrors the substrate's canonical tokenize→pad→mask→pool flow.
-    public func embed(_ texts: [String]) async throws -> [[Float]] {
+    /// Embed each input → an L2-normalized vector (order preserved),
+    /// plus the total tokenized input length for usage accounting
+    /// (M27.1). Mirrors the substrate's canonical
+    /// tokenize→pad→mask→pool flow.
+    public func embed(_ texts: [String]) async throws -> EmbeddingBatch {
         guard let container else {
             throw AthenaError.moduleLoadFailed(
                 .textEmbedding, reason: "embed called before load")
         }
-        if texts.isEmpty { return [] }
+        if texts.isEmpty {
+            return EmbeddingBatch(vectors: [], promptTokens: 0)
+        }
         return await container.perform { ctx in
             let tokenizer = ctx.tokenizer
             let encoded = texts.map {
                 tokenizer.encode(text: $0, addSpecialTokens: true)
             }
+            let promptTokens = encoded.reduce(0) { $0 + $1.count }
             let maxLength = encoded.reduce(into: 1) {
                 $0 = max($0, $1.count)
             }
@@ -97,7 +102,9 @@ public actor MLXEmbeddingModule: EmbeddingModule {
             let result = ctx.pooling(
                 out, normalize: true, applyLayerNorm: true)
             result.eval()
-            return result.map { $0.asArray(Float.self) }
+            return EmbeddingBatch(
+                vectors: result.map { $0.asArray(Float.self) },
+                promptTokens: promptTokens)
         }
     }
 }

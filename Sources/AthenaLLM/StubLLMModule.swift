@@ -28,12 +28,25 @@ public protocol LLMModule: InferenceModule {
         tools: [[String: any Sendable]]?
     ) -> AsyncStream<String>
 
-    /// Override-aware variant (M24.3). `maxTokens`/`temperature`, when
-    /// non-nil and valid, override the daemon-load defaults for THIS
+    /// Metered generation (M27.1) — the canonical entry point. Yields
+    /// `.text` chunks exactly like the String `generate` overloads, then
+    /// a single terminal `.usage(TokenUsage)` carrying the true
+    /// prompt/completion token counts for THIS request. Every other
+    /// `generate` overload is a thin filter over this that drops the
+    /// usage event. `schemaJSON`/`tools`/`maxTokens`/`temperature` behave
+    /// as on the String override-aware variant.
+    nonisolated func generateMetered(
+        messages: [ChatTurn], schemaJSON: String?,
+        tools: [[String: any Sendable]]?,
+        maxTokens: Int?, temperature: Double?
+    ) -> AsyncStream<GenChunk>
+
+    /// Override-aware String variant (M24.3). `maxTokens`/`temperature`,
+    /// when non-nil and valid, override the daemon-load defaults for THIS
     /// request (e.g. OpenAI `max_tokens`/`temperature`). nil ⇒ the loaded
-    /// `LLMGenerationParameters`. The canonical generation entry point;
-    /// the other `generate` overloads funnel here. Default ignores the
-    /// overrides (stub / modules without a model).
+    /// `LLMGenerationParameters`. A filter over `generateMetered` that
+    /// drops the terminal usage; callers that need usage consume
+    /// `generateMetered` directly.
     nonisolated func generate(
         messages: [ChatTurn], schemaJSON: String?,
         tools: [[String: any Sendable]]?,
@@ -72,11 +85,59 @@ extension LLMModule {
         tools: [[String: any Sendable]]?,
         maxTokens: Int?, temperature: Double?
     ) -> AsyncStream<String> {
-        // Default conformers (the stub) have no per-request knobs; the
-        // overrides are dropped and the turns flatten to a prompt.
-        generate(
-            prompt: messages.flattenedPrompt(), schemaJSON: schemaJSON,
-            tools: tools)
+        // Single source of truth: stream the metered events and forward
+        // only the text chunks (drop the terminal usage).
+        let events = generateMetered(
+            messages: messages, schemaJSON: schemaJSON, tools: tools,
+            maxTokens: maxTokens, temperature: temperature)
+        return AsyncStream { continuation in
+            let task = Task {
+                for await event in events {
+                    if case .text(let t) = event { continuation.yield(t) }
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    /// Default metered generation for conformers without native token
+    /// counts (the stub): stream chunks from the String `generate(prompt:
+    /// schemaJSON:tools:)` path and synthesize whitespace-delimited token
+    /// counts so `usage` and the metrics counter are non-zero end-to-end
+    /// under `--engine stub`. The MLX module overrides this with real
+    /// tokenizer counts.
+    public nonisolated func generateMetered(
+        messages: [ChatTurn], schemaJSON: String?,
+        tools: [[String: any Sendable]]?,
+        maxTokens: Int?, temperature: Double?
+    ) -> AsyncStream<GenChunk> {
+        let prompt = messages.flattenedPrompt()
+        let chunks = generate(
+            prompt: prompt, schemaJSON: schemaJSON, tools: tools)
+        return AsyncStream { continuation in
+            let task = Task {
+                var completion = 0
+                for await chunk in chunks {
+                    continuation.yield(.text(chunk))
+                    completion += Self.approxTokens(chunk)
+                }
+                continuation.yield(
+                    .usage(
+                        TokenUsage(
+                            promptTokens: Self.approxTokens(prompt),
+                            completionTokens: completion)))
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    /// Whitespace-delimited token estimate (≥1 for non-empty text) used
+    /// only by the stub's synthetic usage — never the real model path.
+    static func approxTokens(_ s: String) -> Int {
+        let n = s.split(whereSeparator: { $0.isWhitespace }).count
+        return s.isEmpty ? 0 : max(1, n)
     }
 
     public nonisolated func generate(

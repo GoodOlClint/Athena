@@ -366,6 +366,53 @@ UC="$(curl -s -o /dev/null -w '%{http_code}' -b "$UIJAR_A" -X POST \
   || bad "member user-create → $UC (want 303)"
 
 echo
+echo "== phase 2.9: usage accounting — non-zero token counts (M27.1) =="
+# The OpenAI `usage` object must report REAL token counts (was a
+# hardcoded {0,0,0}). Under --engine stub the counts are synthesized
+# from whitespace tokenization, so they're deterministic and non-zero.
+intfield() { # JSON FIELD  → echoes the integer value (or empty)
+  printf '%s' "$1" | grep -o "\"$2\":[0-9]*" | grep -o '[0-9]*' | head -1
+}
+CHATBODY="$(curl -s -X POST \
+  -H "Authorization: Bearer $ALICE_TOK" \
+  -H 'Content-Type: application/json' -d "$CHAT" \
+  "http://127.0.0.1:$PORT/v1/chat/completions")"
+CP="$(intfield "$CHATBODY" prompt_tokens)"
+CC="$(intfield "$CHATBODY" completion_tokens)"
+CT="$(intfield "$CHATBODY" total_tokens)"
+{ [ -n "$CP" ] && [ "$CP" -gt 0 ]; } \
+  && ok "chat usage.prompt_tokens = $CP (>0)" \
+  || bad "chat usage.prompt_tokens not >0 ($CHATBODY)"
+{ [ -n "$CC" ] && [ "$CC" -gt 0 ]; } \
+  && ok "chat usage.completion_tokens = $CC (>0)" \
+  || bad "chat usage.completion_tokens not >0 ($CHATBODY)"
+{ [ -n "$CT" ] && [ "$CT" -eq $((CP + CC)) ]; } \
+  && ok "chat usage.total_tokens = $CT (= prompt+completion)" \
+  || bad "chat usage.total_tokens != prompt+completion ($CHATBODY)"
+
+EMBBODY="$(curl -s -X POST \
+  -H "Authorization: Bearer $ALICE_TOK" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"x","input":["hello world","another sentence here"]}' \
+  "http://127.0.0.1:$PORT/v1/embeddings")"
+EP="$(intfield "$EMBBODY" prompt_tokens)"
+ET="$(intfield "$EMBBODY" total_tokens)"
+{ [ -n "$EP" ] && [ "$EP" -gt 0 ]; } \
+  && ok "embeddings usage.prompt_tokens = $EP (>0)" \
+  || bad "embeddings usage.prompt_tokens not >0 ($EMBBODY)"
+{ [ -n "$ET" ] && [ "$ET" -eq "$EP" ]; } \
+  && ok "embeddings usage.total_tokens = $ET (= prompt; no completion)" \
+  || bad "embeddings usage.total_tokens != prompt_tokens ($EMBBODY)"
+
+# The revived global metrics counter must reflect that work (was dead).
+MET="$(curl -s -H "Authorization: Bearer $ADMIN_TOK" \
+  "http://127.0.0.1:$PORT/metrics")"
+MT="$(intfield "$MET" llmTokens)"
+{ [ -n "$MT" ] && [ "$MT" -gt 0 ]; } \
+  && ok "/metrics llmTokens = $MT (>0, addTokens revived)" \
+  || bad "/metrics llmTokens not >0 ($MET)"
+
+echo
 echo "== phase 3: scoped-token downgrade =="
 # boss is an admin USER, but BOSS_SCOPED narrows to member.
 code 403 GET  /metrics "$BOSS_SCOPED"                   # member perms only
