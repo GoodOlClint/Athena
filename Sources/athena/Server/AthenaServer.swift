@@ -63,6 +63,11 @@ struct AthenaServer {
     /// they're memberwise-init params.
     var maxConcurrency: Int = 0
     var maxConcurrencyPerPrincipal: Int = 0
+    /// Audit-log retention in days (M30.3). 0 ⇒ keep forever (opt-in).
+    /// When > 0, `audit()` opportunistically prunes rows older than the
+    /// window so the trail stays bounded as it grows. `var = 0` so it's
+    /// a memberwise-init param.
+    var auditRetentionDays: Int = 0
     /// WebUI session signer (M12.2). Per-process random secret —
     /// sessions invalidate on restart (acceptable for an appliance).
     let session = Session()
@@ -2392,6 +2397,21 @@ struct AthenaServer {
         } catch {
             Self.auditLog.warning(
                 "audit write failed action=\(action): \(error)")
+        }
+        // Opportunistic age-based retention (M30.3): bound the trail as
+        // it grows. 0 ⇒ keep forever. Non-fatal.
+        if auditRetentionDays > 0 {
+            let cutoff = Date().timeIntervalSince1970
+                - Double(auditRetentionDays) * 86_400
+            let removed =
+                (try? await store.pruneAudit(olderThan: cutoff)) ?? 0
+            if removed > 0 {
+                Self.auditLog.notice(
+                    """
+                    audit retention pruned \(removed) row(s) older \
+                    than \(auditRetentionDays)d
+                    """)
+            }
         }
         Self.auditLog.notice(
             """

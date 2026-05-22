@@ -259,4 +259,26 @@ final class AthenaStoreTests: XCTestCase {
         let persisted = await s2.auditCount()
         XCTAssertEqual(persisted, 3)
     }
+
+    func testAuditPruneByAge() async throws {
+        let url = tmpURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let s = try AthenaStore(path: url)
+        for i in 0..<3 {
+            try await s.addAudit(
+                principal: "u:admin", action: "user.create",
+                target: "u\(i)", result: "ok", detail: nil)
+        }
+        let now = Date().timeIntervalSince1970
+        // A cutoff well in the past removes nothing (all rows are ~now).
+        let none = try await s.pruneAudit(olderThan: now - 10_000)
+        XCTAssertEqual(none, 0)
+        let stillThere = await s.auditCount()
+        XCTAssertEqual(stillThere, 3)
+        // A cutoff in the future removes everything.
+        let all = try await s.pruneAudit(olderThan: now + 10_000)
+        XCTAssertEqual(all, 3)
+        let empty = await s.auditCount()
+        XCTAssertEqual(empty, 0)
+    }
 }

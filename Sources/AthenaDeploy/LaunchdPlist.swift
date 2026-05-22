@@ -76,6 +76,9 @@ public enum LaunchdPlist {
                 "--max-concurrency-per-principal", String(maxConcPP),
             ]
         }
+        if let auditDays = config.auditRetentionDays {
+            args += ["--audit-retention-days", String(auditDays)]
+        }
 
         return [
             "Label": label,

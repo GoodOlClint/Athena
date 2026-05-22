@@ -133,6 +133,15 @@ engine = "mlx"
 # max_concurrency = 8                  # daemon-wide in-flight cap
 # max_concurrency_per_principal = 2    # per-caller in-flight cap
 
+# Audit-log retention. Every RBAC/admin mutation (user/role/token CRUD,
+# model removal, default-model change, daemon load/unload) is recorded
+# to an append-only audit_log table (read it via `athena audit` or
+# GET /api/audit). audit_retention_days bounds how long rows are kept —
+# entries older than the window are pruned as the trail grows. Commented
+# / non-positive ⇒ KEEP FOREVER (default; an audit trail should not
+# silently auto-delete unless you ask it to).
+# audit_retention_days = 365           # prune audit rows older than 1y
+
 
 # ── Network (egress proxy) ───────────────────────────────────────────
 

@@ -543,6 +543,20 @@ public actor AthenaStore {
             ? Int(sqlite3_column_int64(st, 0)) : 0
     }
 
+    /// Delete audit rows older than `cutoff` (epoch seconds). Returns
+    /// the number removed. Backs the M30.3 age-based retention bound.
+    @discardableResult
+    public func pruneAudit(olderThan cutoff: Double) throws -> Int {
+        let st = try Self.prepared(db,
+            "DELETE FROM audit_log WHERE ts < ?;")
+        defer { sqlite3_finalize(st) }
+        sqlite3_bind_double(st, 1, cutoff)
+        guard sqlite3_step(st) == SQLITE_DONE else {
+            throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
+        }
+        return Int(sqlite3_changes(db))
+    }
+
     // MARK: Auth — users (PBKDF2 salt/hash computed by the caller;
     // this layer only stores opaque bytes), per-user role grants, and
     // token hashes bound to a user with an optional scoped-role

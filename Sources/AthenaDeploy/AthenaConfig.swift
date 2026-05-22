@@ -57,6 +57,11 @@ public struct AthenaConfig: Sendable, Equatable {
     /// (opt-in, off by default).
     public var maxConcurrency: Int?
     public var maxConcurrencyPerPrincipal: Int?
+    /// Audit-log retention in days (M30.3). Rows older than this are
+    /// pruned as the trail grows. Optional — absent / non-positive ⇒
+    /// keep forever (opt-in, off by default; an audit trail should not
+    /// silently auto-delete unless the operator asks for it).
+    public var auditRetentionDays: Int?
     /// `[network]` egress-proxy keys (M13.2). An operator-set
     /// `*_PROXY` env var always wins over these.
     public var httpsProxy: String?
@@ -78,6 +83,7 @@ public struct AthenaConfig: Sendable, Equatable {
         rateLimit: String? = nil, rateBurst: Int? = nil,
         maxConcurrency: Int? = nil,
         maxConcurrencyPerPrincipal: Int? = nil,
+        auditRetentionDays: Int? = nil,
         httpsProxy: String? = nil, httpProxy: String? = nil,
         allProxy: String? = nil, noProxy: String? = nil,
         logDir: String
@@ -103,6 +109,7 @@ public struct AthenaConfig: Sendable, Equatable {
         self.rateBurst = rateBurst
         self.maxConcurrency = maxConcurrency
         self.maxConcurrencyPerPrincipal = maxConcurrencyPerPrincipal
+        self.auditRetentionDays = auditRetentionDays
         self.httpsProxy = httpsProxy
         self.httpProxy = httpProxy
         self.allProxy = allProxy
@@ -183,6 +190,10 @@ public struct AthenaConfig: Sendable, Equatable {
         if let mp = scalar("max_concurrency_per_principal", in: toml) {
             maxConcPP = try int("max_concurrency_per_principal", mp)
         }
+        var auditDays: Int?
+        if let ad = scalar("audit_retention_days", in: toml) {
+            auditDays = try int("audit_retention_days", ad)
+        }
         let spec = scalar("speculative", in: toml).map { $0 == "true" }
 
         return AthenaConfig(
@@ -207,6 +218,7 @@ public struct AthenaConfig: Sendable, Equatable {
             rateBurst: rateBurst,
             maxConcurrency: maxConc,
             maxConcurrencyPerPrincipal: maxConcPP,
+            auditRetentionDays: auditDays,
             httpsProxy: scalar("https_proxy", in: toml),
             httpProxy: scalar("http_proxy", in: toml),
             allProxy: scalar("all_proxy", in: toml),

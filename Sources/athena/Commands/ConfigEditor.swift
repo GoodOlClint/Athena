@@ -11,6 +11,7 @@ enum ConfigEditor {
         "listen_port", "budget_bytes", "max_tokens",
         "vector_cap_bytes", "rate_burst",
         "max_concurrency", "max_concurrency_per_principal",
+        "audit_retention_days",
     ]
     /// Written bare (unquoted), like ints: floats and a bool.
     static let rawKeys: Set<String> = [
@@ -23,6 +24,7 @@ enum ConfigEditor {
         "speculative", "vector_cap_bytes", "auth_keys_file",
         "tls_cert", "tls_key", "rate_limit", "rate_burst",
         "max_concurrency", "max_concurrency_per_principal",
+        "audit_retention_days",
         "https_proxy", "http_proxy", "all_proxy", "no_proxy",
         "kv_compression",
     ]
@@ -80,6 +82,8 @@ enum ConfigEditor {
             return cfg.maxConcurrency.map(String.init)
         case "max_concurrency_per_principal":
             return cfg.maxConcurrencyPerPrincipal.map(String.init)
+        case "audit_retention_days":
+            return cfg.auditRetentionDays.map(String.init)
         case "https_proxy": return cfg.httpsProxy
         case "http_proxy": return cfg.httpProxy
         case "all_proxy": return cfg.allProxy

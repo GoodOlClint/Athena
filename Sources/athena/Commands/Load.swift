@@ -156,6 +156,12 @@ struct Load: AsyncParsableCommand {
     )
     var maxConcurrencyPerPrincipal: Int?
 
+    @Option(
+        help:
+            "Audit-log retention in days. 0/absent ⇒ keep forever. Older audit rows are pruned as the trail grows."
+    )
+    var auditRetentionDays: Int?
+
     mutating func run() async throws {
         // Centralized logging first — must precede any Logger creation
         // (Hummingbird/NIO included) so everything routes through the
@@ -374,7 +380,8 @@ struct Load: AsyncParsableCommand {
             tlsCertPath: tlsCert, tlsKeyPath: tlsKey,
             rateLimit: rateLimit ?? 0, rateBurst: rateBurst ?? 0,
             maxConcurrency: maxConcurrency ?? 0,
-            maxConcurrencyPerPrincipal: maxConcurrencyPerPrincipal ?? 0)
+            maxConcurrencyPerPrincipal: maxConcurrencyPerPrincipal ?? 0,
+            auditRetentionDays: auditRetentionDays ?? 0)
         try await server.run()
     }
 }

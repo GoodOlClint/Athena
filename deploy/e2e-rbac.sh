@@ -61,10 +61,11 @@ printf '{"model_type":"test","hidden_size":8}' \
 ln -s /nonexistent/gone "$MSTORE/dead"
 
 D2=""                          # phase-8 isolated RBAC-admin data dir
+D3=""                          # phase-8.7 audit-retention data dir
 cleanup() {
   [ -n "$DPID" ] && kill "$DPID" 2>/dev/null
   wait "$DPID" 2>/dev/null
-  rm -rf "$D" "$EMPTY" "$MSTORE" ${D2:+"$D2"}
+  rm -rf "$D" "$EMPTY" "$MSTORE" ${D2:+"$D2"} ${D3:+"$D3"}
 }
 trap cleanup EXIT
 
@@ -831,6 +832,44 @@ else
 fi
 
 stop_daemon
+
+echo
+echo "== phase 8.7: audit retention bound (M30.3) =="
+# audit_retention_days prunes rows past the window as the trail grows.
+# Backdate a row ~10 days old directly in a fresh store, start a daemon
+# with --audit-retention-days 1, then trigger ONE mutation: the
+# opportunistic prune drops the stale row and keeps the fresh one.
+D3="$(mktemp -d)"
+"$ATHENA" auth user add admin --password adminpass1 --role admin \
+  --data-dir "$D3" >/dev/null && ok "seed D3 admin" || bad "seed D3 admin"
+A3="$("$ATHENA" auth token add --user admin --data-dir "$D3" \
+  2>/dev/null | grep -o 'sk-athena-[A-Za-z0-9_-]*' | head -1)"
+adb3="$D3/athena.sqlite"
+OLDTS=$(( $(date +%s) - 864000 ))   # now − 10 days
+sqlite3 "$adb3" "INSERT INTO audit_log\
+(ts,principal,action,target,result,detail) \
+VALUES($OLDTS,'u:ancient','user.create','old','ok',NULL);"
+PRE="$(sqlite3 "$adb3" \
+  "SELECT COUNT(*) FROM audit_log WHERE target='old';")"
+[ "$PRE" -eq 1 ] && ok "seeded a 10-day-old audit row" \
+  || bad "could not seed old audit row ($PRE)"
+start_daemon "$D3" 127.0.0.1 --audit-retention-days 1 \
+  || { echo "d3 failed"; cat "$D/daemon.log"; exit 1; }
+# One fresh mutation triggers the opportunistic prune.
+code 200 POST /api/users "$A3" \
+  '{"username":"fresh","password":"pw123456","role":"member"}'
+GONE="$(sqlite3 "$adb3" \
+  "SELECT COUNT(*) FROM audit_log WHERE target='old';")"
+[ "$GONE" -eq 0 ] \
+  && ok "10-day-old row pruned past the retention window" \
+  || bad "stale audit row survived retention ($GONE)"
+FRESH="$(sqlite3 "$adb3" "SELECT COUNT(*) FROM audit_log \
+  WHERE target='fresh' AND result='ok';")"
+[ "$FRESH" -ge 1 ] \
+  && ok "fresh audit row retained within the window" \
+  || bad "fresh audit row missing after prune ($FRESH)"
+stop_daemon
+rm -rf "$D3"; D3=""
 
 echo
 echo "== phase 9: remote model verbs via the CLIENT (M17.1) =="
