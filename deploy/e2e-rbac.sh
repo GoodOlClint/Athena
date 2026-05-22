@@ -1157,6 +1157,37 @@ fi
 rm -rf "$DOCDIR"
 
 echo
+echo "== phase 18: reverse-proxy guide — contract guard (M28.3) =="
+# The blessed proxy recipe must stay in sync with the daemon's real
+# constraints. This guards docs/reverse-proxy.md from drift: if the
+# loopback port, the 25 MB audio body cap, the streaming-buffering note,
+# the Authorization passthrough, or the "seed credentials behind a
+# loopback bind" warning ever change, this phase flags the stale doc.
+RPG="docs/reverse-proxy.md"
+if [ ! -f "$RPG" ]; then
+  bad "reverse-proxy guide missing at $RPG"
+else
+  ok "reverse-proxy guide present ($RPG)"
+  grep -q "127.0.0.1:7447" "$RPG" \
+    && ok "guide pins the loopback daemon target 127.0.0.1:7447" \
+    || bad "guide missing 127.0.0.1:7447 loopback target"
+  # 25 MB audio cap — present in both the nginx and Caddy snippets.
+  grep -qi "client_max_body_size 25m" "$RPG" \
+    && grep -qi "max_size 25MB" "$RPG" \
+    && ok "guide sets a 25 MB body cap (matches audio upload limit)" \
+    || bad "guide missing the 25 MB body-size directive"
+  grep -qi "proxy_buffering" "$RPG" \
+    && ok "guide disables proxy buffering (SSE/long-poll streaming)" \
+    || bad "guide missing the streaming/buffering note"
+  grep -q "Authorization" "$RPG" \
+    && ok "guide preserves the Authorization header" \
+    || bad "guide missing Authorization passthrough note"
+  grep -q "athena auth" "$RPG" \
+    && ok "guide tells operators to seed auth creds behind loopback" \
+    || bad "guide missing the seed-credentials warning"
+fi
+
+echo
 echo "════════════════════════════════════════"
 echo "  PASS=$PASS  FAIL=$FAIL"
 echo "════════════════════════════════════════"
