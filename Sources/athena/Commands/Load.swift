@@ -192,6 +192,25 @@ struct Load: AsyncParsableCommand {
             } ?? ModelStore.defaultRoot)
         let modelURL = store.resolve(model)
 
+        // M23 fork B: a VALID kv_compression codec that can't serve the
+        // loaded architecture (TriAttention eviction is Qwen3.5-only)
+        // warns + runs uncompressed — fail-closed is reserved for an
+        // unrecognized VALUE (handled at resolve() above). An unknown
+        // arch (no/unreadable config.json) is left silent — can't tell.
+        if engine == .mlx, kvCompression != .none {
+            let modelType = ModelConfigInfo.read(
+                modelDirectory: modelURL)?.modelType
+            if !kvCompression.servesArch(modelType: modelType) {
+                Logger(label: AthenaLogLabel.daemon).warning(
+                    """
+                    kv_compression=\(kvCompression.rawValue) is inert for \
+                    model type '\(modelType ?? "unknown")' — running \
+                    uncompressed (\(kvCompression.rawValue) applies to \
+                    Qwen3.5 models only)
+                    """)
+            }
+        }
+
         // The LLM is non-evictable (the primary workload); transcription and
         // embedding remain governed stubs (real impls land in M4) and are
         // evictable so the governor can reclaim their budget under pressure.

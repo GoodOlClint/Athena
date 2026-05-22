@@ -71,9 +71,12 @@ struct Show: AsyncParsableCommand {
             print("error: no model '\(model)' in \(root.path)")
             throw ExitCode.failure
         }
+        let info = ModelConfigInfo.parse(configJSON: d.configJSON)
         print("model:    \(model)")
         print("path:     \(d.path)")
         print("size:     \(ModelStoreOps.humanBytes(d.bytes))")
+        print("type:     \(info.modelType ?? "unknown")")
+        print("support:  \(SupportedModels.describe(modelType: info.modelType))")
         print("config.json:")
         print(
             String(data: d.configJSON, encoding: .utf8)

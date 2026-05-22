@@ -70,4 +70,21 @@ public enum KVCompression: String, Sendable, CaseIterable, Equatable {
         case .triattention: return TriAttentionConfig()
         }
     }
+
+    /// Whether this codec actually affects the given architecture (M23
+    /// fork B). TurboQuant is a substrate-level KV-quant codec that
+    /// applies to any arch; TriAttention eviction attaches only to the
+    /// vendored Qwen3.5 model, so it is a no-op for other architectures
+    /// (the request still runs, just uncompressed). `none` trivially
+    /// "serves" everything.
+    ///
+    /// A `false` result is NOT fail-closed: per the fork-B decision an
+    /// inert-but-valid codec warns + runs uncompressed. Fail-closed is
+    /// reserved for an unrecognized VALUE (see `resolve`).
+    public func servesArch(modelType: String?) -> Bool {
+        switch self {
+        case .none, .turboquant: return true
+        case .triattention: return SupportedModels.isQwen35(modelType)
+        }
+    }
 }
