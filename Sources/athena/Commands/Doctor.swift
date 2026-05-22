@@ -5,6 +5,7 @@ import AthenaDeploy
 import AthenaLLM
 import AthenaStore
 import Foundation
+import NIOSSL
 
 /// `athena doctor` — read-only environment preflight. Surfaces the
 /// failure modes this appliance keeps hitting: SSD model store not
@@ -134,16 +135,23 @@ struct Doctor: AsyncParsableCommand {
             }
         }
 
-        // 8. Daemon reachability (informational).
+        // 8. Daemon reachability (informational). Probe HTTPS when TLS
+        //    is configured so the scheme matches what the daemon serves.
         let host = parsed?.listenHost ?? "127.0.0.1"
         let port = parsed?.listenPort ?? GovernorConfig.defaultPort
+        let tlsOn = parsed?.tlsCert != nil && parsed?.tlsKey != nil
+        let scheme = tlsOn ? "https" : "http"
         var req = URLRequest(
-            url: URL(string: "http://\(host):\(port)/healthz")!)
+            url: URL(string: "\(scheme)://\(host):\(port)/healthz")!)
         req.timeoutInterval = 2
         if (try? await URLSession.shared.data(for: req)) != nil {
-            say(.ok, "daemon responding at \(host):\(port)")
+            say(.ok, "daemon responding at \(scheme)://\(host):\(port)")
         } else {
-            say(.warn, "daemon not responding at \(host):\(port)")
+            say(
+                .warn,
+                "daemon not responding at \(scheme)://\(host):\(port)"
+                    + (tlsOn
+                        ? " (or its TLS cert isn't system-trusted)" : ""))
         }
 
         // 9. Auth posture (mirrors the daemon's fail-safe gate so
@@ -205,7 +213,89 @@ struct Doctor: AsyncParsableCommand {
                     + "— daemon will REFUSE to start")
         }
 
-        // 10. HF token posture (informational — only gated/private
+        // 10. TLS posture (predicts the daemon's HTTPS / fail-closed
+        //     behavior; mirrors AthenaServer.serverBuilder).
+        let tlsCert = parsed?.tlsCert.map {
+            ($0 as NSString).expandingTildeInPath
+        }
+        let tlsKey = parsed?.tlsKey.map {
+            ($0 as NSString).expandingTildeInPath
+        }
+        switch (tlsCert, tlsKey) {
+        case (nil, nil):
+            if loopback.contains(host) {
+                say(
+                    .ok,
+                    "TLS: disabled — loopback bind (plaintext stays "
+                        + "on this host)")
+            } else {
+                say(
+                    .warn,
+                    "TLS: disabled on non-loopback \(host) — bearer "
+                        + "tokens + the WebUI cookie travel in "
+                        + "plaintext. Set tls_cert/tls_key or front "
+                        + "the daemon with a TLS reverse proxy "
+                        + "(docs/reverse-proxy.md).")
+            }
+        case (.some, nil), (nil, .some):
+            say(
+                .fail,
+                "TLS: only one of tls_cert/tls_key set — the daemon "
+                    + "will REFUSE to start (set both, or neither)")
+        case (let cert?, let key?):
+            var tlsOK = true
+            if !fm.isReadableFile(atPath: cert) {
+                say(.fail, "TLS: cert not readable: \(cert)")
+                tlsOK = false
+            }
+            if !fm.isReadableFile(atPath: key) {
+                say(.fail, "TLS: key not readable: \(key)")
+                tlsOK = false
+            } else if let mode = (try? fm.attributesOfItem(
+                atPath: key))?[.posixPermissions] as? NSNumber,
+                mode.intValue & 0o077 != 0
+            {
+                say(
+                    .warn,
+                    "TLS: private key \(key) is group/other-"
+                        + "accessible (chmod 600 recommended)")
+            }
+            if tlsOK {
+                if let leaf = try? NIOSSLCertificate.fromPEMFile(cert)
+                    .first
+                {
+                    let expiry = Date(
+                        timeIntervalSince1970:
+                            TimeInterval(leaf.notValidAfter))
+                    let days = Int(
+                        expiry.timeIntervalSinceNow / 86400)
+                    if days < 0 {
+                        say(
+                            .fail,
+                            "TLS: certificate EXPIRED "
+                                + "\(-days) day(s) ago — renew before "
+                                + "serving")
+                    } else if days < 14 {
+                        say(
+                            .warn,
+                            "TLS: enabled — cert expires in "
+                                + "\(days) day(s); renew soon")
+                    } else {
+                        say(
+                            .ok,
+                            "TLS: enabled — cert valid "
+                                + "\(days) more day(s)")
+                    }
+                } else {
+                    say(
+                        .fail,
+                        "TLS: \(cert) is not valid PEM — the daemon "
+                            + "would refuse to start")
+                }
+            }
+        }
+
+        // 11. HF token posture (informational — only gated/private
         // model fetches need it; public repos work without).
         say(.ok, "hf token: \(HFAuth.source())")
 

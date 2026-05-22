@@ -1106,6 +1106,57 @@ fi
 rm -rf "$TLSDIR"
 
 echo
+echo "== phase 17: athena doctor — TLS posture (M28.2) =="
+# `doctor` reads the config and predicts the daemon's TLS behavior
+# WITHOUT starting it: both keys + a valid cert ⇒ "TLS: enabled";
+# exactly one key ⇒ predicts the fail-closed start refusal; an
+# unreadable cert ⇒ FAIL. doctor's overall exit is governed by the
+# CI temp env's other checks (model store etc.), so we grep its
+# output for the TLS line rather than trust the exit code.
+DOCDIR="$(mktemp -d)"
+DCERT="$DOCDIR/cert.pem"; DKEY="$DOCDIR/key.pem"
+if ! command -v openssl >/dev/null 2>&1; then
+  echo "  skip doctor-TLS phase (openssl not available)"
+elif ! openssl req -x509 -newkey rsa:2048 -nodes \
+        -keyout "$DKEY" -out "$DCERT" -days 30 -subj "/CN=athena-doctor" \
+        >/dev/null 2>&1; then
+  echo "  skip doctor-TLS phase (cert generation failed)"
+else
+  chmod 600 "$DKEY"
+  mkcfg() { # CFGPATH  extra-lines…
+    local p="$1"; shift
+    { echo 'listen_host = "127.0.0.1"'
+      echo 'listen_port = 7447'
+      echo 'log_dir = "/usr/local/var/log/athena"'
+      for l in "$@"; do echo "$l"; done
+    } > "$p"
+  }
+  # 17a: both keys + valid cert ⇒ "TLS: enabled".
+  CFG="$DOCDIR/ok.toml"
+  mkcfg "$CFG" "tls_cert = \"$DCERT\"" "tls_key = \"$DKEY\""
+  DOUT="$("$ATHENA" doctor --config "$CFG" --model-store "$MSTORE" 2>&1)"
+  echo "$DOUT" | grep -qi "TLS: enabled" \
+    && ok "doctor reports TLS enabled for a valid cert/key pair" \
+    || { bad "doctor missing 'TLS: enabled'"; echo "$DOUT" | grep -i tls; }
+  # 17b: only tls_cert ⇒ predicts the fail-closed start refusal.
+  CFG2="$DOCDIR/half.toml"
+  mkcfg "$CFG2" "tls_cert = \"$DCERT\""
+  DOUT2="$("$ATHENA" doctor --config "$CFG2" --model-store "$MSTORE" 2>&1)"
+  echo "$DOUT2" | grep -qi "only one of tls_cert/tls_key" \
+    && ok "doctor flags half-configured TLS as a startup refusal" \
+    || { bad "doctor missed half-config TLS"; echo "$DOUT2" | grep -i tls; }
+  # 17c: unreadable cert path ⇒ FAIL line.
+  CFG3="$DOCDIR/missing.toml"
+  mkcfg "$CFG3" "tls_cert = \"$DOCDIR/nope.pem\"" \
+                "tls_key = \"$DKEY\""
+  DOUT3="$("$ATHENA" doctor --config "$CFG3" --model-store "$MSTORE" 2>&1)"
+  echo "$DOUT3" | grep -qi "TLS: cert not readable" \
+    && ok "doctor FAILs on an unreadable TLS cert path" \
+    || { bad "doctor missed unreadable cert"; echo "$DOUT3" | grep -i tls; }
+fi
+rm -rf "$DOCDIR"
+
+echo
 echo "════════════════════════════════════════"
 echo "  PASS=$PASS  FAIL=$FAIL"
 echo "════════════════════════════════════════"
