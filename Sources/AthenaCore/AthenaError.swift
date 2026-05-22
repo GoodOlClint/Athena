@@ -19,6 +19,11 @@ public enum AthenaError: Error, Sendable, Equatable {
     /// the governor-owned global cap allows. Governed 503 (refuse big
     /// contexts before they OOM the box), not a bare failure.
     case promptCacheCapExceeded(requestedBytes: Int, capBytes: Int)
+    /// The audio exceeds a model's single-pass capacity (e.g. the
+    /// offline diarizer's learned positional table). A client error
+    /// (400) — split the audio into shorter segments — NOT a silent
+    /// empty result.
+    case audioTooLong(module: ModuleID, seconds: Double, maxSeconds: Double)
 
     /// HTTP status the serve path should return for this error.
     public var httpStatus: Int {
@@ -28,6 +33,7 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .moduleNotRegistered: return 404
         case .metalOutOfMemory: return 503
         case .promptCacheCapExceeded: return 503
+        case .audioTooLong: return 400
         }
     }
 
@@ -39,6 +45,7 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .moduleNotRegistered: return "module_not_registered"
         case .metalOutOfMemory: return "metal_oom"
         case .promptCacheCapExceeded: return "prompt_cache_cap_exceeded"
+        case .audioTooLong: return "audio_too_long"
         }
     }
 
@@ -57,6 +64,13 @@ public enum AthenaError: Error, Sendable, Equatable {
         case let .promptCacheCapExceeded(requested, cap):
             return "Prompt too large for the governed prompt-cache "
                 + "cap: needs ~\(requested) B, cap \(cap) B."
+        case let .audioTooLong(module, seconds, maxSeconds):
+            return String(
+                format:
+                    "Audio (%.0fs) exceeds the %@ model's single-pass "
+                    + "limit of ~%.0fs. Split it into shorter segments "
+                    + "and submit them separately.",
+                seconds, module.rawValue, maxSeconds)
         }
     }
 

@@ -5,6 +5,36 @@ import XCTest
 
 @testable import AthenaTranscription
 
+/// M24.4a — offline diarization positional-capacity math. The offline
+/// path caps at `max_source_positions` diar frames; this verifies the
+/// frame-count helper mirrors ConvSubsampling's stride-2 stages so the
+/// guard triggers at the right length. Pure, CI-safe.
+final class SortformerOfflineCapTests: XCTestCase {
+    func testSubsamplingFrameMath() {
+        // factor 8 = 3 stride-2 stages of floor((L-1)/2)+1.
+        // 64 -> 32 -> 16 -> 8; tiny inputs floor toward 1.
+        XCTAssertEqual(
+            SortformerModel.offlineDiarFrameCount(
+                melFrames: 64, subsamplingFactor: 8), 8)
+        XCTAssertEqual(
+            SortformerModel.offlineDiarFrameCount(
+                melFrames: 1, subsamplingFactor: 8), 1)
+    }
+
+    /// At 16 kHz, hop 160, factor 8 the frame rate is 12.5 fps, so the
+    /// 1500-position offline table corresponds to ~120 s — the observed
+    /// real-audio ceiling. ~12000 mel frames (120 s) must stay within
+    /// 1500 diar frames; ~16000 (160 s) must exceed it.
+    func testNominal120sFitsAnd160sExceeds() {
+        let f120 = SortformerModel.offlineDiarFrameCount(
+            melFrames: 12000, subsamplingFactor: 8)
+        let f160 = SortformerModel.offlineDiarFrameCount(
+            melFrames: 16000, subsamplingFactor: 8)
+        XCTAssertLessThanOrEqual(f120, 1500)
+        XCTAssertGreaterThan(f160, 1500)
+    }
+}
+
 /// M4.3a — vendored Sortformer **integration** check: the model
 /// downloads, loads, and runs end-to-end producing well-formed
 /// diarization output over the correct duration. Speaker-separation

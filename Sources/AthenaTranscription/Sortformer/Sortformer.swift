@@ -604,6 +604,31 @@ public class SortformerModel: Module {
                 )
                 let featureLengths = MLXArray([Int32(features.dim(2))])
 
+                let subsamplingFactor = model.config.fcEncoderConfig.subsamplingFactor
+                let frameDuration = Float(proc.hopLength * subsamplingFactor) / Float(proc.samplingRate)
+
+                // M24.4a: the offline path runs the whole clip through the
+                // transformer encoder, whose learned positional table caps
+                // the sequence at `max_source_positions` diar frames. Past
+                // that, position lookups overrun the table and predictions
+                // silently collapse to empty (HTTP 200, 0 speakers). Fail
+                // loudly with the limit instead — the caller splits the
+                // audio (or uses the streaming path).
+                let diarFrames = Self.offlineDiarFrameCount(
+                    melFrames: features.dim(2),
+                    subsamplingFactor: subsamplingFactor)
+                let maxPos = model.config.tfEncoderConfig.maxSourcePositions
+                if diarFrames > maxPos {
+                    continuation.resume(
+                        throwing: AthenaError.audioTooLong(
+                            module: .diarization,
+                            seconds: Double(waveform.dim(0))
+                                / Double(proc.samplingRate),
+                            maxSeconds: Double(maxPos)
+                                * Double(frameDuration)))
+                    return
+                }
+
                 if verbose {
                     print("Audio: \(String(format: "%.2f", Float(waveform.dim(0)) / Float(proc.samplingRate)))s")
                     if trimOffset > 0 {
@@ -614,9 +639,6 @@ public class SortformerModel: Module {
 
                 let preds = model(features, audioSignalLength: featureLengths)
                 eval(preds)
-
-                let subsamplingFactor = model.config.fcEncoderConfig.subsamplingFactor
-                let frameDuration = Float(proc.hopLength * subsamplingFactor) / Float(proc.samplingRate)
 
                 var segments = Self.predsToSegments(
                     preds[0],
@@ -1284,6 +1306,19 @@ public class SortformerModel: Module {
     }
 
     // MARK: - Postprocessing
+
+    /// Diarization frame count after ConvSubsampling: `floor((L-1)/2)+1`
+    /// per stride-2 stage (factor 8 ⇒ 3 stages). Mirrors
+    /// `ConvSubsampling`'s length math so the offline positional-capacity
+    /// guard (M24.4a) matches what the encoder actually sees.
+    static func offlineDiarFrameCount(
+        melFrames: Int, subsamplingFactor: Int
+    ) -> Int {
+        let stages = max(0, Int(log2(Double(max(1, subsamplingFactor)))))
+        var l = melFrames
+        for _ in 0..<stages { l = (l - 1) / 2 + 1 }
+        return l
+    }
 
     public static func predsToSegments(
         _ preds: MLXArray,
