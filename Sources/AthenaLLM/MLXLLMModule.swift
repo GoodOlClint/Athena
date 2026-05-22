@@ -43,9 +43,17 @@ public struct LLMGenerationParameters: Sendable {
     }
 }
 
-/// The real MLX-backed LLM module (M1). Loads a Qwen3.5 model from a local
+/// The real MLX-backed LLM module (M1). Loads a model from a local
 /// directory — no download, no HF hub round-trip — and streams native
 /// `TokenIterator` generation via the substrate's `ModelContainer`.
+///
+/// A Qwen3.5 directory routes to Athena's vendored model (MTP speculative,
+/// GDN/Mamba, the bit-identical greedy path); any other architecture the
+/// substrate factory supports (Llama, Gemma, Mistral, Phi, …) loads
+/// through the substrate's general path and streams plain generation.
+/// Structured output / tool calls are guided on BOTH paths (M23 fork A);
+/// MTP speculative + TriAttention eviction apply to Qwen3.5 only and
+/// degrade cleanly elsewhere.
 ///
 /// Memory accounting in M1 is the on-disk safetensors footprint: an honest
 /// pre-load admission estimate for the governor. Live Metal-footprint
@@ -65,18 +73,22 @@ public actor MLXLLMModule: LLMModule {
         (tokens: [VocabToken], eos: UInt32, opener: [UInt32: UInt32])?
 
     /// Governor-owned prompt-cache cap in bytes (0 ⇒ disabled). The
-    /// per-token KV figure is a deliberately conservative upper bound
-    /// across Qwen3.5 variants (≈2·layers·kvdim·fp16 for the 27B), so
-    /// the cap errs toward refusing early — the safe direction for an
-    /// OOM guard. Brief 4b.
+    /// per-token KV figure is derived from the model's own config.json so
+    /// the cap is sized for THIS architecture; the cap errs toward
+    /// refusing early — the safe direction for an OOM guard. Brief 4b /
+    /// M23 fork C.
     private let promptCacheCapBytes: Int
-    /// Conservative per-token KV upper bound, fed to the governor's
-    /// prompt-cache cap. TurboQuant stores quantized K/V (~4-bit + small
-    /// fp16 norm overhead) so its real footprint is well under a quarter
-    /// of the fp16 bound; 64 KiB still over-estimates — the safe
-    /// direction for an OOM guard. M20.2 (refined when the prompt-cache
-    /// round-trip lands in M20.3).
+    /// Per-token KV upper bound fed to the governor's prompt-cache cap,
+    /// derived from config.json (2·layers·kv_heads·head_dim·fp16) so it
+    /// tracks the real KV geometry per arch; falls back to a conservative
+    /// constant when the dims are absent. TurboQuant stores ~4-bit K/V so
+    /// it gets a quarter of the fp16 bound (still over-estimates — the
+    /// safe direction for an OOM guard). M20.2 / M23 fork C.
     private let perTokenKVBytes: Int
+    /// `vocab_size` from config.json, captured at init so structured
+    /// output works on any architecture (the vendored Qwen3.5 model
+    /// exposes it directly; substrate arches do not). M23 fork A.
+    private let configVocabSize: Int?
 
     public init(
         modelDirectory: URL,
@@ -87,14 +99,23 @@ public actor MLXLLMModule: LLMModule {
         self.params = parameters
         self.estimatedBytes = Self.estimateBytes(forModelAt: modelDirectory)
         self.promptCacheCapBytes = promptCacheCapBytes
-        // TurboQuant stores ~4-bit quantized K/V → the 64 KiB bound
-        // over-estimates (safe for an OOM guard). TriAttention does NOT
-        // shrink per-token bytes — it caps token COUNT and pins the
-        // prefill (the prompt cache the preflight sizes) at full
-        // precision — so it keeps the full 256 KiB bound like `none`.
+
+        // Size the prompt-cache cap from the model's own KV geometry. The
+        // old flat 256 KiB constant over-capped small models ~8× (refusing
+        // valid prompts) and would under-cap an arch with larger KV — the
+        // dangerous direction. Fall back to the conservative constant when
+        // config.json omits the dims. M23 fork C.
+        let info = ModelConfigInfo.read(modelDirectory: modelDirectory)
+        self.configVocabSize = info?.vocabSize
+        let fp16PerToken =
+            info?.perTokenKVBytes(bytesPerElement: 2) ?? (256 * 1024)
+        // TurboQuant ~4-bit K/V → a quarter of the fp16 bound (still
+        // conservative). TriAttention does NOT shrink per-token bytes (it
+        // caps token COUNT and pins the prefill at full precision), so it
+        // keeps the full fp16 bound like `none`.
         switch parameters.kvCompression {
-        case .turboquant: self.perTokenKVBytes = 64 * 1024
-        case .none, .triattention: self.perTokenKVBytes = 256 * 1024
+        case .turboquant: self.perTokenKVBytes = max(1, fp16PerToken / 4)
+        case .none, .triattention: self.perTokenKVBytes = fp16PerToken
         }
     }
 
@@ -171,10 +192,11 @@ public actor MLXLLMModule: LLMModule {
                     {
                         continuation.yield(speculative)
                     } else {
-                        // No structured constraint on the non-speculative
-                        // substrate path yet (M3.3c); a schema request
-                        // that can't take the guided speculative path
-                        // falls back to unconstrained generation.
+                        // runSpeculative returns nil only for UNstructured
+                        // requests (no schema) — those stream from the
+                        // standard substrate path. Structured requests are
+                        // always guided: the vendored Qwen3.5 path, or the
+                        // substrate-guided path for other arches (M23).
                         let stream = try await self.beginGeneration(
                             prompt: prompt, tools: tools)
                         for await event in stream {
@@ -220,13 +242,19 @@ public actor MLXLLMModule: LLMModule {
         // model. The ~150k tokenizer.decode calls are the dominant
         // structured-request cost and are schema-independent.
         if schemaJSON != nil, cachedVocabTokens == nil {
+            let cfgVocab = configVocabSize
             let built = try await container.perform {
                 (ctx: ModelContext) -> ([VocabToken], UInt32)? in
-                guard let model = ctx.model as? AthenaQwen35Model
+                // Qwen3.5 exposes vocabularySize directly; any other
+                // architecture uses config.json's vocab_size, so guided
+                // structured output is available everywhere (M23 fork A).
+                guard
+                    let vocabSize =
+                        (ctx.model as? AthenaQwen35Model)?.vocabularySize
+                        ?? cfgVocab
                 else { return nil }
                 let (t, e) = StructuredVocab.tokens(
-                    tokenizer: ctx.tokenizer,
-                    vocabSize: model.vocabularySize)
+                    tokenizer: ctx.tokenizer, vocabSize: vocabSize)
                 return (t, e)
             }
             if let built {
@@ -237,17 +265,9 @@ public actor MLXLLMModule: LLMModule {
         }
         let vocabTokens = cachedVocabTokens
 
+        let cfgVocab = configVocabSize
         return try await container.perform {
             (ctx: ModelContext) -> String? in
-            guard let model = ctx.model as? AthenaQwen35Model
-            else { return nil }
-
-            // TriAttention is inert on the MTP/speculative + guided
-            // paths: eviction can't un-mix the GDN/Mamba recurrent
-            // state, and these paths must stay bit-identical greedy.
-            // Clear any policy a prior standard request left on the
-            // shared model instance before building caches here.
-            model.triAttentionEviction = nil
 
             // Structured ⇒ NO-THINK by construction: the Guide masks
             // from token 0, so the schema is enforced immediately and
@@ -256,32 +276,60 @@ public actor MLXLLMModule: LLMModule {
             // Schema-enforced output that ALSO permits a thinking prefix
             // (deferred enforcement, Patch 6) is tracked in
             // GoodOlClint/athena#2.
-            var guide: StructuredGuide?
-            if let schemaJSON, let vt = vocabTokens {
+            func makeGuide() throws -> StructuredGuide? {
+                guard let schemaJSON, let vt = vocabTokens else {
+                    return nil
+                }
                 let g = try StructuredGuide(
                     index: StructuredIndex(
                         jsonSchema: schemaJSON,
                         vocabulary: StructuredVocabulary(
                             tokens: vt.tokens, eosTokenId: vt.eos)))
                 g.openerAlias = vt.opener
-                guide = g
+                return g
+            }
+            let guide = try makeGuide()
+
+            // Vendored Qwen3.5 path — UNCHANGED (MTP speculative when
+            // eligible, else guided/plain greedy on the vendored model).
+            if let model = ctx.model as? AthenaQwen35Model {
+                // TriAttention is inert on the MTP/speculative + guided
+                // paths: eviction can't un-mix the GDN/Mamba recurrent
+                // state, and these paths must stay bit-identical greedy.
+                // Clear any policy a prior standard request left on the
+                // shared model instance before building caches here.
+                model.triAttentionEviction = nil
+
+                let ids: [Int]
+                if speculativeEligible && model.hasMTPHead {
+                    ids = SpeculativeGeneration.generate(
+                        model: model, promptTokens: promptTokens,
+                        maxTokens: maxTokens,
+                        eosTokenId: ctx.tokenizer.eosTokenId, guide: guide)
+                } else if guide != nil {
+                    // Structured but no speculative/MTP path available.
+                    ids = GuidedGreedy.generate(
+                        model: model, promptTokens: promptTokens,
+                        maxTokens: maxTokens,
+                        eosTokenId: ctx.tokenizer.eosTokenId, guide: guide)
+                } else {
+                    return nil  // unstructured + no MTP ⇒ substrate stream
+                }
+                return ctx.tokenizer.decode(tokenIds: ids)
             }
 
-            let ids: [Int]
-            if speculativeEligible && model.hasMTPHead {
-                ids = SpeculativeGeneration.generate(
-                    model: model, promptTokens: promptTokens,
-                    maxTokens: maxTokens,
-                    eosTokenId: ctx.tokenizer.eosTokenId, guide: guide)
-            } else if guide != nil {
-                // Structured but no speculative/MTP path available.
-                ids = GuidedGreedy.generate(
-                    model: model, promptTokens: promptTokens,
-                    maxTokens: maxTokens,
-                    eosTokenId: ctx.tokenizer.eosTokenId, guide: guide)
-            } else {
-                return nil  // unstructured + no MTP ⇒ substrate fallback
-            }
+            // Any other architecture: schema-guided decoding on the
+            // substrate generation path (M23 fork A). Unstructured
+            // requests (no guide) return nil → the standard substrate
+            // stream in beginGeneration. MTP speculative does not apply
+            // (no mtp.* weights) and degrades to this path cleanly.
+            guard let guide, let vt = vocabTokens,
+                let vocabSize = cfgVocab
+            else { return nil }
+            let ids = try GuidedSubstrate.generate(
+                model: ctx.model, promptTokens: promptTokens,
+                vocab: vocabSize, maxTokens: maxTokens,
+                eosTokenId: Int(vt.eos), guide: guide)
             return ctx.tokenizer.decode(tokenIds: ids)
         }
     }
