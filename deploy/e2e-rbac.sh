@@ -480,6 +480,39 @@ echo "$LU" | grep -q 'u:alice' \
   || bad "athena usage local missing u:alice ($LU)"
 
 echo
+echo "== phase 2.12: streamed usage — stream_options.include_usage (M27.4) =="
+SREQ='{"model":"x","messages":[{"role":"user","content":"hi"}],"stream":true,"stream_options":{"include_usage":true}}'
+SBODY="$(curl -s -N -X POST -H "Authorization: Bearer $ALICE_TOK" \
+  -H 'Content-Type: application/json' -d "$SREQ" \
+  "http://127.0.0.1:$PORT/v1/chat/completions")"
+echo "$SBODY" | grep -q '"usage"' \
+  && ok "include_usage emits a terminal usage chunk" \
+  || bad "no usage chunk with include_usage ($SBODY)"
+echo "$SBODY" | grep -Eq '"total_tokens":[1-9]' \
+  && ok "streamed usage carries non-zero total_tokens" \
+  || bad "streamed usage total_tokens not >0 ($SBODY)"
+echo "$SBODY" | grep -q '\[DONE\]' \
+  && ok "stream still terminates with [DONE]" \
+  || bad "stream missing [DONE] ($SBODY)"
+# Without opting in, a streamed response carries NO usage object.
+NREQ='{"model":"x","messages":[{"role":"user","content":"hi"}],"stream":true}'
+NBODY="$(curl -s -N -X POST -H "Authorization: Bearer $ALICE_TOK" \
+  -H 'Content-Type: application/json' -d "$NREQ" \
+  "http://127.0.0.1:$PORT/v1/chat/completions")"
+echo "$NBODY" | grep -q '"usage"' \
+  && bad "stream without opt-in leaked usage ($NBODY)" \
+  || ok "no usage chunk when not requested"
+# Streamed requests are metered too (was a gap: M27.1 metered sync only).
+SB="$(usagecol 'u:alice' requests)"
+curl -s -N -o /dev/null -X POST -H "Authorization: Bearer $ALICE_TOK" \
+  -H 'Content-Type: application/json' -d "$NREQ" \
+  "http://127.0.0.1:$PORT/v1/chat/completions"
+SA="$(usagecol 'u:alice' requests)"
+[ "$SA" -gt "$SB" ] \
+  && ok "streamed request is metered ($SB → $SA)" \
+  || bad "streamed request not metered ($SB → $SA)"
+
+echo
 echo "== phase 3: scoped-token downgrade =="
 # boss is an admin USER, but BOSS_SCOPED narrows to member.
 code 403 GET  /metrics "$BOSS_SCOPED"                   # member perms only

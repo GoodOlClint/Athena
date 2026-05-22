@@ -516,12 +516,20 @@ struct AthenaServer {
         let toolSpecs = body.toolSpecs()
 
         if body.stream == true {
+            // M27.4: meter streamed requests too, and emit a terminal
+            // usage chunk when the client opted in via stream_options.
+            let principal = await usagePrincipal(request)
+            let includeUsage = body.stream_options?.include_usage == true
             return Self.streamSSE(
                 id: id, model: model, created: created,
-                tokens: llm.generate(
+                events: llm.generateMetered(
                     messages: turns, schemaJSON: schemaJSON,
                     tools: toolSpecs, maxTokens: body.max_tokens,
-                    temperature: body.temperature))
+                    temperature: body.temperature),
+                includeUsage: includeUsage,
+                record: { usage in
+                    await meter(principal: principal, usage: usage)
+                })
         }
 
         var text = ""
@@ -2624,9 +2632,16 @@ struct AthenaServer {
 
     // MARK: - Response helpers
 
+    /// Stream `/v1/chat/completions` over SSE (M27.4). Consumes the
+    /// metered stream so it can (a) emit a terminal usage chunk when the
+    /// client set `stream_options.include_usage` and (b) always meter the
+    /// request via `record` once generation finishes — closing the
+    /// streaming metering gap from M27.1. `record` runs inside the
+    /// streaming task (the body is produced lazily).
     private static func streamSSE(
         id: String, model: String, created: Int,
-        tokens: AsyncStream<String>
+        events: AsyncStream<GenChunk>, includeUsage: Bool,
+        record: @escaping @Sendable (TokenUsage) async -> Void
     ) -> Response {
         let stream = AsyncStream<ByteBuffer> { continuation in
             let task = Task {
@@ -2649,18 +2664,24 @@ struct AthenaServer {
                                 delta: ChatDelta(role: "assistant", content: ""),
                                 finish_reason: nil)
                         ]))
-                for await piece in tokens {
-                    emit(
-                        ChatCompletionChunk(
-                            id: id, object: "chat.completion.chunk",
-                            created: created, model: model,
-                            choices: [
-                                ChatChunkChoice(
-                                    index: 0,
-                                    delta: ChatDelta(
-                                        role: nil, content: piece),
-                                    finish_reason: nil)
-                            ]))
+                var usage = TokenUsage.zero
+                for await event in events {
+                    switch event {
+                    case .text(let piece):
+                        emit(
+                            ChatCompletionChunk(
+                                id: id, object: "chat.completion.chunk",
+                                created: created, model: model,
+                                choices: [
+                                    ChatChunkChoice(
+                                        index: 0,
+                                        delta: ChatDelta(
+                                            role: nil, content: piece),
+                                        finish_reason: nil)
+                                ]))
+                    case .usage(let u):
+                        usage = u
+                    }
                 }
                 emit(
                     ChatCompletionChunk(
@@ -2672,9 +2693,22 @@ struct AthenaServer {
                                 delta: ChatDelta(role: nil, content: nil),
                                 finish_reason: "stop")
                         ]))
+                // OpenAI emits usage in a final chunk with empty choices,
+                // only when the client opted in.
+                if includeUsage {
+                    emit(
+                        ChatCompletionChunk(
+                            id: id, object: "chat.completion.chunk",
+                            created: created, model: model, choices: [],
+                            usage: Usage(
+                                prompt_tokens: usage.promptTokens,
+                                completion_tokens: usage.completionTokens,
+                                total_tokens: usage.totalTokens)))
+                }
                 var done = ByteBuffer()
                 done.writeString("data: [DONE]\n\n")
                 continuation.yield(done)
+                await record(usage)
                 continuation.finish()
             }
             continuation.onTermination = { _ in task.cancel() }

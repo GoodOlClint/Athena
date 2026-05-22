@@ -50,10 +50,18 @@ struct Tool: Codable {
     let function: FunctionDef
 }
 
+/// OpenAI `stream_options` (M27.4). `include_usage:true` ⇒ a streamed
+/// response emits a final chunk with empty `choices` and a populated
+/// `usage` object before `data: [DONE]`.
+struct StreamOptions: Codable {
+    let include_usage: Bool?
+}
+
 struct ChatCompletionRequest: Codable {
     let model: String?
     let messages: [ChatMessage]
     let stream: Bool?
+    let stream_options: StreamOptions?
     let response_format: ResponseFormat?
     let tools: [Tool]?
     let tool_choice: JSONValue?
@@ -163,6 +171,9 @@ struct ChatCompletionChunk: Codable {
     let created: Int
     let model: String
     let choices: [ChatChunkChoice]
+    /// Present only on the terminal usage chunk when the client requested
+    /// `stream_options.include_usage` (M27.4); nil ⇒ omitted from JSON.
+    var usage: Usage? = nil
 }
 
 struct APIErrorBody: Codable {
