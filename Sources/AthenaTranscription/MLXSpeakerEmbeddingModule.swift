@@ -100,4 +100,80 @@ public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule {
         return SpeakerEmbeddingResult(
             segments: out, dimension: model.embeddingDimension)
     }
+
+    public func windowEmbeddings(
+        audio: Data, filename: String?,
+        windowSeconds: Double, hopSeconds: Double
+    ) async throws -> SpeakerEmbeddingResult {
+        guard let model else {
+            throw AthenaError.moduleLoadFailed(
+                .speakerEmbedding, reason: "embed called before load")
+        }
+        let ext = (filename as NSString?)?.pathExtension ?? ""
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "athena-spkwin-\(UUID().uuidString)"
+                    + (ext.isEmpty ? "" : ".\(ext)"))
+        try audio.write(to: tmp)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let pcm = try AudioDecode.pcm16kMono(from: tmp)
+        let sr = Double(AudioDecode.sampleRate)
+        let win = max(1, Int(windowSeconds * sr))
+        let hop = max(1, Int(hopSeconds * sr))
+        guard pcm.count >= win else {
+            // Clip shorter than one window — embed the whole thing.
+            let vec = model.embed(pcm)
+            return SpeakerEmbeddingResult(
+                segments: [
+                    SpeakerSegmentEmbedding(
+                        start: 0, end: Double(pcm.count) / sr,
+                        embedding: vec,
+                        durationSeconds: Double(pcm.count) / sr)
+                ],
+                dimension: model.embeddingDimension)
+        }
+
+        // Candidate windows + per-window RMS for a relative silence gate.
+        var starts: [Int] = []
+        var rms: [Float] = []
+        var i = 0
+        while i + win <= pcm.count {
+            var acc: Float = 0
+            for k in i..<(i + win) { acc += pcm[k] * pcm[k] }
+            starts.append(i)
+            rms.append((acc / Float(win)).squareRoot())
+            i += hop
+        }
+        let maxRMS = rms.max() ?? 0
+        let gate = maxRMS * 0.20  // keep windows ≥ 20% of the loudest
+
+        var out: [SpeakerSegmentEmbedding] = []
+        out.reserveCapacity(starts.count)
+        for (idx, s) in starts.enumerated() {
+            // If the gate would drop everything (uniformly quiet), keep all.
+            if maxRMS > 0, rms[idx] < gate { continue }
+            let vec = model.embed(Array(pcm[s..<(s + win)]))
+            out.append(
+                SpeakerSegmentEmbedding(
+                    start: Double(s) / sr,
+                    end: Double(s + win) / sr,
+                    embedding: vec,
+                    durationSeconds: Double(win) / sr))
+        }
+        // Fallback: gate removed everything → embed every window ungated.
+        if out.isEmpty {
+            for s in starts {
+                let vec = model.embed(Array(pcm[s..<(s + win)]))
+                out.append(
+                    SpeakerSegmentEmbedding(
+                        start: Double(s) / sr,
+                        end: Double(s + win) / sr,
+                        embedding: vec,
+                        durationSeconds: Double(win) / sr))
+            }
+        }
+        return SpeakerEmbeddingResult(
+            segments: out, dimension: model.embeddingDimension)
+    }
 }

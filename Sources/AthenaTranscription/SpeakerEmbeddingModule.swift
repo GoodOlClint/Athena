@@ -50,6 +50,14 @@ public protocol SpeakerEmbeddingModule: InferenceModule {
     func embed(
         audio: Data, filename: String?, segments: [SpeakerSegmentRequest]
     ) async throws -> SpeakerEmbeddingResult
+
+    /// Slide a `windowSeconds` window with `hopSeconds` hop across the
+    /// clip, gate out near-silent windows, and embed each retained one.
+    /// Feeds the embedding+clustering diarizer (M25.3).
+    func windowEmbeddings(
+        audio: Data, filename: String?,
+        windowSeconds: Double, hopSeconds: Double
+    ) async throws -> SpeakerEmbeddingResult
 }
 
 /// `--engine stub` placeholder: a deterministic pseudo-vector per
@@ -96,5 +104,21 @@ public actor StubSpeakerEmbeddingModule: SpeakerEmbeddingModule {
                 durationSeconds: max(0, seg.end - seg.start))
         }
         return SpeakerEmbeddingResult(segments: out, dimension: dimension)
+    }
+
+    public func windowEmbeddings(
+        audio: Data, filename: String?,
+        windowSeconds: Double, hopSeconds: Double
+    ) async throws -> SpeakerEmbeddingResult {
+        // Stub: three canned windows so the clustering path is wired.
+        try await embed(
+            audio: audio, filename: filename,
+            segments: [
+                SpeakerSegmentRequest(start: 0, end: windowSeconds),
+                SpeakerSegmentRequest(
+                    start: hopSeconds, end: hopSeconds + windowSeconds),
+                SpeakerSegmentRequest(
+                    start: 2 * hopSeconds, end: 2 * hopSeconds + windowSeconds),
+            ])
     }
 }

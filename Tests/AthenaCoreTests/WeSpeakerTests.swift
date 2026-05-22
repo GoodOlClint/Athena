@@ -30,6 +30,32 @@ final class WeSpeakerStructureTests: XCTestCase {
         XCTAssertEqual(norm, 1.0, accuracy: 1e-3, "output must be L2-normalized")
     }
 
+    func testAgglomerativeClusteringRecoversGroups() {
+        // 3 well-separated directions in 8-D, 5 points each + tiny noise.
+        func axis(_ i: Int, _ jitter: Float) -> [Float] {
+            var v = [Float](repeating: 0, count: 8)
+            v[i] = 1
+            v[(i + 1) % 8] = jitter
+            let n = (v.reduce(0) { $0 + $1 * $1 }).squareRoot()
+            return v.map { $0 / n }
+        }
+        var embs: [[Float]] = []
+        for g in 0..<3 {
+            for k in 0..<5 { embs.append(axis(g, Float(k) * 0.02)) }
+        }
+        // Exact-count mode.
+        let fixed = AgglomerativeClustering.cluster(embs, numClusters: 3)
+        XCTAssertEqual(Set(fixed).count, 3)
+        XCTAssertEqual(Set(fixed[0..<5]).count, 1, "group 0 split")
+        XCTAssertEqual(Set(fixed[5..<10]).count, 1, "group 1 split")
+        XCTAssertEqual(Set(fixed[10..<15]).count, 1, "group 2 split")
+        XCTAssertNotEqual(fixed[0], fixed[5])
+        XCTAssertNotEqual(fixed[5], fixed[10])
+        // Auto mode (well-separated ⇒ cross-cluster distance ~1 > 0.7).
+        let auto = AgglomerativeClustering.cluster(embs, threshold: 0.7)
+        XCTAssertEqual(Set(auto).count, 3, "auto count wrong")
+    }
+
     func testFeatureFrameMathAndShape() {
         let fe = WeSpeakerFeatures()
         // 1 s of a 220 Hz tone at 16 kHz.

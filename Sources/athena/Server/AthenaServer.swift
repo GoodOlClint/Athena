@@ -790,6 +790,14 @@ struct AthenaServer {
                 type: "invalid_request_error", code: "missing_file")
         }
 
+        // Method select: default Sortformer (fast, ≤4 speakers); opt into
+        // the embedding+clustering diarizer (M25.3) for >4 speakers with
+        // `method=cluster` (+ optional num_speakers / max_speakers /
+        // threshold).
+        if form.text("method") == "cluster" {
+            return await handleClusterDiarization(file: file, form: form)
+        }
+
         do {
             try await governor.ensureLoaded(.diarization)
         } catch let e as AthenaError {
@@ -818,6 +826,80 @@ struct AthenaServer {
                         start: $0.start, end: $0.end,
                         speaker: $0.speaker)
                 }))
+    }
+
+    /// M25.3 embedding+clustering diarizer: window → WeSpeaker embed →
+    /// agglomerative cluster → merge same-speaker windows into turns.
+    /// Recovers >4 speakers, which the offline Sortformer cannot.
+    private func handleClusterDiarization(
+        file: MultipartForm.Part, form: MultipartForm
+    ) async -> Response {
+        let numSpeakers = form.text("num_speakers").flatMap(Int.init)
+        let maxSpeakers = form.text("max_speakers").flatMap(Int.init)
+        let threshold = form.text("threshold").flatMap(Float.init) ?? 0.75
+
+        do {
+            try await governor.ensureLoaded(.speakerEmbedding)
+        } catch let e as AthenaError {
+            return Self.error(
+                status: HTTPResponse.Status(code: e.httpStatus),
+                message: e.message, type: "server_error", code: e.code)
+        } catch {
+            return Self.error(
+                status: .internalServerError,
+                message: String(describing: error),
+                type: "server_error", code: "internal_error")
+        }
+
+        let we: SpeakerEmbeddingResult
+        do {
+            we = try await speakerEmbedding.windowEmbeddings(
+                audio: file.data, filename: file.filename,
+                windowSeconds: 1.5, hopSeconds: 0.75)
+        } catch {
+            return Self.classified(error, module: .speakerEmbedding)
+        }
+
+        let labels = AgglomerativeClustering.cluster(
+            we.segments.map { $0.embedding },
+            numClusters: numSpeakers, threshold: threshold,
+            maxClusters: maxSpeakers)
+        let turns = Self.turnsFromWindows(we.segments, labels: labels)
+        return Self.json(
+            DiarizationResponse(
+                num_speakers: Set(labels).count,
+                segments: turns.map {
+                    DiarizationSegmentDTO(
+                        start: $0.start, end: $0.end, speaker: $0.speaker)
+                }))
+    }
+
+    /// Merge time-ordered, possibly-overlapping labeled windows into
+    /// contiguous same-speaker turns.
+    private static func turnsFromWindows(
+        _ segs: [SpeakerSegmentEmbedding], labels: [Int]
+    ) -> [DiarizationTurn] {
+        guard !segs.isEmpty, segs.count == labels.count else { return [] }
+        var turns: [DiarizationTurn] = []
+        var curLabel = labels[0]
+        var curStart = segs[0].start
+        var curEnd = segs[0].end
+        for i in 1..<segs.count {
+            if labels[i] == curLabel {
+                curEnd = max(curEnd, segs[i].end)
+            } else {
+                turns.append(
+                    DiarizationTurn(
+                        start: curStart, end: curEnd, speaker: curLabel))
+                curLabel = labels[i]
+                curStart = segs[i].start
+                curEnd = segs[i].end
+            }
+        }
+        turns.append(
+            DiarizationTurn(
+                start: curStart, end: curEnd, speaker: curLabel))
+        return turns
     }
 
     /// M25.2 — voice/speaker embeddings. Multipart `file` (audio) + an
