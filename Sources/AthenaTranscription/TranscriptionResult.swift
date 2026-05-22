@@ -1,5 +1,23 @@
 import Foundation
 
+/// A single word with cross-attention DTW-aligned timing (M26.2). Times
+/// are seconds from the start of the whole audio.
+public struct WordTiming: Sendable, Codable {
+    public let word: String
+    public let start: Double
+    public let end: Double
+    /// Mean token probability over the word's tokens (0...1).
+    public let probability: Double
+    public init(
+        word: String, start: Double, end: Double, probability: Double
+    ) {
+        self.word = word
+        self.start = start
+        self.end = end
+        self.probability = probability
+    }
+}
+
 /// A timed transcription span. Times are seconds from the start of the
 /// whole audio (window offsets already applied).
 public struct TranscriptionSegment: Sendable, Codable {
@@ -10,13 +28,18 @@ public struct TranscriptionSegment: Sendable, Codable {
     /// span (M26.1). nil when not tracked (e.g. the stub). Surfaced only
     /// in the `verbose_json` response; other formats ignore it.
     public let avgLogprob: Double?
+    /// Words whose timing falls within this span (M26.2). nil when word
+    /// timestamps were not requested; surfaced only in `verbose_json`.
+    public let words: [WordTiming]?
     public init(
-        start: Double, end: Double, text: String, avgLogprob: Double? = nil
+        start: Double, end: Double, text: String,
+        avgLogprob: Double? = nil, words: [WordTiming]? = nil
     ) {
         self.start = start
         self.end = end
         self.text = text
         self.avgLogprob = avgLogprob
+        self.words = words
     }
 }
 
@@ -27,14 +50,18 @@ public struct TranscriptionResult: Sendable {
     public let language: String
     public let duration: Double
     public let segments: [TranscriptionSegment]
+    /// All aligned words across the audio (M26.2), empty unless word
+    /// timestamps were requested. Surfaced only in `verbose_json`.
+    public let words: [WordTiming]
     public init(
         text: String, language: String, duration: Double,
-        segments: [TranscriptionSegment]
+        segments: [TranscriptionSegment], words: [WordTiming] = []
     ) {
         self.text = text
         self.language = language
         self.duration = duration
         self.segments = segments
+        self.words = words
     }
 }
 

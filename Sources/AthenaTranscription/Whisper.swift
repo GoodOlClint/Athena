@@ -54,6 +54,19 @@ public final class WhisperKVCache {
     }
 }
 
+/// Side-channel collector for the decoder's per-layer cross-attention
+/// scores (pre-softmax `qk`, shape `[1, H, Tq, Tk]`). Used by the
+/// word-timestamp alignment pass (M26.2). Capture is opt-in: when no
+/// collector is threaded through `logits`, the forward path is byte-for-
+/// byte the existing decode (no extra work, no graph nodes retained).
+public final class WhisperCrossQK {
+    public var perLayer: [MLXArray?]
+    public init(layers: Int) {
+        perLayer = .init(repeating: nil, count: layers)
+    }
+    public func evalAll() { for a in perLayer where a != nil { a!.eval() } }
+}
+
 final class WhisperAttention: Module {
     let nHead: Int
     @ModuleInfo(key: "query") var query: Linear
@@ -76,7 +89,8 @@ final class WhisperAttention: Module {
     /// mathematically identical to the uncached path.
     func callAsFunction(
         _ x: MLXArray, xa: MLXArray? = nil, mask: MLXArray? = nil,
-        slot: WhisperKVCache.Slot? = nil, isCross: Bool = false
+        slot: WhisperKVCache.Slot? = nil, isCross: Bool = false,
+        crossQK: WhisperCrossQK? = nil, layer: Int = 0
     ) -> MLXArray {
         let q = query(x)
         let k: MLXArray
@@ -120,6 +134,9 @@ final class WhisperAttention: Module {
         let vh = heads(v, Tk)
         var qk = MLX.matmul(qh, kh.transposed(0, 1, 3, 2))  // [B,H,Tq,Tk]
         if let mask { qk = qk + mask }
+        // Capture the pre-softmax cross-attention scores for word-time
+        // alignment (M26.2). Cross only, opt-in via `crossQK`.
+        if isCross, let crossQK { crossQK.perLayer[layer] = qk }
         let w = MLX.softmax(qk, axis: -1)
         let o = MLX.matmul(w, vh)  // [B,H,Tq,Dh]
             .transposed(0, 2, 1, 3).reshaped([B, Tq, D])
@@ -150,7 +167,8 @@ final class WhisperBlock: Module {
 
     func callAsFunction(
         _ x: MLXArray, xa: MLXArray? = nil, mask: MLXArray? = nil,
-        cache: WhisperKVCache? = nil, layer: Int = 0
+        cache: WhisperKVCache? = nil, layer: Int = 0,
+        crossQK: WhisperCrossQK? = nil
     ) -> MLXArray {
         var x =
             x
@@ -162,7 +180,8 @@ final class WhisperBlock: Module {
                 x
                 + crossAttn(
                     crossAttnLN(x), xa: xa,
-                    slot: cache?.crossSlots[layer], isCross: true)
+                    slot: cache?.crossSlots[layer], isCross: true,
+                    crossQK: crossQK, layer: layer)
         }
         x = x + mlp2(gelu(mlp1(mlpLN(x))))
         return x
@@ -228,7 +247,7 @@ final class WhisperTextDecoder: Module {
     /// token 0 (KV-cache decoding lands in M4.2c). → logits [B,T,vocab].
     func callAsFunction(
         _ tokens: MLXArray, audio: MLXArray, offset: Int = 0,
-        cache: WhisperKVCache? = nil
+        cache: WhisperKVCache? = nil, crossQK: WhisperCrossQK? = nil
     ) -> MLXArray {
         let T = tokens.dim(1)
         var x =
@@ -246,7 +265,9 @@ final class WhisperTextDecoder: Module {
             mask = nil
         }
         for (i, b) in blocks.enumerated() {
-            x = b(x, xa: audio, mask: mask, cache: cache, layer: i)
+            x = b(
+                x, xa: audio, mask: mask, cache: cache, layer: i,
+                crossQK: crossQK)
         }
         x = ln(x)
         return MLX.matmul(x, tokenEmbedding.weight.transposed(1, 0))
@@ -257,6 +278,10 @@ public final class WhisperModel: Module {
     @ModuleInfo(key: "encoder") var encoder: WhisperAudioEncoder
     @ModuleInfo(key: "decoder") var decoder: WhisperTextDecoder
     public let config: WhisperConfig
+    /// `(decoder layer, head)` pairs the checkpoint flags as good for
+    /// word-time alignment (the dropped `alignment_heads` tensor, now
+    /// loaded — M26.2). Empty ⇒ word alignment falls back to all heads.
+    public var alignmentHeads: [(layer: Int, head: Int)] = []
 
     public init(_ config: WhisperConfig) {
         self.config = config
@@ -270,10 +295,14 @@ public final class WhisperModel: Module {
     /// `tokens` [B,T] + audio features → logits [B,T,vocab]. `cache`
     /// (+`offset`) enables incremental KV-cached decoding; nil keeps the
     /// full-sequence path (unchanged for existing callers/tests).
+    /// `crossQK` (opt-in) captures per-layer cross-attention scores for
+    /// the word-time alignment pass; nil leaves the decode path intact.
     public func logits(
         _ tokens: MLXArray, audio: MLXArray, offset: Int = 0,
-        cache: WhisperKVCache? = nil
+        cache: WhisperKVCache? = nil, crossQK: WhisperCrossQK? = nil
     ) -> MLXArray {
-        decoder(tokens, audio: audio, offset: offset, cache: cache)
+        decoder(
+            tokens, audio: audio, offset: offset, cache: cache,
+            crossQK: crossQK)
     }
 }

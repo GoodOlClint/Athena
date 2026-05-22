@@ -103,6 +103,15 @@ struct MultipartForm {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
     }
 
+    /// All values supplied for a (possibly repeated) field, e.g.
+    /// `timestamp_granularities[]`.
+    func texts(_ name: String) -> [String] {
+        parts.filter { $0.name == name }.compactMap {
+            String(data: $0.data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
     /// Parse the boundary token out of a Content-Type header value.
     static func boundary(fromContentType ct: String) -> String? {
         for token in ct.split(separator: ";") {

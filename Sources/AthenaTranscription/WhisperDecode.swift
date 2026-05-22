@@ -131,7 +131,7 @@ public enum WhisperDecode {
         langTok: Int, maxTokens: Int
     ) -> (
         text: String, segments: [TranscriptionSegment],
-        contentTokens: [Int]
+        contentTokens: [Int], segmentRanges: [Range<Int>]
     ) {
         let prefix = [sot, langTok, transcribe]
         var generated: [Int] = []
@@ -167,7 +167,11 @@ public enum WhisperDecode {
         let parsed = parseSegments(
             generated: generated, logprobs: genLogprobs)
         var segments: [TranscriptionSegment] = []
+        var segmentRanges: [Range<Int>] = []
+        var cursor = 0  // running index into the content-token stream
         for p in parsed {
+            let range = cursor ..< (cursor + p.tokens.count)
+            cursor += p.tokens.count
             let t = tokenizer.decode(
                 tokenIds: p.tokens, skipSpecialTokens: true
             ).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -176,12 +180,13 @@ public enum WhisperDecode {
                 TranscriptionSegment(
                     start: p.start, end: p.end, text: t,
                     avgLogprob: p.avgLogprob))
+            segmentRanges.append(range)
         }
 
         let text = segments.map(\.text).joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let contentTokens = generated.filter { $0 < eot }
-        return (text, segments, contentTokens)
+        return (text, segments, contentTokens, segmentRanges)
     }
 
     /// Transcribe full-length PCM (mono 16 kHz) → text + globally-timed
@@ -193,7 +198,8 @@ public enum WhisperDecode {
         pcm: [Float],
         tokenizer: any MLXLMCommon.Tokenizer,
         language: String? = nil,
-        maxTokens: Int = 224
+        maxTokens: Int = 224,
+        wordTimestamps: Bool = false
     ) -> TranscriptionResult {
         let n = LogMel.nSamples
         let windows: [[Float]] =
@@ -204,6 +210,8 @@ public enum WhisperDecode {
             }
         var langTok: Int?
         var allSegments: [TranscriptionSegment] = []
+        var allWords: [WordTiming] = []
+        var segWords: [[WordTiming]] = []  // parallel to allSegments
         var parts: [String] = []
         for (i, w) in windows.enumerated() {
             let audio = model.embedAudio(LogMel.logMel(w))
@@ -212,23 +220,66 @@ public enum WhisperDecode {
                 langTok
                 ?? resolveLang(language, model: model, audio: audio)
             langTok = lt
-            let (text, segs, _) = decodeWindow(
+            let (text, segs, contentTokens, segmentRanges) = decodeWindow(
                 model: model, audio: audio, tokenizer: tokenizer,
                 langTok: lt, maxTokens: maxTokens)
             let off = Double(i) * windowSeconds
+            let base = allSegments.count
             allSegments.append(
                 contentsOf: segs.map {
                     TranscriptionSegment(
                         start: $0.start + off, end: $0.end + off,
                         text: $0.text, avgLogprob: $0.avgLogprob)
                 })
+            segWords.append(contentsOf: segs.map { _ in [WordTiming]() })
+            if wordTimestamps {
+                let validFrames = min(
+                    LogMel.nFrames / 2,
+                    Int(
+                        Double(w.count) / Double(LogMel.sampleRate)
+                            * WhisperWordAlign.framesPerSecond))
+                let aligned = WhisperWordAlign.align(
+                    model: model, audio: audio, tokenizer: tokenizer,
+                    contentTokens: contentTokens, langTok: lt,
+                    validFrames: validFrames)
+                for (word, range) in aligned {
+                    var gw = WordTiming(
+                        word: word.word, start: word.start + off,
+                        end: word.end + off, probability: word.probability)
+                    // Attach to the segment whose content tokens own this
+                    // word's first token — textually exact, not by time —
+                    // and clamp the timing into that segment so a word
+                    // never spans the inter-segment pause.
+                    if let li = segmentRanges.firstIndex(where: {
+                        $0.contains(range.lowerBound)
+                    }) {
+                        let seg = allSegments[base + li]
+                        let cs = min(max(gw.start, seg.start), seg.end)
+                        let ce = min(max(gw.end, cs), seg.end)
+                        gw = WordTiming(
+                            word: gw.word, start: cs, end: ce,
+                            probability: gw.probability)
+                        segWords[base + li].append(gw)
+                    }
+                    allWords.append(gw)
+                }
+            }
             if !text.isEmpty { parts.append(text) }
         }
+        let finalSegments =
+            wordTimestamps
+            ? allSegments.enumerated().map { i, s in
+                TranscriptionSegment(
+                    start: s.start, end: s.end, text: s.text,
+                    avgLogprob: s.avgLogprob,
+                    words: segWords[i].isEmpty ? nil : segWords[i])
+            }
+            : allSegments
         return TranscriptionResult(
             text: parts.joined(separator: " "),
             language: languageCode(forToken: langTok ?? langBase),
             duration: Double(pcm.count) / Double(LogMel.sampleRate),
-            segments: allSegments)
+            segments: finalSegments, words: allWords)
     }
 
     /// Text-only convenience (PCM). Back-compat for callers/tests.

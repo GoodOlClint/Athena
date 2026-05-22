@@ -53,7 +53,8 @@ public actor MLXTranscriptionModule: TranscriptionModule {
     }
 
     public func transcribe(
-        audio: Data, filename: String?, language: String?
+        audio: Data, filename: String?, language: String?,
+        wordTimestamps: Bool
     ) async throws -> TranscriptionResult {
         guard let model, let tokenizer else {
             throw AthenaError.moduleLoadFailed(
@@ -76,6 +77,6 @@ public actor MLXTranscriptionModule: TranscriptionModule {
         // carries timed segments for verbose_json/srt/vtt.
         return WhisperDecode.transcribeResult(
             model: model, pcm: pcm, tokenizer: tokenizer,
-            language: language)
+            language: language, wordTimestamps: wordTimestamps)
     }
 }

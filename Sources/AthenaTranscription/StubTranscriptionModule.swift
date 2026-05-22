@@ -6,8 +6,11 @@ import Foundation
 public protocol TranscriptionModule: InferenceModule {
     /// Transcribe `audio` (raw uploaded file bytes; `filename` hints the
     /// container). `language` is an ISO code (nil/"auto" ⇒ detect).
+    /// `wordTimestamps` adds cross-attention DTW word alignment (M26.2)
+    /// — only requested for the `verbose_json` response.
     func transcribe(
-        audio: Data, filename: String?, language: String?
+        audio: Data, filename: String?, language: String?,
+        wordTimestamps: Bool
     ) async throws -> TranscriptionResult
 }
 
@@ -30,15 +33,24 @@ public actor StubTranscriptionModule: TranscriptionModule {
     public func unload() async { loaded = false }
 
     public func transcribe(
-        audio: Data, filename: String?, language: String?
+        audio: Data, filename: String?, language: String?,
+        wordTimestamps: Bool
     ) async throws -> TranscriptionResult {
-        TranscriptionResult(
+        let words =
+            wordTimestamps
+            ? [
+                WordTiming(
+                    word: "[stub]", start: 0, end: 0, probability: 1)
+            ] : []
+        return TranscriptionResult(
             text: "[athena stub transcription]",
             language: language ?? "en", duration: 0,
             segments: [
                 TranscriptionSegment(
                     start: 0, end: 0,
-                    text: "[athena stub transcription]")
-            ])
+                    text: "[athena stub transcription]",
+                    words: wordTimestamps ? words : nil)
+            ],
+            words: words)
     }
 }

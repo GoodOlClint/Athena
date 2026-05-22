@@ -103,6 +103,64 @@ final class WhisperChunkingIntegrationTests: XCTestCase {
     }
 }
 
+/// M26.2 — cross-attention DTW word timestamps on a real ICSI meeting
+/// clip. Validates the acceptance contract: words exist, are globally
+/// monotonic, fall within the audio, and each segment's attached words
+/// lie within that segment's bounds. Heavy + gated; skips if the sample
+/// clip is absent.
+final class WhisperWordTimestampIntegrationTests: XCTestCase {
+
+    func testWordTimesAreMonotonicAndWithinBounds() async throws {
+        guard
+            ProcessInfo.processInfo.environment["ATHENA_RUN_MODEL_TESTS"]
+                == "1"
+        else { throw XCTSkip("set ATHENA_RUN_MODEL_TESTS=1 (heavy)") }
+        let clip = URL(fileURLWithPath: "/tmp/audio/clip60.wav")
+        guard FileManager.default.fileExists(atPath: clip.path) else {
+            throw XCTSkip("sample clip /tmp/audio/clip60.wav not present")
+        }
+
+        let pcm = try AudioDecode.pcm16kMono(from: clip)
+        let duration = Double(pcm.count) / Double(LogMel.sampleRate)
+        let model = try await WhisperLoader.load()
+        let tokenizer = try await WhisperLoader.loadTokenizer()
+        // Confirm the dropped alignment table is now loaded.
+        XCTAssertFalse(
+            model.alignmentHeads.isEmpty, "alignment_heads not loaded")
+
+        let result = WhisperDecode.transcribeResult(
+            model: model, pcm: pcm, tokenizer: tokenizer,
+            language: "en", wordTimestamps: true)
+
+        XCTAssertFalse(result.words.isEmpty, "no words aligned")
+        let eps = 0.05
+        var prev = -1.0
+        for w in result.words {
+            XCTAssertLessThanOrEqual(w.start, w.end, "word \(w.word)")
+            XCTAssertGreaterThanOrEqual(w.start, -eps, "word \(w.word)")
+            XCTAssertLessThanOrEqual(
+                w.end, duration + 1.0, "word \(w.word) past end")
+            XCTAssertGreaterThanOrEqual(
+                w.start, prev - eps, "non-monotonic at \(w.word)")
+            prev = w.start
+            XCTAssertGreaterThanOrEqual(w.probability, 0)
+            XCTAssertLessThanOrEqual(w.probability, 1.0001)
+        }
+        // Each segment's words are clamped into that segment, so they
+        // sit within its bounds (± float tolerance).
+        let tol = 0.05
+        for seg in result.segments {
+            for w in seg.words ?? [] {
+                XCTAssertGreaterThanOrEqual(
+                    w.start, seg.start - tol,
+                    "word '\(w.word)' before seg")
+                XCTAssertLessThanOrEqual(
+                    w.end, seg.end + tol, "word '\(w.word)' after seg")
+            }
+        }
+    }
+}
+
 final class WhisperLoadIntegrationTests: XCTestCase {
 
     func testLoadsAndRunsEncoderDecoder() async throws {

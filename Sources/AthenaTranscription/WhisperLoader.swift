@@ -55,13 +55,30 @@ public enum WhisperLoader {
         else { throw LoadError.missingFile("weights.safetensors") }
 
         var weights = try MLX.loadArrays(url: weightsURL)
-        // Non-parameter tensors (word-timestamp alignment table).
-        weights.removeValue(forKey: "alignment_heads")
+        // `alignment_heads` is a non-parameter `[k, 2]` Int table of the
+        // (decoder layer, head) pairs flagged for word-time alignment
+        // (M26.2). Pull it out before the parameter update, then parse.
+        let alignmentArray = weights.removeValue(forKey: "alignment_heads")
 
         let model = WhisperModel(config)
         try model.update(
             parameters: ModuleParameters.unflattened(weights),
             verify: .none)
+        if let alignmentArray, alignmentArray.ndim == 2,
+            alignmentArray.dim(1) == 2
+        {
+            let flat = alignmentArray.asType(.int32).asArray(Int32.self)
+            var pairs: [(layer: Int, head: Int)] = []
+            for r in 0 ..< alignmentArray.dim(0) {
+                let l = Int(flat[r * 2]), h = Int(flat[r * 2 + 1])
+                if l >= 0, l < config.n_text_layer,
+                    h >= 0, h < config.n_text_head
+                {
+                    pairs.append((l, h))
+                }
+            }
+            model.alignmentHeads = pairs
+        }
         eval(model)
         return model
     }

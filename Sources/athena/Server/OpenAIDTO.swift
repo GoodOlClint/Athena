@@ -221,6 +221,14 @@ struct TranscriptionResponse: Codable {
     let text: String
 }
 
+/// One word with DTW-aligned timing (M26.2). OpenAI `word` shape.
+struct WordTimestamp: Codable {
+    let word: String
+    let start: Double
+    let end: Double
+    let probability: Double
+}
+
 struct VerboseSegment: Codable {
     let id: Int
     let start: Double
@@ -232,6 +240,9 @@ struct VerboseSegment: Codable {
     /// Speaker id (M4.3c) — present only when the request opted into
     /// diarization (`diarize=true`); omitted otherwise.
     let speaker: Int?
+    /// Words within this span (M26.2) — present only when word
+    /// timestamps were requested.
+    let words: [WordTimestamp]?
 }
 
 /// OpenAI `response_format: "verbose_json"` shape.
@@ -241,6 +252,9 @@ struct VerboseTranscriptionResponse: Codable {
     let duration: Double
     let text: String
     let segments: [VerboseSegment]
+    /// All aligned words (M26.2) — present only when word timestamps
+    /// were requested (`timestamp_granularities[]=word`).
+    let words: [WordTimestamp]?
 }
 
 // MARK: - /v1/audio/diarizations (M4.3c, standalone)

@@ -679,11 +679,19 @@ struct AthenaServer {
                 type: "server_error", code: "internal_error")
         }
 
+        // Word timestamps are an opt-in of verbose_json only
+        // (`timestamp_granularities[]=word`); every other format is
+        // byte-unchanged and never triggers the alignment pass.
+        let wantWords =
+            form.text("response_format") == "verbose_json"
+            && form.texts("timestamp_granularities[]").contains("word")
+
         let result: TranscriptionResult
         do {
             result = try await transcription.transcribe(
                 audio: file.data, filename: file.filename,
-                language: form.text("language"))
+                language: form.text("language"),
+                wordTimestamps: wantWords)
         } catch {
             return Self.classified(error, module: .transcription)
         }
@@ -723,6 +731,14 @@ struct AthenaServer {
                     return Self.classified(error, module: .diarization)
                 }
             }
+            func words(_ ws: [WordTiming]?) -> [WordTimestamp]? {
+                guard let ws else { return nil }
+                return ws.map {
+                    WordTimestamp(
+                        word: $0.word, start: $0.start, end: $0.end,
+                        probability: $0.probability)
+                }
+            }
             return Self.json(
                 VerboseTranscriptionResponse(
                     task: "transcribe", language: result.language,
@@ -736,8 +752,10 @@ struct AthenaServer {
                                 ? nil
                                 : Self.speaker(
                                     start: $0.element.start,
-                                    end: $0.element.end, turns: turns))
-                    }))
+                                    end: $0.element.end, turns: turns),
+                            words: words($0.element.words))
+                    },
+                    words: wantWords ? words(result.words) : nil))
         default:  // "json" / nil
             return Self.json(TranscriptionResponse(text: result.text))
         }
