@@ -207,6 +207,24 @@ struct CreateTokenResponse: Codable {
     let hash_prefix: String
 }
 
+// MARK: - /api/usage (M27.3 — per-principal token metering, pull-only)
+
+/// One principal's cumulative usage. `updated` is epoch seconds of the
+/// last metered request.
+struct UsageEntryDTO: Codable {
+    let principal: String
+    let requests: Int
+    let prompt_tokens: Int
+    let completion_tokens: Int
+    let total_tokens: Int
+    let updated: Double
+}
+
+/// `GET /api/usage` — own usage for a member; all principals for an
+/// admin (owner-scoped like the queue). Always an array so the CLI
+/// renders one table shape.
+struct UsageReportResponse: Codable { let usage: [UsageEntryDTO] }
+
 /// Generic mutation acknowledgements.
 struct OkResponse: Codable { let ok: Bool }
 struct UserRemovedResponse: Codable {

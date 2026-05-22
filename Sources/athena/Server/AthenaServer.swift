@@ -328,6 +328,14 @@ struct AthenaServer {
             await adminStatus()
         }
 
+        // Per-principal token usage (M27.3). Inference-tier (any
+        // authenticated caller sees its OWN usage); an admin sees every
+        // principal — owner-scoped like the queue. Pull only — the
+        // passive oracle never pushes usage out.
+        router.get("/api/usage") { request, _ -> Response in
+            await handleUsage(request)
+        }
+
         // Model store (M16.2). Literal sub-paths are registered
         // BEFORE `:name` so Hummingbird's trie (sibling match in
         // registration order) resolves them first; `default`/`copy`
@@ -1242,6 +1250,33 @@ struct AthenaServer {
             principal: principal ?? Self.xenos,
             promptTokens: usage.promptTokens,
             completionTokens: usage.completionTokens)
+    }
+
+    /// `GET /api/usage` (M27.3). An admin (or the single-tenant
+    /// loopback operator when auth is off) sees every principal's
+    /// counters; any other authenticated caller sees only its own row.
+    private func handleUsage(_ request: Request) async -> Response {
+        let who = await queuePrincipal(request)
+        let rows: [UsageRow]
+        if !who.enforced || who.isAdmin {
+            rows = await store.allUsage()
+        } else if let p = who.principal, let r = await store.usage(
+            principal: p)
+        {
+            rows = [r]
+        } else {
+            rows = []
+        }
+        return Self.json(
+            UsageReportResponse(
+                usage: rows.map {
+                    UsageEntryDTO(
+                        principal: $0.principal, requests: $0.requests,
+                        prompt_tokens: $0.promptTokens,
+                        completion_tokens: $0.completionTokens,
+                        total_tokens: $0.totalTokens,
+                        updated: $0.updated)
+                }))
     }
 
     /// May this caller see/act on `job`? Open when auth is off;

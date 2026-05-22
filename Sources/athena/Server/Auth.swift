@@ -283,6 +283,10 @@ enum AuthPolicy {
         if path == "/api/admin" || path.hasPrefix("/api/admin/") {
             return .daemonAdmin
         }
+        // Usage is inference-tier: any authenticated caller sees its OWN
+        // counters (handler owner-scopes); an admin sees all. Billing-
+        // sensitive, so NOT exposed to the read-only role (M27.3).
+        if path == "/api/usage" { return .inference }
         if path == "/api/models" || path.hasPrefix("/api/models/") {
             return mutating ? .modelWrite : .modelRead
         }

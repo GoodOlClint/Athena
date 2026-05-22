@@ -454,6 +454,32 @@ NROWS="$(sqlite3 "$DB" 'SELECT COUNT(*) FROM usage_counters;')"
   || bad "usage_counters has <2 rows ($NROWS)"
 
 echo
+echo "== phase 2.11: GET /api/usage owner-scoping + CLI (M27.3) =="
+# A member sees only its OWN principal row; an admin sees all;
+# readonly is refused (usage is billing-sensitive).
+AU="$(curl -s -H "Authorization: Bearer $ALICE_TOK" \
+  "http://127.0.0.1:$PORT/api/usage")"
+echo "$AU" | grep -q '"u:alice"' \
+  && ok "member sees its own usage row" \
+  || bad "member missing own usage row ($AU)"
+echo "$AU" | grep -q '"u:bob"' \
+  && bad "member LEAKED another principal's row ($AU)" \
+  || ok "member does not see other principals"
+ADU="$(curl -s -H "Authorization: Bearer $ADMIN_TOK" \
+  "http://127.0.0.1:$PORT/api/usage")"
+{ echo "$ADU" | grep -q '"u:alice"' \
+    && echo "$ADU" | grep -q '"u:bob"'; } \
+  && ok "admin sees all principals (alice + bob)" \
+  || bad "admin usage missing principals ($ADU)"
+code 403 GET /api/usage "$RO_TOK"     # readonly ∌ inference
+code 401 GET /api/usage ""            # no token
+# Local CLI overload: a loopback --host reads the store directly.
+LU="$("$ATHENA" usage --data-dir "$D" 2>/dev/null)"
+echo "$LU" | grep -q 'u:alice' \
+  && ok "athena usage (local) renders the store" \
+  || bad "athena usage local missing u:alice ($LU)"
+
+echo
 echo "== phase 3: scoped-token downgrade =="
 # boss is an admin USER, but BOSS_SCOPED narrows to member.
 code 403 GET  /metrics "$BOSS_SCOPED"                   # member perms only

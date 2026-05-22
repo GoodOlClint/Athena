@@ -31,8 +31,9 @@ private let cliGrantorPermissions = Set(Permission.allCases)
 
 /// The daemon's SQLite path: configured `data_dir` (or ~/.athena) +
 /// athena.sqlite. Works OFFLINE so the first admin can be created
-/// before the auth-protected daemon exists.
-private func storeDBPath(_ override: String? = nil) -> URL {
+/// before the auth-protected daemon exists. (Module-internal so the
+/// `usage` command's local path reuses it — M27.3.)
+func storeDBPath(_ override: String? = nil) -> URL {
     let dir: URL
     if let override, !override.isEmpty {
         dir = URL(
