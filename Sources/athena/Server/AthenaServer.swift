@@ -1208,12 +1208,19 @@ struct AthenaServer {
     ) async -> (result: Data?, error: String?) {
         switch kind {
         case "conversation":
+            // M24.2: decode the OpenAI `ChatCompletionRequest` (a superset
+            // of the native chat body — a `{messages}` job still decodes)
+            // so the queued path honors `response_format`/`tools` the SAME
+            // way the sync `/v1/chat/completions` handler does. Without
+            // this, queued generation ran unconstrained and structured
+            // jobs came back as free text.
             guard
                 let req = try? JSONDecoder().decode(
-                    AthenaChatRequest.self, from: request)
+                    ChatCompletionRequest.self, from: request)
             else { return (nil, "invalid conversation body") }
-            let turns = req.messages.map {
-                ChatTurn(role: $0.role, content: $0.content)
+            let turns = req.messages.compactMap { m -> ChatTurn? in
+                guard let c = m.content else { return nil }
+                return ChatTurn(role: m.role, content: c)
             }
             do {
                 try await governor.ensureLoaded(.llm)
@@ -1223,9 +1230,11 @@ struct AthenaServer {
             } catch {
                 return (nil, String(describing: error))
             }
+            let effective = req.effectiveSchema()
             var text = ""
             for await c in llm.generate(
-                messages: turns, schemaJSON: nil, tools: nil)
+                messages: turns, schemaJSON: effective?.json,
+                tools: req.toolSpecs())
             {
                 text += c
             }
