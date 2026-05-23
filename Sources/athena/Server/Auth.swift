@@ -258,7 +258,8 @@ enum AuthStartupError: Error, CustomStringConvertible {
 }
 
 /// The permission a route requires, or nil = open (no auth).
-/// `/healthz` + `/ui/login` + `/ui/logout` are always open. Every
+/// `/healthz` + `/openapi.json` + `/ui/login` + `/ui/logout` are always
+/// open (discovery + login). Every
 /// other route maps to exactly one `Permission`; an unlisted route
 /// fails closed to `.inference` (the minimum authenticated
 /// capability). Per-owner queue isolation is still enforced in the
@@ -267,8 +268,8 @@ enum AuthPolicy {
     static func required(method: String, path: String)
         -> Permission?
     {
-        if path == "/healthz" || path == "/ui/login"
-            || path == "/ui/logout"
+        if path == "/healthz" || path == "/openapi.json"
+            || path == "/ui/login" || path == "/ui/logout"
         {
             return nil
         }

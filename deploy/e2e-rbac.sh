@@ -589,6 +589,25 @@ SA="$(usagecol 'u:alice' requests)"
   || bad "streamed request not metered ($SB → $SA)"
 
 echo
+echo "== phase 2.13: OpenAPI spec discovery /openapi.json (M32.1) =="
+# Served unauthenticated (discovery), even while RBAC is enabled, with the
+# running daemon's version stamped into info.version.
+code 200 GET /openapi.json ""                            # public, no token
+SPEC="$(curl -s "http://127.0.0.1:$PORT/openapi.json")"
+echo "$SPEC" | grep -q '"openapi": "3.0.3"' \
+  && ok "openapi 3.0.3 document" || bad "not an openapi 3.0.3 doc"
+VER="$("$ATHENA" --version)"
+echo "$SPEC" | grep -q "\"version\": \"$VER\"" \
+  && ok "info.version matches binary ($VER)" \
+  || bad "info.version != binary version $VER"
+echo "$SPEC" | grep -q '"bearerAuth"' \
+  && ok "bearerAuth security scheme present" || bad "no bearerAuth scheme"
+echo "$SPEC" | grep -q '"/v1/chat/completions"' \
+  && ok "documents /v1/chat/completions" || bad "missing chat path"
+echo "$SPEC" | grep -q '"error"' \
+  && ok "documents the error envelope" || bad "missing error shape"
+
+echo
 echo "== phase 3: scoped-token downgrade =="
 # boss is an admin USER, but BOSS_SCOPED narrows to member.
 code 403 GET  /metrics "$BOSS_SCOPED"                   # member perms only

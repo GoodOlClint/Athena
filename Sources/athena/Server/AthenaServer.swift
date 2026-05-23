@@ -111,6 +111,13 @@ struct AthenaServer {
             Self.json(await metrics.snapshot())
         }
 
+        // Machine-readable API description (M32.1) — always open, like
+        // /healthz, so the appliance can describe itself. Hand-authored
+        // OpenAPI 3.0.3 with the running daemon's version stamped in.
+        router.get("/openapi.json") { _, _ -> Response in
+            Self.jsonString(OpenAPISpec.json(version: Athena.appVersion))
+        }
+
         // Monitoring dashboard (M11.2) — inbound-only.
         router.get("/ui") { request, _ -> Response in
             await handleUIDashboard(request)
@@ -3117,6 +3124,20 @@ struct AthenaServer {
             (try? JSONEncoder().encode(value)) ?? Data("{}".utf8)
         var buffer = ByteBuffer()
         buffer.writeBytes(data)
+        var headers = HTTPFields()
+        headers[.contentType] = "application/json"
+        return Response(
+            status: status, headers: headers,
+            body: ResponseBody(byteBuffer: buffer))
+    }
+
+    /// Serve a pre-rendered JSON string verbatim (the embedded OpenAPI
+    /// document, M32.1) — no re-encode of an already-formed document.
+    static func jsonString(
+        _ s: String, status: HTTPResponse.Status = .ok
+    ) -> Response {
+        var buffer = ByteBuffer()
+        buffer.writeBytes(Data(s.utf8))
         var headers = HTTPFields()
         headers[.contentType] = "application/json"
         return Response(
