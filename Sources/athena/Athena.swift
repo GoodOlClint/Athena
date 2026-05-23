@@ -16,7 +16,7 @@ struct Athena: AsyncParsableCommand {
         commandName: "athena",
         abstract:
             "Project the platform inference appliance (passive oracle).",
-        version: "0.10.5",
+        version: "0.10.6",
         subcommands: [
             Load.self, Init.self, Install.self, ListModels.self, Ps.self,
             Run.self, Pull.self, Convert.self, Verify.self,

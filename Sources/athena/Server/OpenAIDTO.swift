@@ -185,6 +185,24 @@ struct APIErrorBody: Codable {
     let error: ErrorDetail
 }
 
+// MARK: - /v1/models (M31.1 — OpenAI list/retrieve)
+
+/// One model in the OpenAI `model` shape. `created` is the store entry's
+/// mtime as a unix epoch; `owned_by` is the appliance itself (the
+/// goddess — never another tool's value). Backed by the same
+/// `ModelStoreOps` the native `/api/models` reads.
+struct OpenAIModel: Codable {
+    let id: String
+    let object: String  // "model"
+    let created: Int
+    let owned_by: String
+}
+
+struct OpenAIModelList: Codable {
+    let object: String  // "list"
+    let data: [OpenAIModel]
+}
+
 // MARK: - /v1/embeddings
 
 /// `input` is a string or an array of strings (OpenAI also allows token

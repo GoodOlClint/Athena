@@ -280,6 +280,12 @@ enum AuthPolicy {
             return .daemonAdmin
         }
         if path.hasPrefix("/v1/store") { return .storeAdmin }
+        // OpenAI model discovery is a read-only store projection (M31.1),
+        // gated like the native `/api/models` reads — model.read, never
+        // the inference catch-all.
+        if path == "/v1/models" || path.hasPrefix("/v1/models/") {
+            return .modelRead
+        }
         if path == "/api/admin" || path.hasPrefix("/api/admin/") {
             return .daemonAdmin
         }

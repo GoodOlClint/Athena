@@ -291,6 +291,17 @@ struct AthenaServer {
             await handleChatCompletions(request)
         }
 
+        // OpenAI model discovery (M31.1). Read-only projection of the
+        // SAME model store the native `/api/models` serves, in the
+        // OpenAI list/retrieve shape so drop-in SDK/LiteLLM clients can
+        // probe. Gated `model.read` (AuthPolicy maps `/v1/models*`).
+        router.get("/v1/models") { _, _ -> Response in
+            handleOpenAIModelsList()
+        }
+        router.get("/v1/models/:id") { _, context -> Response in
+            handleOpenAIModelRetrieve(context.parameters.get("id"))
+        }
+
         router.post("/v1/embeddings") { request, _ -> Response in
             await handleEmbeddings(request)
         }
@@ -1969,6 +1980,47 @@ struct AthenaServer {
                             name: $0.name, bytes: $0.bytes,
                             modified: Self.iso($0.modified))
                     }))
+    }
+
+    /// `GET /v1/models` (M31.1) — OpenAI list shape over the model store.
+    private func handleOpenAIModelsList() -> Response {
+        Self.json(
+            OpenAIModelList(
+                object: "list",
+                data: ModelStoreOps.list(root: modelStoreRoot)
+                    .map { Self.openAIModel($0.name, $0.modified) }))
+    }
+
+    /// `GET /v1/models/:id` (M31.1) — OpenAI retrieve shape; 404 in the
+    /// OpenAI error envelope when the model is not in the store.
+    private func handleOpenAIModelRetrieve(_ id: String?) -> Response {
+        guard let name = Self.safeModelName(id) else {
+            return Self.error(
+                status: .badRequest, message: "invalid model name",
+                type: "invalid_request_error", code: "invalid_name")
+        }
+        guard
+            let d = ModelStoreOps.show(root: modelStoreRoot, name: name)
+        else {
+            return Self.error(
+                status: .notFound, message: "no model '\(name)'",
+                type: "invalid_request_error", code: "not_found")
+        }
+        // `show` does not carry mtime; read it back from `list` (cheap —
+        // a directory scan) so `created` matches the list projection.
+        let created =
+            ModelStoreOps.list(root: modelStoreRoot)
+            .first { $0.name == d.name }?.modified ?? Date()
+        return Self.json(Self.openAIModel(d.name, created))
+    }
+
+    private static func openAIModel(_ name: String, _ modified: Date)
+        -> OpenAIModel
+    {
+        OpenAIModel(
+            id: name, object: "model",
+            created: Int(modified.timeIntervalSince1970),
+            owned_by: "athena")
     }
 
     private func handleModelShow(_ name: String?) -> Response {

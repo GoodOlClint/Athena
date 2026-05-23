@@ -579,6 +579,37 @@ echo "$ML" | grep -q '"fake-model"' \
   || bad "model list missing fake-model ($ML)"
 
 echo
+echo "== phase 3.65: OpenAI model discovery /v1/models (M31.1) =="
+# Read-only store projection in the OpenAI list/retrieve shape; gated
+# model.read (same as the native /api/models reads), NOT the inference
+# catch-all — so a member with inference but ∌ model.read is 403.
+code 401 GET /v1/models             ""            # no token
+code 200 GET /v1/models             "$ADMIN_TOK"
+code 200 GET /v1/models             "$RO_TOK"     # readonly ∋ model.read
+code 403 GET /v1/models             "$ALICE_TOK"  # member ∌ model.read
+code 200 GET /v1/models/fake-model  "$RO_TOK"
+code 404 GET /v1/models/nope        "$RO_TOK"
+code 400 GET /v1/models/bad~name    "$RO_TOK"     # name guard
+# list payload shape: OpenAI envelope + the seeded model + athena owner
+OML="$(curl -s -H "Authorization: Bearer $ADMIN_TOK" \
+  "http://127.0.0.1:$PORT/v1/models")"
+echo "$OML" | grep -q '"object":"list"' \
+  && ok "/v1/models is an OpenAI list" \
+  || bad "/v1/models not a list ($OML)"
+echo "$OML" | grep -q '"owned_by":"athena"' \
+  && ok "/v1/models owned_by athena" \
+  || bad "/v1/models missing owned_by athena ($OML)"
+echo "$OML" | grep -q '"id":"fake-model"' \
+  && ok "/v1/models carries the seeded model id" \
+  || bad "/v1/models missing fake-model id ($OML)"
+# retrieve payload shape: a single OpenAI model object
+ORET="$(curl -s -H "Authorization: Bearer $RO_TOK" \
+  "http://127.0.0.1:$PORT/v1/models/fake-model")"
+echo "$ORET" | grep -q '"object":"model"' \
+  && ok "/v1/models/:id is an OpenAI model object" \
+  || bad "/v1/models/:id wrong object ($ORET)"
+
+echo
 echo "== phase 3.7: async model ops via queue (M16.3) =="
 # perm: model.write only; AuthMiddleware blocks before any enqueue.
 code 403 POST /api/models/pull   "$ALICE_TOK" '{"id":"x/y"}'
