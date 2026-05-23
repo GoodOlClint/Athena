@@ -24,6 +24,17 @@ struct Init: AsyncParsableCommand {
     @Option(help: "Model store root. Default: ~/.athena/models.")
     var modelStore: String?
 
+    @Option(
+        name: .customLong("embedding-model"),
+        help: """
+            Embedding model HF id(s) to pull. Repeatable: pass it once per \
+            model you intend to make selectable at `load` (matching its \
+            --embedding-model set), so per-request model selection works \
+            without a first-use download. Default BAAI/bge-small-en-v1.5.
+            """
+    )
+    var embeddingModels: [String] = [Load.defaultEmbeddingModel]
+
     func run() async throws {
         let root =
             modelStore.map {
@@ -31,12 +42,13 @@ struct Init: AsyncParsableCommand {
             } ?? ModelStore.defaultRoot
 
         // Source the ids from `load`'s defaults — one source of truth.
-        let aux: [(role: String, id: String)] = [
-            ("embeddings", Load.defaultEmbeddingModel),
-            ("transcription", Load.defaultTranscriptionModel),
-            ("diarization", Load.defaultDiarizationModel),
-            ("speaker-embeddings", Load.defaultSpeakerEmbeddingModel),
-        ]
+        // Every declared embedding model is pulled (M39) so the whole
+        // selectable set is present before any request.
+        var aux: [(role: String, id: String)] =
+            embeddingModels.map { ("embeddings", $0) }
+        aux.append(("transcription", Load.defaultTranscriptionModel))
+        aux.append(("diarization", Load.defaultDiarizationModel))
+        aux.append(("speaker-embeddings", Load.defaultSpeakerEmbeddingModel))
 
         print(
             "athena init — pulling \(aux.count) default auxiliary models "

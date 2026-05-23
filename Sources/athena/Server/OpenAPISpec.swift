@@ -824,7 +824,7 @@ enum OpenAPISpec {
                 "type": "object",
                 "required": ["input"],
                 "properties": {
-                  "model": { "type": "string" },
+                  "model": { "type": "string", "description": "Selects among the embedding models the daemon was loaded with (--embedding-model, repeatable; first = default). Omit ⇒ the default. An id outside the configured set is rejected with 400 model_not_available — never a silent fallback or on-request download. The response `model` reports the model actually served." },
                   "input": { "oneOf": [ { "type": "string" }, { "type": "array", "items": { "type": "string" } } ] },
                   "encoding_format": { "type": "string" }
                 }
@@ -920,7 +920,7 @@ enum OpenAPISpec {
               "AthenaEmbedRequest": {
                 "type": "object",
                 "required": ["input"],
-                "properties": { "model": { "type": "string" }, "input": { "oneOf": [ { "type": "string" }, { "type": "array", "items": { "type": "string" } } ] } }
+                "properties": { "model": { "type": "string", "description": "Selects among the configured embedding set (see EmbeddingRequest.model). Omit ⇒ default; unknown id ⇒ 400 model_not_available. The response `model` is the model actually served." }, "input": { "oneOf": [ { "type": "string" }, { "type": "array", "items": { "type": "string" } } ] } }
               },
               "AthenaEmbedResponse": { "type": "object", "properties": { "model": { "type": "string" }, "embeddings": { "type": "array", "items": { "type": "array", "items": { "type": "number" } } } } },
               "AthenaStopResponse": { "type": "object", "properties": { "status": { "type": "string" }, "model": { "type": "string" } } },

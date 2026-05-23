@@ -419,8 +419,12 @@ struct QueueStatusResponse: Codable {
 
 /// Stored job results (encoded into the job row; surfaced under
 /// `result` on status). Conversation jobs store a full
-/// `ChatCompletionResponse` (M24.6); embeddings store this.
-struct QueuedEmbeddingResult: Codable { let embeddings: [[Float]] }
+/// `ChatCompletionResponse` (M24.6); embeddings store this. `model`
+/// (M39) is the embedding model actually served for the job.
+struct QueuedEmbeddingResult: Codable {
+    let model: String
+    let embeddings: [[Float]]
+}
 
 struct QueueJobSummary: Codable {
     let id: String

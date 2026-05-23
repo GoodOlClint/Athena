@@ -1334,8 +1334,8 @@ struct AthenaServer {
         }
         switch await governedEmbed([text], module: .textEmbedding) {
         case .fail(let r): return .fail(r)
-        case .ok(let vs):
-            return .ok(vs.first ?? [])
+        case .ok(let batch):
+            return .ok(batch.vectors.first ?? [])
         }
     }
 
@@ -1907,7 +1907,11 @@ struct AthenaServer {
             else { return (nil, "invalid embeddings body") }
             do {
                 try await governor.ensureLoaded(.textEmbedding)
-                let batch = try await embedding.embed(req.input, model: nil)
+                // M39: select per request; report the served model in the
+                // stored result (an unknown id fails the job, not a silent
+                // wrong-dimension fallback).
+                let batch = try await embedding.embed(
+                    req.input, model: req.model)
                 await meter(
                     principal: owner,
                     usage: TokenUsage(
@@ -1915,7 +1919,9 @@ struct AthenaServer {
                         completionTokens: 0))
                 return (
                     try? JSONEncoder().encode(
-                        QueuedEmbeddingResult(embeddings: batch.vectors)),
+                        QueuedEmbeddingResult(
+                            model: batch.model,
+                            embeddings: batch.vectors)),
                     nil
                 )
             } catch let e as AthenaError {
@@ -2114,10 +2120,13 @@ struct AthenaServer {
     }
 
     /// Governed embedding helper shared by `/api/embed`, `/v1/vectors`
-    /// text resolution, and the queued `embeddings` kind.
-    private func governedEmbed(_ inputs: [String], module: ModuleID)
-        async -> Outcome<[[Float]]>
-    {
+    /// text resolution, and the queued `embeddings` kind. Returns the
+    /// whole batch so callers can echo the model ACTUALLY served (M39).
+    /// `model` selects among the configured set (nil ⇒ default); an
+    /// unknown id surfaces as a classified 400 `model_not_available`.
+    private func governedEmbed(
+        _ inputs: [String], module: ModuleID, model: String? = nil
+    ) async -> Outcome<EmbeddingBatch> {
         do {
             try await governor.ensureLoaded(.textEmbedding)
         } catch let e as AthenaError {
@@ -2130,7 +2139,7 @@ struct AthenaServer {
             return .fail(Self.classified(error, module: module))
         }
         do {
-            return .ok(try await embedding.embed(inputs, model: nil).vectors)
+            return .ok(try await embedding.embed(inputs, model: model))
         } catch {
             return .fail(Self.classified(error, module: module))
         }
@@ -2149,12 +2158,17 @@ struct AthenaServer {
                 status: .badRequest, message: "'input' is required",
                 type: "invalid_request_error", code: "invalid_input")
         }
-        switch await governedEmbed(body.input, module: .textEmbedding) {
+        // M39: `body.model` selects among the configured embedding set;
+        // the response reports the model actually served (not the request
+        // echo). An unknown id ⇒ 400 model_not_available via governedEmbed.
+        switch await governedEmbed(
+            body.input, module: .textEmbedding, model: body.model)
+        {
         case .fail(let r): return r
-        case .ok(let v):
+        case .ok(let batch):
             return Self.json(
                 AthenaEmbedResponse(
-                    model: body.model ?? modelName, embeddings: v))
+                    model: batch.model, embeddings: batch.vectors))
         }
     }
 
