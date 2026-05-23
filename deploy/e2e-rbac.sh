@@ -608,6 +608,43 @@ echo "$SPEC" | grep -q '"error"' \
   && ok "documents the error envelope" || bad "missing error shape"
 
 echo
+echo "== phase 2.14: OpenAPI drift-guard — every route documented (M32.3) =="
+# Fetch the LIVE document, parse it, and assert every /v1, /api, and
+# operational route registered in AthenaServer is present (path + method)
+# — a new route cannot ship without a matching spec entry. Param segments
+# (:id) are normalized to OpenAPI templates ({id}); the /ui browser
+# console is intentionally out of the spec's scope and excluded.
+SPECF="$D/openapi.json"
+curl -s "http://127.0.0.1:$PORT/openapi.json" > "$SPECF"
+if python3 - "$SPECF" Sources/athena/Server/AthenaServer.swift <<'PY'
+import json, re, sys
+spec = json.load(open(sys.argv[1]))               # fetch + parse
+if spec.get("openapi") != "3.0.3":
+    print("not an openapi 3.0.3 document"); sys.exit(1)
+paths = spec.get("paths", {})
+src = open(sys.argv[2]).read()
+routes = re.findall(r'router\.(get|post|put|delete|patch)\("([^"]+)"', src)
+operational = {"/healthz", "/metrics", "/openapi.json"}
+HTTP = {"get", "post", "put", "delete", "patch"}
+def in_scope(p):
+    return p.startswith("/v1/") or p.startswith("/api/") or p in operational
+def norm(p):
+    return re.sub(r":([A-Za-z_]+)", r"{\1}", p)
+live = {(m, norm(p)) for m, p in routes if in_scope(p)}
+documented = {(m, path) for path, ops in paths.items() for m in ops if m in HTTP}
+missing = sorted(m.upper() + " " + p for m, p in live - documented)   # route, no spec
+stale   = sorted(m.upper() + " " + p for m, p in documented - live)   # spec, no route
+if missing:
+    print("UNDOCUMENTED (route has no spec entry): " + "; ".join(missing)); sys.exit(1)
+if stale:
+    print("STALE (spec entry has no route): " + "; ".join(stale)); sys.exit(1)
+print("parsed live spec: %d routes ↔ %d documented paths, exact match" % (len(live), len(paths)))
+PY
+then ok "spec ↔ routes exact match (every /v1+/api+operational route documented, no stale entries)"
+else bad "OpenAPI drift or parse failure (see line above)"
+fi
+
+echo
 echo "== phase 3: scoped-token downgrade =="
 # boss is an admin USER, but BOSS_SCOPED narrows to member.
 code 403 GET  /metrics "$BOSS_SCOPED"                   # member perms only

@@ -487,21 +487,9 @@ enum OpenAPISpec {
                   "403": { "$ref": "#/components/responses/Forbidden" }
                 }
               },
-              "post": {
-                "tags": ["Model store"],
-                "summary": "Set the default model.",
-                "description": "Requires `model.write`. `PUT` is an idempotent alias.",
-                "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SetDefaultModelRequest" } } } },
-                "responses": {
-                  "200": { "description": "Default set.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DefaultModelResponse" } } } },
-                  "400": { "$ref": "#/components/responses/BadRequest" },
-                  "401": { "$ref": "#/components/responses/Unauthorized" },
-                  "403": { "$ref": "#/components/responses/Forbidden" }
-                }
-              },
               "put": {
                 "tags": ["Model store"],
-                "summary": "Set the default model (alias of POST).",
+                "summary": "Set the default model.",
                 "description": "Requires `model.write`.",
                 "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SetDefaultModelRequest" } } } },
                 "responses": {
