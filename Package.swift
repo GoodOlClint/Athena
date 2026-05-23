@@ -41,6 +41,13 @@ let package = Package(
         .package(
             url: "https://github.com/apple/swift-crypto",
             from: "4.0.0"),
+        // swift-service-lifecycle (already transitive via Hummingbird) —
+        // declared direct so the daemon can register the queue worker as
+        // a managed Service and drain in-flight work on graceful shutdown
+        // (M33.2).
+        .package(
+            url: "https://github.com/swift-server/swift-service-lifecycle",
+            from: "2.11.0"),
         // The MLX substrate. Local clone per the the platform environment
         // (~/Source/mlx-swift-lm); a path dependency keeps M1 buildable
         // against the exact reusable Qwen3.5/TokenIterator code.
@@ -212,6 +219,9 @@ let package = Package(
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "Crypto", package: "swift-crypto"),
+                .product(
+                    name: "ServiceLifecycle",
+                    package: "swift-service-lifecycle"),
             ],
             path: "Sources/athena",
             linkerSettings: [

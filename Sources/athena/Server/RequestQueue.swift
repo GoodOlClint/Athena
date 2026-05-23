@@ -36,6 +36,9 @@ actor RequestQueue {
     private let wake: AsyncStream<Void>
     private let signal: AsyncStream<Void>.Continuation
     private let log = Logger(label: AthenaLog.daemonLabel)
+    /// Set by `stop()` on graceful shutdown (M33.2): the worker finishes
+    /// the in-flight job, then exits instead of starting the next one.
+    private var stopping = false
 
     init(store: AthenaStore) {
         self.store = store
@@ -83,15 +86,27 @@ actor RequestQueue {
     }
 
     /// Serial worker: drain on startup (re-pick interrupted jobs),
-    /// then on each submit signal. One job at a time.
+    /// then on each submit signal. One job at a time. Returns when
+    /// `stop()` finishes the wake stream (graceful shutdown, M33.2).
     func runWorker() async {
         await drain()
         for await _ in wake { await drain() }
     }
 
+    /// Graceful-shutdown signal (M33.2): stop after the in-flight job and
+    /// end `runWorker`'s wake loop so the managed Service exits. The queue
+    /// is durable — any job left queued/running re-drains on next start.
+    func stop() {
+        stopping = true
+        signal.finish()
+    }
+
     private func drain() async {
         guard let executor else { return }
         while true {
+            // M33.2: on graceful shutdown, stop before picking up new
+            // work (a job already running below still completes).
+            if stopping { return }
             // Oldest job still needing work (a prior run may have left
             // one in `running`).
             let pending = await store.listJobs().first {

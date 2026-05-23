@@ -1674,6 +1674,44 @@ stop_daemon
 unset ATHENA_STUB_DELAY_MS
 
 echo
+echo "== phase 23: graceful shutdown — drain in-flight on SIGTERM (M33.2) =="
+# The queue worker is a managed Service and the HTTP server drains on
+# graceful shutdown, so a SIGTERM mid-request lets the in-flight request
+# COMPLETE (200, full body) instead of dropping the connection, and the
+# daemon then exits on its own. The stub paces at 300 ms/chunk (~3 s) so
+# the request is reliably mid-generation when the signal lands.
+stop_daemon
+export ATHENA_STUB_DELAY_MS=300
+start_daemon "$D" 127.0.0.1 \
+  || { echo "graceful-shutdown daemon failed"; cat "$D/daemon.log"; exit 1; }
+GDPID="$DPID"
+INFLIGHT="$(mktemp)"
+# Fire a long in-flight chat; capture its final HTTP status to a file.
+( curl -s -o /dev/null -w "%{http_code}" \
+    -H "Authorization: Bearer $ALICE_TOK" \
+    -H "Content-Type: application/json" -d "$CHAT" \
+    "http://127.0.0.1:$PORT/v1/chat/completions" > "$INFLIGHT" ) &
+CPID=$!
+sleep 0.6                      # let it reach mid-generation
+kill -TERM "$GDPID"            # graceful shutdown while a request is in flight
+wait "$CPID" 2>/dev/null       # the request must finish, not be dropped
+[ "$(cat "$INFLIGHT")" = "200" ] \
+  && ok "in-flight request drained to completion (200) across SIGTERM" \
+  || bad "in-flight request not drained (got '$(cat "$INFLIGHT")')"
+# The daemon should exit on its own after draining (graceful, not SIGKILL).
+EXITED=0
+for _ in $(seq 1 20); do
+  if ! kill -0 "$GDPID" 2>/dev/null; then EXITED=1; break; fi
+  sleep 0.5
+done
+[ "$EXITED" = "1" ] \
+  && ok "daemon exited on its own after draining (no SIGKILL needed)" \
+  || bad "daemon still alive after graceful shutdown window"
+rm -f "$INFLIGHT"
+DPID=""                        # already gone; don't let cleanup re-kill
+unset ATHENA_STUB_DELAY_MS
+
+echo
 echo "════════════════════════════════════════"
 echo "  PASS=$PASS  FAIL=$FAIL"
 echo "════════════════════════════════════════"

@@ -518,15 +518,19 @@ struct AthenaServer {
                 context.parameters.get("prefix"), request)
         }
 
-        // Wire the queue executor to the governed module paths and
-        // start the single serial worker (M8.1).
+        // Wire the queue executor to the governed module paths (M8.1).
+        // The serial worker runs as a managed Service (below) so it
+        // drains on graceful shutdown rather than being cancelled mid-job.
         await queue.setExecutor { kind, data, owner in
             await self.queuedExecute(
                 kind: kind, request: data, owner: owner)
         }
-        let worker = Task { await queue.runWorker() }
-        defer { worker.cancel() }
 
+        // M33.2: register the queue worker in the application's
+        // ServiceGroup. `runService` installs SIGTERM/SIGINT graceful
+        // shutdown; on signal the HTTP server drains its in-flight
+        // requests and the worker finishes its in-flight job, both within
+        // the stop window — no abrupt mid-request/mid-job teardown.
         let app = Application(
             router: router,
             server: try Self.serverBuilder(
@@ -535,7 +539,8 @@ struct AthenaServer {
                 address: .hostname(
                     config.listenHost, port: config.listenPort),
                 serverName: "athena"
-            )
+            ),
+            services: [QueueWorkerService(queue: queue)]
         )
         try await app.runService()
     }
