@@ -31,14 +31,18 @@ public protocol LLMModule: InferenceModule {
     /// Metered generation (M27.1) — the canonical entry point. Yields
     /// `.text` chunks exactly like the String `generate` overloads, then
     /// a single terminal `.usage(TokenUsage)` carrying the true
-    /// prompt/completion token counts for THIS request. Every other
-    /// `generate` overload is a thin filter over this that drops the
-    /// usage event. `schemaJSON`/`tools`/`maxTokens`/`temperature` behave
-    /// as on the String override-aware variant.
+    /// prompt/completion token counts for THIS request, then a terminal
+    /// `.finish(FinishReason)` (M31.2). Every other `generate` overload is
+    /// a thin filter over this that drops the usage/finish events.
+    /// `schemaJSON`/`tools`/`maxTokens`/`temperature` behave as on the
+    /// String override-aware variant. `topP`/`seed` (M31.3) override the
+    /// loaded sampling defaults on the substrate sampling path only —
+    /// inert on the greedy/MTP/structured (argmax) paths.
     nonisolated func generateMetered(
         messages: [ChatTurn], schemaJSON: String?,
         tools: [[String: any Sendable]]?,
-        maxTokens: Int?, temperature: Double?
+        maxTokens: Int?, temperature: Double?,
+        topP: Double?, seed: Int?
     ) -> AsyncStream<GenChunk>
 
     /// Override-aware String variant (M24.3). `maxTokens`/`temperature`,
@@ -89,7 +93,8 @@ extension LLMModule {
         // only the text chunks (drop the terminal usage).
         let events = generateMetered(
             messages: messages, schemaJSON: schemaJSON, tools: tools,
-            maxTokens: maxTokens, temperature: temperature)
+            maxTokens: maxTokens, temperature: temperature,
+            topP: nil, seed: nil)
         return AsyncStream { continuation in
             let task = Task {
                 for await event in events {
@@ -110,8 +115,11 @@ extension LLMModule {
     public nonisolated func generateMetered(
         messages: [ChatTurn], schemaJSON: String?,
         tools: [[String: any Sendable]]?,
-        maxTokens: Int?, temperature: Double?
+        maxTokens: Int?, temperature: Double?,
+        topP: Double?, seed: Int?
     ) -> AsyncStream<GenChunk> {
+        // The model-free stub has no sampler, so topP/seed are accepted
+        // and ignored; the e2e gate exercises them via stop/max_tokens.
         let prompt = messages.flattenedPrompt()
         let chunks = generate(
             prompt: prompt, schemaJSON: schemaJSON, tools: tools)

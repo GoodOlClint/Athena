@@ -3,6 +3,7 @@ import AthenaModels
 import AthenaStructured
 import Foundation
 import HuggingFace
+import MLX
 import MLXHuggingFace
 import MLXLLM
 import MLXLMCommon
@@ -210,7 +211,8 @@ public actor MLXLLMModule: LLMModule {
     public nonisolated func generateMetered(
         messages: [ChatTurn], schemaJSON: String?,
         tools: [[String: any Sendable]]?,
-        maxTokens: Int?, temperature: Double?
+        maxTokens: Int?, temperature: Double?,
+        topP: Double?, seed: Int?
     ) -> AsyncStream<GenChunk> {
         // `messages` ([ChatTurn]) is Sendable and crosses into the actor;
         // the non-Sendable `Chat.Message` mapping happens INSIDE the actor
@@ -239,7 +241,8 @@ public actor MLXLLMModule: LLMModule {
                         // substrate-guided path for other arches (M23).
                         let stream = try await self.beginGeneration(
                             messages: messages, tools: tools,
-                            maxTokens: maxTokens, temperature: temperature)
+                            maxTokens: maxTokens, temperature: temperature,
+                            topP: topP, seed: seed)
                         for await event in stream {
                             switch event {
                             case .chunk(let text):
@@ -411,7 +414,8 @@ public actor MLXLLMModule: LLMModule {
 
     private func beginGeneration(
         messages: [ChatTurn], tools: [[String: any Sendable]]?,
-        maxTokens: Int?, temperature: Double?
+        maxTokens: Int?, temperature: Double?,
+        topP: Double?, seed: Int?
     ) async throws -> AsyncStream<Generation> {
         guard let container else {
             throw AthenaError.moduleLoadFailed(
@@ -435,12 +439,21 @@ public actor MLXLLMModule: LLMModule {
         let temp =
             (temperature.map { Float($0) }).flatMap { $0 >= 0 ? $0 : nil }
             ?? params.temperature
+        // M31.3: per-request top_p overrides the loaded default; only the
+        // (0,1) range engages nucleus sampling, and only when temp>0 (at
+        // temp==0 the substrate uses argmax — top_p/seed are inert).
+        let tp =
+            topP.map { Float($0) }.flatMap { $0 > 0 && $0 < 1 ? $0 : nil }
+            ?? params.topP
+        // M31.3: a per-request seed makes temp>0 sampling reproducible by
+        // pinning the substrate's global RNG before generation.
+        if let seed, seed >= 0 { MLXRandom.seed(UInt64(seed)) }
         let gp = GenerateParameters(
             maxTokens: Self.effectiveMaxTokens(maxTokens, params.maxTokens),
             kvBits: gen.kvBits,
             kvQuantizationScheme: gen.scheme,
             temperature: temp,
-            topP: params.topP)
+            topP: tp)
         return try await container.generate(input: lmInput, parameters: gp)
     }
 

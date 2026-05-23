@@ -69,6 +69,56 @@ struct ChatCompletionRequest: Codable {
     /// loaded defaults. Honored on the sync, native, and queued paths.
     let max_tokens: Int?
     let temperature: Double?
+    /// Sampling overrides (M31.3). `top_p`/`seed` reach the substrate
+    /// sampling path; they are INERT on the greedy/MTP/structured paths
+    /// (which are deterministic by construction — argmax decoding). `stop`
+    /// truncates the output at the first matching sequence (string or
+    /// array of strings) and reports finish_reason "stop".
+    let top_p: Double?
+    let seed: Int?
+    let stop: JSONValue?
+    /// Unsupported under Athena's greedy/MTP/structured determinism — a
+    /// request carrying any of these is a 400 (see `unsupportedParameter`)
+    /// rather than a silently-ignored param: `n>1` (one decode per
+    /// request), `logprobs`/`top_logprobs` (the Guide masks the
+    /// distribution), `logit_bias` (ditto).
+    let n: Int?
+    let logprobs: JSONValue?
+    let top_logprobs: Int?
+    let logit_bias: JSONValue?
+
+    /// Normalized stop sequences: OpenAI accepts a string or an array of
+    /// strings (commonly ≤4). Empty/whitespace and non-string array
+    /// members are dropped; capped at 4. [] ⇒ no stop handling.
+    func stopSequences() -> [String] {
+        let raw: [String]
+        switch stop {
+        case .string(let s): raw = [s]
+        case .array(let a):
+            raw = a.compactMap {
+                if case .string(let s) = $0 { return s } else { return nil }
+            }
+        default: raw = []
+        }
+        return Array(raw.filter { !$0.isEmpty }.prefix(4))
+    }
+
+    /// The first OpenAI param present that Athena cannot honor under its
+    /// greedy/MTP/structured determinism, for a clear 400. nil ⇒ all
+    /// present params are supported.
+    func unsupportedParameter() -> String? {
+        if let n, n > 1 { return "n" }
+        switch logprobs {
+        case .bool(true): return "logprobs"
+        case .number(let d) where d > 0: return "logprobs"
+        default: break
+        }
+        if top_logprobs != nil { return "top_logprobs" }
+        if case .object(let o)? = logit_bias, !o.isEmpty {
+            return "logit_bias"
+        }
+        return nil
+    }
 
     /// Tools to constrain to: `tool_choice` forcing one ⇒ `[that]`;
     /// `"none"` / no tools ⇒ nil; otherwise (auto/absent/"required") ⇒

@@ -567,6 +567,20 @@ struct AthenaServer {
                 code: "invalid_body")
         }
 
+        // M31.3: reject params that fight the greedy/MTP/structured
+        // determinism up front (n>1, logprobs, logit_bias) — a clear 400
+        // instead of silently ignoring them, so a drop-in OpenAI client
+        // gets honest feedback rather than wrong assumptions.
+        if let bad = body.unsupportedParameter() {
+            return Self.error(
+                status: .badRequest,
+                message:
+                    "'\(bad)' is not supported by this deterministic "
+                    + "(greedy/structured) inference path",
+                type: "invalid_request_error",
+                code: "unsupported_parameter")
+        }
+
         // The governed path: load the LLM under the global budget. A budget
         // event becomes a classified 503 here, never a Metal abort.
         do {
@@ -612,6 +626,8 @@ struct AthenaServer {
         let schemaJSON = effective?.json
         let toolSpecs = body.toolSpecs()
 
+        let stops = body.stopSequences()
+
         if body.stream == true {
             // M27.4: meter streamed requests too, and emit a terminal
             // usage chunk when the client opted in via stream_options.
@@ -622,8 +638,9 @@ struct AthenaServer {
                 events: llm.generateMetered(
                     messages: turns, schemaJSON: schemaJSON,
                     tools: toolSpecs, maxTokens: body.max_tokens,
-                    temperature: body.temperature),
-                includeUsage: includeUsage,
+                    temperature: body.temperature,
+                    topP: body.top_p, seed: body.seed),
+                includeUsage: includeUsage, stops: stops,
                 record: { usage in
                     await meter(principal: principal, usage: usage)
                 })
@@ -634,12 +651,23 @@ struct AthenaServer {
         var finish: FinishReason = .stop
         for await event in llm.generateMetered(
             messages: turns, schemaJSON: schemaJSON, tools: toolSpecs,
-            maxTokens: body.max_tokens, temperature: body.temperature)
+            maxTokens: body.max_tokens, temperature: body.temperature,
+            topP: body.top_p, seed: body.seed)
         {
             switch event {
             case .text(let chunk): text += chunk
             case .usage(let u): usage = u
             case .finish(let r): finish = r
+            }
+        }
+        // M31.3: truncate at the first stop sequence; a stop hit reports
+        // finish_reason "stop" (it overrides a length cap reached later in
+        // the same generation).
+        if !stops.isEmpty {
+            let cut = StopStreamFilter.truncate(text, stops: stops)
+            if cut.stopped {
+                text = cut.text
+                finish = .stop
             }
         }
         // M27.1/.2: real token counts feed the response `usage` object,
@@ -1695,12 +1723,21 @@ struct AthenaServer {
             for await event in llm.generateMetered(
                 messages: turns, schemaJSON: effective?.json,
                 tools: req.toolSpecs(), maxTokens: req.max_tokens,
-                temperature: req.temperature)
+                temperature: req.temperature,
+                topP: req.top_p, seed: req.seed)
             {
                 switch event {
                 case .text(let c): text += c
                 case .usage(let u): usage = u
                 case .finish(let r): finish = r
+                }
+            }
+            let stops = req.stopSequences()
+            if !stops.isEmpty {
+                let cut = StopStreamFilter.truncate(text, stops: stops)
+                if cut.stopped {
+                    text = cut.text
+                    finish = .stop
                 }
             }
             await meter(principal: owner, usage: usage)
@@ -2964,6 +3001,7 @@ struct AthenaServer {
     private static func streamSSE(
         id: String, model: String, created: Int,
         events: AsyncStream<GenChunk>, includeUsage: Bool,
+        stops: [String] = [],
         record: @escaping @Sendable (TokenUsage) async -> Void
     ) -> Response {
         let stream = AsyncStream<ByteBuffer> { continuation in
@@ -2977,6 +3015,20 @@ struct AthenaServer {
                         continuation.yield(buf)
                     }
                 }
+                func emitDelta(_ piece: String) {
+                    guard !piece.isEmpty else { return }
+                    emit(
+                        ChatCompletionChunk(
+                            id: id, object: "chat.completion.chunk",
+                            created: created, model: model,
+                            choices: [
+                                ChatChunkChoice(
+                                    index: 0,
+                                    delta: ChatDelta(
+                                        role: nil, content: piece),
+                                    finish_reason: nil)
+                            ]))
+                }
                 emit(
                     ChatCompletionChunk(
                         id: id, object: "chat.completion.chunk",
@@ -2989,28 +3041,37 @@ struct AthenaServer {
                         ]))
                 var usage = TokenUsage.zero
                 var finish: FinishReason = .stop
+                // M31.3: filter the streamed deltas through the stop
+                // sequences; once a sequence matches, latch `stop`, emit
+                // only the text up to it, and suppress the rest while still
+                // draining the generator for an accurate usage count.
+                var stopFilter = StopStreamFilter(stops: stops)
                 for await event in events {
                     switch event {
                     case .text(let piece):
-                        emit(
-                            ChatCompletionChunk(
-                                id: id, object: "chat.completion.chunk",
-                                created: created, model: model,
-                                choices: [
-                                    ChatChunkChoice(
-                                        index: 0,
-                                        delta: ChatDelta(
-                                            role: nil, content: piece),
-                                        finish_reason: nil)
-                                ]))
+                        if stopFilter.isActive {
+                            let wasStopped = stopFilter.stopped
+                            emitDelta(stopFilter.push(piece))
+                            if stopFilter.stopped && !wasStopped {
+                                finish = .stop
+                            }
+                        } else {
+                            emitDelta(piece)
+                        }
                     case .usage(let u):
                         usage = u
                     case .finish(let r):
-                        finish = r
+                        // A stop-sequence hit wins over the generator's
+                        // own length/stop reason.
+                        if !stopFilter.stopped { finish = r }
                     }
                 }
+                if stopFilter.isActive && !stopFilter.stopped {
+                    emitDelta(stopFilter.flush())
+                }
                 // M31.2: the terminal chunk carries `length` when the
-                // request hit max_tokens, `stop` otherwise.
+                // request hit max_tokens, `stop` otherwise (or on a stop
+                // sequence hit, M31.3).
                 emit(
                     ChatCompletionChunk(
                         id: id, object: "chat.completion.chunk",

@@ -204,6 +204,51 @@ echo "$SSEL" | grep -q 'data: \[DONE\]' \
   || bad "SSE missing [DONE] ($SSEL)"
 
 echo
+echo "== phase 2.2: OpenAI sampling params — stop/seed/top_p + 400s (M31.3) =="
+# Unsupported under greedy/MTP/structured determinism ⇒ a clear 400
+# (NOT a silent ignore). Member token clears auth so the handler runs.
+code 400 POST /v1/chat/completions "$ALICE_TOK" \
+  '{"model":"x","messages":[{"role":"user","content":"hi"}],"n":2}'
+code 400 POST /v1/chat/completions "$ALICE_TOK" \
+  '{"model":"x","messages":[{"role":"user","content":"hi"}],"logprobs":true}'
+code 400 POST /v1/chat/completions "$ALICE_TOK" \
+  '{"model":"x","messages":[{"role":"user","content":"hi"}],"logit_bias":{"50256":-100}}'
+# n:1 is the supported single-decode case ⇒ 200.
+code 200 POST /v1/chat/completions "$ALICE_TOK" \
+  '{"model":"x","messages":[{"role":"user","content":"hi"}],"n":1}'
+# top_p/seed are accepted (inert on the stub's model-less path) ⇒ 200.
+TPS="$(curl -s -H "Authorization: Bearer $ALICE_TOK" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"x","messages":[{"role":"user","content":"hi"}],"top_p":0.9,"seed":42}' \
+  "http://127.0.0.1:$PORT/v1/chat/completions")"
+echo "$TPS" | grep -q '"finish_reason":"stop"' \
+  && ok "top_p+seed accepted ⇒ 200/stop" \
+  || bad "top_p+seed request rejected ($TPS)"
+# stop truncates the output at the first sequence ⇒ finish_reason stop and
+# the text after the sequence is gone (string form).
+STOPR="$(curl -s -H "Authorization: Bearer $ALICE_TOK" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"x","messages":[{"role":"user","content":"hi"}],"stop":"governed"}' \
+  "http://127.0.0.1:$PORT/v1/chat/completions")"
+echo "$STOPR" | grep -q '"finish_reason":"stop"' \
+  && ok "stop hit ⇒ finish_reason stop" \
+  || bad "stop did not set finish_reason ($STOPR)"
+echo "$STOPR" | grep -q 'governed' \
+  && bad "stop did not truncate (text still has 'governed': $STOPR)" \
+  || ok "stop truncated the body before the sequence"
+# stop also accepts an array form, applied on the SSE stream.
+SSES="$(curl -s -N -H "Authorization: Bearer $ALICE_TOK" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"x","messages":[{"role":"user","content":"hi"}],"stream":true,"stop":["governed"]}' \
+  "http://127.0.0.1:$PORT/v1/chat/completions")"
+echo "$SSES" | grep -q '"finish_reason":"stop"' \
+  && ok "SSE stop ⇒ terminal finish_reason stop" \
+  || bad "SSE stop finish_reason missing ($SSES)"
+echo "$SSES" | grep -q 'governed' \
+  && bad "SSE stop did not truncate the stream ($SSES)" \
+  || ok "SSE stop suppressed text from the sequence on"
+
+echo
 echo "== phase 2.5: WebUI session cookie + RBAC nav + CSRF (M18.1) =="
 # /ui is SESSION-cookie authed (not bearer). admin (daemonAdmin) gets
 # the control shell; a member is bounced to login; mutations require
