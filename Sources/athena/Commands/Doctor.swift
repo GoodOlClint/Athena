@@ -347,11 +347,112 @@ struct Doctor: AsyncParsableCommand {
             }
         }
 
+        // 13. Data-at-rest posture (M34): SQLite store encryption (or the
+        //     FileVault fallback) + retention bounds. Passwords (PBKDF2),
+        //     token hashes (SHA-256) and outbound secrets (Keychain) are
+        //     already safe; the concern is the vector + queue blobs, which
+        //     hold inference inputs/outputs.
+        let storeFile = dataDir.appendingPathComponent("athena.sqlite")
+        let storeExists = fm.fileExists(atPath: storeFile.path)
+        let onDiskEncrypted =
+            storeExists && !AthenaStore.isPlaintextDatabase(at: storeFile)
+        if parsed?.encryptStore == true {
+            let keySrc = StoreKey.source()
+            if !storeExists {
+                say(
+                    .ok,
+                    "at-rest: encryption enabled (SQLCipher) — store not "
+                        + "yet created; key from \(keySrc)")
+            } else if onDiskEncrypted {
+                say(
+                    .ok,
+                    "at-rest: store encrypted (SQLCipher); key from "
+                        + "\(keySrc)")
+            } else {
+                say(
+                    .warn,
+                    "at-rest: encrypt_store is set but the store is still "
+                        + "plaintext — it migrates on the next daemon "
+                        + "start (key from \(keySrc))")
+            }
+            if keySrc == "none" {
+                say(
+                    .warn,
+                    "at-rest: no key resolvable yet — the daemon will mint "
+                        + "one in the Keychain on start. Back up "
+                        + "ATHENA_STORE_KEY / the Keychain item; without "
+                        + "it an encrypted store is unrecoverable.")
+            }
+        } else if onDiskEncrypted {
+            say(
+                .warn,
+                "at-rest: the store on disk is encrypted but encrypt_store "
+                    + "is not set — set encrypt_store (or ATHENA_STORE_KEY) "
+                    + "so the daemon can open it")
+        } else {
+            switch Self.fileVaultOn() {
+            case .some(true):
+                say(
+                    .ok,
+                    "at-rest: store is plaintext but FileVault is ON "
+                        + "(full-disk encrypted). Set encrypt_store for "
+                        + "defense-in-depth.")
+            case .some(false):
+                say(
+                    .warn,
+                    "at-rest: store is plaintext and FileVault is OFF — "
+                        + "vector/queue blobs (inference content) are "
+                        + "readable on disk. Enable FileVault or set "
+                        + "encrypt_store.")
+            case .none:
+                say(
+                    .warn,
+                    "at-rest: store is plaintext; FileVault status unknown "
+                        + "— ensure FileVault is on, or set encrypt_store.")
+            }
+        }
+        // Retention bounds (advisory): unbounded queue/vector growth keeps
+        // inference content on disk indefinitely.
+        let qTtl = parsed?.queueResultTtlSecs ?? 0
+        let qMax = parsed?.queueMaxRows ?? 0
+        let vTtl = parsed?.vectorTtlSecs ?? 0
+        var ret: [String] = []
+        if qTtl > 0 { ret.append("queue TTL \(qTtl)s") }
+        if qMax > 0 { ret.append("queue cap \(qMax) rows") }
+        if vTtl > 0 { ret.append("vector TTL \(vTtl)s") }
+        if parsed?.dropRequestContent == true { ret.append("drop prompts") }
+        if ret.isEmpty {
+            say(
+                .ok,
+                "retention: none configured (queue/vector results kept "
+                    + "until manually removed)")
+        } else {
+            say(.ok, "retention: " + ret.joined(separator: ", "))
+        }
+
         if fails > 0 {
             print("\n\(fails) critical issue(s).")
             throw ExitCode.failure
         }
         print("\nall critical checks passed.")
+    }
+
+    /// macOS FileVault state via `fdesetup status` (read-only, no sudo for
+    /// status). nil ⇒ couldn't determine. Backs the at-rest posture check.
+    private static func fileVaultOn() -> Bool? {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/fdesetup")
+        p.arguments = ["status"]
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = FileHandle.nullDevice
+        do { try p.run() } catch { return nil }
+        p.waitUntilExit()
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        guard let s = String(data: data, encoding: .utf8) else { return nil }
+        if s.contains("FileVault is On") { return true }
+        if s.contains("FileVault is Off") { return false }
+        return nil
     }
 
     /// Writable = exists & we can create a probe file, or the parent

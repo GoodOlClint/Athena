@@ -1950,6 +1950,54 @@ rm -rf "$D10"; D10=""
 unset ATHENA_STORE_KEY
 
 echo
+echo "== phase 27: athena doctor — data-at-rest posture (M34.4) =="
+# doctor (check #13) reports store encryption / FileVault fallback +
+# retention bounds. It derives data_dir from the config, so each test
+# config pins data_dir to control which store it inspects.
+DOC3="$(mktemp -d)"
+dcfg27() { # CFGPATH DATADIR extra-lines…
+  local p="$1" dd="$2"; shift 2
+  { echo 'listen_host = "127.0.0.1"'
+    echo 'listen_port = 7447'
+    echo 'log_dir = "/usr/local/var/log/athena"'
+    echo "data_dir = \"$dd\""
+    for l in "$@"; do echo "$l"; done
+  } > "$p"
+}
+# 27a: encrypt_store=true over an ENCRYPTED store ⇒ "store encrypted".
+export ATHENA_STORE_KEY="e2e-store-key-0123456789abcdef0123"
+EDD="$(mktemp -d)"
+"$ATHENA" auth user add admin --password adminpass1 --role admin \
+  --data-dir "$EDD" >/dev/null
+CE="$DOC3/enc.toml"; dcfg27 "$CE" "$EDD" "encrypt_store = true"
+OE="$("$ATHENA" doctor --config "$CE" --model-store "$MSTORE" 2>&1)"
+echo "$OE" | grep -qi "at-rest: store encrypted" \
+  && ok "doctor reports the store encrypted at rest" \
+  || { bad "doctor missing encrypted-at-rest line"; echo "$OE" | grep -i at-rest; }
+echo "$OE" | grep -qi "key from ATHENA_STORE_KEY env" \
+  && ok "doctor reports the encryption key source" \
+  || { bad "doctor missing key-source line"; echo "$OE" | grep -i key; }
+rm -rf "$EDD"; unset ATHENA_STORE_KEY
+# 27b: plaintext store, no encrypt_store ⇒ at-rest warns/relies on FileVault.
+PDD="$(mktemp -d)"
+"$ATHENA" auth user add admin --password adminpass1 --role admin \
+  --data-dir "$PDD" >/dev/null
+CP="$DOC3/plain.toml"; dcfg27 "$CP" "$PDD"
+OP="$("$ATHENA" doctor --config "$CP" --model-store "$MSTORE" 2>&1)"
+echo "$OP" | grep -qi "at-rest: store is plaintext" \
+  && ok "doctor reports a plaintext store (FileVault fallback)" \
+  || { bad "doctor missing plaintext at-rest line"; echo "$OP" | grep -i at-rest; }
+rm -rf "$PDD"
+# 27c: retention knobs are surfaced.
+CR="$DOC3/ret.toml"
+dcfg27 "$CR" "$D" "queue_result_ttl_secs = 604800" "vector_ttl_secs = 2592000"
+OR="$("$ATHENA" doctor --config "$CR" --model-store "$MSTORE" 2>&1)"
+echo "$OR" | grep -qi "retention:.*queue TTL 604800s" \
+  && ok "doctor reports configured retention bounds" \
+  || { bad "doctor missing retention line"; echo "$OR" | grep -i retention; }
+rm -rf "$DOC3"
+
+echo
 echo "════════════════════════════════════════"
 echo "  PASS=$PASS  FAIL=$FAIL"
 echo "════════════════════════════════════════"
