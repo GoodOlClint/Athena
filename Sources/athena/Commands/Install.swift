@@ -84,6 +84,23 @@ struct Install: AsyncParsableCommand {
             ?? NSUserName()
         let fm = FileManager.default
 
+        // M38: version/upgrade guard. A prior install leaves a marker in
+        // the config dir; classify this install against it so the
+        // operator sees fresh / reinstall / upgrade and is WARNED on a
+        // DOWNGRADE (an older build can reintroduce a fixed bug or expect
+        // an older store schema). Detection only — never blocks.
+        let versionMarker = plan.configDir.appendingPathComponent(
+            "installed-version")
+        let previousVersion =
+            (try? String(contentsOf: versionMarker, encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let versionSummary = VersionGuard.summary(
+            from: previousVersion, to: Athena.appVersion)
+        let isDowngrade =
+            VersionGuard.classify(
+                from: previousVersion, to: Athena.appVersion)
+            == .downgrade
+
         let plistData = try LaunchdPlist.xmlData(
             label: label,
             executablePath: plan.installedDaemon.path,
@@ -93,6 +110,7 @@ struct Install: AsyncParsableCommand {
 
         if dryRun {
             print("athena install (dry-run)")
+            print("  \(versionSummary)")
             print("  from:    \(plan.sourceDir.path)")
             print("  libexec: \(plan.libexecDir.path)")
             print("  symlink: \(plan.binSymlink.path)")
@@ -266,6 +284,10 @@ struct Install: AsyncParsableCommand {
         }
 
         try configData.write(to: plan.installedConfig)
+        // Record the installed version so the NEXT install can classify
+        // the transition (M38). Best-effort — a failure here must not
+        // abort an otherwise-good install.
+        try? Data(Athena.appVersion.utf8).write(to: versionMarker)
 
         try? fm.removeItem(at: plan.binSymlink)
         try fm.createSymbolicLink(
@@ -283,6 +305,13 @@ struct Install: AsyncParsableCommand {
         _ = Self.launchctl(["kickstart", "-k", "system/\(label)"])
 
         print("installed \(label) (service user: \(serviceUser)).")
+        print("  \(versionSummary)")
+        if isDowngrade {
+            print(
+                "  WARNING: downgrade — an older build may reintroduce "
+                    + "fixed bugs or expect an older store schema; "
+                    + "verify compatibility before serving.")
+        }
         print("  model store: \(modelStore.path)")
         print("  data dir:    \(dataDir.path)")
         if let pw = seededPassword {

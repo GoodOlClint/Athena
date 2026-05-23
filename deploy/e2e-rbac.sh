@@ -2188,6 +2188,32 @@ stop_daemon
 rm -rf "$DM"
 
 echo
+echo "== phase 32: install version/upgrade guard (M38) =="
+# `athena install --dry-run` (no root) classifies this build against the
+# version marker a prior install leaves in <prefix>/etc/athena. Fresh
+# when absent; upgrade/downgrade vs a seeded marker. Detection only.
+IP="$(mktemp -d)"
+F="$("$ATHENA" install --dry-run --prefix "$IP" \
+  --config deploy/athena.toml 2>&1)"
+echo "$F" | grep -qi "fresh install" \
+  && ok "install dry-run: fresh when no version marker" \
+  || { bad "install missing fresh-install line"; echo "$F" | grep -i version; }
+mkdir -p "$IP/etc/athena"
+echo "0.0.1" > "$IP/etc/athena/installed-version"
+U="$("$ATHENA" install --dry-run --prefix "$IP" \
+  --config deploy/athena.toml 2>&1)"
+echo "$U" | grep -qi "upgrading 0.0.1" \
+  && ok "install dry-run: upgrade detected vs older marker" \
+  || { bad "install missing upgrade line"; echo "$U" | grep -i version; }
+echo "99.0.0" > "$IP/etc/athena/installed-version"
+DN="$("$ATHENA" install --dry-run --prefix "$IP" \
+  --config deploy/athena.toml 2>&1)"
+echo "$DN" | grep -q "DOWNGRADING 99.0.0" \
+  && ok "install dry-run: downgrade flagged vs newer marker" \
+  || { bad "install missing downgrade line"; echo "$DN" | grep -i version; }
+rm -rf "$IP"
+
+echo
 echo "════════════════════════════════════════"
 echo "  PASS=$PASS  FAIL=$FAIL"
 echo "════════════════════════════════════════"
