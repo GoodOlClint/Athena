@@ -28,6 +28,11 @@ public enum AthenaError: Error, Sendable, Equatable {
     /// yield any feature frame. A client error (400) — never a silent
     /// zero embedding.
     case audioSegmentInvalid(module: ModuleID, detail: String)
+    /// Generation outlived the per-request inference deadline
+    /// (`request_timeout_secs`) and was cancelled. A gateway timeout
+    /// (504) so a runaway decode bounds the caller's wait (and frees the
+    /// worker) instead of being capped only by `max_tokens`.
+    case requestTimedOut(seconds: Int)
 
     /// HTTP status the serve path should return for this error.
     public var httpStatus: Int {
@@ -39,6 +44,7 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .promptCacheCapExceeded: return 503
         case .audioTooLong: return 400
         case .audioSegmentInvalid: return 400
+        case .requestTimedOut: return 504
         }
     }
 
@@ -52,6 +58,7 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .promptCacheCapExceeded: return "prompt_cache_cap_exceeded"
         case .audioTooLong: return "audio_too_long"
         case .audioSegmentInvalid: return "audio_segment_invalid"
+        case .requestTimedOut: return "inference_timeout"
         }
     }
 
@@ -79,6 +86,9 @@ public enum AthenaError: Error, Sendable, Equatable {
                 seconds, module.rawValue, maxSeconds)
         case let .audioSegmentInvalid(module, detail):
             return "Invalid audio segment for \(module.rawValue): \(detail)"
+        case let .requestTimedOut(seconds):
+            return "Inference exceeded the \(seconds)s request timeout "
+                + "and was cancelled."
         }
     }
 

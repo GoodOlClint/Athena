@@ -162,6 +162,12 @@ struct Load: AsyncParsableCommand {
     )
     var auditRetentionDays: Int?
 
+    @Option(
+        help:
+            "Per-request inference timeout in seconds. 0/absent ⇒ no deadline (opt-in). A decode past this ⇒ 504 (sync) / truncated stream, and the work is cancelled. Set it above your slowest legitimate generation."
+    )
+    var requestTimeoutSecs: Int?
+
     mutating func run() async throws {
         // Centralized logging first — must precede any Logger creation
         // (Hummingbird/NIO included) so everything routes through the
@@ -381,7 +387,8 @@ struct Load: AsyncParsableCommand {
             rateLimit: rateLimit ?? 0, rateBurst: rateBurst ?? 0,
             maxConcurrency: maxConcurrency ?? 0,
             maxConcurrencyPerPrincipal: maxConcurrencyPerPrincipal ?? 0,
-            auditRetentionDays: auditRetentionDays ?? 0)
+            auditRetentionDays: auditRetentionDays ?? 0,
+            requestTimeoutSecs: requestTimeoutSecs ?? 0)
         try await server.run()
     }
 }

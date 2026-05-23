@@ -160,6 +160,27 @@ final class AthenaConfigTests: XCTestCase {
         XCTAssertNil(c.maxConcurrencyPerPrincipal)
     }
 
+    func testRequestTimeoutKeyParse() throws {
+        let toml = """
+            listen_host = "127.0.0.1"
+            listen_port = 7447
+            log_dir = "/l"
+            request_timeout_secs = 120
+            """
+        let c = try AthenaConfig.parse(toml: toml)
+        XCTAssertEqual(c.requestTimeoutSecs, 120)
+    }
+
+    func testRequestTimeoutKeyAbsentIsNil() throws {
+        let toml = """
+            listen_host = "127.0.0.1"
+            listen_port = 7447
+            log_dir = "/l"
+            """
+        let c = try AthenaConfig.parse(toml: toml)
+        XCTAssertNil(c.requestTimeoutSecs)
+    }
+
     func testMissingRequiredKeyThrows() {
         let toml = "listen_host = \"h\"\nlog_dir = \"/l\""
         XCTAssertThrowsError(try AthenaConfig.parse(toml: toml)) {
@@ -243,7 +264,8 @@ final class LaunchdPlistTests: XCTestCase {
         rateLimit: String? = nil, rateBurst: Int? = nil,
         maxConcurrency: Int? = nil,
         maxConcurrencyPerPrincipal: Int? = nil,
-        auditRetentionDays: Int? = nil
+        auditRetentionDays: Int? = nil,
+        requestTimeoutSecs: Int? = nil
     ) -> AthenaConfig {
         AthenaConfig(
             listenHost: "127.0.0.1", listenPort: 7447, budgetBytes: budget,
@@ -258,6 +280,7 @@ final class LaunchdPlistTests: XCTestCase {
             maxConcurrency: maxConcurrency,
             maxConcurrencyPerPrincipal: maxConcurrencyPerPrincipal,
             auditRetentionDays: auditRetentionDays,
+            requestTimeoutSecs: requestTimeoutSecs,
             logDir: "/var/log/athena")
     }
 
@@ -295,7 +318,8 @@ final class LaunchdPlistTests: XCTestCase {
                 rateLimit: "10", rateBurst: 20,
                 maxConcurrency: 8,
                 maxConcurrencyPerPrincipal: 2,
-                auditRetentionDays: 365))
+                auditRetentionDays: 365,
+                requestTimeoutSecs: 120))
         XCTAssertEqual(
             d["ProgramArguments"] as? [String],
             [
@@ -314,6 +338,7 @@ final class LaunchdPlistTests: XCTestCase {
                 "--max-concurrency", "8",
                 "--max-concurrency-per-principal", "2",
                 "--audit-retention-days", "365",
+                "--request-timeout-secs", "120",
             ])
     }
 

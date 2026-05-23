@@ -62,6 +62,12 @@ public struct AthenaConfig: Sendable, Equatable {
     /// keep forever (opt-in, off by default; an audit trail should not
     /// silently auto-delete unless the operator asks for it).
     public var auditRetentionDays: Int?
+    /// Per-request inference timeout in seconds (M33.1). A generation
+    /// that overruns becomes a 504 (sync) or is truncated (streamed) so a
+    /// runaway decode is bounded by wall-clock, not only `max_tokens`.
+    /// Optional — absent / non-positive ⇒ no deadline (opt-in, off by
+    /// default).
+    public var requestTimeoutSecs: Int?
     /// `[network]` egress-proxy keys (M13.2). An operator-set
     /// `*_PROXY` env var always wins over these.
     public var httpsProxy: String?
@@ -84,6 +90,7 @@ public struct AthenaConfig: Sendable, Equatable {
         maxConcurrency: Int? = nil,
         maxConcurrencyPerPrincipal: Int? = nil,
         auditRetentionDays: Int? = nil,
+        requestTimeoutSecs: Int? = nil,
         httpsProxy: String? = nil, httpProxy: String? = nil,
         allProxy: String? = nil, noProxy: String? = nil,
         logDir: String
@@ -110,6 +117,7 @@ public struct AthenaConfig: Sendable, Equatable {
         self.maxConcurrency = maxConcurrency
         self.maxConcurrencyPerPrincipal = maxConcurrencyPerPrincipal
         self.auditRetentionDays = auditRetentionDays
+        self.requestTimeoutSecs = requestTimeoutSecs
         self.httpsProxy = httpsProxy
         self.httpProxy = httpProxy
         self.allProxy = allProxy
@@ -194,6 +202,10 @@ public struct AthenaConfig: Sendable, Equatable {
         if let ad = scalar("audit_retention_days", in: toml) {
             auditDays = try int("audit_retention_days", ad)
         }
+        var reqTimeout: Int?
+        if let rt = scalar("request_timeout_secs", in: toml) {
+            reqTimeout = try int("request_timeout_secs", rt)
+        }
         let spec = scalar("speculative", in: toml).map { $0 == "true" }
 
         return AthenaConfig(
@@ -219,6 +231,7 @@ public struct AthenaConfig: Sendable, Equatable {
             maxConcurrency: maxConc,
             maxConcurrencyPerPrincipal: maxConcPP,
             auditRetentionDays: auditDays,
+            requestTimeoutSecs: reqTimeout,
             httpsProxy: scalar("https_proxy", in: toml),
             httpProxy: scalar("http_proxy", in: toml),
             allProxy: scalar("all_proxy", in: toml),

@@ -143,6 +143,18 @@ engine = "mlx"
 # audit_retention_days = 365           # prune audit rows older than 1y
 
 
+# ── Reliability ──────────────────────────────────────────────────────
+
+# Per-request inference timeout, in whole seconds. Bounds a single
+# generation by wall-clock so a runaway decode is capped here, not only
+# by max_tokens. A sync request that overruns returns HTTP 504 (code
+# inference_timeout); a streamed one is truncated and the stream closed.
+# The work is cancelled so it stops holding the worker. Commented /
+# non-positive ⇒ NO deadline (default; opt-in — pick a ceiling above
+# your slowest legitimate generation for the chosen model + hardware).
+# request_timeout_secs = 120           # cancel any decode past 2 min
+
+
 # ── Network (egress proxy) ───────────────────────────────────────────
 
 # The ONLY outbound the appliance makes is fetching model weights

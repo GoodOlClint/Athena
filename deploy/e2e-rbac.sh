@@ -1635,6 +1635,45 @@ echo "$O3" | grep -qi "no rate_limit or max_concurrency on non-loopback" \
 rm -rf "$DOC2"
 
 echo
+echo "== phase 22: per-request inference timeout — 504 + truncate (M33.1) =="
+# The deadline (--request-timeout-secs) bounds a single generation by
+# wall-clock, independent of auth. The stub's canned stream is paced by
+# ATHENA_STUB_DELAY_MS (a dev/e2e-only knob): 10 chunks × 200 ms ≈ 2 s, so
+# a 1 s timeout fires mid-decode. Same invariants: --engine stub, loopback,
+# ephemeral data dir, the authed $D realm (timeout is orthogonal to RBAC).
+stop_daemon
+export ATHENA_STUB_DELAY_MS=200
+start_daemon "$D" 127.0.0.1 --request-timeout-secs 1 \
+  || { echo "timeout daemon failed"; cat "$D/daemon.log"; exit 1; }
+# 22a: a sync chat that overruns the 1 s deadline → classified 504.
+TO="$(curl -s -i -H "Authorization: Bearer $ALICE_TOK" \
+  -H "Content-Type: application/json" -d "$CHAT" \
+  "http://127.0.0.1:$PORT/v1/chat/completions")"
+echo "$TO" | head -1 | grep -q " 504" \
+  && ok "sync generation past the deadline → 504" \
+  || bad "expected 504 ($(echo "$TO" | head -1))"
+echo "$TO" | grep -q '"code":"inference_timeout"' \
+  && ok "504 body uses code inference_timeout" \
+  || bad "504 body shape unexpected ($(echo "$TO" | tail -1))"
+# 22b: a streamed chat can't be a 504 (200 + headers already sent), so it
+# truncates and still closes the wire cleanly with data: [DONE].
+SR="$(curl -s -N -H "Authorization: Bearer $ALICE_TOK" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"x","stream":true,"messages":[{"role":"user","content":"hi"}]}' \
+  "http://127.0.0.1:$PORT/v1/chat/completions")"
+echo "$SR" | grep -q "data: \[DONE\]" \
+  && ok "streamed generation truncates but closes with [DONE]" \
+  || bad "streamed timeout did not close cleanly"
+stop_daemon
+# 22c: the SAME slow generation under a generous timeout is NOT killed —
+# proves the deadline doesn't false-fire on legitimate work.
+start_daemon "$D" 127.0.0.1 --request-timeout-secs 30 \
+  || { echo "generous-timeout daemon failed"; cat "$D/daemon.log"; exit 1; }
+code 200 POST /v1/chat/completions "$ALICE_TOK" "$CHAT"
+stop_daemon
+unset ATHENA_STUB_DELAY_MS
+
+echo
 echo "════════════════════════════════════════"
 echo "  PASS=$PASS  FAIL=$FAIL"
 echo "════════════════════════════════════════"

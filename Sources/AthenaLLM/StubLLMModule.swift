@@ -209,14 +209,28 @@ public actor StubLLMModule: LLMModule {
                 "Athena ", "M0 ", "stub", ": ", "governed ", "memory ",
                 "path ", "is ", "live", ".",
             ]
+            let delay = Self.chunkDelayNanos
             let task = Task {
                 for chunk in chunks {
                     continuation.yield(chunk)
-                    try? await Task.sleep(nanoseconds: 15_000_000)
+                    try? await Task.sleep(nanoseconds: delay)
                 }
                 continuation.finish()
             }
             continuation.onTermination = { _ in task.cancel() }
         }
+    }
+
+    /// Per-chunk pacing for the canned stream (default 15 ms). The
+    /// dev/e2e-only `ATHENA_STUB_DELAY_MS` env var widens it so the e2e
+    /// gate can drive a generation past a whole-second request timeout
+    /// (the real model has no such knob — it's just slow enough on its
+    /// own). Read once per stream.
+    private static var chunkDelayNanos: UInt64 {
+        if let raw = ProcessInfo.processInfo.environment[
+            "ATHENA_STUB_DELAY_MS"], let ms = UInt64(raw), ms > 0 {
+            return ms * 1_000_000
+        }
+        return 15_000_000
     }
 }

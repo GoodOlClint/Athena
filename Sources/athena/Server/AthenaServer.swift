@@ -68,6 +68,13 @@ struct AthenaServer {
     /// window so the trail stays bounded as it grows. `var = 0` so it's
     /// a memberwise-init param.
     var auditRetentionDays: Int = 0
+    /// Per-request inference timeout in seconds (M33.1). 0 ⇒ no deadline
+    /// (opt-in, off by default — a runaway decode is otherwise bounded
+    /// only by `max_tokens`). When > 0, each generation is deadline-
+    /// wrapped: a sync request that overruns becomes a classified 504
+    /// (`inference_timeout`), a streamed one is truncated at the wire.
+    /// `var = 0` so it's a memberwise-init param.
+    var requestTimeoutSecs: Int = 0
     /// WebUI session signer (M12.2). Per-process random secret —
     /// sessions invalidate on restart (acceptable for an appliance).
     let session = Session()
@@ -642,31 +649,39 @@ struct AthenaServer {
             let includeUsage = body.stream_options?.include_usage == true
             return Self.streamSSE(
                 id: id, model: model, created: created,
-                events: llm.generateMetered(
-                    messages: turns, schemaJSON: schemaJSON,
-                    tools: toolSpecs, maxTokens: body.max_tokens,
-                    temperature: body.temperature,
-                    topP: body.top_p, seed: body.seed),
+                events: deadlineBounded(
+                    seconds: requestTimeoutSecs,
+                    llm.generateMetered(
+                        messages: turns, schemaJSON: schemaJSON,
+                        tools: toolSpecs, maxTokens: body.max_tokens,
+                        temperature: body.temperature,
+                        topP: body.top_p, seed: body.seed)),
                 includeUsage: includeUsage, stops: stops,
                 record: { usage in
                     await meter(principal: principal, usage: usage)
                 })
         }
 
-        var text = ""
-        var usage = TokenUsage.zero
-        var finish: FinishReason = .stop
-        for await event in llm.generateMetered(
-            messages: turns, schemaJSON: schemaJSON, tools: toolSpecs,
-            maxTokens: body.max_tokens, temperature: body.temperature,
-            topP: body.top_p, seed: body.seed)
-        {
-            switch event {
-            case .text(let chunk): text += chunk
-            case .usage(let u): usage = u
-            case .finish(let r): finish = r
-            }
+        let collected: GenCollected
+        do {
+            collected = try await collectMetered(
+                llm.generateMetered(
+                    messages: turns, schemaJSON: schemaJSON,
+                    tools: toolSpecs, maxTokens: body.max_tokens,
+                    temperature: body.temperature,
+                    topP: body.top_p, seed: body.seed))
+        } catch let e as AthenaError {
+            // M33.1: the only AthenaError collectMetered raises is the
+            // per-request timeout → classified 504.
+            return Self.error(
+                status: HTTPResponse.Status(code: e.httpStatus),
+                message: e.message, type: "server_error", code: e.code)
+        } catch {
+            return Self.classified(error, module: .llm)
         }
+        var text = collected.text
+        let usage = collected.usage
+        var finish = collected.finish
         // M31.3: truncate at the first stop sequence; a stop hit reports
         // finish_reason "stop" (it overrides a length cap reached later in
         // the same generation).
@@ -747,6 +762,37 @@ struct AthenaServer {
                 prompt_tokens: usage.promptTokens,
                 completion_tokens: usage.completionTokens,
                 total_tokens: usage.totalTokens))
+    }
+
+    /// Accumulated result of draining a metered generation: the full
+    /// text, the true token usage, and the finish reason.
+    struct GenCollected: Sendable {
+        var text = ""
+        var usage = TokenUsage.zero
+        var finish: FinishReason = .stop
+    }
+
+    /// Drain a metered generation under the per-request deadline (M33.1)
+    /// and return its text + usage + finish reason. `requestTimeoutSecs`
+    /// = 0 ⇒ unbounded. On overrun it throws
+    /// `AthenaError.requestTimedOut` (the caller maps it to a 504) and the
+    /// generation is cancelled so it stops consuming the worker/budget.
+    /// Shared by the sync `/v1/chat/completions`, native `/api/chat`, and
+    /// queued `conversation` paths so all three honor the same timeout.
+    private func collectMetered(
+        _ events: AsyncStream<GenChunk>
+    ) async throws -> GenCollected {
+        try await withInferenceDeadline(seconds: requestTimeoutSecs) {
+            var c = GenCollected()
+            for await event in events {
+                switch event {
+                case .text(let chunk): c.text += chunk
+                case .usage(let u): c.usage = u
+                case .finish(let r): c.finish = r
+                }
+            }
+            return c
+        }
     }
 
     private func handleEmbeddings(_ request: Request) async -> Response {
@@ -1724,21 +1770,22 @@ struct AthenaServer {
                 return (nil, String(describing: error))
             }
             let effective = req.effectiveSchema()
-            var text = ""
-            var usage = TokenUsage.zero
-            var finish: FinishReason = .stop
-            for await event in llm.generateMetered(
-                messages: turns, schemaJSON: effective?.json,
-                tools: req.toolSpecs(), maxTokens: req.max_tokens,
-                temperature: req.temperature,
-                topP: req.top_p, seed: req.seed)
-            {
-                switch event {
-                case .text(let c): text += c
-                case .usage(let u): usage = u
-                case .finish(let r): finish = r
-                }
+            let collected: GenCollected
+            do {
+                collected = try await collectMetered(
+                    llm.generateMetered(
+                        messages: turns, schemaJSON: effective?.json,
+                        tools: req.toolSpecs(), maxTokens: req.max_tokens,
+                        temperature: req.temperature,
+                        topP: req.top_p, seed: req.seed))
+            } catch let e as AthenaError {
+                return (nil, e.message)  // M33.1: timeout → job error
+            } catch {
+                return (nil, String(describing: error))
             }
+            var text = collected.text
+            let usage = collected.usage
+            var finish = collected.finish
             let stops = req.stopSequences()
             if !stops.isEmpty {
                 let cut = StopStreamFilter.truncate(text, stops: stops)
@@ -1940,22 +1987,36 @@ struct AthenaServer {
         let model = body.model ?? modelName
         if body.stream == true {
             return Self.streamNDJSON(
-                tokens: llm.generate(
-                    messages: turns, schemaJSON: nil, tools: nil,
-                    maxTokens: body.max_tokens,
-                    temperature: body.temperature)
+                tokens: deadlineBounded(
+                    seconds: requestTimeoutSecs,
+                    llm.generate(
+                        messages: turns, schemaJSON: nil, tools: nil,
+                        maxTokens: body.max_tokens,
+                        temperature: body.temperature))
             ) { content, done in
                 try? JSONEncoder().encode(
                     AthenaChatChunk(
                         content: done ? "" : content, done: done))
             }
         }
-        var text = ""
-        for await c in llm.generate(
+        let stream = llm.generate(
             messages: turns, schemaJSON: nil, tools: nil,
             maxTokens: body.max_tokens, temperature: body.temperature)
-        {
-            text += c
+        let text: String
+        do {
+            text = try await withInferenceDeadline(
+                seconds: requestTimeoutSecs
+            ) {
+                var acc = ""
+                for await c in stream { acc += c }
+                return acc
+            }
+        } catch let e as AthenaError {
+            return Self.error(
+                status: HTTPResponse.Status(code: e.httpStatus),
+                message: e.message, type: "server_error", code: e.code)
+        } catch {
+            return Self.classified(error, module: .llm)
         }
         return Self.json(
             AthenaChatResponse(
