@@ -430,6 +430,33 @@ struct Doctor: AsyncParsableCommand {
             say(.ok, "retention: " + ret.joined(separator: ", "))
         }
 
+        // 14. Audit-log posture (M30): RBAC/admin mutations (user/role/
+        //     token CRUD, model.remove, default_set, daemon load/unload)
+        //     append to an audit_log table. Report how many records exist
+        //     and the retention policy. Unlike the queue/vector blobs
+        //     above — where unbounded GROWTH is the risk — an audit trail
+        //     is normally kept for compliance, so it's a day-based
+        //     retention (which PRUNES the trail) that's worth surfacing.
+        var nAudit = 0
+        if let db = try? AthenaStore(
+            path: storeFile, key: StoreKey.resolve())
+        {
+            nAudit = await db.auditCount()
+        }
+        if let days = parsed?.auditRetentionDays, days > 0 {
+            say(
+                .ok,
+                "audit: \(nAudit) record(s); retention \(days) day(s) "
+                    + "— older RBAC/admin records are pruned. Set "
+                    + "audit_retention_days = 0 to keep the trail "
+                    + "indefinitely for compliance.")
+        } else {
+            say(
+                .ok,
+                "audit: \(nAudit) record(s); retention unbounded "
+                    + "(records kept indefinitely)")
+        }
+
         if fails > 0 {
             print("\n\(fails) critical issue(s).")
             throw ExitCode.failure

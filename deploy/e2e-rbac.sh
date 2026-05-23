@@ -1998,6 +1998,29 @@ echo "$OR" | grep -qi "retention:.*queue TTL 604800s" \
 rm -rf "$DOC3"
 
 echo
+echo "== phase 28: athena doctor — audit-log posture (M35) =="
+# doctor (check #14) reports how many RBAC/admin records the audit_log
+# holds and whether a day-based retention prunes them. It derives
+# data_dir from the config; $D already carries audit rows written in
+# phase 8.5 (cookie u:admin mutations). Line shape is asserted (not an
+# exact count) so the phase stays deterministic regardless of how
+# StoreKey.resolve() sources a key in the test env (mirrors phase 21/27).
+DOC4="$(mktemp -d)"
+# 28a: no audit_retention_days ⇒ unbounded (audit trail kept for compliance).
+CA="$DOC4/audit-unbounded.toml"; dcfg27 "$CA" "$D"
+OA="$("$ATHENA" doctor --config "$CA" --model-store "$MSTORE" 2>&1)"
+echo "$OA" | grep -qiE "audit: [0-9]+ record\(s\); retention unbounded" \
+  && ok "doctor reports audit records + unbounded retention" \
+  || { bad "doctor missing audit-unbounded line"; echo "$OA" | grep -i audit; }
+# 28b: audit_retention_days set ⇒ doctor surfaces the prune window.
+CB="$DOC4/audit-ret.toml"; dcfg27 "$CB" "$D" "audit_retention_days = 30"
+OB="$("$ATHENA" doctor --config "$CB" --model-store "$MSTORE" 2>&1)"
+echo "$OB" | grep -qi "audit:.*retention 30 day(s)" \
+  && ok "doctor reports configured audit retention window" \
+  || { bad "doctor missing audit-retention line"; echo "$OB" | grep -i audit; }
+rm -rf "$DOC4"
+
+echo
 echo "════════════════════════════════════════"
 echo "  PASS=$PASS  FAIL=$FAIL"
 echo "════════════════════════════════════════"
