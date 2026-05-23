@@ -119,6 +119,25 @@ engine = "mlx"
 # drop_request_content = true
 
 
+# ── At-rest encryption ───────────────────────────────────────────────
+
+# Encrypt the SQLite store on disk with SQLCipher (AES-256). Passwords
+# (PBKDF2), token hashes (SHA-256) and outbound secrets (Keychain) are
+# already protected; this additionally encrypts the vector + queue blobs,
+# which hold inference inputs/outputs. The key is resolved from the
+# ATHENA_STORE_KEY environment variable, else the login Keychain (service
+# "athena", account "store:key"); when neither exists the daemon mints a
+# random 256-bit key and stores it in the Keychain on first start. A
+# plaintext store is migrated to encrypted in place on the first start
+# with this enabled. Commented / false ⇒ a plaintext store relying on
+# FileVault for at-rest protection (default). Bare boolean.
+#
+# IMPORTANT: the key is NOT stored in this file. Keep ATHENA_STORE_KEY (or
+# a Keychain backup) safe — without it an encrypted store is unreadable.
+# `athena doctor` reports the encryption posture (see docs/at-rest.md).
+# encrypt_store = true
+
+
 # ── Security ─────────────────────────────────────────────────────────
 
 # Bearer-token auth keys file. Each line: `admin <key>` or

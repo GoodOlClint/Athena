@@ -17,7 +17,7 @@ enum ConfigEditor {
     /// Written bare (unquoted), like ints: floats and bools.
     static let rawKeys: Set<String> = [
         "temperature", "speculative", "rate_limit", "preload",
-        "drop_request_content",
+        "drop_request_content", "encrypt_store",
     ]
     static let knownKeys: Set<String> = [
         "listen_host", "listen_port", "budget_bytes", "engine",
@@ -28,7 +28,7 @@ enum ConfigEditor {
         "max_concurrency", "max_concurrency_per_principal",
         "audit_retention_days", "request_timeout_secs", "preload",
         "queue_result_ttl_secs", "queue_max_rows", "vector_ttl_secs",
-        "drop_request_content",
+        "drop_request_content", "encrypt_store",
         "https_proxy", "http_proxy", "all_proxy", "no_proxy",
         "kv_compression",
     ]
@@ -100,6 +100,8 @@ enum ConfigEditor {
             return cfg.vectorTtlSecs.map(String.init)
         case "drop_request_content":
             return cfg.dropRequestContent.map { $0 ? "true" : "false" }
+        case "encrypt_store":
+            return cfg.encryptStore.map { $0 ? "true" : "false" }
         case "https_proxy": return cfg.httpsProxy
         case "http_proxy": return cfg.httpProxy
         case "all_proxy": return cfg.allProxy
@@ -190,6 +192,10 @@ enum ConfigEditor {
                 throw Failure.badValue(key, "true or false")
             }
             if key == "drop_request_content",
+                value != "true", value != "false" {
+                throw Failure.badValue(key, "true or false")
+            }
+            if key == "encrypt_store",
                 value != "true", value != "false" {
                 throw Failure.badValue(key, "true or false")
             }

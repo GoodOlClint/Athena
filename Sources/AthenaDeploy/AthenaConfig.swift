@@ -91,6 +91,12 @@ public struct AthenaConfig: Sendable, Equatable {
     /// don't persist on disk; the result stays (bounded by the queue
     /// TTL). Optional — absent / false ⇒ prompts retained (default).
     public var dropRequestContent: Bool?
+    /// At-rest encryption (M34.3b). When true, the SQLite store is opened
+    /// (and a plaintext store migrated) under SQLCipher AES-256, keyed
+    /// from `ATHENA_STORE_KEY` env or the Keychain (generated on first
+    /// run). Optional — absent / false ⇒ plaintext store on disk relying
+    /// on FileVault (default).
+    public var encryptStore: Bool?
     /// `[network]` egress-proxy keys (M13.2). An operator-set
     /// `*_PROXY` env var always wins over these.
     public var httpsProxy: String?
@@ -119,6 +125,7 @@ public struct AthenaConfig: Sendable, Equatable {
         queueMaxRows: Int? = nil,
         vectorTtlSecs: Int? = nil,
         dropRequestContent: Bool? = nil,
+        encryptStore: Bool? = nil,
         httpsProxy: String? = nil, httpProxy: String? = nil,
         allProxy: String? = nil, noProxy: String? = nil,
         logDir: String
@@ -151,6 +158,7 @@ public struct AthenaConfig: Sendable, Equatable {
         self.queueMaxRows = queueMaxRows
         self.vectorTtlSecs = vectorTtlSecs
         self.dropRequestContent = dropRequestContent
+        self.encryptStore = encryptStore
         self.httpsProxy = httpsProxy
         self.httpProxy = httpProxy
         self.allProxy = allProxy
@@ -256,6 +264,9 @@ public struct AthenaConfig: Sendable, Equatable {
         let dropReq = scalar("drop_request_content", in: toml).map {
             $0 == "true"
         }
+        let encStore = scalar("encrypt_store", in: toml).map {
+            $0 == "true"
+        }
 
         return AthenaConfig(
             listenHost: host,
@@ -286,6 +297,7 @@ public struct AthenaConfig: Sendable, Equatable {
             queueMaxRows: queueMax,
             vectorTtlSecs: vectorTtl,
             dropRequestContent: dropReq,
+            encryptStore: encStore,
             httpsProxy: scalar("https_proxy", in: toml),
             httpProxy: scalar("http_proxy", in: toml),
             allProxy: scalar("all_proxy", in: toml),

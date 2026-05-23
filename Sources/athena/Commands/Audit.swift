@@ -37,7 +37,9 @@ struct AuditCommand: AsyncParsableCommand {
         }
         // Local: read the store directly (works while the daemon holds
         // it open — SQLite WAL allows concurrent readers).
-        guard let db = try? AthenaStore(path: storeDBPath(dataDir))
+        guard
+            let db = try? AthenaStore(
+                path: storeDBPath(dataDir), key: StoreKey.resolve())
         else {
             print("no audit entries")
             return

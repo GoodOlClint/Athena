@@ -97,6 +97,9 @@ public enum LaunchdPlist {
         if config.dropRequestContent == true {
             args += ["--drop-request-content"]  // a Flag, not an Option
         }
+        if config.encryptStore == true {
+            args += ["--encrypt-store"]  // a Flag, not an Option
+        }
 
         return [
             "Label": label,

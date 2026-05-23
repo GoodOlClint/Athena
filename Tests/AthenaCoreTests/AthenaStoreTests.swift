@@ -352,6 +352,73 @@ final class AthenaStoreTests: XCTestCase {
         XCTAssertEqual(left, ["p1", "p2"], "stays above cap, keeps pending")
     }
 
+    // MARK: At-rest encryption (M34.3b)
+
+    func testEncryptedStoreRoundTripAndWrongKey() async throws {
+        let url = tmpURL()
+        defer {
+            for ext in ["", "-wal", "-shm"] {
+                try? FileManager.default.removeItem(
+                    at: URL(fileURLWithPath: url.path + ext))
+            }
+        }
+        let key = "0123456789abcdef0123456789abcdef"
+        do {
+            let s = try AthenaStore(path: url, key: key)
+            try await s.putVector(id: "v", vector: [1, 2, 3], metadata: nil)
+            await s.close()
+        }
+        // The on-disk file must NOT be a plaintext SQLite database.
+        XCTAssertFalse(
+            AthenaStore.isPlaintextDatabase(at: url),
+            "keyed store must be ciphertext on disk")
+        // Correct key reopens and reads.
+        do {
+            let s = try AthenaStore(path: url, key: key)
+            let got = await s.getVector(id: "v")?.vector
+            XCTAssertEqual(got, [1, 2, 3])
+            await s.close()
+        }
+        // Wrong key fails fast with an encryption error.
+        XCTAssertThrowsError(try AthenaStore(path: url, key: "wrongkey")) {
+            guard case AthenaStore.StoreError.encryption = $0 else {
+                return XCTFail("expected .encryption, got \($0)")
+            }
+        }
+        // No key against an encrypted file also fails (can't read it).
+        XCTAssertThrowsError(try AthenaStore(path: url))
+    }
+
+    func testPlaintextToEncryptedMigrationPreservesData() async throws {
+        let url = tmpURL()
+        defer {
+            for ext in ["", "-wal", "-shm"] {
+                try? FileManager.default.removeItem(
+                    at: URL(fileURLWithPath: url.path + ext))
+            }
+        }
+        // Seed a plaintext store, then close it so the file is free for
+        // the migration swap (the daemon migrates BEFORE opening too).
+        do {
+            let s = try AthenaStore(path: url)
+            try await s.putVector(id: "keep", vector: [7, 8], metadata: nil)
+            await s.close()
+        }
+        XCTAssertTrue(
+            AthenaStore.isPlaintextDatabase(at: url),
+            "store starts plaintext")
+        // Migrate in place.
+        let key = "feedfacefeedfacefeedfacefeedface"
+        try AthenaStore.migrateToEncrypted(at: url, key: key)
+        XCTAssertFalse(
+            AthenaStore.isPlaintextDatabase(at: url),
+            "store is encrypted after migration")
+        // Data survives, readable only with the key.
+        let s = try AthenaStore(path: url, key: key)
+        let got = await s.getVector(id: "keep")?.vector
+        XCTAssertEqual(got, [7, 8])
+    }
+
     func testPruneVectorsByAge() async throws {
         let url = tmpURL()
         defer { try? FileManager.default.removeItem(at: url) }

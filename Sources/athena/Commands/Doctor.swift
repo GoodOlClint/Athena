@@ -169,7 +169,8 @@ struct Doctor: AsyncParsableCommand {
         var nUsr = 0
         var nAdmins = 0
         if let db = try? AthenaStore(
-            path: dataDir.appendingPathComponent("athena.sqlite"))
+            path: dataDir.appendingPathComponent("athena.sqlite"),
+            key: StoreKey.resolve())
         {
             nTok = await db.tokenCount()
             nUsr = await db.userCount()

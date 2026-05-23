@@ -250,6 +250,27 @@ final class AthenaConfigTests: XCTestCase {
         XCTAssertNil(c.dropRequestContent)
     }
 
+    func testEncryptStoreKeyParse() throws {
+        let toml = """
+            listen_host = "127.0.0.1"
+            listen_port = 7447
+            log_dir = "/l"
+            encrypt_store = true
+            """
+        let c = try AthenaConfig.parse(toml: toml)
+        XCTAssertEqual(c.encryptStore, true)
+    }
+
+    func testEncryptStoreKeyAbsentIsNil() throws {
+        let toml = """
+            listen_host = "127.0.0.1"
+            listen_port = 7447
+            log_dir = "/l"
+            """
+        let c = try AthenaConfig.parse(toml: toml)
+        XCTAssertNil(c.encryptStore)
+    }
+
     func testMissingRequiredKeyThrows() {
         let toml = "listen_host = \"h\"\nlog_dir = \"/l\""
         XCTAssertThrowsError(try AthenaConfig.parse(toml: toml)) {
@@ -339,7 +360,8 @@ final class LaunchdPlistTests: XCTestCase {
         queueResultTtlSecs: Int? = nil,
         queueMaxRows: Int? = nil,
         vectorTtlSecs: Int? = nil,
-        dropRequestContent: Bool? = nil
+        dropRequestContent: Bool? = nil,
+        encryptStore: Bool? = nil
     ) -> AthenaConfig {
         AthenaConfig(
             listenHost: "127.0.0.1", listenPort: 7447, budgetBytes: budget,
@@ -360,6 +382,7 @@ final class LaunchdPlistTests: XCTestCase {
             queueMaxRows: queueMaxRows,
             vectorTtlSecs: vectorTtlSecs,
             dropRequestContent: dropRequestContent,
+            encryptStore: encryptStore,
             logDir: "/var/log/athena")
     }
 
@@ -403,7 +426,8 @@ final class LaunchdPlistTests: XCTestCase {
                 queueResultTtlSecs: 604_800,
                 queueMaxRows: 10_000,
                 vectorTtlSecs: 2_592_000,
-                dropRequestContent: true))
+                dropRequestContent: true,
+                encryptStore: true))
         XCTAssertEqual(
             d["ProgramArguments"] as? [String],
             [
@@ -428,6 +452,7 @@ final class LaunchdPlistTests: XCTestCase {
                 "--queue-max-rows", "10000",
                 "--vector-ttl-secs", "2592000",
                 "--drop-request-content",
+                "--encrypt-store",
             ])
     }
 

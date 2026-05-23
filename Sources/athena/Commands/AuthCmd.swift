@@ -56,7 +56,7 @@ func storeDBPath(_ override: String? = nil) -> URL {
 
 private func openStore(_ dataDir: String?) -> AthenaStore {
     do {
-        return try AthenaStore(path: storeDBPath(dataDir))
+        return try AthenaStore(path: storeDBPath(dataDir), key: StoreKey.resolve())
     } catch {
         FailableExit.die("error: cannot open store: \(error)")
     }
@@ -230,7 +230,7 @@ struct AuthUserList: AsyncParsableCommand {
             try await RemoteAuth.usersList(daemon)
             return
         }
-        guard let db = try? AthenaStore(path: storeDBPath(dataDir))
+        guard let db = try? AthenaStore(path: storeDBPath(dataDir), key: StoreKey.resolve())
         else {
             print("no store at \(storeDBPath(dataDir).path)")
             return
@@ -261,7 +261,7 @@ struct AuthUserRemove: AsyncParsableCommand {
                 daemon, username: username)
             return
         }
-        guard let db = try? AthenaStore(path: storeDBPath(dataDir))
+        guard let db = try? AthenaStore(path: storeDBPath(dataDir), key: StoreKey.resolve())
         else {
             FailableExit.die(
                 "error: no store at \(storeDBPath(dataDir).path)")
@@ -459,7 +459,7 @@ struct AuthList: AsyncParsableCommand {
             try await RemoteAuth.tokensList(daemon)
             return
         }
-        guard let db = try? AthenaStore(path: storeDBPath(dataDir))
+        guard let db = try? AthenaStore(path: storeDBPath(dataDir), key: StoreKey.resolve())
         else {
             print("no store at \(storeDBPath(dataDir).path)")
             return
@@ -495,7 +495,7 @@ struct AuthRemove: AsyncParsableCommand {
         guard prefix.count >= 6 else {
             FailableExit.die("error: prefix must be >= 6 hex chars")
         }
-        guard let db = try? AthenaStore(path: storeDBPath(dataDir))
+        guard let db = try? AthenaStore(path: storeDBPath(dataDir), key: StoreKey.resolve())
         else {
             FailableExit.die(
                 "error: no store at \(storeDBPath(dataDir).path)")

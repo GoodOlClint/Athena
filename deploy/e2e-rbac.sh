@@ -67,11 +67,15 @@ D5=""                          # phase-25.1 queue-max-rows data dir
 D6=""                          # phase-25.2 vector-TTL data dir
 D7=""                          # phase-25.3 content opt-out data dir
 D8=""                          # phase-25.3 content-retained control dir
+D9=""                          # phase-26 encrypted-store data dir
+D10=""                         # phase-26 plaintext→encrypted migration dir
 cleanup() {
   [ -n "$DPID" ] && kill "$DPID" 2>/dev/null
   wait "$DPID" 2>/dev/null
   rm -rf "$D" "$EMPTY" "$MSTORE" ${D2:+"$D2"} ${D3:+"$D3"} \
-    ${D4:+"$D4"} ${D5:+"$D5"} ${D6:+"$D6"} ${D7:+"$D7"} ${D8:+"$D8"}
+    ${D4:+"$D4"} ${D5:+"$D5"} ${D6:+"$D6"} ${D7:+"$D7"} ${D8:+"$D8"} \
+    ${D9:+"$D9"} ${D10:+"$D10"}
+  unset ATHENA_STORE_KEY
 }
 trap cleanup EXIT
 
@@ -1886,6 +1890,64 @@ KREQ="$(sqlite3 "$cdb8" "SELECT length(request) FROM jobs WHERE id='$JK';")"
   || bad "default unexpectedly dropped the prompt (len=$KREQ)"
 stop_daemon
 rm -rf "$D8"; D8=""
+
+echo
+echo "== phase 26: at-rest encryption + migration (M34.3b) =="
+# encrypt_store opens (and migrates) the SQLite store under SQLCipher.
+# Deterministic key via ATHENA_STORE_KEY env (no Keychain in automated
+# runs). The on-disk file becomes ciphertext; the same key still serves.
+stop_daemon
+export ATHENA_STORE_KEY="e2e-store-key-0123456789abcdef0123"
+
+# 26a: a store written by the keyed CLI is encrypted on disk, the daemon
+# (same key) serves it, and a plaintext sqlite3 cannot read it.
+D9="$(mktemp -d)"; edb="$D9/athena.sqlite"
+"$ATHENA" auth user add admin --password adminpass1 --role admin \
+  --data-dir "$D9" >/dev/null \
+  && ok "seed admin into keyed store" || bad "seed keyed admin"
+EMAGIC="$(head -c 15 "$edb" | tr -d '\0')"
+[ "$EMAGIC" != "SQLite format 3" ] \
+  && ok "keyed store is ciphertext on disk (no SQLite magic)" \
+  || bad "keyed store header is plaintext ($EMAGIC)"
+if sqlite3 "$edb" "SELECT count(*) FROM auth_users;" >/dev/null 2>&1; then
+  bad "plaintext sqlite3 read the encrypted store"
+else
+  ok "plaintext sqlite3 cannot read the encrypted store"
+fi
+A9="$("$ATHENA" auth token add --user admin --data-dir "$D9" \
+  2>/dev/null | grep -o 'sk-athena-[A-Za-z0-9_-]*' | head -1)"
+start_daemon "$D9" 127.0.0.1 --encrypt-store \
+  || { echo "encrypted daemon failed"; cat "$D/daemon.log"; exit 1; }
+code 200 GET /api/users "$A9"   # daemon decrypts + serves with the key
+stop_daemon
+rm -rf "$D9"; D9=""
+
+# 26b: a plaintext store is migrated to encrypted on the first encrypted
+# start, and pre-migration data + credentials survive.
+unset ATHENA_STORE_KEY
+D10="$(mktemp -d)"; mdb="$D10/athena.sqlite"
+"$ATHENA" auth user add admin --password adminpass1 --role admin \
+  --data-dir "$D10" >/dev/null \
+  && ok "seed admin into plaintext store" || bad "seed plaintext admin"
+PMAGIC="$(head -c 15 "$mdb" | tr -d '\0')"
+[ "$PMAGIC" = "SQLite format 3" ] \
+  && ok "store starts plaintext" || bad "store not plaintext ($PMAGIC)"
+A10="$("$ATHENA" auth token add --user admin --data-dir "$D10" \
+  2>/dev/null | grep -o 'sk-athena-[A-Za-z0-9_-]*' | head -1)"
+export ATHENA_STORE_KEY="e2e-store-key-0123456789abcdef0123"
+start_daemon "$D10" 127.0.0.1 --encrypt-store \
+  || { echo "migration daemon failed"; cat "$D/daemon.log"; exit 1; }
+grep -q "migrating plaintext store to encrypted" "$D/daemon.log" \
+  && ok "daemon migrated the plaintext store on first encrypted start" \
+  || { bad "no migration log line"; grep -i encrypt "$D/daemon.log"; }
+MMAGIC="$(head -c 15 "$mdb" | tr -d '\0')"
+[ "$MMAGIC" != "SQLite format 3" ] \
+  && ok "store is ciphertext after migration" \
+  || bad "store still plaintext after migration ($MMAGIC)"
+code 200 GET /api/users "$A10"  # pre-migration token still valid post-encrypt
+stop_daemon
+rm -rf "$D10"; D10=""
+unset ATHENA_STORE_KEY
 
 echo
 echo "════════════════════════════════════════"

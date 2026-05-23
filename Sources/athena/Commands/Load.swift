@@ -198,6 +198,12 @@ struct Load: AsyncParsableCommand {
     )
     var dropRequestContent = false
 
+    @Flag(
+        help:
+            "Encrypt the SQLite store at rest with SQLCipher (AES-256). The key resolves from ATHENA_STORE_KEY env or the Keychain; if absent, a random key is generated and stored in the Keychain. A plaintext store is migrated to encrypted on first start. Off by default."
+    )
+    var encryptStore = false
+
     mutating func run() async throws {
         // Centralized logging first — must precede any Logger creation
         // (Hummingbird/NIO included) so everything routes through the
@@ -379,8 +385,27 @@ struct Load: AsyncParsableCommand {
             dataDir.map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? AthenaEnv.userHome()
                 .appendingPathComponent(".athena", isDirectory: true)
-        let athenaStore = try AthenaStore(
-            path: dataRoot.appendingPathComponent("athena.sqlite"))
+        // M34.3b: at-rest encryption. `encrypt_store` ensures a key
+        // exists (env > Keychain, else mint+store — fail-closed) and
+        // migrates a plaintext store to SQLCipher-encrypted on first
+        // start. Otherwise honor an already-configured key if present, so
+        // an existing encrypted store still opens.
+        let dbPath = dataRoot.appendingPathComponent("athena.sqlite")
+        let storeKey: String?
+        if encryptStore {
+            let key = try StoreKey.ensure()
+            if AthenaStore.isPlaintextDatabase(at: dbPath) {
+                Logger(label: AthenaLogLabel.daemon).notice(
+                    "encrypt_store: migrating plaintext store to encrypted")
+                try AthenaStore.migrateToEncrypted(at: dbPath, key: key)
+                Logger(label: AthenaLogLabel.daemon).notice(
+                    "encrypt_store: store is now encrypted at rest")
+            }
+            storeKey = key
+        } else {
+            storeKey = StoreKey.resolve()
+        }
+        let athenaStore = try AthenaStore(path: dbPath, key: storeKey)
         let vectorStore = VectorStore(
             store: athenaStore,
             capBytes: vectorCapBytes

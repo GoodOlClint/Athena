@@ -207,7 +207,7 @@ struct Install: AsyncParsableCommand {
         let dbURL = dataDir.appendingPathComponent("athena.sqlite")
         var seededPassword: String?
         var seededToken: String?
-        if let db = try? AthenaStore(path: dbURL) {
+        if let db = try? AthenaStore(path: dbURL, key: StoreKey.resolve()) {
             if await db.userCount() == 0 {
                 let pw = Self.simplePassword()
                 let salt = Passwords.randomSalt()

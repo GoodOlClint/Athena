@@ -79,12 +79,35 @@ public actor AthenaStore {
     public enum StoreError: Error, CustomStringConvertible {
         case open(String)
         case sql(String)
+        case encryption(String)
         public var description: String {
             switch self {
             case .open(let s): return "store open: \(s)"
             case .sql(let s): return "store sql: \(s)"
+            case .encryption(let s): return "store encryption: \(s)"
             }
         }
+    }
+
+    /// SQLite plaintext file magic (first 16 bytes incl. the NUL). An
+    /// at-rest-encrypted (SQLCipher-keyed) file does NOT start with this —
+    /// its header pages are ciphertext. Used to decide whether a store
+    /// needs the one-time plaintext→encrypted migration (M34.3b).
+    public nonisolated static let plaintextMagic = Data(
+        "SQLite format 3\u{0}".utf8)
+
+    /// True if `path` exists and begins with the standard SQLite magic
+    /// (i.e. it is an UNENCRYPTED database). A missing file or a keyed
+    /// (ciphertext-header) file returns false.
+    public nonisolated static func isPlaintextDatabase(
+        at path: URL
+    ) -> Bool {
+        guard let h = try? FileHandle(forReadingFrom: path) else {
+            return false
+        }
+        defer { try? h.close() }
+        let head = (try? h.read(upToCount: plaintextMagic.count)) ?? Data()
+        return head == plaintextMagic
     }
 
     // nonisolated(unsafe): the actor serialises all real access; only
@@ -96,7 +119,14 @@ public actor AthenaStore {
     private static let transient = unsafeBitCast(
         -1, to: sqlite3_destructor_type.self)
 
-    public init(path: URL) throws {
+    /// Open (creating if needed) the SQLite store. When `key` is a
+    /// non-empty passphrase the connection is keyed via SQLCipher
+    /// (`sqlite3_key`) BEFORE any other statement, so the database is
+    /// transparently AES-256 encrypted at rest (M34.3b). A wrong key on
+    /// an existing encrypted store, or a key against a plaintext store,
+    /// fails fast with `StoreError.encryption` (no silent corruption).
+    /// `key == nil`/empty ⇒ a standard plaintext store (default).
+    public init(path: URL, key: String? = nil) throws {
         self.dbPath = path
         try FileManager.default.createDirectory(
             at: path.deletingLastPathComponent(),
@@ -108,6 +138,27 @@ public actor AthenaStore {
                     | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK
         else {
             throw StoreError.open(String(cString: sqlite3_errmsg(db)))
+        }
+        if let key, !key.isEmpty {
+            // Key MUST precede any other statement on the connection.
+            let bytes = Array(key.utf8)
+            guard sqlite3_key(db, bytes, Int32(bytes.count)) == SQLITE_OK
+            else {
+                throw StoreError.encryption(
+                    String(cString: sqlite3_errmsg(db)))
+            }
+            // Probe: the first read forces SQLCipher to derive the key and
+            // decrypt page 1. A wrong key (or a plaintext file opened with
+            // a key) fails here — surface it as a clear encryption error
+            // rather than a confusing CREATE TABLE failure later.
+            guard
+                Self.exec0(db, "SELECT count(*) FROM sqlite_master;")
+                    == SQLITE_OK
+            else {
+                throw StoreError.encryption(
+                    "cannot open keyed store — wrong key, or the file is "
+                        + "not SQLCipher-encrypted")
+            }
         }
         try Self.exec(db, "PRAGMA journal_mode=WAL;")
         try Self.exec(
@@ -160,6 +211,78 @@ public actor AthenaStore {
 
     deinit { sqlite3_close(db) }
 
+    /// Explicitly close the SQLite connection now, rather than waiting for
+    /// `deinit`. Lets a caller release the file (and its WAL/SHM locks)
+    /// deterministically — e.g. before a `migrateToEncrypted` swap. The
+    /// connection must not be used afterwards; `deinit`'s close becomes a
+    /// no-op (`sqlite3_close(nil)`).
+    public func close() {
+        sqlite3_close(db)
+        db = nil
+    }
+
+    /// One-time, in-place migration of a PLAINTEXT store at `path` to a
+    /// SQLCipher-encrypted one keyed with `key` (M34.3b). Uses SQLCipher's
+    /// `sqlcipher_export` into an attached encrypted database, then
+    /// atomically swaps it in (deleting the plaintext file and its stale
+    /// WAL/SHM sidecars). Idempotent at the call site: callers guard with
+    /// `isPlaintextDatabase(at:)`, so an already-encrypted store is never
+    /// re-migrated. Throws (leaving the original untouched) on any failure.
+    public nonisolated static func migrateToEncrypted(
+        at path: URL, key: String
+    ) throws {
+        // Keep the values safe to inline into the ATTACH literal.
+        guard !key.contains("'") else {
+            throw StoreError.encryption(
+                "encryption key must not contain a single quote")
+        }
+        let enc = path.appendingPathExtension("enc-migrate")
+        guard !enc.path.contains("'") else {
+            throw StoreError.encryption(
+                "data dir path must not contain a single quote")
+        }
+        let fm = FileManager.default
+        try? fm.removeItem(at: enc)  // clear any interrupted prior attempt
+
+        var db: OpaquePointer?
+        // ATTACH inherits the main connection's open flags, so CREATE is
+        // required here for the new encrypted file to be created.
+        guard
+            sqlite3_open_v2(
+                path.path, &db,
+                SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil)
+                == SQLITE_OK
+        else {
+            let m = String(cString: sqlite3_errmsg(db))
+            sqlite3_close(db)
+            throw StoreError.encryption("migration open: \(m)")
+        }
+        do {
+            try exec(
+                db,
+                "ATTACH DATABASE '\(enc.path)' AS encrypted KEY '\(key)';")
+            try exec(db, "SELECT sqlcipher_export('encrypted');")
+            try exec(db, "DETACH DATABASE encrypted;")
+        } catch {
+            sqlite3_close(db)
+            try? fm.removeItem(at: enc)
+            throw StoreError.encryption("migration export: \(error)")
+        }
+        sqlite3_close(db)
+
+        // Atomic-ish swap: drop the plaintext db + its WAL/SHM, move the
+        // encrypted copy into place.
+        do {
+            for ext in ["", "-wal", "-shm"] {
+                try? fm.removeItem(
+                    at: URL(fileURLWithPath: path.path + ext))
+            }
+            try fm.moveItem(at: enc, to: path)
+        } catch {
+            throw StoreError.encryption("migration swap: \(error)")
+        }
+    }
+
     // MARK: SQLite helpers
 
     // Nonisolated statics (take `db`) so the actor initializer can use
@@ -173,6 +296,14 @@ public actor AthenaStore {
             sqlite3_free(err)
             throw StoreError.sql(m)
         }
+    }
+
+    /// Non-throwing exec returning the raw SQLite status — for the keyed-
+    /// open probe where we want to inspect the code, not throw a `.sql`.
+    private static func exec0(
+        _ db: OpaquePointer?, _ sql: String
+    ) -> Int32 {
+        sqlite3_exec(db, sql, nil, nil, nil)
     }
 
     private static func prepared(
