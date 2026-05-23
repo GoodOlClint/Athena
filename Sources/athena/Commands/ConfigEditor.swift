@@ -12,11 +12,12 @@ enum ConfigEditor {
         "vector_cap_bytes", "rate_burst",
         "max_concurrency", "max_concurrency_per_principal",
         "audit_retention_days", "request_timeout_secs",
-        "queue_result_ttl_secs", "queue_max_rows",
+        "queue_result_ttl_secs", "queue_max_rows", "vector_ttl_secs",
     ]
     /// Written bare (unquoted), like ints: floats and bools.
     static let rawKeys: Set<String> = [
         "temperature", "speculative", "rate_limit", "preload",
+        "drop_request_content",
     ]
     static let knownKeys: Set<String> = [
         "listen_host", "listen_port", "budget_bytes", "engine",
@@ -26,7 +27,8 @@ enum ConfigEditor {
         "tls_cert", "tls_key", "rate_limit", "rate_burst",
         "max_concurrency", "max_concurrency_per_principal",
         "audit_retention_days", "request_timeout_secs", "preload",
-        "queue_result_ttl_secs", "queue_max_rows",
+        "queue_result_ttl_secs", "queue_max_rows", "vector_ttl_secs",
+        "drop_request_content",
         "https_proxy", "http_proxy", "all_proxy", "no_proxy",
         "kv_compression",
     ]
@@ -94,6 +96,10 @@ enum ConfigEditor {
             return cfg.queueResultTtlSecs.map(String.init)
         case "queue_max_rows":
             return cfg.queueMaxRows.map(String.init)
+        case "vector_ttl_secs":
+            return cfg.vectorTtlSecs.map(String.init)
+        case "drop_request_content":
+            return cfg.dropRequestContent.map { $0 ? "true" : "false" }
         case "https_proxy": return cfg.httpsProxy
         case "http_proxy": return cfg.httpProxy
         case "all_proxy": return cfg.allProxy
@@ -180,6 +186,10 @@ enum ConfigEditor {
                 throw Failure.badValue(key, "true or false")
             }
             if key == "preload",
+                value != "true", value != "false" {
+                throw Failure.badValue(key, "true or false")
+            }
+            if key == "drop_request_content",
                 value != "true", value != "false" {
                 throw Failure.badValue(key, "true or false")
             }

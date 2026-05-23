@@ -81,6 +81,16 @@ public struct AthenaConfig: Sendable, Equatable {
     /// retention is the operator's call). Pending jobs are never pruned.
     public var queueResultTtlSecs: Int?
     public var queueMaxRows: Int?
+    /// Vector-store retention (M34.2). Prunes vectors written longer ago
+    /// than the window on each upsert. Optional — absent / non-positive ⇒
+    /// keep forever (opt-in, off by default). Vectors stored before the
+    /// feature (no timestamp) are never auto-pruned.
+    public var vectorTtlSecs: Int?
+    /// Content opt-out (M34.2). When true, a queued job's prompt
+    /// (request) blob is cleared once it finishes so inference inputs
+    /// don't persist on disk; the result stays (bounded by the queue
+    /// TTL). Optional — absent / false ⇒ prompts retained (default).
+    public var dropRequestContent: Bool?
     /// `[network]` egress-proxy keys (M13.2). An operator-set
     /// `*_PROXY` env var always wins over these.
     public var httpsProxy: String?
@@ -107,6 +117,8 @@ public struct AthenaConfig: Sendable, Equatable {
         preload: Bool? = nil,
         queueResultTtlSecs: Int? = nil,
         queueMaxRows: Int? = nil,
+        vectorTtlSecs: Int? = nil,
+        dropRequestContent: Bool? = nil,
         httpsProxy: String? = nil, httpProxy: String? = nil,
         allProxy: String? = nil, noProxy: String? = nil,
         logDir: String
@@ -137,6 +149,8 @@ public struct AthenaConfig: Sendable, Equatable {
         self.preload = preload
         self.queueResultTtlSecs = queueResultTtlSecs
         self.queueMaxRows = queueMaxRows
+        self.vectorTtlSecs = vectorTtlSecs
+        self.dropRequestContent = dropRequestContent
         self.httpsProxy = httpsProxy
         self.httpProxy = httpProxy
         self.allProxy = allProxy
@@ -233,8 +247,15 @@ public struct AthenaConfig: Sendable, Equatable {
         if let qm = scalar("queue_max_rows", in: toml) {
             queueMax = try int("queue_max_rows", qm)
         }
+        var vectorTtl: Int?
+        if let vt = scalar("vector_ttl_secs", in: toml) {
+            vectorTtl = try int("vector_ttl_secs", vt)
+        }
         let spec = scalar("speculative", in: toml).map { $0 == "true" }
         let preload = scalar("preload", in: toml).map { $0 == "true" }
+        let dropReq = scalar("drop_request_content", in: toml).map {
+            $0 == "true"
+        }
 
         return AthenaConfig(
             listenHost: host,
@@ -263,6 +284,8 @@ public struct AthenaConfig: Sendable, Equatable {
             preload: preload,
             queueResultTtlSecs: queueTtl,
             queueMaxRows: queueMax,
+            vectorTtlSecs: vectorTtl,
+            dropRequestContent: dropReq,
             httpsProxy: scalar("https_proxy", in: toml),
             httpProxy: scalar("http_proxy", in: toml),
             allProxy: scalar("all_proxy", in: toml),

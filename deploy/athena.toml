@@ -100,6 +100,24 @@ engine = "mlx"
 # queue_result_ttl_secs = 604800       # drop results older than 7 days
 # queue_max_rows = 10000               # cap total queue rows
 
+# Built-in vector-DB retention. vector_ttl_secs prunes vectors written
+# longer ago than the window; the sweep runs opportunistically on each
+# upsert (a daemon actively writing vectors keeps itself bounded).
+# Vectors stored before this feature existed (no write timestamp) are
+# never auto-pruned. Commented / non-positive ⇒ keep forever (default).
+# Use it for ephemeral/RAG working sets, NOT a vector DB you treat as a
+# durable knowledge base.
+# vector_ttl_secs = 2592000            # drop vectors older than 30 days
+
+# Content opt-out (zero prompt retention). With it on, a queued job's
+# request (the prompt) is wiped from disk the moment the job finishes —
+# only the result the client polls for is kept (and that is bounded by
+# queue_result_ttl_secs above). Inputs to the synchronous /v1 + /api
+# paths are never persisted regardless; this only affects the async
+# queue, which must store the request to run it later. Bare boolean;
+# commented / false ⇒ prompts retained until the row is pruned (default).
+# drop_request_content = true
+
 
 # ── Security ─────────────────────────────────────────────────────────
 

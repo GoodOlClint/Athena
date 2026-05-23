@@ -186,6 +186,18 @@ struct Load: AsyncParsableCommand {
     )
     var queueMaxRows: Int?
 
+    @Option(
+        help:
+            "Vector-store TTL in seconds. 0/absent ⇒ keep forever (opt-in). On each upsert, vectors written longer ago than this are pruned. Vectors stored before this feature (no timestamp) are never auto-pruned."
+    )
+    var vectorTtlSecs: Int?
+
+    @Flag(
+        help:
+            "Clear a queued job's prompt (request) blob once it finishes, so inference inputs don't persist on disk past completion. The result the client polls for is retained (bounded by --queue-result-ttl-secs). Off by default."
+    )
+    var dropRequestContent = false
+
     mutating func run() async throws {
         // Centralized logging first — must precede any Logger creation
         // (Hummingbird/NIO included) so everything routes through the
@@ -409,7 +421,9 @@ struct Load: AsyncParsableCommand {
             requestTimeoutSecs: requestTimeoutSecs ?? 0,
             preload: preload,
             queueResultTtlSecs: queueResultTtlSecs ?? 0,
-            queueMaxRows: queueMaxRows ?? 0)
+            queueMaxRows: queueMaxRows ?? 0,
+            vectorTtlSecs: vectorTtlSecs ?? 0,
+            dropRequestContent: dropRequestContent)
         try await server.run()
     }
 }

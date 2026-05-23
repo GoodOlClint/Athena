@@ -351,4 +351,39 @@ final class AthenaStoreTests: XCTestCase {
         let left = await s.listJobs().map { $0.id }.sorted()
         XCTAssertEqual(left, ["p1", "p2"], "stays above cap, keeps pending")
     }
+
+    func testPruneVectorsByAge() async throws {
+        let url = tmpURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let s = try AthenaStore(path: url)
+        try await s.putVector(id: "a", vector: [1, 2, 3], metadata: nil)
+        try await s.putVector(id: "b", vector: [4, 5, 6], metadata: nil)
+        let now = Date().timeIntervalSince1970
+        // Past cutoff: both were just written, nothing is old enough.
+        let none = try await s.pruneVectors(olderThan: now - 10_000)
+        XCTAssertEqual(none, 0)
+        var cnt = await s.vectorCount()
+        XCTAssertEqual(cnt, 2)
+        // Future cutoff: both are "older", both go.
+        let all = try await s.pruneVectors(olderThan: now + 10_000)
+        XCTAssertEqual(all, 2)
+        cnt = await s.vectorCount()
+        XCTAssertEqual(cnt, 0)
+    }
+
+    func testClearJobRequestEmptiesPrompt() async throws {
+        let url = tmpURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let s = try AthenaStore(path: url)
+        let req = Data("{\"prompt\":\"secret\"}".utf8)
+        try await s.insertJob(
+            id: "j", kind: "conversation", request: req, owner: nil)
+        try await s.updateJob(
+            id: "j", status: "done", result: Data("r".utf8), error: nil)
+        try await s.clearJobRequest(id: "j")
+        let after = await s.getJob(id: "j")
+        XCTAssertEqual(after?.request, Data(), "prompt blob emptied")
+        XCTAssertEqual(after?.result, Data("r".utf8), "result untouched")
+        XCTAssertEqual(after?.status, "done")
+    }
 }

@@ -115,7 +115,7 @@ public actor AthenaStore {
             """
             CREATE TABLE IF NOT EXISTS vectors(
               id TEXT PRIMARY KEY, dim INTEGER NOT NULL,
-              vec BLOB NOT NULL, metadata BLOB);
+              vec BLOB NOT NULL, metadata BLOB, created REAL);
             CREATE TABLE IF NOT EXISTS jobs(
               id TEXT PRIMARY KEY, kind TEXT NOT NULL,
               status TEXT NOT NULL, request BLOB NOT NULL,
@@ -150,6 +150,12 @@ public actor AthenaStore {
         // EXISTS for columns; the dup-column error is expected and
         // ignored on already-migrated DBs).
         try? Self.exec(db, "ALTER TABLE jobs ADD COLUMN owner TEXT;")
+        // M34.2: vectors gained a write timestamp for age-based
+        // retention. Existing rows get NULL created (unknown age) — a
+        // NULL never satisfies `created < cutoff`, so pre-migration
+        // vectors are never auto-pruned (fail-safe; only timestamped
+        // rows are eligible).
+        try? Self.exec(db, "ALTER TABLE vectors ADD COLUMN created REAL;")
     }
 
     deinit { sqlite3_close(db) }
@@ -193,8 +199,8 @@ public actor AthenaStore {
         id: String, vector: [Float], metadata: Data?
     ) throws {
         let st = try Self.prepared(db,
-            "INSERT OR REPLACE INTO vectors(id,dim,vec,metadata) "
-                + "VALUES(?,?,?,?);")
+            "INSERT OR REPLACE INTO vectors(id,dim,vec,metadata,created) "
+                + "VALUES(?,?,?,?,?);")
         defer { sqlite3_finalize(st) }
         sqlite3_bind_text(st, 1, id, -1, Self.transient)
         sqlite3_bind_int(st, 2, Int32(vector.count))
@@ -202,9 +208,30 @@ public actor AthenaStore {
         if let m = metadata { Self.bindBlob(st, 4, m) } else {
             sqlite3_bind_null(st, 4)
         }
+        // `created` is the current row's last-write time (INSERT OR
+        // REPLACE deletes+reinserts, so an upsert resets it) — backs the
+        // M34.2 age-based vector retention.
+        sqlite3_bind_double(st, 5, Date().timeIntervalSince1970)
         guard sqlite3_step(st) == SQLITE_DONE else {
             throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
         }
+    }
+
+    /// Delete vectors whose `created` (last-write) time is older than
+    /// `cutoff` (epoch seconds). Returns the number removed. Backs the
+    /// M34.2 vector TTL. Rows with NULL `created` (written before the
+    /// migration) are never matched, so they are never auto-pruned.
+    @discardableResult
+    public func pruneVectors(olderThan cutoff: Double) throws -> Int {
+        let st = try Self.prepared(db,
+            "DELETE FROM vectors WHERE created IS NOT NULL "
+                + "AND created < ?;")
+        defer { sqlite3_finalize(st) }
+        sqlite3_bind_double(st, 1, cutoff)
+        guard sqlite3_step(st) == SQLITE_DONE else {
+            throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
+        }
+        return Int(sqlite3_changes(db))
     }
 
     private func readVector(_ st: OpaquePointer?) -> [Float] {
@@ -384,6 +411,22 @@ public actor AthenaStore {
         defer { sqlite3_finalize(st) }
         return sqlite3_step(st) == SQLITE_ROW
             ? Int(sqlite3_column_int(st, 0)) : 0
+    }
+
+    /// Replace a job's stored `request` blob with empty bytes (M34.2
+    /// content opt-out). The prompt is no longer needed once the job
+    /// finishes; clearing it keeps the inference INPUT off disk while the
+    /// result (the output the client polls for) stays, bounded by the
+    /// queue TTL. `request` is NOT NULL, so we store zero-length bytes.
+    public func clearJobRequest(id: String) throws {
+        let st = try Self.prepared(db,
+            "UPDATE jobs SET request=? WHERE id=?;")
+        defer { sqlite3_finalize(st) }
+        Self.bindBlob(st, 1, Data())
+        sqlite3_bind_text(st, 2, id, -1, Self.transient)
+        guard sqlite3_step(st) == SQLITE_DONE else {
+            throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
+        }
     }
 
     /// Terminal job statuses — work is finished and the row is just a

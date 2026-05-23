@@ -64,11 +64,14 @@ D2=""                          # phase-8 isolated RBAC-admin data dir
 D3=""                          # phase-8.7 audit-retention data dir
 D4=""                          # phase-25 queue-TTL data dir
 D5=""                          # phase-25.1 queue-max-rows data dir
+D6=""                          # phase-25.2 vector-TTL data dir
+D7=""                          # phase-25.3 content opt-out data dir
+D8=""                          # phase-25.3 content-retained control dir
 cleanup() {
   [ -n "$DPID" ] && kill "$DPID" 2>/dev/null
   wait "$DPID" 2>/dev/null
   rm -rf "$D" "$EMPTY" "$MSTORE" ${D2:+"$D2"} ${D3:+"$D3"} \
-    ${D4:+"$D4"} ${D5:+"$D5"}
+    ${D4:+"$D4"} ${D5:+"$D5"} ${D6:+"$D6"} ${D7:+"$D7"} ${D8:+"$D8"}
 }
 trap cleanup EXIT
 
@@ -1812,6 +1815,77 @@ done
   || bad "queue not capped (rows=$(sqlite3 "$qdb5" 'SELECT COUNT(*) FROM jobs;'))"
 stop_daemon
 rm -rf "$D5"; D5=""
+
+echo
+echo "== phase 25.2: vector-store TTL (prune-on-write, M34.2) =="
+# vector_ttl_secs prunes vectors written longer ago than the window; the
+# sweep runs opportunistically on each upsert. Backdate one vector's
+# write time, then upsert another to trigger the prune. Auth off.
+D6="$(mktemp -d)"
+vdb6="$D6/athena.sqlite"
+start_daemon "$D6" 127.0.0.1 --vector-ttl-secs 1 \
+  || { echo "vector-ttl daemon failed"; cat "$D/daemon.log"; exit 1; }
+curl -s -o /dev/null -X POST "http://127.0.0.1:$PORT/v1/vectors" \
+  -H "Content-Type: application/json" \
+  -d '{"id":"v1","vector":[1,2,3]}'
+V1="$(sqlite3 "$vdb6" "SELECT COUNT(*) FROM vectors WHERE id='v1';")"
+[ "$V1" = "1" ] && ok "vector v1 upserted" || bad "v1 upsert ($V1)"
+# Backdate v1's write time ~10 days so the 1 s TTL must reap it.
+OLDV=$(( $(date +%s) - 864000 ))
+sqlite3 "$vdb6" "UPDATE vectors SET created=$OLDV WHERE id='v1';"
+# A second upsert triggers the opportunistic prune.
+curl -s -o /dev/null -X POST "http://127.0.0.1:$PORT/v1/vectors" \
+  -H "Content-Type: application/json" \
+  -d '{"id":"v2","vector":[4,5,6]}'
+GONEV="$(sqlite3 "$vdb6" "SELECT COUNT(*) FROM vectors WHERE id='v1';")"
+[ "$GONEV" = "0" ] \
+  && ok "stale vector pruned past the TTL window" \
+  || bad "stale vector survived TTL ($GONEV)"
+KEPTV="$(sqlite3 "$vdb6" "SELECT COUNT(*) FROM vectors WHERE id='v2';")"
+[ "$KEPTV" = "1" ] \
+  && ok "fresh vector retained within the window" \
+  || bad "fresh vector missing after sweep ($KEPTV)"
+stop_daemon
+rm -rf "$D6"; D6=""
+
+echo
+echo "== phase 25.3: content opt-out — drop prompt on completion (M34.2) =="
+# With --drop-request-content the queue wipes a job's request (prompt)
+# blob the moment it finishes; the result the client polls for stays.
+# Default (no flag) retains the prompt. Auth off.
+D7="$(mktemp -d)"
+cdb7="$D7/athena.sqlite"
+start_daemon "$D7" 127.0.0.1 --drop-request-content \
+  || { echo "content-optout daemon failed"; cat "$D/daemon.log"; exit 1; }
+JC="$(curl -s -X POST "http://127.0.0.1:$PORT/v1/queue/conversation" \
+  -H "Content-Type: application/json" -d "$CHAT" \
+  | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
+curl -s -o /dev/null "http://127.0.0.1:$PORT/v1/queue/$JC?wait=15"
+REQLEN="$(sqlite3 "$cdb7" "SELECT length(request) FROM jobs WHERE id='$JC';")"
+RESLEN="$(sqlite3 "$cdb7" "SELECT length(result) FROM jobs WHERE id='$JC';")"
+[ "$REQLEN" = "0" ] \
+  && ok "prompt blob wiped on completion (request length 0)" \
+  || bad "prompt blob survived with opt-out (len=$REQLEN)"
+[ "${RESLEN:-0}" -gt 0 ] \
+  && ok "result still retained for the client to poll (len=$RESLEN)" \
+  || bad "result missing after content opt-out (len=$RESLEN)"
+stop_daemon
+rm -rf "$D7"; D7=""
+# Control: default daemon (no flag) keeps the prompt.
+D8="$(mktemp -d)"
+cdb8="$D8/athena.sqlite"
+start_daemon "$D8" 127.0.0.1 \
+  || { echo "content-control daemon failed"; cat "$D/daemon.log"; exit 1; }
+JK="$(curl -s -X POST "http://127.0.0.1:$PORT/v1/queue/conversation" \
+  -H "Content-Type: application/json" -d "$CHAT" \
+  | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
+curl -s -o /dev/null "http://127.0.0.1:$PORT/v1/queue/$JK?wait=15"
+KREQ="$(sqlite3 "$cdb8" "SELECT length(request) FROM jobs WHERE id='$JK';")"
+[ "${KREQ:-0}" -gt 0 ] \
+  && ok "default retains the prompt (no opt-out ⇒ request kept)" \
+  || bad "default unexpectedly dropped the prompt (len=$KREQ)"
+stop_daemon
+rm -rf "$D8"; D8=""
 
 echo
 echo "════════════════════════════════════════"

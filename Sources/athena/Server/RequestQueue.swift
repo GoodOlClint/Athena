@@ -45,6 +45,10 @@ actor RequestQueue {
     /// forever (opt-in, off by default). Swept on the worker idle path.
     private var ttlSecs = 0
     private var maxRows = 0
+    /// Content opt-out (M34.2): when true, a job's `request` (prompt)
+    /// blob is cleared once it reaches a terminal state, so inference
+    /// inputs don't persist past completion.
+    private var dropRequestContent = false
 
     init(store: AthenaStore) {
         self.store = store
@@ -53,11 +57,15 @@ actor RequestQueue {
 
     func setExecutor(_ e: @escaping Executor) { executor = e }
 
-    /// Configure result retention (M34.1). Called once at startup. 0 for
-    /// either bound disables that dimension.
-    func setRetention(ttlSecs: Int, maxRows: Int) {
+    /// Configure result retention (M34.1) + content opt-out (M34.2).
+    /// Called once at startup. 0 for either bound disables that
+    /// dimension; `dropRequestContent=false` keeps prompts (default).
+    func setRetention(
+        ttlSecs: Int, maxRows: Int, dropRequestContent: Bool
+    ) {
         self.ttlSecs = ttlSecs
         self.maxRows = maxRows
+        self.dropRequestContent = dropRequestContent
     }
 
     /// Enqueue; returns the job id. `owner` = the submitting
@@ -144,6 +152,11 @@ actor RequestQueue {
                 id: job.id,
                 status: error == nil ? "done" : "error",
                 result: result, error: error)
+            // M34.2: drop the prompt from disk once the job is finished
+            // (the result the client polls for is retained separately).
+            if dropRequestContent {
+                try? await store.clearJobRequest(id: job.id)
+            }
             if let error {
                 log.warning(
                     "queue job error id=\(job.id) detail=\(error)")

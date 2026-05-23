@@ -91,6 +91,12 @@ public enum LaunchdPlist {
         if let queueMax = config.queueMaxRows {
             args += ["--queue-max-rows", String(queueMax)]
         }
+        if let vectorTtl = config.vectorTtlSecs {
+            args += ["--vector-ttl-secs", String(vectorTtl)]
+        }
+        if config.dropRequestContent == true {
+            args += ["--drop-request-content"]  // a Flag, not an Option
+        }
 
         return [
             "Label": label,

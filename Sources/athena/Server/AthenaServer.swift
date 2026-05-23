@@ -88,6 +88,19 @@ struct AthenaServer {
     /// so they're memberwise-init params.
     var queueResultTtlSecs: Int = 0
     var queueMaxRows: Int = 0
+    /// Vector-store retention (M34.2). > 0 ⇒ on each upsert, prune
+    /// persisted vectors whose last-write time is older than the window
+    /// (prune-on-write, like the M30 audit prune — a daemon actively
+    /// writing vectors keeps itself bounded; an idle one accrues
+    /// nothing). 0 ⇒ keep forever (opt-in). `var = 0` so it's a
+    /// memberwise-init param.
+    var vectorTtlSecs: Int = 0
+    /// Content opt-out (M34.2). When true, the queue clears a job's
+    /// persisted `request` (prompt) blob once it reaches a terminal
+    /// state, so inference INPUTS don't sit on disk after the answer is
+    /// produced (the result the client polls for stays, bounded by the
+    /// queue TTL). `var = false` so it's a memberwise-init param.
+    var dropRequestContent: Bool = false
     /// WebUI session signer (M12.2). Per-process random secret —
     /// sessions invalidate on restart (acceptable for an appliance).
     let session = Session()
@@ -543,7 +556,8 @@ struct AthenaServer {
         // persist forever. Swept on the worker idle path (startup + each
         // time it drains empty). 0/0 ⇒ keep forever (opt-in).
         await queue.setRetention(
-            ttlSecs: queueResultTtlSecs, maxRows: queueMaxRows)
+            ttlSecs: queueResultTtlSecs, maxRows: queueMaxRows,
+            dropRequestContent: dropRequestContent)
 
         // M33.3: optionally warm the LLM at startup so the first request
         // doesn't pay the load latency. Best-effort and concurrent — the
@@ -1345,6 +1359,17 @@ struct AthenaServer {
                 id: body.id, vector: vec, metadata: meta)
         } catch {
             return Self.vectorErrorResponse(error)
+        }
+        // M34.2: opportunistic age-based retention (prune-on-write).
+        // 0 ⇒ keep forever. Non-fatal — never fails the upsert.
+        if vectorTtlSecs > 0 {
+            let cutoff = Date().timeIntervalSince1970
+                - Double(vectorTtlSecs)
+            let removed = await vectorStore.sweepExpired(olderThan: cutoff)
+            if removed > 0 {
+                Logger(label: AthenaLogLabel.daemon).notice(
+                    "vector retention: pruned \(removed) vector(s) older than \(vectorTtlSecs)s")
+            }
         }
         return Self.json(VectorIdResponse(id: body.id))
     }

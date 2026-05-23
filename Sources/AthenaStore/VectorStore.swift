@@ -115,6 +115,21 @@ public actor VectorStore {
             .map { $0 }
     }
 
+    /// Age-based retention (M34.2): delete persisted vectors whose
+    /// last-write time is older than `cutoff`, then drop the resident
+    /// cache so the next query rebuilds the matrix without the pruned
+    /// rows. Returns the count removed. Driven opportunistically by the
+    /// server on each upsert when a vector TTL is configured.
+    @discardableResult
+    public func sweepExpired(olderThan cutoff: Double) async -> Int {
+        let removed = (try? await store.pruneVectors(olderThan: cutoff)) ?? 0
+        if removed > 0 {
+            cache = []
+            loaded = false
+        }
+        return removed
+    }
+
     public func stats() async -> Stats {
         await ensureLoaded()
         return Stats(
