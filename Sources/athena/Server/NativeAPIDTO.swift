@@ -198,6 +198,10 @@ struct CreateTokenRequest: Codable {
     /// unscoped token may not exceed the caller's own permissions.
     let role: [String]?
     let label: String?
+    /// Per-token lifetime in whole seconds (M36.1). Absent / non-
+    /// positive ⇒ never expires (subject to the daemon's global
+    /// token_max_age_days cap).
+    let ttl_secs: Int?
 }
 /// The minted key is returned ONCE here and never persisted.
 struct CreateTokenResponse: Codable {

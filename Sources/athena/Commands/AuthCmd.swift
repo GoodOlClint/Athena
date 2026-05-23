@@ -377,6 +377,27 @@ struct AuthToken: AsyncParsableCommand {
         subcommands: [AuthTokenAdd.self])
 }
 
+/// Parse a TTL like `30d`, `12h`, `90m`, `3600s`, or a bare integer
+/// (seconds) into whole seconds. nil ⇒ malformed or non-positive.
+/// Shared by the offline CLI; the wire/remote path carries bare seconds.
+func parseTTLSeconds(_ s: String) -> Int? {
+    let t = s.trimmingCharacters(in: .whitespaces)
+    guard !t.isEmpty else { return nil }
+    let mult: Int
+    let numPart: Substring
+    switch t.last {
+    case "s": mult = 1; numPart = t.dropLast()
+    case "m": mult = 60; numPart = t.dropLast()
+    case "h": mult = 3600; numPart = t.dropLast()
+    case "d": mult = 86400; numPart = t.dropLast()
+    default: mult = 1; numPart = t[...]  // bare integer ⇒ seconds
+    }
+    guard let n = Int(numPart), n > 0 else { return nil }
+    let (secs, overflow) = n.multipliedReportingOverflow(by: mult)
+    guard !overflow else { return nil }
+    return secs
+}
+
 struct AuthTokenAdd: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "add",
@@ -389,14 +410,28 @@ struct AuthTokenAdd: AsyncParsableCommand {
     var role: [String] = []
     @Option(help: "Optional label (shown by `auth list`).")
     var label: String?
+    @Option(
+        help:
+            "Lifetime: 30d / 12h / 90m / 3600s (or bare seconds). Absent ⇒ never expires (subject to token_max_age_days)."
+    )
+    var ttl: String?
     @Option(help: "Data dir (default: configured / ~/.athena).")
     var dataDir: String?
     @OptionGroup var daemon: DaemonOptions
 
     func run() async throws {
+        let ttlSecs: Int? = try ttl.map {
+            guard let s = parseTTLSeconds($0) else {
+                FailableExit.die(
+                    "error: invalid --ttl '\($0)' (use e.g. 30d, 12h, "
+                        + "90m, 3600s, or bare seconds)")
+            }
+            return s
+        }
         if daemon.isRemote {
             try await RemoteAuth.tokenCreate(
-                daemon, user: user, roles: role, label: label)
+                daemon, user: user, roles: role, label: label,
+                ttlSecs: ttlSecs)
             return
         }
         for r in role { requireValidRole(r) }
@@ -407,19 +442,24 @@ struct AuthTokenAdd: AsyncParsableCommand {
         // Single key-generation path, shared with POST /api/tokens.
         let (key, hash) = AuthConfig.mintToken()
         let scoped = role.isEmpty ? nil : role
+        let expires = ttlSecs.map {
+            Date().timeIntervalSince1970 + Double($0)
+        }
         do {
             try await db.putToken(
                 hash: hash, username: user,
-                scopedRoles: scoped, label: label)
+                scopedRoles: scoped, label: label, expires: expires)
         } catch {
             FailableExit.die("error: \(error)")
         }
         let scopeNote =
             scoped.map { " scoped to [\($0.joined(separator: ", "))]" }
             ?? " (inherits \(user)'s roles)"
+        let expiryNote =
+            ttlSecs.map { " expires in \($0)s" } ?? " (no expiry)"
         print(
             """
-            token for '\(user)'\(scopeNote) \
+            token for '\(user)'\(scopeNote)\(expiryNote) \
             (SAVE NOW — shown once, not stored):
 
               \(key)

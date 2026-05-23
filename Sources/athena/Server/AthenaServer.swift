@@ -2949,10 +2949,13 @@ struct AthenaServer {
             }
         }
         let (key, hash) = AuthConfig.mintToken()
+        let expires = body.ttl_secs.flatMap {
+            $0 > 0 ? Date().timeIntervalSince1970 + Double($0) : nil
+        }
         do {
             try await store.putToken(
                 hash: hash, username: user, scopedRoles: scoped,
-                label: body.label)
+                label: body.label, expires: expires)
         } catch {
             return Self.error(
                 status: .internalServerError, message: "\(error)",

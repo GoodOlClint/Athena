@@ -941,7 +941,7 @@ enum OpenAPISpec {
               "RolesResponse": { "type": "object", "properties": { "roles": { "type": "array", "items": { "$ref": "#/components/schemas/RoleCatalogEntry" } } } },
               "TokenSummary": { "type": "object", "properties": { "username": { "type": "string" }, "scope": { "type": "array", "items": { "type": "string" }, "nullable": true }, "hash_prefix": { "type": "string" }, "label": { "type": "string", "nullable": true } } },
               "TokenListResponse": { "type": "object", "properties": { "tokens": { "type": "array", "items": { "$ref": "#/components/schemas/TokenSummary" } } } },
-              "CreateTokenRequest": { "type": "object", "required": ["user"], "properties": { "user": { "type": "string" }, "role": { "type": "array", "items": { "type": "string" } }, "label": { "type": "string" } } },
+              "CreateTokenRequest": { "type": "object", "required": ["user"], "properties": { "user": { "type": "string" }, "role": { "type": "array", "items": { "type": "string" } }, "label": { "type": "string" }, "ttl_secs": { "type": "integer", "description": "Per-token lifetime in seconds; absent/non-positive means never expires (subject to the daemon token_max_age_days cap)." } } },
               "CreateTokenResponse": { "type": "object", "properties": { "user": { "type": "string" }, "scope": { "type": "array", "items": { "type": "string" }, "nullable": true }, "token": { "type": "string" }, "hash_prefix": { "type": "string" } } },
               "TokensRemovedResponse": { "type": "object", "properties": { "removed": { "type": "integer" } } },
               "Ok": { "type": "object", "properties": { "ok": { "type": "boolean" } } }

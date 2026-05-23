@@ -11,7 +11,8 @@ enum ConfigEditor {
         "listen_port", "budget_bytes", "max_tokens",
         "vector_cap_bytes", "rate_burst",
         "max_concurrency", "max_concurrency_per_principal",
-        "audit_retention_days", "request_timeout_secs",
+        "audit_retention_days", "token_max_age_days",
+        "request_timeout_secs",
         "queue_result_ttl_secs", "queue_max_rows", "vector_ttl_secs",
     ]
     /// Written bare (unquoted), like ints: floats and bools.
@@ -26,7 +27,8 @@ enum ConfigEditor {
         "speculative", "vector_cap_bytes", "auth_keys_file",
         "tls_cert", "tls_key", "rate_limit", "rate_burst",
         "max_concurrency", "max_concurrency_per_principal",
-        "audit_retention_days", "request_timeout_secs", "preload",
+        "audit_retention_days", "token_max_age_days",
+        "request_timeout_secs", "preload",
         "queue_result_ttl_secs", "queue_max_rows", "vector_ttl_secs",
         "drop_request_content", "encrypt_store",
         "https_proxy", "http_proxy", "all_proxy", "no_proxy",
@@ -88,6 +90,8 @@ enum ConfigEditor {
             return cfg.maxConcurrencyPerPrincipal.map(String.init)
         case "audit_retention_days":
             return cfg.auditRetentionDays.map(String.init)
+        case "token_max_age_days":
+            return cfg.tokenMaxAgeDays.map(String.init)
         case "request_timeout_secs":
             return cfg.requestTimeoutSecs.map(String.init)
         case "preload":

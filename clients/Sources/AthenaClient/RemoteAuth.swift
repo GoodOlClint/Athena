@@ -195,11 +195,12 @@ public enum RemoteAuth {
 
     public static func tokenCreate(
         _ d: DaemonOptions, user: String, roles: [String],
-        label: String?
+        label: String?, ttlSecs: Int? = nil
     ) async throws {
         var body: [String: Any] = ["user": user]
         if !roles.isEmpty { body["role"] = roles }
         if let label { body["label"] = label }
+        if let ttlSecs { body["ttl_secs"] = ttlSecs }
         let payload = try JSONSerialization.data(
             withJSONObject: body)
         let (code, data): (Int, Data)

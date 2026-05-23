@@ -79,6 +79,9 @@ public enum LaunchdPlist {
         if let auditDays = config.auditRetentionDays {
             args += ["--audit-retention-days", String(auditDays)]
         }
+        if let tokenMaxAge = config.tokenMaxAgeDays {
+            args += ["--token-max-age-days", String(tokenMaxAge)]
+        }
         if let reqTimeout = config.requestTimeoutSecs {
             args += ["--request-timeout-secs", String(reqTimeout)]
         }

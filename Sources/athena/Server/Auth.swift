@@ -38,24 +38,33 @@ struct AuthConfig: Sendable {
     /// running open daemon needs a restart to begin enforcing.
     private let enabled: Bool
     var isEnabled: Bool { enabled }
+    /// Global upper bound on a managed token's age in days (M36.1), 0 ⇒
+    /// no cap. Enforced at validation relative to the token's `created`,
+    /// so lowering it retroactively shortens every token's lifetime.
+    /// Bootstrap (env/file) hashes are unaffected — they have no row.
+    private let tokenMaxAgeDays: Int
 
     init(
         hashes: [[UInt8]: [String]] = [:],
         store: AthenaStore? = nil,
-        enabled: Bool? = nil
+        enabled: Bool? = nil,
+        tokenMaxAgeDays: Int = 0
     ) {
         self.hashes = hashes
         self.store = store
         self.enabled = enabled ?? !hashes.isEmpty
+        self.tokenMaxAgeDays = tokenMaxAgeDays
     }
 
     /// Bind the DB and (re)compute `enabled` including DB rows.
-    func bound(to store: AthenaStore, dbHasCredentials: Bool)
-        -> AuthConfig
-    {
+    func bound(
+        to store: AthenaStore, dbHasCredentials: Bool,
+        tokenMaxAgeDays: Int = 0
+    ) -> AuthConfig {
         AuthConfig(
             hashes: hashes, store: store,
-            enabled: !hashes.isEmpty || dbHasCredentials)
+            enabled: !hashes.isEmpty || dbHasCredentials,
+            tokenMaxAgeDays: tokenMaxAgeDays)
     }
 
     static func sha(_ s: String) -> [UInt8] {
@@ -204,6 +213,17 @@ struct AuthConfig: Sendable {
             let tok = await store.tokenPrincipal(
                 hash: Data(presented))
         {
+            // Expiry (M36.1): a past per-token TTL, or — when a global
+            // cap is set — a token older than the cap, fails closed.
+            // An expired token resolves to nil exactly like an unknown
+            // one (no oracle: same 401, no "expired" disclosure).
+            let now = Date().timeIntervalSince1970
+            if let exp = tok.expires, exp <= now { return nil }
+            if tokenMaxAgeDays > 0,
+                tok.created + Double(tokenMaxAgeDays) * 86400 <= now
+            {
+                return nil
+            }
             let userRoles = await store.rolesForUser(
                 username: tok.username)
             let perms = RBAC.effectivePermissions(

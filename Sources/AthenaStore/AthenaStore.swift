@@ -183,7 +183,7 @@ public actor AthenaStore {
             CREATE TABLE IF NOT EXISTS auth_tokens(
               hash BLOB PRIMARY KEY, username TEXT NOT NULL,
               scoped_roles TEXT, label TEXT,
-              created REAL NOT NULL);
+              created REAL NOT NULL, expires REAL);
             CREATE TABLE IF NOT EXISTS usage_counters(
               principal TEXT PRIMARY KEY,
               requests INTEGER NOT NULL DEFAULT 0,
@@ -207,6 +207,11 @@ public actor AthenaStore {
         // vectors are never auto-pruned (fail-safe; only timestamped
         // rows are eligible).
         try? Self.exec(db, "ALTER TABLE vectors ADD COLUMN created REAL;")
+        // M36.1: tokens gained an optional expiry. Existing rows get
+        // NULL expires (no expiry) — a NULL token never expires, so
+        // pre-migration tokens keep working (fail-safe / backward-
+        // compatible). Only tokens minted with a TTL carry a timestamp.
+        try? Self.exec(db, "ALTER TABLE auth_tokens ADD COLUMN expires REAL;")
     }
 
     deinit { sqlite3_close(db) }
@@ -794,6 +799,10 @@ public actor AthenaStore {
     public struct TokenRow: Sendable {
         public let username: String
         public let scopedRoles: [String]?
+        /// Mint time (epoch). Drives the global `token_max_age_days` cap.
+        public let created: Double
+        /// Per-token expiry (epoch), or nil ⇒ never expires.
+        public let expires: Double?
     }
 
     public func putUser(
@@ -941,12 +950,12 @@ public actor AthenaStore {
 
     public func putToken(
         hash: Data, username: String, scopedRoles: [String]?,
-        label: String?
+        label: String?, expires: Double? = nil
     ) throws {
         let st = try Self.prepared(db,
             "INSERT OR REPLACE INTO auth_tokens"
-                + "(hash,username,scoped_roles,label,created) "
-                + "VALUES(?,?,?,?,?);")
+                + "(hash,username,scoped_roles,label,created,expires) "
+                + "VALUES(?,?,?,?,?,?);")
         defer { sqlite3_finalize(st) }
         Self.bindBlob(st, 1, hash)
         sqlite3_bind_text(st, 2, username, -1, Self.transient)
@@ -957,6 +966,9 @@ public actor AthenaStore {
             sqlite3_bind_text(st, 4, label, -1, Self.transient)
         } else { sqlite3_bind_null(st, 4) }
         sqlite3_bind_double(st, 5, Date().timeIntervalSince1970)
+        if let expires {
+            sqlite3_bind_double(st, 6, expires)
+        } else { sqlite3_bind_null(st, 6) }
         guard sqlite3_step(st) == SQLITE_DONE else {
             throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
         }
@@ -967,8 +979,8 @@ public actor AthenaStore {
     /// already a hash, so a byte-probing timing attack is infeasible.
     public func tokenPrincipal(hash: Data) -> TokenRow? {
         guard let st = try? Self.prepared(db,
-            "SELECT username,scoped_roles FROM auth_tokens "
-                + "WHERE hash=?;")
+            "SELECT username,scoped_roles,created,expires FROM "
+                + "auth_tokens WHERE hash=?;")
         else { return nil }
         defer { sqlite3_finalize(st) }
         Self.bindBlob(st, 1, hash)
@@ -977,8 +989,13 @@ public actor AthenaStore {
         let scope =
             sqlite3_column_type(st, 1) == SQLITE_NULL
             ? nil : String(cString: sqlite3_column_text(st, 1))
+        let created = sqlite3_column_double(st, 2)
+        let expires =
+            sqlite3_column_type(st, 3) == SQLITE_NULL
+            ? nil : sqlite3_column_double(st, 3)
         return TokenRow(
-            username: user, scopedRoles: Self.decodeScope(scope))
+            username: user, scopedRoles: Self.decodeScope(scope),
+            created: created, expires: expires)
     }
 
     public func listTokens() -> [(hex: String, username: String,

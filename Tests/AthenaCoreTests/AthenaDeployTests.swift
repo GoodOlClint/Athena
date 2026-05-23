@@ -149,6 +149,27 @@ final class AthenaConfigTests: XCTestCase {
         XCTAssertNil(c.auditRetentionDays)
     }
 
+    func testTokenMaxAgeKeyParse() throws {
+        let toml = """
+            listen_host = "127.0.0.1"
+            listen_port = 7447
+            log_dir = "/l"
+            token_max_age_days = 90
+            """
+        let c = try AthenaConfig.parse(toml: toml)
+        XCTAssertEqual(c.tokenMaxAgeDays, 90)
+    }
+
+    func testTokenMaxAgeKeyAbsentIsNil() throws {
+        let toml = """
+            listen_host = "127.0.0.1"
+            listen_port = 7447
+            log_dir = "/l"
+            """
+        let c = try AthenaConfig.parse(toml: toml)
+        XCTAssertNil(c.tokenMaxAgeDays)
+    }
+
     func testConcurrencyKeysAbsentAreNil() throws {
         let toml = """
             listen_host = "127.0.0.1"
@@ -355,6 +376,7 @@ final class LaunchdPlistTests: XCTestCase {
         maxConcurrency: Int? = nil,
         maxConcurrencyPerPrincipal: Int? = nil,
         auditRetentionDays: Int? = nil,
+        tokenMaxAgeDays: Int? = nil,
         requestTimeoutSecs: Int? = nil,
         preload: Bool? = nil,
         queueResultTtlSecs: Int? = nil,
@@ -376,6 +398,7 @@ final class LaunchdPlistTests: XCTestCase {
             maxConcurrency: maxConcurrency,
             maxConcurrencyPerPrincipal: maxConcurrencyPerPrincipal,
             auditRetentionDays: auditRetentionDays,
+            tokenMaxAgeDays: tokenMaxAgeDays,
             requestTimeoutSecs: requestTimeoutSecs,
             preload: preload,
             queueResultTtlSecs: queueResultTtlSecs,
@@ -421,6 +444,7 @@ final class LaunchdPlistTests: XCTestCase {
                 maxConcurrency: 8,
                 maxConcurrencyPerPrincipal: 2,
                 auditRetentionDays: 365,
+                tokenMaxAgeDays: 90,
                 requestTimeoutSecs: 120,
                 preload: true,
                 queueResultTtlSecs: 604_800,
@@ -446,6 +470,7 @@ final class LaunchdPlistTests: XCTestCase {
                 "--max-concurrency", "8",
                 "--max-concurrency-per-principal", "2",
                 "--audit-retention-days", "365",
+                "--token-max-age-days", "90",
                 "--request-timeout-secs", "120",
                 "--preload",
                 "--queue-result-ttl-secs", "604800",

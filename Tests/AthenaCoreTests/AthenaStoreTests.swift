@@ -165,6 +165,32 @@ final class AthenaStoreTests: XCTestCase {
         XCTAssertFalse(delMissing)
     }
 
+    func testTokenExpiryRoundTrip() async throws {
+        let url = tmpURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let s = try AthenaStore(path: url)
+        try await s.putUser(
+            username: "carol", salt: Data([1]), hash: Data([2]),
+            iters: 1)
+        let future = Date().timeIntervalSince1970 + 3600
+        // One token with an explicit expiry, one without (never).
+        try await s.putToken(
+            hash: Data(repeating: 7, count: 32), username: "carol",
+            scopedRoles: nil, label: "ttl", expires: future)
+        try await s.putToken(
+            hash: Data(repeating: 8, count: 32), username: "carol",
+            scopedRoles: nil, label: "forever")
+        let withExp = await s.tokenPrincipal(
+            hash: Data(repeating: 7, count: 32))
+        XCTAssertEqual(withExp?.username, "carol")
+        XCTAssertEqual(withExp?.expires, future)
+        XCTAssertGreaterThan(withExp?.created ?? 0, 0)  // mint time set
+        let noExp = await s.tokenPrincipal(
+            hash: Data(repeating: 8, count: 32))
+        XCTAssertNil(noExp?.expires)  // NULL ⇒ never expires
+        XCTAssertGreaterThan(noExp?.created ?? 0, 0)
+    }
+
     func testErrorStatusAndPersistenceAcrossOpen() async throws {
         let url = tmpURL()
         defer { try? FileManager.default.removeItem(at: url) }

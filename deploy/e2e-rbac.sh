@@ -2021,6 +2021,59 @@ echo "$OB" | grep -qi "audit:.*retention 30 day(s)" \
 rm -rf "$DOC4"
 
 echo
+echo "== phase 29: bearer-token expiry + global age cap (M36.1) =="
+# Tokens carry an optional per-token TTL (--ttl) and the daemon can
+# impose a global token_max_age_days cap (relative to mint time). Both
+# are enforced at validation: an expired / over-cap token resolves to nil
+# → 401, exactly like an unknown one (no "expired" oracle). Deterministic
+# via sqlite3 backdating (no sleeps), mirroring phase 8.7's audit backdate.
+DE="$(mktemp -d)"
+"$ATHENA" auth user add expu --password expupass12 --role member \
+  --data-dir "$DE" >/dev/null \
+  && ok "expiry: seed expu" || bad "expiry: seed expu"
+"$ATHENA" auth user add gooduser --password goodpass12 --role member \
+  --data-dir "$DE" >/dev/null
+"$ATHENA" auth user add capu --password capupass123 --role member \
+  --data-dir "$DE" >/dev/null
+# Parser: a malformed --ttl is rejected offline (nothing minted).
+"$ATHENA" auth token add --user expu --ttl bogus --data-dir "$DE" \
+  >/dev/null 2>&1 \
+  && bad "expiry: malformed --ttl accepted" \
+  || ok "expiry: malformed --ttl rejected"
+mintt() { # USER [extra flags…]
+  "$ATHENA" auth token add --user "$1" "${@:2}" --data-dir "$DE" \
+    2>/dev/null | grep -o 'sk-athena-[A-Za-z0-9_-]*' | head -1
+}
+EXP_TOK="$(mintt expu --ttl 1h)"   # valid --ttl; expires backdated below
+GOOD_TOK="$(mintt gooduser)"       # no ttl, minted now → valid
+CAP_TOK="$(mintt capu)"            # no ttl; created backdated 10d below
+{ [ -n "$EXP_TOK" ] && [ -n "$GOOD_TOK" ] && [ -n "$CAP_TOK" ]; } \
+  && ok "expiry: minted 3 test tokens (--ttl 1h accepted)" \
+  || bad "expiry: a test token was empty"
+# Backdate expu's per-token expiry into the past + capu's MINT time 10d ago.
+sqlite3 "$DE/athena.sqlite" \
+  "UPDATE auth_tokens SET expires=strftime('%s','now')-100 \
+   WHERE username='expu';"
+sqlite3 "$DE/athena.sqlite" \
+  "UPDATE auth_tokens SET created=strftime('%s','now')-864000 \
+   WHERE username='capu';"
+# Daemon WITH a 1-day cap: ttl-expired → 401, over-cap → 401, fresh → 200.
+start_daemon "$DE" 127.0.0.1 --token-max-age-days 1 \
+  || { echo "expiry daemon failed"; cat "$D/daemon.log"; exit 1; }
+code 401 POST /v1/chat/completions "$EXP_TOK" "$CHAT"
+code 401 POST /v1/chat/completions "$CAP_TOK" "$CHAT"
+code 200 POST /v1/chat/completions "$GOOD_TOK" "$CHAT"
+stop_daemon
+# Cap is OPT-IN: without it the 10-day-old token (no per-token TTL) is
+# accepted again, while the per-token-expired one is STILL rejected.
+start_daemon "$DE" 127.0.0.1 \
+  || { echo "expiry daemon (no cap) failed"; cat "$D/daemon.log"; exit 1; }
+code 200 POST /v1/chat/completions "$CAP_TOK" "$CHAT"
+code 401 POST /v1/chat/completions "$EXP_TOK" "$CHAT"
+stop_daemon
+rm -rf "$DE"
+
+echo
 echo "════════════════════════════════════════"
 echo "  PASS=$PASS  FAIL=$FAIL"
 echo "════════════════════════════════════════"

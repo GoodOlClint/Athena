@@ -164,6 +164,12 @@ struct Load: AsyncParsableCommand {
 
     @Option(
         help:
+            "Global cap on a managed bearer token's age in days. 0/absent ⇒ no cap (tokens never expire unless minted with --ttl). A token older than this ⇒ 401, enforced relative to mint time."
+    )
+    var tokenMaxAgeDays: Int?
+
+    @Option(
+        help:
             "Per-request inference timeout in seconds. 0/absent ⇒ no deadline (opt-in). A decode past this ⇒ 504 (sync) / truncated stream, and the work is cancelled. Set it above your slowest legitimate generation."
     )
     var requestTimeoutSecs: Int?
@@ -421,7 +427,9 @@ struct Load: AsyncParsableCommand {
             file: authKeysFile,
             env: ProcessInfo.processInfo.environment,
             log: Logger(label: AthenaLogLabel.daemon)
-        ).bound(to: athenaStore, dbHasCredentials: dbHasCreds)
+        ).bound(
+            to: athenaStore, dbHasCredentials: dbHasCreds,
+            tokenMaxAgeDays: tokenMaxAgeDays ?? 0)
         try authConfig.validateStartup(
             listenHost: config.listenHost)
         Logger(label: AthenaLogLabel.daemon).notice(

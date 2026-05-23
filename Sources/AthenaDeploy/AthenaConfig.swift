@@ -62,6 +62,11 @@ public struct AthenaConfig: Sendable, Equatable {
     /// keep forever (opt-in, off by default; an audit trail should not
     /// silently auto-delete unless the operator asks for it).
     public var auditRetentionDays: Int?
+    /// Global cap on a managed bearer token's age in days (M36.1).
+    /// Optional — absent / non-positive ⇒ no cap (tokens never expire
+    /// unless minted with a per-token TTL). Enforced at validation
+    /// relative to mint time, so lowering it shortens existing tokens.
+    public var tokenMaxAgeDays: Int?
     /// Per-request inference timeout in seconds (M33.1). A generation
     /// that overruns becomes a 504 (sync) or is truncated (streamed) so a
     /// runaway decode is bounded by wall-clock, not only `max_tokens`.
@@ -119,6 +124,7 @@ public struct AthenaConfig: Sendable, Equatable {
         maxConcurrency: Int? = nil,
         maxConcurrencyPerPrincipal: Int? = nil,
         auditRetentionDays: Int? = nil,
+        tokenMaxAgeDays: Int? = nil,
         requestTimeoutSecs: Int? = nil,
         preload: Bool? = nil,
         queueResultTtlSecs: Int? = nil,
@@ -152,6 +158,7 @@ public struct AthenaConfig: Sendable, Equatable {
         self.maxConcurrency = maxConcurrency
         self.maxConcurrencyPerPrincipal = maxConcurrencyPerPrincipal
         self.auditRetentionDays = auditRetentionDays
+        self.tokenMaxAgeDays = tokenMaxAgeDays
         self.requestTimeoutSecs = requestTimeoutSecs
         self.preload = preload
         self.queueResultTtlSecs = queueResultTtlSecs
@@ -243,6 +250,10 @@ public struct AthenaConfig: Sendable, Equatable {
         if let ad = scalar("audit_retention_days", in: toml) {
             auditDays = try int("audit_retention_days", ad)
         }
+        var tokenMaxAge: Int?
+        if let tm = scalar("token_max_age_days", in: toml) {
+            tokenMaxAge = try int("token_max_age_days", tm)
+        }
         var reqTimeout: Int?
         if let rt = scalar("request_timeout_secs", in: toml) {
             reqTimeout = try int("request_timeout_secs", rt)
@@ -291,6 +302,7 @@ public struct AthenaConfig: Sendable, Equatable {
             maxConcurrency: maxConc,
             maxConcurrencyPerPrincipal: maxConcPP,
             auditRetentionDays: auditDays,
+            tokenMaxAgeDays: tokenMaxAge,
             requestTimeoutSecs: reqTimeout,
             preload: preload,
             queueResultTtlSecs: queueTtl,

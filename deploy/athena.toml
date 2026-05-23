@@ -195,6 +195,15 @@ engine = "mlx"
 # silently auto-delete unless you ask it to).
 # audit_retention_days = 365           # prune audit rows older than 1y
 
+# Global cap on a managed bearer token's age, in whole days. Tokens
+# older than this are rejected (401) regardless of their per-token TTL,
+# enforced at validation relative to mint time — so lowering it
+# retroactively shortens every existing token's lifetime. Mint a token
+# with a shorter lifetime via `athena auth token add --ttl 30d`.
+# Commented / non-positive ⇒ no cap (tokens never expire unless minted
+# with an explicit --ttl). Bootstrap env/file keys are unaffected.
+# token_max_age_days = 90              # reject managed tokens older than 90d
+
 
 # ── Reliability ──────────────────────────────────────────────────────
 
