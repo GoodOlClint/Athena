@@ -2074,6 +2074,71 @@ stop_daemon
 rm -rf "$DE"
 
 echo
+echo "== phase 30: token rotate + list-expiry + doctor posture (M36.2) =="
+# auth list surfaces each token's expiry; `auth token rotate` (and
+# POST /api/tokens/{prefix}/rotate) revoke+reissue so the old secret dies
+# and a fresh one carries the same owner/scope; doctor #15 reports token
+# posture. Hash prefixes are derived from the printed key via shasum
+# (the store hashes the full sk-athena-… string, like AuthConfig.sha).
+DR="$(mktemp -d)"
+"$ATHENA" auth user add admin --password adminpass1 --role admin \
+  --data-dir "$DR" >/dev/null
+"$ATHENA" auth user add rotu --password rotupass12 --role member \
+  --data-dir "$DR" >/dev/null
+ADMTOK="$("$ATHENA" auth token add --user admin --data-dir "$DR" \
+  2>/dev/null | grep -o 'sk-athena-[A-Za-z0-9_-]*' | head -1)"
+ROTU_TOK="$("$ATHENA" auth token add --user rotu --ttl 1h \
+  --data-dir "$DR" 2>/dev/null | grep -o 'sk-athena-[A-Za-z0-9_-]*' \
+  | head -1)"
+# auth list shows an expiry column: rotu (TTL) → "exp …", admin → "no-expiry".
+LL="$("$ATHENA" auth list --data-dir "$DR" 2>&1)"
+echo "$LL" | grep -q "exp " \
+  && ok "auth list shows a TTL token (exp …)" \
+  || { bad "auth list missing exp column"; echo "$LL"; }
+echo "$LL" | grep -q "no-expiry" \
+  && ok "auth list marks never-expiring tokens" \
+  || bad "auth list missing no-expiry"
+# Local CLI rotate: revoke + reissue rotu's token.
+RPFX="$(printf '%s' "$ROTU_TOK" | shasum -a 256 | cut -c1-16)"
+ROTU_NEW="$("$ATHENA" auth token rotate "$RPFX" --ttl 2h \
+  --data-dir "$DR" 2>/dev/null | grep -o 'sk-athena-[A-Za-z0-9_-]*' \
+  | head -1)"
+{ [ -n "$ROTU_NEW" ] && [ "$ROTU_NEW" != "$ROTU_TOK" ]; } \
+  && ok "CLI rotate reissued a new secret" \
+  || bad "CLI rotate produced no/identical secret"
+start_daemon "$DR" 127.0.0.1 \
+  || { echo "rotate daemon failed"; cat "$D/daemon.log"; exit 1; }
+code 200 POST /v1/chat/completions "$ROTU_NEW" "$CHAT"   # rotated-in works
+code 401 POST /v1/chat/completions "$ROTU_TOK" "$CHAT"   # old revoked
+# /api/tokens carries the expires field (rotu's TTL token).
+AL="$(curl -s -H "Authorization: Bearer $ADMTOK" \
+  "http://127.0.0.1:$PORT/api/tokens")"
+echo "$AL" | grep -q '"expires"' \
+  && ok "/api/tokens carries the expires field" \
+  || { bad "/api/tokens missing expires"; echo "$AL"; }
+# Remote /api rotate (admin) revokes the prior secret too.
+NPFX="$(printf '%s' "$ROTU_NEW" | shasum -a 256 | cut -c1-16)"
+RR="$(curl -s -X POST -H "Authorization: Bearer $ADMTOK" \
+  -H "Content-Type: application/json" -d '{}' \
+  "http://127.0.0.1:$PORT/api/tokens/$NPFX/rotate")"
+ROTU_NEW2="$(echo "$RR" | grep -o 'sk-athena-[A-Za-z0-9_-]*' | head -1)"
+[ -n "$ROTU_NEW2" ] \
+  && ok "/api rotate returns a fresh secret" \
+  || { bad "/api rotate returned no secret"; echo "$RR"; }
+code 200 POST /v1/chat/completions "$ROTU_NEW2" "$CHAT"  # newest works
+code 401 POST /v1/chat/completions "$ROTU_NEW" "$CHAT"   # prior revoked
+code 400 POST /api/tokens/abc/rotate "$ADMTOK"           # short prefix
+code 403 POST /api/tokens/$NPFX/rotate "$ROTU_NEW2"      # member ∌ tokens.admin
+stop_daemon
+# doctor #15 token-expiry posture.
+DTC="$DR/doc.toml"; dcfg27 "$DTC" "$DR"
+DO="$("$ATHENA" doctor --config "$DTC" --model-store "$MSTORE" 2>&1)"
+echo "$DO" | grep -qiE "tokens: [0-9]+ managed" \
+  && ok "doctor reports token-expiry posture (#15)" \
+  || { bad "doctor missing token posture"; echo "$DO" | grep -i token; }
+rm -rf "$DR"
+
+echo
 echo "════════════════════════════════════════"
 echo "  PASS=$PASS  FAIL=$FAIL"
 echo "════════════════════════════════════════"

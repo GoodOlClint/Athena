@@ -543,6 +543,11 @@ struct AthenaServer {
             await handleTokenDelete(
                 context.parameters.get("prefix"), request)
         }
+        router.post("/api/tokens/:prefix/rotate") { request, context
+            -> Response in
+            await handleTokenRotate(
+                context.parameters.get("prefix"), request)
+        }
 
         // Wire the queue executor to the governed module paths (M8.1).
         // The serial worker runs as a managed Service (below) so it
@@ -2891,7 +2896,7 @@ struct AthenaServer {
                     TokenSummaryDTO(
                         username: $0.username, scope: $0.scoped,
                         hash_prefix: String($0.hex.prefix(12)),
-                        label: $0.label)
+                        label: $0.label, expires: $0.expires)
                 }))
     }
 
@@ -3024,6 +3029,93 @@ struct AthenaServer {
             request, action: "token.delete", target: prefix,
             result: "ok", detail: "removed=\(removed)")
         return Self.json(TokensRemovedResponse(removed: removed))
+    }
+
+    /// `POST /api/tokens/{prefix}/rotate` (M36.2) — revoke + reissue.
+    /// The prefix must match EXACTLY one token; its owner/scope/label
+    /// carry to a fresh secret (returned once), the old hash is deleted.
+    /// `ttl_secs` sets the new token's lifetime (absent ⇒ no expiry).
+    /// Same scope guard as create: the caller may not re-mint a token
+    /// more powerful than they can grant.
+    private func handleTokenRotate(
+        _ prefix: String?, _ request: Request
+    ) async -> Response {
+        guard let prefix, prefix.count >= 6,
+            prefix.allSatisfy({ $0.isHexDigit })
+        else {
+            return Self.error(
+                status: .badRequest,
+                message: "prefix must be >= 6 hex chars",
+                type: "invalid_request_error", code: "invalid_prefix")
+        }
+        let decoded = await decodeJSON(request, RotateTokenRequest.self)
+        guard case .ok(let body) = decoded else {
+            if case .fail(let r) = decoded { return r }
+            fatalError()
+        }
+        let matches = await store.listTokens().filter {
+            $0.hex.hasPrefix(prefix)
+        }
+        guard matches.count == 1, let m = matches.first,
+            let oldHash = Self.hexData(m.hex)
+        else {
+            return Self.error(
+                status: matches.count > 1 ? .conflict : .notFound,
+                message: matches.count > 1
+                    ? "prefix \(prefix) matched \(matches.count) "
+                        + "tokens — use a longer, unambiguous prefix"
+                    : "no token matched \(prefix)",
+                type: "invalid_request_error",
+                code: matches.count > 1 ? "ambiguous_prefix"
+                    : "not_found")
+        }
+        // Same scope guard as create — rotation must not re-mint a token
+        // more powerful than the caller can grant.
+        let caller = await callerPermissions(request)
+        if let scoped = m.scoped {
+            guard Self.canGrantAll(scoped, caller) else {
+                await audit(
+                    request, action: "token.rotate", target: m.username,
+                    result: "denied", detail: "scope exceeds caller")
+                return Self.deny403("token scope exceeds your permissions")
+            }
+        } else {
+            let inherited = RBAC.permissions(
+                forRoles: await store.rolesForUser(username: m.username))
+            guard inherited.isSubset(of: caller) else {
+                await audit(
+                    request, action: "token.rotate", target: m.username,
+                    result: "denied",
+                    detail: "unscoped token exceeds caller")
+                return Self.deny403(
+                    "rotating this unscoped token would exceed your "
+                        + "permissions")
+            }
+        }
+        let expires = body.ttl_secs.flatMap {
+            $0 > 0 ? Date().timeIntervalSince1970 + Double($0) : nil
+        }
+        let (key, hash) = AuthConfig.mintToken()
+        _ = await store.deleteToken(hash: oldHash)
+        do {
+            try await store.putToken(
+                hash: hash, username: m.username, scopedRoles: m.scoped,
+                label: m.label, expires: expires)
+        } catch {
+            return Self.error(
+                status: .internalServerError, message: "\(error)",
+                type: "server_error", code: "store_error")
+        }
+        let newPrefix = String(AuthConfig.hex(Array(hash)).prefix(12))
+        await audit(
+            request, action: "token.rotate", target: m.username,
+            result: "ok",
+            detail: "old=\(prefix) new=\(newPrefix)")
+        return Self.json(
+            CreateTokenResponse(
+                user: m.username, scope: m.scoped, token: key,
+                hash_prefix: newPrefix),
+            status: .accepted)
     }
 
     private static func deny403(_ msg: String) -> Response {

@@ -457,6 +457,57 @@ struct Doctor: AsyncParsableCommand {
                     + "(records kept indefinitely)")
         }
 
+        // 15. Token-expiry posture (M36): how many managed tokens carry
+        //     a TTL, how many have already expired (rejected at
+        //     validation but still on disk), and whether a global
+        //     token_max_age_days cap bounds the never-expiring ones.
+        var tokTotal = 0
+        var tokExpiring = 0
+        var tokExpired = 0
+        if let db = try? AthenaStore(
+            path: storeFile, key: StoreKey.resolve())
+        {
+            let now = Date().timeIntervalSince1970
+            for t in await db.listTokens() {
+                tokTotal += 1
+                if let e = t.expires {
+                    tokExpiring += 1
+                    if e <= now { tokExpired += 1 }
+                }
+            }
+        }
+        let tokCap = parsed?.tokenMaxAgeDays ?? 0
+        if tokTotal == 0 {
+            say(
+                .ok,
+                "tokens: no managed tokens (env/file keys or auth off)")
+        } else {
+            let capNote =
+                tokCap > 0 ? "global cap \(tokCap)d" : "no global cap"
+            say(
+                .ok,
+                "tokens: \(tokTotal) managed, \(tokExpiring) with a TTL, "
+                    + capNote)
+            if tokExpired > 0 {
+                say(
+                    .warn,
+                    "tokens: \(tokExpired) already expired but still on "
+                        + "disk — rejected (401) yet lingering; prune "
+                        + "with `athena auth rm <prefix>`")
+            }
+            let neverExpire = tokTotal - tokExpiring
+            if neverExpire > 0, tokCap == 0, anyCreds,
+                !loopback.contains(host)
+            {
+                say(
+                    .warn,
+                    "tokens: \(neverExpire) never expire and no "
+                        + "token_max_age_days cap on a non-loopback bind "
+                        + "— long-lived secrets. Set token_max_age_days "
+                        + "or mint with --ttl.")
+            }
+        }
+
         if fails > 0 {
             print("\n\(fails) critical issue(s).")
             throw ExitCode.failure

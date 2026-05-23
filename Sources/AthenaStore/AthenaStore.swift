@@ -999,14 +999,14 @@ public actor AthenaStore {
     }
 
     public func listTokens() -> [(hex: String, username: String,
-        scoped: [String]?, label: String?)]
+        scoped: [String]?, label: String?, expires: Double?)]
     {
         guard let st = try? Self.prepared(db,
-            "SELECT hash,username,scoped_roles,label FROM auth_tokens "
-                + "ORDER BY created;")
+            "SELECT hash,username,scoped_roles,label,expires FROM "
+                + "auth_tokens ORDER BY created;")
         else { return [] }
         defer { sqlite3_finalize(st) }
-        var out: [(String, String, [String]?, String?)] = []
+        var out: [(String, String, [String]?, String?, Double?)] = []
         while sqlite3_step(st) == SQLITE_ROW {
             let h = Self.blob(st, 0)
                 .map { String(format: "%02x", $0) }.joined()
@@ -1017,8 +1017,11 @@ public actor AthenaStore {
             let label =
                 sqlite3_column_type(st, 3) == SQLITE_NULL
                 ? nil : String(cString: sqlite3_column_text(st, 3))
+            let expires =
+                sqlite3_column_type(st, 4) == SQLITE_NULL
+                ? nil : sqlite3_column_double(st, 4)
             out.append(
-                (h, user, Self.decodeScope(scope), label))
+                (h, user, Self.decodeScope(scope), label, expires))
         }
         return out
     }

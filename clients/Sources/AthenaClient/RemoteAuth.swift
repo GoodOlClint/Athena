@@ -38,6 +38,17 @@ public enum RemoteAuth {
         let scope: [String]?
         let hash_prefix: String
         let label: String?
+        let expires: Double?
+    }
+
+    /// Human-readable expiry status for a token's `expires` epoch
+    /// (M36.2). Mirrors the offline `auth list` rendering.
+    private static func expiryNote(_ expires: Double?) -> String {
+        guard let expires else { return "no-expiry" }
+        let now = Date().timeIntervalSince1970
+        if expires <= now { return "EXPIRED" }
+        let days = Int((expires - now) / 86400)
+        return days >= 1 ? "exp \(days)d" : "exp <1d"
     }
     private struct TokensResp: Decodable { let tokens: [TokenDTO] }
     private struct MintResp: Decodable {
@@ -188,6 +199,7 @@ public enum RemoteAuth {
                 ?? "(full)"
             print(
                 "\(t.username)\t\(scope)\tsha256:\(t.hash_prefix)…"
+                    + "\t\(Self.expiryNote(t.expires))"
                     + (t.label.map { "\t\($0)" } ?? ""))
         }
         print("\(r.tokens.count) token(s)")
@@ -221,6 +233,37 @@ public enum RemoteAuth {
             """
             token for '\(m.user)'\(scopeNote) \
             (SAVE NOW — shown once, not stored):
+
+              \(m.token)
+
+            use:  Authorization: Bearer \(m.token)
+            """)
+    }
+
+    public static func tokenRotate(
+        _ d: DaemonOptions, prefix: String, ttlSecs: Int? = nil
+    ) async throws {
+        var body: [String: Any] = [:]
+        if let ttlSecs { body["ttl_secs"] = ttlSecs }
+        let payload = try JSONSerialization.data(withJSONObject: body)
+        let (code, data): (Int, Data)
+        do {
+            (code, data) = try await HTTPClient.send(
+                "POST",
+                d.base + "/api/tokens/\(enc(prefix))/rotate",
+                body: payload, key: d.authKey)
+        } catch { HTTPClient.noDaemon(d, error) }
+        guard code < 400,
+            let m = try? JSONDecoder().decode(MintResp.self, from: data)
+        else { return try fail(code, data) }
+        let scopeNote =
+            m.scope.map {
+                " scoped to [\($0.joined(separator: ", "))]"
+            } ?? " (inherits \(m.user)'s roles)"
+        print(
+            """
+            rotated token for '\(m.user)'\(scopeNote) \
+            — old revoked (SAVE NOW — shown once, not stored):
 
               \(m.token)
 

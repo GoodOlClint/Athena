@@ -374,7 +374,7 @@ struct AuthToken: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "token",
         abstract: "Manage bearer tokens (hash-only at rest).",
-        subcommands: [AuthTokenAdd.self])
+        subcommands: [AuthTokenAdd.self, AuthTokenRotate.self])
 }
 
 /// Parse a TTL like `30d`, `12h`, `90m`, `3600s`, or a bare integer
@@ -470,6 +470,82 @@ struct AuthTokenAdd: AsyncParsableCommand {
     }
 }
 
+struct AuthTokenRotate: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "rotate",
+        abstract:
+            "Revoke a token (by hash prefix) and reissue a fresh one "
+            + "with the same owner/scope/label (shown once).")
+    @Argument(help: "Hash hex prefix (>= 6 chars; must match exactly one).")
+    var prefix: String
+    @Option(
+        help:
+            "New lifetime: 30d / 12h / 90m / 3600s (or bare seconds). Absent ⇒ the rotated token never expires (the old TTL is not carried)."
+    )
+    var ttl: String?
+    @Option(help: "Data dir (default: configured / ~/.athena).")
+    var dataDir: String?
+    @OptionGroup var daemon: DaemonOptions
+
+    func run() async throws {
+        let ttlSecs: Int? = try ttl.map {
+            guard let s = parseTTLSeconds($0) else {
+                FailableExit.die(
+                    "error: invalid --ttl '\($0)' (use e.g. 30d, 12h, "
+                        + "90m, 3600s, or bare seconds)")
+            }
+            return s
+        }
+        if daemon.isRemote {
+            try await RemoteAuth.tokenRotate(
+                daemon, prefix: prefix, ttlSecs: ttlSecs)
+            return
+        }
+        guard prefix.count >= 6 else {
+            FailableExit.die("error: prefix must be >= 6 hex chars")
+        }
+        let db = openStore(dataDir)
+        let matches = await db.listTokens().filter {
+            $0.hex.hasPrefix(prefix)
+        }
+        guard matches.count == 1, let m = matches.first,
+            let oldBytes = hexBytes(Substring(m.hex))
+        else {
+            FailableExit.die(
+                matches.count > 1
+                    ? "error: prefix '\(prefix)' matched "
+                        + "\(matches.count) tokens — use a longer prefix"
+                    : "error: no token matched '\(prefix)'")
+        }
+        let (key, hash) = AuthConfig.mintToken()
+        let expires = ttlSecs.map {
+            Date().timeIntervalSince1970 + Double($0)
+        }
+        _ = await db.deleteToken(hash: Data(oldBytes))
+        do {
+            try await db.putToken(
+                hash: hash, username: m.username,
+                scopedRoles: m.scoped, label: m.label, expires: expires)
+        } catch {
+            FailableExit.die("error: \(error)")
+        }
+        let scopeNote =
+            m.scoped.map { " scoped to [\($0.joined(separator: ", "))]" }
+            ?? " (inherits \(m.username)'s roles)"
+        let expiryNote =
+            ttlSecs.map { " expires in \($0)s" } ?? " (no expiry)"
+        print(
+            """
+            rotated token for '\(m.username)'\(scopeNote)\(expiryNote) \
+            — old revoked (SAVE NOW — shown once, not stored):
+
+              \(key)
+
+            use:  Authorization: Bearer \(key)
+            """)
+    }
+}
+
 // MARK: - Token listing / removal
 
 /// 64-char hex → bytes (for `auth rm <hashprefix>` reconstruction).
@@ -484,6 +560,16 @@ private func hexBytes(_ s: Substring) -> [UInt8]? {
         i = j
     }
     return out
+}
+
+/// Human-readable expiry status for a token's `expires` epoch (M36.2).
+/// Shared by the offline `auth list`; the remote path renders server-side.
+func tokenExpiryNote(_ expires: Double?) -> String {
+    guard let expires else { return "no-expiry" }
+    let now = Date().timeIntervalSince1970
+    if expires <= now { return "EXPIRED" }
+    let days = Int((expires - now) / 86400)
+    return days >= 1 ? "exp \(days)d" : "exp <1d"
 }
 
 struct AuthList: AsyncParsableCommand {
@@ -512,6 +598,7 @@ struct AuthList: AsyncParsableCommand {
                 ?? "(full)"
             print(
                 "\(t.username)\t\(scope)\tsha256:\(t.hex.prefix(12))…"
+                    + "\t\(tokenExpiryNote(t.expires))"
                     + (t.label.map { "\t\($0)" } ?? ""))
         }
         print("\(toks.count) token(s) — \(storeDBPath(dataDir).path)")

@@ -188,6 +188,10 @@ struct TokenSummaryDTO: Codable {
     let scope: [String]?  // nil ⇒ inherits the user's full roles
     let hash_prefix: String
     let label: String?
+    /// Per-token expiry epoch (M36.2), nil ⇒ never expires. The
+    /// global token_max_age_days cap is NOT folded in here (it's a
+    /// daemon-level policy, reported by `athena doctor`).
+    let expires: Double?
 }
 struct TokenListResponse: Codable { let tokens: [TokenSummaryDTO] }
 
@@ -209,6 +213,13 @@ struct CreateTokenResponse: Codable {
     let scope: [String]?
     let token: String
     let hash_prefix: String
+}
+
+/// Body for `POST /api/tokens/{prefix}/rotate` (M36.2). Revoke + reissue:
+/// the matched token's owner/scope/label carry over; `ttl_secs` sets the
+/// NEW token's lifetime (absent ⇒ no expiry, the old TTL is not carried).
+struct RotateTokenRequest: Codable {
+    let ttl_secs: Int?
 }
 
 // MARK: - /api/usage (M27.3 — per-principal token metering, pull-only)

@@ -696,6 +696,23 @@ enum OpenAPISpec {
                   "403": { "$ref": "#/components/responses/Forbidden" }
                 }
               }
+            },
+            "/api/tokens/{prefix}/rotate": {
+              "post": {
+                "tags": ["RBAC"],
+                "summary": "Rotate (revoke + reissue) an API token by hash prefix.",
+                "description": "Matches exactly one token; its owner/scope/label carry to a fresh secret returned ONCE, and the old hash is revoked. `ttl_secs` sets the new lifetime (absent means no expiry). Requires `tokens.admin`.",
+                "parameters": [ { "name": "prefix", "in": "path", "required": true, "schema": { "type": "string" } } ],
+                "requestBody": { "required": false, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RotateTokenRequest" } } } },
+                "responses": {
+                  "200": { "description": "Reissued token (secret shown once).", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateTokenResponse" } } } },
+                  "400": { "$ref": "#/components/responses/BadRequest" },
+                  "401": { "$ref": "#/components/responses/Unauthorized" },
+                  "403": { "$ref": "#/components/responses/Forbidden" },
+                  "404": { "description": "No token matched the prefix." },
+                  "409": { "description": "Prefix matched more than one token." }
+                }
+              }
             }
           },
           "components": {
@@ -939,9 +956,10 @@ enum OpenAPISpec {
               "UserRemovedResponse": { "type": "object", "properties": { "username": { "type": "string" }, "removed": { "type": "boolean" } } },
               "RoleCatalogEntry": { "type": "object", "properties": { "role": { "type": "string" }, "permissions": { "type": "array", "items": { "type": "string" } } } },
               "RolesResponse": { "type": "object", "properties": { "roles": { "type": "array", "items": { "$ref": "#/components/schemas/RoleCatalogEntry" } } } },
-              "TokenSummary": { "type": "object", "properties": { "username": { "type": "string" }, "scope": { "type": "array", "items": { "type": "string" }, "nullable": true }, "hash_prefix": { "type": "string" }, "label": { "type": "string", "nullable": true } } },
+              "TokenSummary": { "type": "object", "properties": { "username": { "type": "string" }, "scope": { "type": "array", "items": { "type": "string" }, "nullable": true }, "hash_prefix": { "type": "string" }, "label": { "type": "string", "nullable": true }, "expires": { "type": "number", "nullable": true, "description": "Per-token expiry epoch seconds; null means never expires." } } },
               "TokenListResponse": { "type": "object", "properties": { "tokens": { "type": "array", "items": { "$ref": "#/components/schemas/TokenSummary" } } } },
               "CreateTokenRequest": { "type": "object", "required": ["user"], "properties": { "user": { "type": "string" }, "role": { "type": "array", "items": { "type": "string" } }, "label": { "type": "string" }, "ttl_secs": { "type": "integer", "description": "Per-token lifetime in seconds; absent/non-positive means never expires (subject to the daemon token_max_age_days cap)." } } },
+              "RotateTokenRequest": { "type": "object", "properties": { "ttl_secs": { "type": "integer", "description": "New token lifetime in seconds; absent/non-positive means never expires. The rotated token's old TTL is not carried over." } } },
               "CreateTokenResponse": { "type": "object", "properties": { "user": { "type": "string" }, "scope": { "type": "array", "items": { "type": "string" }, "nullable": true }, "token": { "type": "string" }, "hash_prefix": { "type": "string" } } },
               "TokensRemovedResponse": { "type": "object", "properties": { "removed": { "type": "integer" } } },
               "Ok": { "type": "object", "properties": { "ok": { "type": "boolean" } } }
