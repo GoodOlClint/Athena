@@ -15,6 +15,9 @@ actor AthenaMetrics {
         let p95Ms: Double
         let llmTokens: Int
         let sinceEpoch: Double
+        /// Observations in the latency reservoir the quantiles/avg are
+        /// computed over (bounded; M37 — backs the summary _count/_sum).
+        let latencyWindow: Int
     }
 
     private var total = 0
@@ -52,7 +55,59 @@ actor AthenaMetrics {
             totalRequests: total, totalErrors: errors,
             byKind: byKind, avgMs: avg, p50Ms: pct(0.5),
             p95Ms: pct(0.95), llmTokens: tokens,
-            sinceEpoch: started)
+            sinceEpoch: started, latencyWindow: sorted.count)
+    }
+
+    /// Render a snapshot as Prometheus text-exposition format 0.0.4
+    /// (M37). Counters end in `_total`; latency is a summary over the
+    /// recent bounded window; gauges report start/uptime. Metric names
+    /// are namespaced `athena_` (the project/goddess name). Pure, so it
+    /// is testable without the actor.
+    static func prometheus(_ s: Snapshot, now: Double) -> String {
+        func esc(_ v: String) -> String {
+            v.replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "\"", with: "\\\"")
+                .replacingOccurrences(of: "\n", with: "\\n")
+        }
+        var out = ""
+        out += "# HELP athena_requests_total Inference/admin requests "
+        out += "counted (excludes health/UI/metrics).\n"
+        out += "# TYPE athena_requests_total counter\n"
+        out += "athena_requests_total \(s.totalRequests)\n"
+        out += "# HELP athena_request_errors_total Requests that "
+        out += "returned >= 400 or threw.\n"
+        out += "# TYPE athena_request_errors_total counter\n"
+        out += "athena_request_errors_total \(s.totalErrors)\n"
+        out += "# HELP athena_requests_by_kind_total Requests by "
+        out += "coarse kind.\n"
+        out += "# TYPE athena_requests_by_kind_total counter\n"
+        for k in s.byKind.keys.sorted() {
+            out +=
+                "athena_requests_by_kind_total{kind=\"\(esc(k))\"} "
+                + "\(s.byKind[k] ?? 0)\n"
+        }
+        out += "# HELP athena_llm_tokens_total Cumulative LLM tokens "
+        out += "(prompt+completion) metered.\n"
+        out += "# TYPE athena_llm_tokens_total counter\n"
+        out += "athena_llm_tokens_total \(s.llmTokens)\n"
+        out += "# HELP athena_request_latency_ms Request latency (ms) "
+        out += "over a recent bounded window.\n"
+        out += "# TYPE athena_request_latency_ms summary\n"
+        out += "athena_request_latency_ms{quantile=\"0.5\"} \(s.p50Ms)\n"
+        out += "athena_request_latency_ms{quantile=\"0.95\"} \(s.p95Ms)\n"
+        out +=
+            "athena_request_latency_ms_sum "
+            + "\(s.avgMs * Double(s.latencyWindow))\n"
+        out += "athena_request_latency_ms_count \(s.latencyWindow)\n"
+        out += "# HELP athena_start_time_seconds Daemon start time "
+        out += "(unix epoch seconds).\n"
+        out += "# TYPE athena_start_time_seconds gauge\n"
+        out += "athena_start_time_seconds \(s.sinceEpoch)\n"
+        out += "# HELP athena_uptime_seconds Seconds since the daemon "
+        out += "started.\n"
+        out += "# TYPE athena_uptime_seconds gauge\n"
+        out += "athena_uptime_seconds \(now - s.sinceEpoch)\n"
+        return out
     }
 }
 

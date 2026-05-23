@@ -491,7 +491,9 @@ ET="$(intfield "$EMBBODY" total_tokens)"
   || bad "embeddings usage.total_tokens != prompt_tokens ($EMBBODY)"
 
 # The revived global metrics counter must reflect that work (was dead).
+# /metrics is content-negotiated (M37) — ask for JSON explicitly.
 MET="$(curl -s -H "Authorization: Bearer $ADMIN_TOK" \
+  -H "Accept: application/json" \
   "http://127.0.0.1:$PORT/metrics")"
 MT="$(intfield "$MET" llmTokens)"
 { [ -n "$MT" ] && [ "$MT" -gt 0 ]; } \
@@ -2137,6 +2139,53 @@ echo "$DO" | grep -qiE "tokens: [0-9]+ managed" \
   && ok "doctor reports token-expiry posture (#15)" \
   || { bad "doctor missing token posture"; echo "$DO" | grep -i token; }
 rm -rf "$DR"
+
+echo
+echo "== phase 31: /metrics Prometheus exposition (content-negotiated, M37) =="
+# /metrics now serves Prometheus text 0.0.4 by default (the scrape
+# target) and the JSON snapshot only when Accept: application/json is
+# sent. Auth/role gating (metrics.read) is unchanged. Self-contained
+# realm (own admin/member) so it's independent of earlier phases' state.
+DM="$(mktemp -d)"
+"$ATHENA" auth user add admin --password adminpass1 --role admin \
+  --data-dir "$DM" >/dev/null
+"$ATHENA" auth user add mu --password mupass12345 --role member \
+  --data-dir "$DM" >/dev/null
+AM="$("$ATHENA" auth token add --user admin --data-dir "$DM" \
+  2>/dev/null | grep -o 'sk-athena-[A-Za-z0-9_-]*' | head -1)"
+MM="$("$ATHENA" auth token add --user mu --data-dir "$DM" \
+  2>/dev/null | grep -o 'sk-athena-[A-Za-z0-9_-]*' | head -1)"
+start_daemon "$DM" 127.0.0.1 \
+  || { echo "metrics daemon failed"; cat "$D/daemon.log"; exit 1; }
+# Generate a little counted work so the counters are non-zero.
+code 200 POST /v1/chat/completions "$MM" "$CHAT"
+# Default scrape (no Accept; curl sends */*) → Prometheus text 0.0.4.
+PM="$(curl -s -i -H "Authorization: Bearer $AM" \
+  "http://127.0.0.1:$PORT/metrics")"
+echo "$PM" | grep -qi "^content-type: text/plain; version=0.0.4" \
+  && ok "/metrics default content-type is Prometheus 0.0.4" \
+  || { bad "/metrics default content-type wrong"
+       echo "$PM" | grep -i "content-type"; }
+echo "$PM" | grep -q "# TYPE athena_requests_total counter" \
+  && ok "/metrics emits Prometheus HELP/TYPE + athena_requests_total" \
+  || { bad "/metrics missing prometheus exposition"; }
+echo "$PM" | grep -q 'athena_request_latency_ms{quantile="0.95"}' \
+  && ok "/metrics emits the latency summary quantiles" \
+  || bad "/metrics missing latency summary"
+echo "$PM" | grep -q "athena_requests_by_kind_total{kind=\"chat\"}" \
+  && ok "/metrics emits per-kind counters" \
+  || bad "/metrics missing per-kind counter"
+# Accept: application/json still returns the JSON snapshot (negotiation).
+JM="$(curl -s -H "Authorization: Bearer $AM" \
+  -H "Accept: application/json" \
+  "http://127.0.0.1:$PORT/metrics")"
+echo "$JM" | grep -q '"totalRequests"' \
+  && ok "/metrics honors Accept: application/json (JSON snapshot)" \
+  || { bad "/metrics JSON negotiation failed"; echo "$JM"; }
+# Role gating is unchanged: member ∌ metrics.read ⇒ 403 either way.
+code 403 GET /metrics "$MM"
+stop_daemon
+rm -rf "$DM"
 
 echo
 echo "════════════════════════════════════════"

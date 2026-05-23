@@ -65,10 +65,10 @@ enum OpenAPISpec {
             "/metrics": {
               "get": {
                 "tags": ["Operational"],
-                "summary": "In-memory metrics snapshot (JSON).",
-                "description": "Global, process-lifetime counters (reset on restart). Requires the `metrics.read` permission.",
+                "summary": "Metrics (Prometheus text by default; JSON via Accept).",
+                "description": "Global, process-lifetime counters (reset on restart). Content-negotiated: returns Prometheus text-exposition format 0.0.4 by default (the scrape target), or the JSON snapshot when the request sends `Accept: application/json`. Requires the `metrics.read` permission.",
                 "responses": {
-                  "200": { "description": "Metrics snapshot.", "content": { "application/json": { "schema": { "type": "object" } } } },
+                  "200": { "description": "Metrics.", "content": { "text/plain": { "schema": { "type": "string" } }, "application/json": { "schema": { "type": "object" } } } },
                   "401": { "$ref": "#/components/responses/Unauthorized" },
                   "403": { "$ref": "#/components/responses/Forbidden" }
                 }

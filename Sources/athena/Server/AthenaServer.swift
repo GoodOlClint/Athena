@@ -140,8 +140,19 @@ struct AthenaServer {
             return Self.json(snapshot)
         }
 
-        router.get("/metrics") { _, _ -> Response in
-            Self.json(await metrics.snapshot())
+        router.get("/metrics") { request, _ -> Response in
+            // Content-negotiated (M37): Prometheus text 0.0.4 by default
+            // (the scrape target); JSON only when explicitly asked, so
+            // the prior JSON consumers keep working.
+            let snap = await metrics.snapshot()
+            if (request.headers[.accept] ?? "")
+                .contains("application/json")
+            {
+                return Self.json(snap)
+            }
+            return Self.prometheusText(
+                AthenaMetrics.prometheus(
+                    snap, now: Date().timeIntervalSince1970))
         }
 
         // Machine-readable API description (M32.1) — always open, like
@@ -3368,6 +3379,19 @@ struct AthenaServer {
         headers[.contentType] = "application/json"
         return Response(
             status: status, headers: headers,
+            body: ResponseBody(byteBuffer: buffer))
+    }
+
+    /// Prometheus text-exposition response (M37) — the content type a
+    /// scraper expects for format version 0.0.4.
+    static func prometheusText(_ s: String) -> Response {
+        var buffer = ByteBuffer()
+        buffer.writeBytes(Data(s.utf8))
+        var headers = HTTPFields()
+        headers[.contentType] =
+            "text/plain; version=0.0.4; charset=utf-8"
+        return Response(
+            status: .ok, headers: headers,
             body: ResponseBody(byteBuffer: buffer))
     }
 
