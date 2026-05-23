@@ -68,6 +68,11 @@ public struct AthenaConfig: Sendable, Equatable {
     /// Optional — absent / non-positive ⇒ no deadline (opt-in, off by
     /// default).
     public var requestTimeoutSecs: Int?
+    /// Preload (warm) the LLM at startup instead of lazily on first
+    /// request (M33.3). Optional — absent / false ⇒ lazy load (default).
+    /// Opt-in: the operator trades a slower start for a warm first
+    /// request. Best-effort — a failed warm logs and falls back to lazy.
+    public var preload: Bool?
     /// `[network]` egress-proxy keys (M13.2). An operator-set
     /// `*_PROXY` env var always wins over these.
     public var httpsProxy: String?
@@ -91,6 +96,7 @@ public struct AthenaConfig: Sendable, Equatable {
         maxConcurrencyPerPrincipal: Int? = nil,
         auditRetentionDays: Int? = nil,
         requestTimeoutSecs: Int? = nil,
+        preload: Bool? = nil,
         httpsProxy: String? = nil, httpProxy: String? = nil,
         allProxy: String? = nil, noProxy: String? = nil,
         logDir: String
@@ -118,6 +124,7 @@ public struct AthenaConfig: Sendable, Equatable {
         self.maxConcurrencyPerPrincipal = maxConcurrencyPerPrincipal
         self.auditRetentionDays = auditRetentionDays
         self.requestTimeoutSecs = requestTimeoutSecs
+        self.preload = preload
         self.httpsProxy = httpsProxy
         self.httpProxy = httpProxy
         self.allProxy = allProxy
@@ -207,6 +214,7 @@ public struct AthenaConfig: Sendable, Equatable {
             reqTimeout = try int("request_timeout_secs", rt)
         }
         let spec = scalar("speculative", in: toml).map { $0 == "true" }
+        let preload = scalar("preload", in: toml).map { $0 == "true" }
 
         return AthenaConfig(
             listenHost: host,
@@ -232,6 +240,7 @@ public struct AthenaConfig: Sendable, Equatable {
             maxConcurrencyPerPrincipal: maxConcPP,
             auditRetentionDays: auditDays,
             requestTimeoutSecs: reqTimeout,
+            preload: preload,
             httpsProxy: scalar("https_proxy", in: toml),
             httpProxy: scalar("http_proxy", in: toml),
             allProxy: scalar("all_proxy", in: toml),

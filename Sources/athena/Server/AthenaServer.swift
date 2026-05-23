@@ -75,6 +75,11 @@ struct AthenaServer {
     /// (`inference_timeout`), a streamed one is truncated at the wire.
     /// `var = 0` so it's a memberwise-init param.
     var requestTimeoutSecs: Int = 0
+    /// Warm the LLM at startup instead of lazily on first request
+    /// (M33.3). `var = false` so it's a memberwise-init param. Best-
+    /// effort: the warm runs concurrently with serving (the HTTP surface
+    /// is up immediately) and a failure falls back to the lazy path.
+    var preload: Bool = false
     /// WebUI session signer (M12.2). Per-process random secret —
     /// sessions invalidate on restart (acceptable for an appliance).
     let session = Session()
@@ -524,6 +529,27 @@ struct AthenaServer {
         await queue.setExecutor { kind, data, owner in
             await self.queuedExecute(
                 kind: kind, request: data, owner: owner)
+        }
+
+        // M33.3: optionally warm the LLM at startup so the first request
+        // doesn't pay the load latency. Best-effort and concurrent — the
+        // HTTP surface (below) still comes up immediately; a failed warm
+        // logs and leaves the lazy path intact. `governor.ensureLoaded`
+        // is idempotent, so a request racing the warm is safe.
+        if preload {
+            let governor = self.governor
+            Task {
+                let log = Logger(label: AthenaLogLabel.daemon)
+                log.notice("preload: warming LLM at startup")
+                do {
+                    try await governor.ensureLoaded(.llm)
+                    log.notice("preload: LLM warm")
+                } catch {
+                    log.warning(
+                        "preload: LLM warm failed, will load lazily: \(error)"
+                    )
+                }
+            }
         }
 
         // M33.2: register the queue worker in the application's

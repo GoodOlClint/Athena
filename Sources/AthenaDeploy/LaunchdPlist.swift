@@ -82,6 +82,9 @@ public enum LaunchdPlist {
         if let reqTimeout = config.requestTimeoutSecs {
             args += ["--request-timeout-secs", String(reqTimeout)]
         }
+        if config.preload == true {
+            args += ["--preload"]  // a Flag, not an Option
+        }
 
         return [
             "Label": label,

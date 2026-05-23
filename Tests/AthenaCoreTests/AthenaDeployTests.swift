@@ -181,6 +181,27 @@ final class AthenaConfigTests: XCTestCase {
         XCTAssertNil(c.requestTimeoutSecs)
     }
 
+    func testPreloadKeyParse() throws {
+        let toml = """
+            listen_host = "127.0.0.1"
+            listen_port = 7447
+            log_dir = "/l"
+            preload = true
+            """
+        let c = try AthenaConfig.parse(toml: toml)
+        XCTAssertEqual(c.preload, true)
+    }
+
+    func testPreloadKeyAbsentIsNil() throws {
+        let toml = """
+            listen_host = "127.0.0.1"
+            listen_port = 7447
+            log_dir = "/l"
+            """
+        let c = try AthenaConfig.parse(toml: toml)
+        XCTAssertNil(c.preload)
+    }
+
     func testMissingRequiredKeyThrows() {
         let toml = "listen_host = \"h\"\nlog_dir = \"/l\""
         XCTAssertThrowsError(try AthenaConfig.parse(toml: toml)) {
@@ -265,7 +286,8 @@ final class LaunchdPlistTests: XCTestCase {
         maxConcurrency: Int? = nil,
         maxConcurrencyPerPrincipal: Int? = nil,
         auditRetentionDays: Int? = nil,
-        requestTimeoutSecs: Int? = nil
+        requestTimeoutSecs: Int? = nil,
+        preload: Bool? = nil
     ) -> AthenaConfig {
         AthenaConfig(
             listenHost: "127.0.0.1", listenPort: 7447, budgetBytes: budget,
@@ -281,6 +303,7 @@ final class LaunchdPlistTests: XCTestCase {
             maxConcurrencyPerPrincipal: maxConcurrencyPerPrincipal,
             auditRetentionDays: auditRetentionDays,
             requestTimeoutSecs: requestTimeoutSecs,
+            preload: preload,
             logDir: "/var/log/athena")
     }
 
@@ -319,7 +342,8 @@ final class LaunchdPlistTests: XCTestCase {
                 maxConcurrency: 8,
                 maxConcurrencyPerPrincipal: 2,
                 auditRetentionDays: 365,
-                requestTimeoutSecs: 120))
+                requestTimeoutSecs: 120,
+                preload: true))
         XCTAssertEqual(
             d["ProgramArguments"] as? [String],
             [
@@ -339,6 +363,7 @@ final class LaunchdPlistTests: XCTestCase {
                 "--max-concurrency-per-principal", "2",
                 "--audit-retention-days", "365",
                 "--request-timeout-secs", "120",
+                "--preload",
             ])
     }
 

@@ -13,9 +13,9 @@ enum ConfigEditor {
         "max_concurrency", "max_concurrency_per_principal",
         "audit_retention_days", "request_timeout_secs",
     ]
-    /// Written bare (unquoted), like ints: floats and a bool.
+    /// Written bare (unquoted), like ints: floats and bools.
     static let rawKeys: Set<String> = [
-        "temperature", "speculative", "rate_limit",
+        "temperature", "speculative", "rate_limit", "preload",
     ]
     static let knownKeys: Set<String> = [
         "listen_host", "listen_port", "budget_bytes", "engine",
@@ -24,7 +24,7 @@ enum ConfigEditor {
         "speculative", "vector_cap_bytes", "auth_keys_file",
         "tls_cert", "tls_key", "rate_limit", "rate_burst",
         "max_concurrency", "max_concurrency_per_principal",
-        "audit_retention_days", "request_timeout_secs",
+        "audit_retention_days", "request_timeout_secs", "preload",
         "https_proxy", "http_proxy", "all_proxy", "no_proxy",
         "kv_compression",
     ]
@@ -86,6 +86,8 @@ enum ConfigEditor {
             return cfg.auditRetentionDays.map(String.init)
         case "request_timeout_secs":
             return cfg.requestTimeoutSecs.map(String.init)
+        case "preload":
+            return cfg.preload.map { $0 ? "true" : "false" }
         case "https_proxy": return cfg.httpsProxy
         case "http_proxy": return cfg.httpProxy
         case "all_proxy": return cfg.allProxy
@@ -168,6 +170,10 @@ enum ConfigEditor {
                 throw Failure.badValue(key, "a number")
             }
             if key == "speculative",
+                value != "true", value != "false" {
+                throw Failure.badValue(key, "true or false")
+            }
+            if key == "preload",
                 value != "true", value != "false" {
                 throw Failure.badValue(key, "true or false")
             }

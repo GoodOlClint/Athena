@@ -168,6 +168,12 @@ struct Load: AsyncParsableCommand {
     )
     var requestTimeoutSecs: Int?
 
+    @Flag(
+        help:
+            "Warm the LLM at startup instead of lazily on first request. The HTTP surface still comes up immediately; the warm runs in the background (best-effort — a failure falls back to lazy load)."
+    )
+    var preload = false
+
     mutating func run() async throws {
         // Centralized logging first — must precede any Logger creation
         // (Hummingbird/NIO included) so everything routes through the
@@ -388,7 +394,8 @@ struct Load: AsyncParsableCommand {
             maxConcurrency: maxConcurrency ?? 0,
             maxConcurrencyPerPrincipal: maxConcurrencyPerPrincipal ?? 0,
             auditRetentionDays: auditRetentionDays ?? 0,
-            requestTimeoutSecs: requestTimeoutSecs ?? 0)
+            requestTimeoutSecs: requestTimeoutSecs ?? 0,
+            preload: preload)
         try await server.run()
     }
 }
