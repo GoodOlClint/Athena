@@ -1,5 +1,5 @@
+import CSQLCipher
 import Foundation
-import SQLite3
 
 /// A queued/async job row.
 public struct JobRow: Sendable {
