@@ -631,6 +631,7 @@ struct AthenaServer {
 
         var text = ""
         var usage = TokenUsage.zero
+        var finish: FinishReason = .stop
         for await event in llm.generateMetered(
             messages: turns, schemaJSON: schemaJSON, tools: toolSpecs,
             maxTokens: body.max_tokens, temperature: body.temperature)
@@ -638,6 +639,7 @@ struct AthenaServer {
             switch event {
             case .text(let chunk): text += chunk
             case .usage(let u): usage = u
+            case .finish(let r): finish = r
             }
         }
         // M27.1/.2: real token counts feed the response `usage` object,
@@ -649,15 +651,19 @@ struct AthenaServer {
         return Self.json(
             Self.chatCompletionResponse(
                 id: id, model: model, created: created, text: text,
-                isToolCall: effective?.isToolCall == true, usage: usage))
+                isToolCall: effective?.isToolCall == true, usage: usage,
+                finish: finish))
     }
 
     /// Build one `ChatChoice` from generated text: a tool-call object is
     /// surfaced as OpenAI `tool_calls`; everything else as `content`.
     /// Shared by the sync `/v1/chat/completions` handler and the queued
     /// `conversation` executor so both emit the identical OpenAI shape.
+    /// `finish` is the generator's stop reason (M31.2): a real tool call
+    /// always reports `tool_calls`; otherwise the reason passes through
+    /// (`stop` natural end, `length` max_tokens truncation).
     private static func chatChoice(
-        text: String, isToolCall: Bool
+        text: String, isToolCall: Bool, finish: FinishReason
     ) -> ChatChoice {
         if isToolCall,
             let data = text.data(using: .utf8),
@@ -686,18 +692,22 @@ struct AthenaServer {
         return ChatChoice(
             index: 0,
             message: ChatMessage(role: "assistant", content: text),
-            finish_reason: "stop")
+            finish_reason: finish.rawValue)
     }
 
     /// Assemble a full OpenAI `ChatCompletionResponse` around one choice.
     private static func chatCompletionResponse(
         id: String, model: String, created: Int, text: String,
-        isToolCall: Bool, usage: TokenUsage
+        isToolCall: Bool, usage: TokenUsage,
+        finish: FinishReason = .stop
     ) -> ChatCompletionResponse {
         ChatCompletionResponse(
             id: id, object: "chat.completion", created: created,
             model: model,
-            choices: [chatChoice(text: text, isToolCall: isToolCall)],
+            choices: [
+                chatChoice(
+                    text: text, isToolCall: isToolCall, finish: finish)
+            ],
             usage: Usage(
                 prompt_tokens: usage.promptTokens,
                 completion_tokens: usage.completionTokens,
@@ -1681,6 +1691,7 @@ struct AthenaServer {
             let effective = req.effectiveSchema()
             var text = ""
             var usage = TokenUsage.zero
+            var finish: FinishReason = .stop
             for await event in llm.generateMetered(
                 messages: turns, schemaJSON: effective?.json,
                 tools: req.toolSpecs(), maxTokens: req.max_tokens,
@@ -1689,6 +1700,7 @@ struct AthenaServer {
                 switch event {
                 case .text(let c): text += c
                 case .usage(let u): usage = u
+                case .finish(let r): finish = r
                 }
             }
             await meter(principal: owner, usage: usage)
@@ -1705,7 +1717,7 @@ struct AthenaServer {
                         created: Int(Date().timeIntervalSince1970),
                         text: text,
                         isToolCall: effective?.isToolCall == true,
-                        usage: usage)), nil
+                        usage: usage, finish: finish)), nil
             )
         case "embeddings":
             guard
@@ -2976,6 +2988,7 @@ struct AthenaServer {
                                 finish_reason: nil)
                         ]))
                 var usage = TokenUsage.zero
+                var finish: FinishReason = .stop
                 for await event in events {
                     switch event {
                     case .text(let piece):
@@ -2992,8 +3005,12 @@ struct AthenaServer {
                                 ]))
                     case .usage(let u):
                         usage = u
+                    case .finish(let r):
+                        finish = r
                     }
                 }
+                // M31.2: the terminal chunk carries `length` when the
+                // request hit max_tokens, `stop` otherwise.
                 emit(
                     ChatCompletionChunk(
                         id: id, object: "chat.completion.chunk",
@@ -3002,7 +3019,7 @@ struct AthenaServer {
                             ChatChunkChoice(
                                 index: 0,
                                 delta: ChatDelta(role: nil, content: nil),
-                                finish_reason: "stop")
+                                finish_reason: finish.rawValue)
                         ]))
                 // OpenAI emits usage in a final chunk with empty choices,
                 // only when the client opted in.

@@ -175,6 +175,35 @@ code 303 GET  /ui "$ALICE_TOK"                          # ∌ daemonAdmin → lo
 code 200 GET  /healthz ""                               # always open
 
 echo
+echo "== phase 2.1: OpenAI finish_reason length on truncation (M31.2) =="
+# A positive max_tokens truncates the stub stream ⇒ finish_reason
+# "length"; an uncapped request ends naturally ⇒ "stop". Same signal on
+# the sync body and the terminal SSE chunk.
+CHATCAP='{"model":"x","messages":[{"role":"user","content":"hi"}],"max_tokens":2}'
+FRL="$(curl -s -H "Authorization: Bearer $ALICE_TOK" \
+  -H 'Content-Type: application/json' -d "$CHATCAP" \
+  "http://127.0.0.1:$PORT/v1/chat/completions")"
+echo "$FRL" | grep -q '"finish_reason":"length"' \
+  && ok "sync truncation ⇒ finish_reason length" \
+  || bad "sync finish_reason not length ($FRL)"
+FRS="$(curl -s -H "Authorization: Bearer $ALICE_TOK" \
+  -H 'Content-Type: application/json' -d "$CHAT" \
+  "http://127.0.0.1:$PORT/v1/chat/completions")"
+echo "$FRS" | grep -q '"finish_reason":"stop"' \
+  && ok "sync natural end ⇒ finish_reason stop" \
+  || bad "sync finish_reason not stop ($FRS)"
+SSEL="$(curl -s -N -H "Authorization: Bearer $ALICE_TOK" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"x","messages":[{"role":"user","content":"hi"}],"stream":true,"max_tokens":2}' \
+  "http://127.0.0.1:$PORT/v1/chat/completions")"
+echo "$SSEL" | grep -q '"finish_reason":"length"' \
+  && ok "SSE truncation ⇒ terminal finish_reason length" \
+  || bad "SSE finish_reason not length ($SSEL)"
+echo "$SSEL" | grep -q 'data: \[DONE\]' \
+  && ok "SSE still terminates with [DONE]" \
+  || bad "SSE missing [DONE] ($SSEL)"
+
+echo
 echo "== phase 2.5: WebUI session cookie + RBAC nav + CSRF (M18.1) =="
 # /ui is SESSION-cookie authed (not bearer). admin (daemonAdmin) gets
 # the control shell; a member is bounced to login; mutations require

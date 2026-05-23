@@ -30,6 +30,7 @@ final class UsageAccountingTests: XCTestCase {
             switch event {
             case .text(let t): text += t
             case .usage(let u): usages.append(u)
+            case .finish: break
             }
         }
         XCTAssertFalse(text.isEmpty, "stub still streams text")
@@ -39,6 +40,43 @@ final class UsageAccountingTests: XCTestCase {
         XCTAssertEqual(
             usages[0].totalTokens,
             usages[0].promptTokens + usages[0].completionTokens)
+    }
+
+    /// M31.2: a positive `max_tokens` truncates the stub stream and the
+    /// terminal `.finish` reports `.length`; an absent cap reports
+    /// `.stop`. The server maps these to the OpenAI `finish_reason`.
+    func testStubGenerateMeteredReportsFinishReason() async {
+        let llm = StubLLMModule(reserveBytes: 1)
+        let turns = [ChatTurn(role: "user", content: "hello")]
+
+        func run(maxTokens: Int?) async -> (
+            text: String, completion: Int, finish: FinishReason?
+        ) {
+            var text = ""
+            var completion = 0
+            var finish: FinishReason?
+            for await event in llm.generateMetered(
+                messages: turns, schemaJSON: nil, tools: nil,
+                maxTokens: maxTokens, temperature: nil)
+            {
+                switch event {
+                case .text(let t): text += t
+                case .usage(let u): completion = u.completionTokens
+                case .finish(let r): finish = r
+                }
+            }
+            return (text, completion, finish)
+        }
+
+        let capped = await run(maxTokens: 2)
+        XCTAssertEqual(capped.finish, .length, "hit max_tokens ⇒ length")
+        XCTAssertEqual(capped.completion, 2, "truncated at the cap")
+
+        let full = await run(maxTokens: nil)
+        XCTAssertEqual(full.finish, .stop, "natural end ⇒ stop")
+        XCTAssertGreaterThan(
+            full.completion, capped.completion,
+            "uncapped emits more than the truncated run")
     }
 
     /// The String `generate` filter drops the usage event but preserves

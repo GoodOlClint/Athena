@@ -115,10 +115,21 @@ extension LLMModule {
         let prompt = messages.flattenedPrompt()
         let chunks = generate(
             prompt: prompt, schemaJSON: schemaJSON, tools: tools)
+        // M31.2: honor a positive `max_tokens` so the synthetic stream
+        // truncates and reports `.finish(.length)` — gives the stub
+        // engine a deterministic truncation signal for the e2e gate. A
+        // 0/negative/absent cap means "no limit" (the loaded default has
+        // no meaning for the model-less stub).
+        let cap = (maxTokens.flatMap { $0 > 0 ? $0 : nil }) ?? Int.max
         return AsyncStream { continuation in
             let task = Task {
                 var completion = 0
+                var truncated = false
                 for await chunk in chunks {
+                    if completion >= cap {
+                        truncated = true
+                        break
+                    }
                     continuation.yield(.text(chunk))
                     completion += Self.approxTokens(chunk)
                 }
@@ -127,6 +138,8 @@ extension LLMModule {
                         TokenUsage(
                             promptTokens: Self.approxTokens(prompt),
                             completionTokens: completion)))
+                continuation.yield(
+                    .finish(truncated ? .length : .stop))
                 continuation.finish()
             }
             continuation.onTermination = { _ in task.cancel() }

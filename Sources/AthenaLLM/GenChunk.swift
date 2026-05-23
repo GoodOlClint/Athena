@@ -14,12 +14,25 @@ public struct TokenUsage: Sendable, Equatable {
     public static let zero = TokenUsage(promptTokens: 0, completionTokens: 0)
 }
 
+/// Why a generation stopped (M31.2). `length` ⇒ the model hit the
+/// effective `max_tokens` cap and was truncated; `stop` ⇒ it ended
+/// naturally (EOS / structured-output completion). Maps to the OpenAI
+/// `finish_reason` (the server upgrades `stop` to `tool_calls` when the
+/// emitted text is a tool call — that determination is the server's, not
+/// the module's). Raw value IS the OpenAI string.
+public enum FinishReason: String, Sendable {
+    case stop
+    case length
+}
+
 /// One element of the metered generation stream (M27.1). Text chunks
 /// stream exactly as the String `generate` overloads yield them; a
-/// single terminal `.usage` carries the true token counts once the
-/// model has finished. Callers that don't need usage consume the
+/// single terminal `.usage` carries the true token counts, followed by a
+/// single terminal `.finish` carrying the stop reason (M31.2), once the
+/// model has finished. Callers that don't need usage/finish consume the
 /// String `generate` overloads, which are thin filters over this.
 public enum GenChunk: Sendable {
     case text(String)
     case usage(TokenUsage)
+    case finish(FinishReason)
 }

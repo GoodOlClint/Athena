@@ -216,16 +216,21 @@ public actor MLXLLMModule: LLMModule {
         // the non-Sendable `Chat.Message` mapping happens INSIDE the actor
         // methods (Swift 6 strict-concurrency). A single terminal
         // `.usage` carries the true token counts (M27.1): prompt = the
-        // tokenized input length, completion = tokens emitted.
+        // tokenized input length, completion = tokens emitted. A terminal
+        // `.finish` follows with the stop reason (M31.2): the request
+        // truncated when its completion count reached the same effective
+        // cap both generation paths enforce.
         AsyncStream { continuation in
             let task = Task {
+                var usage = TokenUsage.zero
                 do {
                     if let speculative = try await self.runSpeculative(
                         messages: messages, schemaJSON: schemaJSON,
                         tools: tools, maxTokens: maxTokens)
                     {
+                        usage = speculative.usage
                         continuation.yield(.text(speculative.text))
-                        continuation.yield(.usage(speculative.usage))
+                        continuation.yield(.usage(usage))
                     } else {
                         // runSpeculative returns nil only for UNstructured
                         // requests (no schema) — those stream from the
@@ -235,7 +240,6 @@ public actor MLXLLMModule: LLMModule {
                         let stream = try await self.beginGeneration(
                             messages: messages, tools: tools,
                             maxTokens: maxTokens, temperature: temperature)
-                        var usage = TokenUsage.zero
                         for await event in stream {
                             switch event {
                             case .chunk(let text):
@@ -253,10 +257,19 @@ public actor MLXLLMModule: LLMModule {
                         }
                         continuation.yield(.usage(usage))
                     }
+                    // M31.2: the effective cap is the same positive-wins
+                    // resolution both paths apply; hitting it ⇒ truncated.
+                    let cap = await Self.effectiveMaxTokens(
+                        maxTokens, self.params.maxTokens)
+                    continuation.yield(
+                        .finish(
+                            usage.completionTokens >= cap
+                                ? .length : .stop))
                 } catch {
                     continuation.yield(
                         .text("[athena: generation failed: \(error)]"))
                     continuation.yield(.usage(.zero))
+                    continuation.yield(.finish(.stop))
                 }
                 continuation.finish()
             }
