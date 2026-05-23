@@ -903,9 +903,13 @@ struct AthenaServer {
                 type: "server_error", code: "internal_error")
         }
 
+        // M39: `body.model` selects among the configured set. The module
+        // rebinds its slot (or 400s on an unknown id) and reports the id
+        // actually served, which we echo back — no longer the unused
+        // request string.
         let batch: EmbeddingBatch
         do {
-            batch = try await embedding.embed(body.input)
+            batch = try await embedding.embed(body.input, model: body.model)
         } catch {
             return Self.classified(error, module: .textEmbedding)
         }
@@ -922,7 +926,7 @@ struct AthenaServer {
                     object: "embedding", embedding: $0.element,
                     index: $0.offset)
             },
-            model: body.model ?? "athena-embedding",
+            model: batch.model,
             usage: Usage(
                 prompt_tokens: batch.promptTokens, completion_tokens: 0,
                 total_tokens: batch.promptTokens))
@@ -1903,7 +1907,7 @@ struct AthenaServer {
             else { return (nil, "invalid embeddings body") }
             do {
                 try await governor.ensureLoaded(.textEmbedding)
-                let batch = try await embedding.embed(req.input)
+                let batch = try await embedding.embed(req.input, model: nil)
                 await meter(
                     principal: owner,
                     usage: TokenUsage(
@@ -2126,7 +2130,7 @@ struct AthenaServer {
             return .fail(Self.classified(error, module: module))
         }
         do {
-            return .ok(try await embedding.embed(inputs).vectors)
+            return .ok(try await embedding.embed(inputs, model: nil).vectors)
         } catch {
             return .fail(Self.classified(error, module: module))
         }

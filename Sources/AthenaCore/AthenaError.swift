@@ -33,6 +33,12 @@ public enum AthenaError: Error, Sendable, Equatable {
     /// (504) so a runaway decode bounds the caller's wait (and frees the
     /// worker) instead of being capped only by `max_tokens`.
     case requestTimedOut(seconds: Int)
+    /// The request named a model that is not in the configured/selectable
+    /// set for its module (e.g. per-request embedding selection). A client
+    /// error (400) — NEVER a silent fallback to a different model, which
+    /// for embeddings would return wrong-dimension vectors, and never an
+    /// arbitrary on-request download.
+    case modelNotAvailable(requested: String, available: [String])
 
     /// HTTP status the serve path should return for this error.
     public var httpStatus: Int {
@@ -45,6 +51,7 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .audioTooLong: return 400
         case .audioSegmentInvalid: return 400
         case .requestTimedOut: return 504
+        case .modelNotAvailable: return 400
         }
     }
 
@@ -59,6 +66,7 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .audioTooLong: return "audio_too_long"
         case .audioSegmentInvalid: return "audio_segment_invalid"
         case .requestTimedOut: return "inference_timeout"
+        case .modelNotAvailable: return "model_not_available"
         }
     }
 
@@ -89,6 +97,9 @@ public enum AthenaError: Error, Sendable, Equatable {
         case let .requestTimedOut(seconds):
             return "Inference exceeded the \(seconds)s request timeout "
                 + "and was cancelled."
+        case let .modelNotAvailable(requested, available):
+            return "Model '\(requested)' is not available. Configured "
+                + "models: \(available.joined(separator: ", "))."
         }
     }
 

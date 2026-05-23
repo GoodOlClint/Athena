@@ -70,9 +70,16 @@ struct Load: AsyncParsableCommand {
     var modelStore: String?
 
     @Option(
-        help:
-            "Text-embedding model HF id (default BAAI/bge-small-en-v1.5).")
-    var embeddingModel: String = Load.defaultEmbeddingModel
+        name: .customLong("embedding-model"),
+        help: """
+            Text-embedding model HF id. Repeatable: pass it more than once \
+            to make several models selectable per-request via the `model` \
+            body field; the FIRST is the default (used when a request omits \
+            `model`). A request for a model not in this set is a 400 (never \
+            an on-request download). Default BAAI/bge-small-en-v1.5.
+            """
+    )
+    var embeddingModels: [String] = [Load.defaultEmbeddingModel]
 
     @Option(
         help:
@@ -331,9 +338,9 @@ struct Load: AsyncParsableCommand {
         let embedding: any EmbeddingModule
         switch engine {
         case .stub:
-            embedding = StubEmbeddingModule()
+            embedding = StubEmbeddingModule(modelIds: embeddingModels)
         case .mlx:
-            embedding = MLXEmbeddingModule(modelId: embeddingModel)
+            embedding = MLXEmbeddingModule(modelIds: embeddingModels)
         }
         // Transcription: real Whisper under the mlx engine, stub under
         // the stub engine. Evictable — the LLM is the primary workload.

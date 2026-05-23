@@ -476,10 +476,15 @@ CT="$(intfield "$CHATBODY" total_tokens)"
   && ok "chat usage.total_tokens = $CT (= prompt+completion)" \
   || bad "chat usage.total_tokens != prompt+completion ($CHATBODY)"
 
+# M39: the `model` field now SELECTS among the configured embedding set
+# instead of being an ignored false-friend echo. Omit it ⇒ the daemon's
+# default model (here the stub's lone configured id). An id outside the
+# set is a 400 `model_not_available` (asserted just below) — never a
+# silent wrong-model fallback.
 EMBBODY="$(curl -s -X POST \
   -H "Authorization: Bearer $ALICE_TOK" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"x","input":["hello world","another sentence here"]}' \
+  -d '{"input":["hello world","another sentence here"]}' \
   "http://127.0.0.1:$PORT/v1/embeddings")"
 EP="$(intfield "$EMBBODY" prompt_tokens)"
 ET="$(intfield "$EMBBODY" total_tokens)"
@@ -489,6 +494,17 @@ ET="$(intfield "$EMBBODY" total_tokens)"
 { [ -n "$ET" ] && [ "$ET" -eq "$EP" ]; } \
   && ok "embeddings usage.total_tokens = $ET (= prompt; no completion)" \
   || bad "embeddings usage.total_tokens != prompt_tokens ($EMBBODY)"
+# M39: an unknown model id is refused (400 model_not_available) under the
+# stub too — selection/allowlist parity is engine-independent.
+ENB="$(curl -s -X POST -H "Authorization: Bearer $ALICE_TOK" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"nope/not-loaded","input":"hi"}' \
+  "http://127.0.0.1:$PORT/v1/embeddings")"
+echo "$ENB" | grep -q 'model_not_available' \
+  && ok "embeddings unknown model ⇒ model_not_available" \
+  || bad "embeddings unknown model not refused ($ENB)"
+code 400 POST /v1/embeddings "$ALICE_TOK" \
+  '{"model":"nope/not-loaded","input":"hi"}'
 
 # The revived global metrics counter must reflect that work (was dead).
 # /metrics is content-negotiated (M37) — ask for JSON explicitly.

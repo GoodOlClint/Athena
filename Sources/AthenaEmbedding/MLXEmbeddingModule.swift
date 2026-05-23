@@ -22,21 +22,36 @@ import Tokenizers
 public actor MLXEmbeddingModule: EmbeddingModule {
     public nonisolated let id: ModuleID = .textEmbedding
 
-    private let modelId: String
+    /// The selectable set (M39). The single resident slot is rebound to
+    /// whichever member a request asks for; an id outside this set is a
+    /// `modelNotAvailable` 400 — a request can never trigger an arbitrary
+    /// HF download. (Future governor evolution: a multi-resident pool so
+    /// hot models stay loaded; today it is one-at-a-time.)
+    private let allowedModelIds: [String]
+    private let defaultModelId: String
     private let estimatedBytes: Int
     private var container: EmbedderModelContainer?
+    /// The id currently resident in `container` (nil ⇒ nothing loaded).
+    private var residentModelId: String?
 
     /// - Parameters:
-    ///   - modelId: HF id of the embedding model (default
-    ///     `BAAI/bge-small-en-v1.5` — 384-dim, ~130 MB).
+    ///   - modelIds: the selectable set of embedding model HF ids; the
+    ///     first is the default (used when a request omits `model`).
+    ///     Default `[BAAI/bge-small-en-v1.5]` — 384-dim, ~130 MB.
     ///   - estimatedBytes: governor admission estimate. Default 512 MiB:
     ///     safe headroom over bge-small's weights + tokenizer + the
-    ///     transient activation working set.
+    ///     transient activation working set. One model is resident at a
+    ///     time, so the fixed estimate still bounds the slot even though
+    ///     a larger member (e.g. bge-large) exceeds bge-small's weights.
     public init(
-        modelId: String = "BAAI/bge-small-en-v1.5",
+        modelIds: [String] = ["BAAI/bge-small-en-v1.5"],
         estimatedBytes: Int = 512 * 1024 * 1024
     ) {
-        self.modelId = modelId
+        precondition(
+            !modelIds.isEmpty,
+            "MLXEmbeddingModule needs at least one model id")
+        self.allowedModelIds = modelIds
+        self.defaultModelId = modelIds[0]
         self.estimatedBytes = estimatedBytes
     }
 
@@ -46,35 +61,66 @@ public actor MLXEmbeddingModule: EmbeddingModule {
 
     public func load(reservation: MemoryReservation) async throws {
         if container != nil { return }
+        try await loadContainer(defaultModelId)
+    }
+
+    public func unload() async {
+        container = nil
+        residentModelId = nil
+    }
+
+    /// Load `id` into the single resident slot, replacing whatever was
+    /// there. On failure the slot is left empty (container + residentId
+    /// nil) so the next request re-attempts rather than wedging.
+    private func loadContainer(_ id: String) async throws {
         do {
             container = try await EmbedderModelFactory.shared.loadContainer(
                 from: #hubDownloader(
                     HuggingFace.HubClient(
                         session: AthenaProxy.proxiedURLSession())),
                 using: #huggingFaceTokenizerLoader(),
-                configuration: ModelConfiguration(id: modelId))
+                configuration: ModelConfiguration(id: id))
+            residentModelId = id
         } catch {
+            container = nil
+            residentModelId = nil
             throw AthenaError.moduleLoadFailed(
                 .textEmbedding,
-                reason: "embedding model \(modelId): \(error)")
+                reason: "embedding model \(id): \(error)")
         }
-    }
-
-    public func unload() async {
-        container = nil
     }
 
     /// Embed each input → an L2-normalized vector (order preserved),
     /// plus the total tokenized input length for usage accounting
     /// (M27.1). Mirrors the substrate's canonical
     /// tokenize→pad→mask→pool flow.
-    public func embed(_ texts: [String]) async throws -> EmbeddingBatch {
+    ///
+    /// M39: `model` selects from `allowedModelIds` (nil ⇒ default). If the
+    /// requested model isn't the resident one, the slot is rebound
+    /// (unload current → load requested) before embedding. An id outside
+    /// the set throws `modelNotAvailable` (400) — never a silent
+    /// wrong-dimension fallback, never an on-request download. The
+    /// returned batch reports the id actually served.
+    public func embed(_ texts: [String], model: String? = nil) async throws
+        -> EmbeddingBatch
+    {
+        let target = model ?? defaultModelId
+        guard allowedModelIds.contains(target) else {
+            throw AthenaError.modelNotAvailable(
+                requested: target, available: allowedModelIds)
+        }
+        if residentModelId != target || container == nil {
+            container = nil
+            residentModelId = nil
+            try await loadContainer(target)
+        }
         guard let container else {
             throw AthenaError.moduleLoadFailed(
                 .textEmbedding, reason: "embed called before load")
         }
         if texts.isEmpty {
-            return EmbeddingBatch(vectors: [], promptTokens: 0)
+            return EmbeddingBatch(
+                vectors: [], promptTokens: 0, model: target)
         }
         return await container.perform { ctx in
             let tokenizer = ctx.tokenizer
@@ -104,7 +150,7 @@ public actor MLXEmbeddingModule: EmbeddingModule {
             result.eval()
             return EmbeddingBatch(
                 vectors: result.map { $0.asArray(Float.self) },
-                promptTokens: promptTokens)
+                promptTokens: promptTokens, model: target)
         }
     }
 }

@@ -23,6 +23,31 @@ final class StubEmbeddingModuleTests: XCTestCase {
         let out = try await StubEmbeddingModule().embed([]).vectors
         XCTAssertTrue(out.isEmpty)
     }
+
+    // M39: per-request model selection over the configured set.
+
+    func testAbsentModelServesDefaultTruthfully() async throws {
+        let m = StubEmbeddingModule(modelIds: ["m-small", "m-large"])
+        let batch = try await m.embed(["hi"], model: nil)
+        XCTAssertEqual(batch.model, "m-small", "nil ⇒ first declared")
+    }
+
+    func testSelectsAllowedModelAndEchoesTruthfully() async throws {
+        let m = StubEmbeddingModule(modelIds: ["m-small", "m-large"])
+        let batch = try await m.embed(["hi"], model: "m-large")
+        XCTAssertEqual(batch.model, "m-large", "served id is echoed")
+    }
+
+    func testUnknownModelThrowsModelNotAvailable() async throws {
+        let m = StubEmbeddingModule(modelIds: ["m-small"])
+        do {
+            _ = try await m.embed(["hi"], model: "nope/not-loaded")
+            XCTFail("expected modelNotAvailable")
+        } catch let e as AthenaError {
+            XCTAssertEqual(e.code, "model_not_available")
+            XCTAssertEqual(e.httpStatus, 400)
+        }
+    }
 }
 
 /// MLX module — construction/accounting only (loading downloads a model,
