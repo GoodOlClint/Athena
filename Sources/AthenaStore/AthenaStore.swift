@@ -386,6 +386,51 @@ public actor AthenaStore {
             ? Int(sqlite3_column_int(st, 0)) : 0
     }
 
+    /// Terminal job statuses — work is finished and the row is just a
+    /// retained result. Only these are eligible for retention pruning;
+    /// `queued`/`running` rows are pending work and never auto-deleted.
+    static let terminalJobStatuses = "'done','error','canceled'"
+
+    /// Delete terminal (done/error/canceled) jobs whose `updated`
+    /// (completion) time is older than `cutoff` (epoch seconds). Returns
+    /// the number removed. Backs the M34.1 queue-result TTL. Pending
+    /// (queued/running) jobs are never touched regardless of age.
+    @discardableResult
+    public func pruneJobs(olderThan cutoff: Double) throws -> Int {
+        let st = try Self.prepared(db,
+            "DELETE FROM jobs WHERE status IN "
+                + "(\(Self.terminalJobStatuses)) AND updated < ?;")
+        defer { sqlite3_finalize(st) }
+        sqlite3_bind_double(st, 1, cutoff)
+        guard sqlite3_step(st) == SQLITE_DONE else {
+            throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
+        }
+        return Int(sqlite3_changes(db))
+    }
+
+    /// Bound total job rows to `maxRows` by deleting the OLDEST terminal
+    /// jobs first (by completion time). Returns the number removed.
+    /// Backs the M34.1 queue-result row cap. Pending (queued/running)
+    /// rows are never deleted, so the table can stay above `maxRows` if
+    /// pending work alone exceeds it — retention never drops live work.
+    @discardableResult
+    public func trimJobs(maxRows: Int) throws -> Int {
+        let total = jobCount()
+        let excess = total - maxRows
+        guard maxRows > 0, excess > 0 else { return 0 }
+        let st = try Self.prepared(db,
+            "DELETE FROM jobs WHERE id IN ("
+                + "SELECT id FROM jobs WHERE status IN "
+                + "(\(Self.terminalJobStatuses)) "
+                + "ORDER BY updated ASC LIMIT ?);")
+        defer { sqlite3_finalize(st) }
+        sqlite3_bind_int(st, 1, Int32(excess))
+        guard sqlite3_step(st) == SQLITE_DONE else {
+            throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
+        }
+        return Int(sqlite3_changes(db))
+    }
+
     // MARK: Usage metering (M27.2) — cumulative per-principal token
     // counters. Persisted so usage survives restarts and is retrievable
     // locally (pull only; the passive oracle never pushes usage out).

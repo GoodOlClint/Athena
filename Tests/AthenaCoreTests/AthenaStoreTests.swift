@@ -281,4 +281,74 @@ final class AthenaStoreTests: XCTestCase {
         let empty = await s.auditCount()
         XCTAssertEqual(empty, 0)
     }
+
+    func testPruneJobsByAgeSkipsPending() async throws {
+        let url = tmpURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let s = try AthenaStore(path: url)
+        // Two terminal jobs + one still-queued.
+        try await s.insertJob(
+            id: "d1", kind: "conversation", request: Data(), owner: nil)
+        try await s.updateJob(
+            id: "d1", status: "done", result: Data("r".utf8), error: nil)
+        try await s.insertJob(
+            id: "e1", kind: "conversation", request: Data(), owner: nil)
+        try await s.updateJob(
+            id: "e1", status: "error", result: nil, error: "boom")
+        try await s.insertJob(
+            id: "q1", kind: "conversation", request: Data(), owner: nil)
+        let now = Date().timeIntervalSince1970
+        // Past cutoff: nothing is old enough yet.
+        let none = try await s.pruneJobs(olderThan: now - 10_000)
+        XCTAssertEqual(none, 0)
+        // Future cutoff: both terminal results go, the queued one stays.
+        let removed = try await s.pruneJobs(olderThan: now + 10_000)
+        XCTAssertEqual(removed, 2)
+        let left = await s.listJobs().map { $0.id }
+        XCTAssertEqual(left, ["q1"], "pending job is never pruned")
+    }
+
+    func testTrimJobsToMaxRowsOldestTerminalFirst() async throws {
+        let url = tmpURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let s = try AthenaStore(path: url)
+        // Three terminal (done) jobs, completed in id order, + a queued one.
+        for id in ["a", "b", "c"] {
+            try await s.insertJob(
+                id: id, kind: "conversation", request: Data(), owner: nil)
+            try await s.updateJob(
+                id: id, status: "done", result: Data(id.utf8), error: nil)
+        }
+        try await s.insertJob(
+            id: "q", kind: "conversation", request: Data(), owner: nil)
+        // Cap at 2 total rows ⇒ delete 2 oldest terminal (a, b);
+        // c (terminal) + q (pending) remain.
+        let trimmed = try await s.trimJobs(maxRows: 2)
+        XCTAssertEqual(trimmed, 2)
+        let left = await s.listJobs().map { $0.id }.sorted()
+        XCTAssertEqual(left, ["c", "q"])
+        // maxRows 0 disables; never deletes.
+        let none = try await s.trimJobs(maxRows: 0)
+        XCTAssertEqual(none, 0)
+    }
+
+    func testTrimJobsNeverDropsPendingBelowCap() async throws {
+        let url = tmpURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let s = try AthenaStore(path: url)
+        // Two pending + one terminal; cap of 1 can only reclaim the
+        // terminal one — pending work is never trimmed.
+        try await s.insertJob(
+            id: "p1", kind: "conversation", request: Data(), owner: nil)
+        try await s.insertJob(
+            id: "p2", kind: "conversation", request: Data(), owner: nil)
+        try await s.insertJob(
+            id: "t1", kind: "conversation", request: Data(), owner: nil)
+        try await s.updateJob(
+            id: "t1", status: "done", result: Data(), error: nil)
+        let trimmed = try await s.trimJobs(maxRows: 1)
+        XCTAssertEqual(trimmed, 1)
+        let left = await s.listJobs().map { $0.id }.sorted()
+        XCTAssertEqual(left, ["p1", "p2"], "stays above cap, keeps pending")
+    }
 }

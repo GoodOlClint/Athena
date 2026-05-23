@@ -73,6 +73,14 @@ public struct AthenaConfig: Sendable, Equatable {
     /// Opt-in: the operator trades a slower start for a warm first
     /// request. Best-effort — a failed warm logs and falls back to lazy.
     public var preload: Bool?
+    /// Queue-result retention (M34.1). `queueResultTtlSecs` prunes
+    /// terminal (done/error/canceled) results older than the window;
+    /// `queueMaxRows` caps total job rows (oldest terminal trimmed
+    /// first). Both optional — absent / non-positive ⇒ keep forever
+    /// (opt-in, off by default; results hold inference outputs, so
+    /// retention is the operator's call). Pending jobs are never pruned.
+    public var queueResultTtlSecs: Int?
+    public var queueMaxRows: Int?
     /// `[network]` egress-proxy keys (M13.2). An operator-set
     /// `*_PROXY` env var always wins over these.
     public var httpsProxy: String?
@@ -97,6 +105,8 @@ public struct AthenaConfig: Sendable, Equatable {
         auditRetentionDays: Int? = nil,
         requestTimeoutSecs: Int? = nil,
         preload: Bool? = nil,
+        queueResultTtlSecs: Int? = nil,
+        queueMaxRows: Int? = nil,
         httpsProxy: String? = nil, httpProxy: String? = nil,
         allProxy: String? = nil, noProxy: String? = nil,
         logDir: String
@@ -125,6 +135,8 @@ public struct AthenaConfig: Sendable, Equatable {
         self.auditRetentionDays = auditRetentionDays
         self.requestTimeoutSecs = requestTimeoutSecs
         self.preload = preload
+        self.queueResultTtlSecs = queueResultTtlSecs
+        self.queueMaxRows = queueMaxRows
         self.httpsProxy = httpsProxy
         self.httpProxy = httpProxy
         self.allProxy = allProxy
@@ -213,6 +225,14 @@ public struct AthenaConfig: Sendable, Equatable {
         if let rt = scalar("request_timeout_secs", in: toml) {
             reqTimeout = try int("request_timeout_secs", rt)
         }
+        var queueTtl: Int?
+        if let qt = scalar("queue_result_ttl_secs", in: toml) {
+            queueTtl = try int("queue_result_ttl_secs", qt)
+        }
+        var queueMax: Int?
+        if let qm = scalar("queue_max_rows", in: toml) {
+            queueMax = try int("queue_max_rows", qm)
+        }
         let spec = scalar("speculative", in: toml).map { $0 == "true" }
         let preload = scalar("preload", in: toml).map { $0 == "true" }
 
@@ -241,6 +261,8 @@ public struct AthenaConfig: Sendable, Equatable {
             auditRetentionDays: auditDays,
             requestTimeoutSecs: reqTimeout,
             preload: preload,
+            queueResultTtlSecs: queueTtl,
+            queueMaxRows: queueMax,
             httpsProxy: scalar("https_proxy", in: toml),
             httpProxy: scalar("http_proxy", in: toml),
             allProxy: scalar("all_proxy", in: toml),

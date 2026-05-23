@@ -202,6 +202,30 @@ final class AthenaConfigTests: XCTestCase {
         XCTAssertNil(c.preload)
     }
 
+    func testQueueRetentionKeysParse() throws {
+        let toml = """
+            listen_host = "127.0.0.1"
+            listen_port = 7447
+            log_dir = "/l"
+            queue_result_ttl_secs = 604800
+            queue_max_rows = 10000
+            """
+        let c = try AthenaConfig.parse(toml: toml)
+        XCTAssertEqual(c.queueResultTtlSecs, 604_800)
+        XCTAssertEqual(c.queueMaxRows, 10_000)
+    }
+
+    func testQueueRetentionKeysAbsentAreNil() throws {
+        let toml = """
+            listen_host = "127.0.0.1"
+            listen_port = 7447
+            log_dir = "/l"
+            """
+        let c = try AthenaConfig.parse(toml: toml)
+        XCTAssertNil(c.queueResultTtlSecs)
+        XCTAssertNil(c.queueMaxRows)
+    }
+
     func testMissingRequiredKeyThrows() {
         let toml = "listen_host = \"h\"\nlog_dir = \"/l\""
         XCTAssertThrowsError(try AthenaConfig.parse(toml: toml)) {
@@ -287,7 +311,9 @@ final class LaunchdPlistTests: XCTestCase {
         maxConcurrencyPerPrincipal: Int? = nil,
         auditRetentionDays: Int? = nil,
         requestTimeoutSecs: Int? = nil,
-        preload: Bool? = nil
+        preload: Bool? = nil,
+        queueResultTtlSecs: Int? = nil,
+        queueMaxRows: Int? = nil
     ) -> AthenaConfig {
         AthenaConfig(
             listenHost: "127.0.0.1", listenPort: 7447, budgetBytes: budget,
@@ -304,6 +330,8 @@ final class LaunchdPlistTests: XCTestCase {
             auditRetentionDays: auditRetentionDays,
             requestTimeoutSecs: requestTimeoutSecs,
             preload: preload,
+            queueResultTtlSecs: queueResultTtlSecs,
+            queueMaxRows: queueMaxRows,
             logDir: "/var/log/athena")
     }
 
@@ -343,7 +371,9 @@ final class LaunchdPlistTests: XCTestCase {
                 maxConcurrencyPerPrincipal: 2,
                 auditRetentionDays: 365,
                 requestTimeoutSecs: 120,
-                preload: true))
+                preload: true,
+                queueResultTtlSecs: 604_800,
+                queueMaxRows: 10_000))
         XCTAssertEqual(
             d["ProgramArguments"] as? [String],
             [
@@ -364,6 +394,8 @@ final class LaunchdPlistTests: XCTestCase {
                 "--audit-retention-days", "365",
                 "--request-timeout-secs", "120",
                 "--preload",
+                "--queue-result-ttl-secs", "604800",
+                "--queue-max-rows", "10000",
             ])
     }
 

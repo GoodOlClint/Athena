@@ -12,6 +12,7 @@ enum ConfigEditor {
         "vector_cap_bytes", "rate_burst",
         "max_concurrency", "max_concurrency_per_principal",
         "audit_retention_days", "request_timeout_secs",
+        "queue_result_ttl_secs", "queue_max_rows",
     ]
     /// Written bare (unquoted), like ints: floats and bools.
     static let rawKeys: Set<String> = [
@@ -25,6 +26,7 @@ enum ConfigEditor {
         "tls_cert", "tls_key", "rate_limit", "rate_burst",
         "max_concurrency", "max_concurrency_per_principal",
         "audit_retention_days", "request_timeout_secs", "preload",
+        "queue_result_ttl_secs", "queue_max_rows",
         "https_proxy", "http_proxy", "all_proxy", "no_proxy",
         "kv_compression",
     ]
@@ -88,6 +90,10 @@ enum ConfigEditor {
             return cfg.requestTimeoutSecs.map(String.init)
         case "preload":
             return cfg.preload.map { $0 ? "true" : "false" }
+        case "queue_result_ttl_secs":
+            return cfg.queueResultTtlSecs.map(String.init)
+        case "queue_max_rows":
+            return cfg.queueMaxRows.map(String.init)
         case "https_proxy": return cfg.httpsProxy
         case "http_proxy": return cfg.httpProxy
         case "all_proxy": return cfg.allProxy

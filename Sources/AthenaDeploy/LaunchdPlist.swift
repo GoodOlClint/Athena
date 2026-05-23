@@ -85,6 +85,12 @@ public enum LaunchdPlist {
         if config.preload == true {
             args += ["--preload"]  // a Flag, not an Option
         }
+        if let queueTtl = config.queueResultTtlSecs {
+            args += ["--queue-result-ttl-secs", String(queueTtl)]
+        }
+        if let queueMax = config.queueMaxRows {
+            args += ["--queue-max-rows", String(queueMax)]
+        }
 
         return [
             "Label": label,

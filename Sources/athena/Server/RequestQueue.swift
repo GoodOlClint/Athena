@@ -39,6 +39,12 @@ actor RequestQueue {
     /// Set by `stop()` on graceful shutdown (M33.2): the worker finishes
     /// the in-flight job, then exits instead of starting the next one.
     private var stopping = false
+    /// Retention bounds for terminal (done/error/canceled) job results
+    /// (M34.1). `ttlSecs` > 0 ⇒ prune results older than that; `maxRows`
+    /// > 0 ⇒ cap total job rows (oldest terminal first). Both 0 ⇒ keep
+    /// forever (opt-in, off by default). Swept on the worker idle path.
+    private var ttlSecs = 0
+    private var maxRows = 0
 
     init(store: AthenaStore) {
         self.store = store
@@ -46,6 +52,13 @@ actor RequestQueue {
     }
 
     func setExecutor(_ e: @escaping Executor) { executor = e }
+
+    /// Configure result retention (M34.1). Called once at startup. 0 for
+    /// either bound disables that dimension.
+    func setRetention(ttlSecs: Int, maxRows: Int) {
+        self.ttlSecs = ttlSecs
+        self.maxRows = maxRows
+    }
 
     /// Enqueue; returns the job id. `owner` = the submitting
     /// principal (M12.6); nil when auth is disabled.
@@ -112,7 +125,13 @@ actor RequestQueue {
             let pending = await store.listJobs().first {
                 $0.status == "queued" || $0.status == "running"
             }
-            guard let job = pending else { return }
+            guard let job = pending else {
+                // Queue idle: bound retained results before sleeping
+                // (M34.1). Runs on startup and each time the worker
+                // drains empty after a wake.
+                await sweep()
+                return
+            }
             if job.status != "running" {
                 try? await store.updateJob(
                     id: job.id, status: "running", result: nil,
@@ -130,6 +149,29 @@ actor RequestQueue {
                     "queue job error id=\(job.id) detail=\(error)")
             } else {
                 log.info("queue job done id=\(job.id)")
+            }
+        }
+    }
+
+    /// Bound retained terminal results (M34.1). Age-based TTL first, then
+    /// the row cap. Non-fatal — a sweep hiccup must never sink the worker.
+    /// 0 for a bound skips it.
+    private func sweep() async {
+        if ttlSecs > 0 {
+            let cutoff = Date().timeIntervalSince1970 - Double(ttlSecs)
+            let removed =
+                (try? await store.pruneJobs(olderThan: cutoff)) ?? 0
+            if removed > 0 {
+                log.notice(
+                    "queue retention: pruned \(removed) result(s) older than \(ttlSecs)s")
+            }
+        }
+        if maxRows > 0 {
+            let removed =
+                (try? await store.trimJobs(maxRows: maxRows)) ?? 0
+            if removed > 0 {
+                log.notice(
+                    "queue retention: trimmed \(removed) result(s) over cap \(maxRows)")
             }
         }
     }

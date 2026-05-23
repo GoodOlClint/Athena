@@ -85,6 +85,22 @@ engine = "mlx"
 # data_dir = "/usr/local/var/athena/data"
 
 
+# ── Data retention ───────────────────────────────────────────────────
+
+# Async-queue result retention. A submitted job's request + result are
+# persisted so a client can poll for the answer after the fact — but
+# those blobs hold inference inputs/outputs, so left unbounded they
+# accumulate on disk forever. queue_result_ttl_secs prunes TERMINAL
+# (done/error/canceled) results older than the window; queue_max_rows
+# caps the total number of job rows, trimming the oldest terminal
+# results first. Both are swept on the queue worker's idle path (on
+# startup and each time it drains empty). Pending (queued/running) jobs
+# are NEVER pruned — retention only reclaims finished work. Commented /
+# non-positive ⇒ keep forever / unbounded (default; opt-in).
+# queue_result_ttl_secs = 604800       # drop results older than 7 days
+# queue_max_rows = 10000               # cap total queue rows
+
+
 # ── Security ─────────────────────────────────────────────────────────
 
 # Bearer-token auth keys file. Each line: `admin <key>` or

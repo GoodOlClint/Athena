@@ -174,6 +174,18 @@ struct Load: AsyncParsableCommand {
     )
     var preload = false
 
+    @Option(
+        help:
+            "Queue-result TTL in seconds. 0/absent ⇒ keep forever (opt-in). Terminal (done/error/canceled) results older than this are pruned on the worker idle path; pending jobs are never touched."
+    )
+    var queueResultTtlSecs: Int?
+
+    @Option(
+        help:
+            "Max total queue job rows. 0/absent ⇒ unbounded. Over the cap, the oldest terminal results are trimmed first; pending jobs are never deleted."
+    )
+    var queueMaxRows: Int?
+
     mutating func run() async throws {
         // Centralized logging first — must precede any Logger creation
         // (Hummingbird/NIO included) so everything routes through the
@@ -395,7 +407,9 @@ struct Load: AsyncParsableCommand {
             maxConcurrencyPerPrincipal: maxConcurrencyPerPrincipal ?? 0,
             auditRetentionDays: auditRetentionDays ?? 0,
             requestTimeoutSecs: requestTimeoutSecs ?? 0,
-            preload: preload)
+            preload: preload,
+            queueResultTtlSecs: queueResultTtlSecs ?? 0,
+            queueMaxRows: queueMaxRows ?? 0)
         try await server.run()
     }
 }

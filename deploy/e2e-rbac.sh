@@ -62,10 +62,13 @@ ln -s /nonexistent/gone "$MSTORE/dead"
 
 D2=""                          # phase-8 isolated RBAC-admin data dir
 D3=""                          # phase-8.7 audit-retention data dir
+D4=""                          # phase-25 queue-TTL data dir
+D5=""                          # phase-25.1 queue-max-rows data dir
 cleanup() {
   [ -n "$DPID" ] && kill "$DPID" 2>/dev/null
   wait "$DPID" 2>/dev/null
-  rm -rf "$D" "$EMPTY" "$MSTORE" ${D2:+"$D2"} ${D3:+"$D3"}
+  rm -rf "$D" "$EMPTY" "$MSTORE" ${D2:+"$D2"} ${D3:+"$D3"} \
+    ${D4:+"$D4"} ${D5:+"$D5"}
 }
 trap cleanup EXIT
 
@@ -1738,6 +1741,77 @@ grep -q "preload:" "$D/daemon.log" \
   && bad "lazy default unexpectedly preloaded" \
   || ok "default start is lazy (no preload without the flag)"
 stop_daemon
+
+echo
+echo "== phase 25: queue-result retention sweeper (M34.1) =="
+# A submitted job's request+result persist so a client can poll after the
+# fact; left unbounded those inference-output blobs accumulate forever.
+# queue_result_ttl_secs prunes TERMINAL results older than the window,
+# swept on the worker's idle path. Fresh data dir, auth off (loopback,
+# no creds) so submission needs no token. Deterministic via a backdated
+# `updated` (mirrors phase 8.7's audit-retention proof).
+stop_daemon
+D4="$(mktemp -d)"
+qdb4="$D4/athena.sqlite"
+start_daemon "$D4" 127.0.0.1 --queue-result-ttl-secs 1 \
+  || { echo "queue-ttl daemon failed"; cat "$D/daemon.log"; exit 1; }
+J1="$(curl -s -X POST "http://127.0.0.1:$PORT/v1/queue/conversation" \
+  -H "Content-Type: application/json" -d "$CHAT" \
+  | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
+[ -n "$J1" ] && ok "submitted job 1 ($J1)" || bad "submit job 1"
+R1="$(curl -s "http://127.0.0.1:$PORT/v1/queue/$J1?wait=15")"
+echo "$R1" | grep -q '"status":"done"' \
+  && ok "job 1 completed (result persisted)" || bad "job 1 done ($R1)"
+# Backdate its completion ~10 days so the 1 s TTL must reap it.
+OLDQ=$(( $(date +%s) - 864000 ))
+sqlite3 "$qdb4" "UPDATE jobs SET updated=$OLDQ WHERE id='$J1';"
+# A second submit wakes the worker; after it drains, the idle sweep fires.
+J2="$(curl -s -X POST "http://127.0.0.1:$PORT/v1/queue/conversation" \
+  -H "Content-Type: application/json" -d "$CHAT" \
+  | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
+curl -s -o /dev/null "http://127.0.0.1:$PORT/v1/queue/$J2?wait=15"
+GONEQ=0
+for _ in $(seq 1 20); do
+  N="$(sqlite3 "$qdb4" "SELECT COUNT(*) FROM jobs WHERE id='$J1';")"
+  [ "$N" = "0" ] && { GONEQ=1; break; }
+  sleep 0.25
+done
+[ "$GONEQ" = "1" ] \
+  && ok "stale terminal result pruned past the TTL window" \
+  || bad "stale queue result survived TTL"
+KEPTQ="$(sqlite3 "$qdb4" "SELECT COUNT(*) FROM jobs WHERE id='$J2';")"
+[ "$KEPTQ" = "1" ] \
+  && ok "fresh result retained within the window" \
+  || bad "fresh result missing after sweep ($KEPTQ)"
+stop_daemon
+rm -rf "$D4"; D4=""
+
+echo
+echo "== phase 25.1: queue_max_rows caps total rows (M34.1) =="
+# An independent bound: cap total job rows, trimming the oldest terminal
+# results first. Submit three jobs; once they finish and the worker idles,
+# the cap reaps down to 2.
+D5="$(mktemp -d)"
+qdb5="$D5/athena.sqlite"
+start_daemon "$D5" 127.0.0.1 --queue-max-rows 2 \
+  || { echo "queue-max daemon failed"; cat "$D/daemon.log"; exit 1; }
+for _ in 1 2 3; do
+  JX="$(curl -s -X POST "http://127.0.0.1:$PORT/v1/queue/conversation" \
+    -H "Content-Type: application/json" -d "$CHAT" \
+    | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
+  curl -s -o /dev/null "http://127.0.0.1:$PORT/v1/queue/$JX?wait=15"
+done
+CAPQ=0
+for _ in $(seq 1 20); do
+  N="$(sqlite3 "$qdb5" "SELECT COUNT(*) FROM jobs;")"
+  [ "$N" = "2" ] && { CAPQ=1; break; }
+  sleep 0.25
+done
+[ "$CAPQ" = "1" ] \
+  && ok "queue trimmed to the row cap (2)" \
+  || bad "queue not capped (rows=$(sqlite3 "$qdb5" 'SELECT COUNT(*) FROM jobs;'))"
+stop_daemon
+rm -rf "$D5"; D5=""
 
 echo
 echo "════════════════════════════════════════"
