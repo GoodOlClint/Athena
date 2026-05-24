@@ -65,9 +65,18 @@ let package = Package(
         .package(
             url: "https://github.com/huggingface/swift-transformers",
             from: "1.3.0"),
-        .package(
-            url: "https://github.com/huggingface/swift-huggingface",
-            from: "0.9.0"),
+        // swift-huggingface (Hub client) — TEMPORARY local fork (sibling
+        // clone, like mlx-swift-lm above). Pinned at 0.9.0 (b721959) plus
+        // the unmerged upstream fix from PR #50 (tracking issue #48): the
+        // stock async `session.download(for:delegate:)` never delivered
+        // `didWriteData`, so model-pull progress sat at 0% then jumped,
+        // and a stalled transfer (e.g. the box napping) couldn't resume —
+        // it restarted multi-GB shards from zero. The fork's
+        // continuation-based download bridge restores real per-byte
+        // progress + resume for EVERY download site (pull/init/convert and
+        // the on-demand whisper/embedding/diarization fetches). Revert to
+        // the upstream `url:` dep + a version bump once PR #50 merges.
+        .package(path: "../swift-huggingface"),
     ],
     targets: [
         // The memory governor + module protocol. This is the thesis
