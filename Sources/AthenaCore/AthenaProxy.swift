@@ -92,6 +92,18 @@ public enum AthenaProxy {
     /// plain `.default` session (system settings still apply).
     public static func proxiedURLSession() -> URLSession {
         let cfg = URLSessionConfiguration.default
+        // Model weights are multi-GB; the only outbound we make is a
+        // large file fetch. Foundation's default 60s *per-request*
+        // (inactivity) timeout is far too aggressive — a slow CDN chunk
+        // or a brief network stall (e.g. the box napping) trips a
+        // spurious NSURLErrorTimedOut (-1001) and, because the Hub
+        // client's async `download(for:delegate:)` discards the OS resume
+        // data, the whole shard restarts from zero. Give a generous
+        // inactivity window and keep the long resource ceiling; also wait
+        // for connectivity to return rather than failing instantly.
+        cfg.timeoutIntervalForRequest = 300  // 5 min between bytes
+        cfg.timeoutIntervalForResource = 24 * 60 * 60  // 24h total
+        cfg.waitsForConnectivity = true
         guard let p = effective() else {
             return URLSession(configuration: cfg)
         }

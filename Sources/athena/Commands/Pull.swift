@@ -47,12 +47,23 @@ struct Pull: AsyncParsableCommand {
         do {
             let dest = try await ModelPull.pull(
                 id: model, into: root,
-                progress: { f in bar.update(f) })
+                progress: { f in bar.update(f) },
+                onRetry: { attempt, maxAttempts, err in
+                    bar.finish()
+                    FileHandle.standardError.write(
+                        Data(
+                            ("  \(ModelPull.friendlyError(err)) — "
+                                + "retrying (\(attempt)/\(maxAttempts - 1))…\n")
+                                .utf8))
+                })
             bar.finish()
             print("pulled \(model) → \(dest.path)")
         } catch {
             bar.finish()
-            print("error: pull failed — \(error)")
+            print("error: pull failed — \(ModelPull.friendlyError(error))")
+            print(
+                "  re-run `athena pull \(model)` to resume "
+                    + "(already-downloaded files are kept).")
             throw ExitCode.failure
         }
     }

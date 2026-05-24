@@ -82,13 +82,21 @@ struct Init: AsyncParsableCommand {
             do {
                 let d = try await ModelPull.pull(
                     id: id, into: root,
-                    progress: { f in bar.update(f) })
+                    progress: { f in bar.update(f) },
+                    onRetry: { attempt, maxAttempts, err in
+                        bar.finish()
+                        FileHandle.standardError.write(
+                            Data(
+                                ("  \(ModelPull.friendlyError(err)) — "
+                                    + "retrying (\(attempt)/\(maxAttempts - 1))…\n")
+                                    .utf8))
+                    })
                 bar.finish()
                 print("  pulled → \(d.path)")
                 pulled += 1
             } catch {
                 bar.finish()
-                print("  error: pull failed — \(error)")
+                print("  error: pull failed — \(ModelPull.friendlyError(error))")
                 failed += 1
             }
         }
