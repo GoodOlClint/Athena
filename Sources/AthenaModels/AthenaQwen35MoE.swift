@@ -79,6 +79,33 @@ public class AthenaQwen35MoEModel: AthenaQwen35Model {
             }
         }
 
+        // MTP layer(s): unlike the backbone layers (shipped pre-fused as
+        // `experts.gate_up_proj`), some checkpoints store the MTP MoE
+        // experts PER-EXPERT — `mtp.layers.L.mlp.experts.{0..E-1}.{gate,
+        // up,down}_proj.weight` (e.g. Qwen3.5-122B-A10B). The
+        // `SparseMoeBlock` binds the stacked `switch_mlp.*` tensors, so
+        // fold the per-expert weights together here (routed experts only;
+        // the router `gate`, `shared_expert.*`, and `shared_expert_gate`
+        // map directly). Stacked along axis 0, matching the backbone
+        // path's `[num_experts, …]` shape.
+        let cfg = languageModel.configuration
+        if cfg.numExperts > 0 {
+            for l in 0 ..< cfg.mtpNumHiddenLayers {
+                let prefix = "language_model.mtp.layers.\(l).mlp"
+                for proj in ["gate_proj", "up_proj", "down_proj"] {
+                    let perExpert = (0 ..< cfg.numExperts).map {
+                        "\(prefix).experts.\($0).\(proj).weight"
+                    }
+                    guard perExpert.allSatisfy({ newWeights[$0] != nil })
+                    else { continue }
+                    let fused = stacked(
+                        perExpert.map { newWeights[$0]! }, axis: 0)
+                    for k in perExpert { newWeights[k] = nil }
+                    newWeights["\(prefix).switch_mlp.\(proj).weight"] = fused
+                }
+            }
+        }
+
         return languageModel.sanitize(weights: newWeights)
     }
 }
