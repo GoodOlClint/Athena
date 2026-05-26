@@ -59,8 +59,11 @@ engine = "mlx"
 # Bare number, not quoted.
 # temperature = 0.7
 
-# MTP speculative decoding — greedy/temp-0 + Qwen3.5(-MTP) only; a no-op
-# on other architectures (default false). Bare boolean.
+# MTP speculative decoding — Qwen3.5(-MTP) only; a no-op on other
+# architectures (default false). Greedy speculative at temperature 0
+# (bit-identical to non-speculative greedy); Leviathan/Chen sampling
+# speculative at temperature > 0 (distributionally identical to
+# non-speculative sampling at the same temp/top_p/seed). Bare boolean.
 # speculative = false
 
 # KV-cache compression (default "none"): "none", "turboquant"

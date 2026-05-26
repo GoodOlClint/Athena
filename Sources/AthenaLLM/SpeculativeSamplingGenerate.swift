@@ -15,21 +15,8 @@ import MLXLMCommon
 // sampling under the same params — speculation is a speedup, not a
 // quality knob. (At temperature == 0 the path is unused; the greedy
 // `SpeculativeGeneration` keeps that contract bit-identically.)
-//
-// Internal-only in M40.2: gated behind `ATHENA_ENABLE_SAMPLING_SPECULATIVE=1`
-// for host-bound validation. The server's `speculative_requires_greedy`
-// 400 still stands in production. M40.3 lifts the gate.
 
 extension SpeculativeSampling {
-
-    /// Process-level kill-switch for sampling-mode speculative. While
-    /// this is `false`, the loop here is unreachable: `runSpeculative`
-    /// won't route to it AND the server's 400 guard refuses temp>0
-    /// speculative requests upstream. M40.3 removes both.
-    public static var enabledForNonZeroTemperature: Bool {
-        ProcessInfo.processInfo.environment[
-            "ATHENA_ENABLE_SAMPLING_SPECULATIVE"] == "1"
-    }
 
     /// Sampling-mode speculative decoding over the MTP draft head and
     /// the backbone target. Mirrors `SpeculativeGeneration.generate`

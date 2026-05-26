@@ -21,9 +21,9 @@ struct AthenaChatRequest: Codable {
     let max_tokens: Int?
     let temperature: Double?
     /// Per-request MTP speculative override. Absent ⇒ loaded
-    /// `--speculative` default; `true` opts in (requires temperature 0
-    /// + an MTP-capable model), `false` forces standard path. `true`
-    /// with non-zero temperature is a 400 (issue #1).
+    /// `--speculative` default; `true` opts into MTP speculative
+    /// (greedy at temp 0, sampling at temp > 0; requires an
+    /// MTP-capable model), `false` forces the standard path.
     let speculative: Bool?
 }
 

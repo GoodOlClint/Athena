@@ -88,12 +88,13 @@ struct ChatCompletionRequest: Codable {
     let logit_bias: JSONValue?
     /// Athena extension — per-request MTP speculative decoding override.
     /// Absent ⇒ the daemon's loaded `--speculative` default. `true`
-    /// opts this request into the bit-identical-greedy speculative path
-    /// (requires `temperature == 0`, and the loaded model to have an
-    /// MTP head); `false` forces the standard non-speculative path even
-    /// when the daemon was loaded with `--speculative`. A `true` paired
-    /// with a non-zero `temperature` is a 400 (see issue #1; sampling
-    /// speculative is a separate milestone).
+    /// opts this request into the MTP speculative path: the
+    /// bit-identical-greedy loop at `temperature == 0`, the
+    /// Leviathan/Chen sampling loop (distributionally identical to
+    /// non-speculative sampling at the same temp/top_p/seed) at
+    /// `temperature > 0`. Requires the loaded model to have an MTP
+    /// head. `false` forces the standard non-speculative path even
+    /// when the daemon was loaded with `--speculative`.
     let speculative: Bool?
 
     /// Normalized stop sequences: OpenAI accepts a string or an array of

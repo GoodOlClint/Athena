@@ -5,26 +5,27 @@ import XCTest
 
 @testable import AthenaLLM
 
-/// MTP speculative decoding is greedy-only (GoodOlClint/athena#1): the
-/// gate must engage iff speculative AND temperature == 0. Pure, CI-safe.
+/// MTP speculative decoding eligibility (M40 lifted the temp==0 gate;
+/// both greedy and sampling speculative paths are now in production).
+/// Pure, CI-safe.
 final class SpeculativeGateTests: XCTestCase {
-    func testEngagesOnlyForSpeculativeGreedy() {
+    func testEligibleAtTempZero() {
         XCTAssertTrue(
             LLMGenerationParameters(temperature: 0, speculative: true)
-                .speculativeGreedyEligible)
+                .speculativeEligible)
     }
-    func testTempAboveZeroFallsBack() {
-        XCTAssertFalse(
+    func testEligibleAtNonZeroTemp() {
+        XCTAssertTrue(
             LLMGenerationParameters(temperature: 0.7, speculative: true)
-                .speculativeGreedyEligible)
+                .speculativeEligible)
     }
     func testSpeculativeOffNeverEngages() {
         XCTAssertFalse(
             LLMGenerationParameters(temperature: 0, speculative: false)
-                .speculativeGreedyEligible)
+                .speculativeEligible)
         XCTAssertFalse(
             LLMGenerationParameters(temperature: 0.7, speculative: false)
-                .speculativeGreedyEligible)
+                .speculativeEligible)
     }
 }
 

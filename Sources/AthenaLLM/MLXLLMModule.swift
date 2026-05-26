@@ -15,9 +15,11 @@ public struct LLMGenerationParameters: Sendable {
     public var maxTokens: Int
     public var temperature: Float
     public var topP: Float
-    /// Opt-in MTP speculative decoding. Greedy-only: takes effect only
-    /// when temperature == 0 AND the model has an MTP head; otherwise the
-    /// standard path is used (temp>0 speculative is the M2.3 named risk).
+    /// Opt-in MTP speculative decoding. Takes effect when the loaded
+    /// model has an MTP head; the runtime picks the greedy speculative
+    /// loop at temperature 0 (bit-identical to non-speculative greedy)
+    /// or the sampling speculative loop at temperature > 0
+    /// (distributionally identical to non-speculative sampling).
     public var speculative: Bool
     /// KV-cache compression codec (the `kv_compression` knob). M20.
     public var kvCompression: KVCompression
@@ -34,14 +36,13 @@ public struct LLMGenerationParameters: Sendable {
         self.kvCompression = kvCompression
     }
 
-    /// MTP speculative decoding is **greedy-only**: it engages only at
-    /// temperature 0. temp>0 residual-sampling acceptance is a deliberate
-    /// deferral (bench-unvalidated even in the Python reference) — see
-    /// GoodOlClint/athena#1. temp>0 requests fall back to the standard
-    /// (correct, non-accelerated) path.
-    public var speculativeGreedyEligible: Bool {
-        speculative && temperature == 0
-    }
+    /// Whether THIS request is opted into MTP speculative decoding.
+    /// M40 lifted the "greedy only" restriction — both temp == 0
+    /// (greedy speculative, bit-identical to non-speculative greedy)
+    /// and temp > 0 (sampling speculative, distributionally identical
+    /// to non-speculative sampling) are honored. Engagement still
+    /// requires an MTP head on the loaded model.
+    public var speculativeEligible: Bool { speculative }
 }
 
 /// The real MLX-backed LLM module (M1). Loads a model from a local
@@ -285,15 +286,16 @@ public actor MLXLLMModule: LLMModule {
     }
 
     /// MTP speculative path — greedy at temp == 0 (bit-identical to the
-    /// non-speculative greedy path) AND sampling-mode at temp > 0 (M40.2,
-    /// internal: gated on `ATHENA_ENABLE_SAMPLING_SPECULATIVE=1`).
-    /// Returns the full decoded text, or nil to fall back to the
-    /// unconstrained substrate stream. A structured request (`schemaJSON`)
-    /// ALWAYS takes a guided path (greedy): the MTP speculative loop when
-    /// eligible (faster), else a plain guided-greedy loop. An
-    /// unstructured request takes the opt-in speculative path only;
-    /// sampling-mode is unstructured-only (the Guide masks to one valid
-    /// token, so sampling has no meaning there).
+    /// non-speculative greedy path) AND sampling-mode at temp > 0
+    /// (Leviathan/Chen; distributionally identical to non-speculative
+    /// sampling at the same temp/top_p/seed). Returns the full decoded
+    /// text, or nil to fall back to the unconstrained substrate stream.
+    /// A structured request (`schemaJSON`) ALWAYS takes a guided path
+    /// (greedy): the MTP speculative loop when eligible (faster), else
+    /// a plain guided-greedy loop. An unstructured request takes the
+    /// opt-in speculative path only; sampling-mode is unstructured-only
+    /// (the Guide masks to one valid token, so sampling has no meaning
+    /// there).
     private func runSpeculative(
         messages: [ChatTurn], schemaJSON: String?,
         tools: [[String: any Sendable]]?, maxTokens: Int?,
@@ -316,15 +318,13 @@ public actor MLXLLMModule: LLMModule {
             requestTemperature
             ?? (requestSpeculative == true ? 0.0 : Double(params.temperature))
         let greedyEligible = effectiveSpec && effectiveTemp == 0
-        // M40.2: sampling-mode speculative is gated behind the env flag
-        // until M40.3 lifts it for production. Structured/guided is out
-        // of scope (the Guide masks to one valid token; sampling has no
-        // meaning), so `schemaJSON == nil` is the hard precondition.
+        // Sampling-mode speculative covers temp > 0 unstructured requests.
+        // Structured/guided is out of scope (the Guide masks to one valid
+        // token; sampling has no meaning), so `schemaJSON == nil` is the
+        // hard precondition; the guided path keeps using the greedy
+        // speculative loop above when eligible. M40.3.
         let samplingEligible =
-            effectiveSpec
-            && effectiveTemp > 0
-            && schemaJSON == nil
-            && SpeculativeSampling.enabledForNonZeroTemperature
+            effectiveSpec && effectiveTemp > 0 && schemaJSON == nil
         if schemaJSON == nil && !greedyEligible && !samplingEligible {
             return nil
         }
