@@ -167,7 +167,10 @@ echo "== phase 1: CLI escalation / validation guards =="
 
 echo
 echo "== phase 2: permission gating (auth enforced) =="
-start_daemon "$D" 127.0.0.1 || { echo "daemon failed"; \
+start_daemon "$D" 127.0.0.1 \
+  --embedding-model athena-embedding-default \
+  --embedding-model athena-embedding-alt \
+  || { echo "daemon failed"; \
   cat "$D/daemon.log"; exit 1; }
 grep -q "auth: enabled (RBAC" "$D/daemon.log" \
   && ok "daemon reports RBAC enabled" || bad "RBAC-enabled log line"
@@ -908,6 +911,47 @@ S_BAD=$(curl -s -o /tmp/sbad.json -w '%{http_code}' \
   && grep -q 'model_not_available' /tmp/sbad.json \
   && ok "speaker-embedding unknown model ⇒ 400 model_not_available" \
   || bad "speaker-embedding unknown model not refused ($S_BAD: $(cat /tmp/sbad.json))"
+
+echo
+echo "== phase 3.69: inference-time rebind audited (M41.4) =="
+# An /v1/embeddings request that names a NON-resident allowlist member
+# rebinds the slot in place + audits the change (trigger=inference).
+# A second request to the SAME model is a no-op rebind and emits NO
+# new audit row (audit only on actual resident-id change).
+RB_BEFORE="$(curl -s -H "Authorization: Bearer $ADMIN_TOK" \
+  "http://127.0.0.1:$PORT/api/audit?action=model.rebind&limit=100")"
+RB_N_BEFORE="$(echo "$RB_BEFORE" | python3 -c '
+import json, sys
+print(len(json.load(sys.stdin).get("audit", [])))')"
+# Trigger a rebind to the alt member.
+curl -s -o /dev/null -X POST -H "Authorization: Bearer $ALICE_TOK" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"athena-embedding-alt","input":"hi"}' \
+  "http://127.0.0.1:$PORT/v1/embeddings"
+RB_MID="$(curl -s -H "Authorization: Bearer $ADMIN_TOK" \
+  "http://127.0.0.1:$PORT/api/audit?action=model.rebind&limit=100")"
+RB_N_MID="$(echo "$RB_MID" | python3 -c '
+import json, sys
+print(len(json.load(sys.stdin).get("audit", [])))')"
+[ "$RB_N_MID" -gt "$RB_N_BEFORE" ] \
+  && ok "inference-time rebind emitted model.rebind audit row (+$((RB_N_MID-RB_N_BEFORE)))" \
+  || bad "no model.rebind audit row after inference rebind ($RB_N_BEFORE → $RB_N_MID)"
+echo "$RB_MID" | grep -q 'trigger=inference' \
+  && ok "model.rebind detail includes trigger=inference" \
+  || bad "model.rebind missing trigger=inference"
+# Same request again ⇒ same resident, no new audit.
+curl -s -o /dev/null -X POST -H "Authorization: Bearer $ALICE_TOK" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"athena-embedding-alt","input":"hi"}' \
+  "http://127.0.0.1:$PORT/v1/embeddings"
+RB_AFTER="$(curl -s -H "Authorization: Bearer $ADMIN_TOK" \
+  "http://127.0.0.1:$PORT/api/audit?action=model.rebind&limit=100")"
+RB_N_AFTER="$(echo "$RB_AFTER" | python3 -c '
+import json, sys
+print(len(json.load(sys.stdin).get("audit", [])))')"
+[ "$RB_N_AFTER" -eq "$RB_N_MID" ] \
+  && ok "no-op rebind does not audit (same resident, $RB_N_AFTER rows)" \
+  || bad "no-op rebind emitted an audit row ($RB_N_MID → $RB_N_AFTER)"
 
 echo
 echo "== phase 3.65: OpenAI model discovery /v1/models (M31.1) =="

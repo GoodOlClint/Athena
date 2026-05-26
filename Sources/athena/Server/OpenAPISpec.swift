@@ -163,7 +163,7 @@ enum OpenAPISpec {
                     "required": ["file"],
                     "properties": {
                       "file": { "type": "string", "format": "binary", "description": "Audio file." },
-                      "model": { "type": "string" },
+                      "model": { "type": "string", "description": "Selects among --whisper-model allowlist (M41.3). Omit ⇒ default; unknown id ⇒ 400 model_not_available." },
                       "language": { "type": "string" },
                       "response_format": { "type": "string", "enum": ["json", "text", "srt", "vtt", "verbose_json"] },
                       "diarize": { "type": "boolean" }
@@ -194,7 +194,7 @@ enum OpenAPISpec {
                     "required": ["file"],
                     "properties": {
                       "file": { "type": "string", "format": "binary" },
-                      "model": { "type": "string" },
+                      "model": { "type": "string", "description": "Selects among --diarization-model allowlist (M41.3). Omit ⇒ default; unknown id ⇒ 400 model_not_available." },
                       "num_speakers": { "type": "integer" }
                     }
                   } } }
@@ -220,7 +220,7 @@ enum OpenAPISpec {
                     "required": ["file"],
                     "properties": {
                       "file": { "type": "string", "format": "binary" },
-                      "model": { "type": "string" },
+                      "model": { "type": "string", "description": "Selects among --speaker-embedding-model allowlist (M41.3). Omit ⇒ default; unknown id ⇒ 400 model_not_available. The response `model` is the model actually served." },
                       "segments": { "type": "string", "description": "JSON array of {start,end} segment specs (seconds)." }
                     }
                   } } }
@@ -808,7 +808,7 @@ enum OpenAPISpec {
                 "type": "object",
                 "required": ["messages"],
                 "properties": {
-                  "model": { "type": "string" },
+                  "model": { "type": "string", "description": "Selects among the LLM models the daemon was loaded with (--llm-model, repeatable; first = default). Omit ⇒ the resident default. An id outside the configured set is rejected with 400 model_not_available — never a silent fallback or on-request download. The response `model` reports the model actually served. M41.2." },
                   "messages": { "type": "array", "items": { "$ref": "#/components/schemas/ChatMessage" } },
                   "stream": { "type": "boolean" },
                   "stream_options": { "type": "object", "properties": { "include_usage": { "type": "boolean" } } },
@@ -951,7 +951,7 @@ enum OpenAPISpec {
                 "type": "object",
                 "required": ["messages"],
                 "properties": {
-                  "model": { "type": "string" },
+                  "model": { "type": "string", "description": "Same semantics as ChatCompletionRequest.model — selects among the operator-declared LLM allowlist (M41.2)." },
                   "messages": { "type": "array", "items": { "type": "object", "properties": { "role": { "type": "string" }, "content": { "type": "string" } } } },
                   "stream": { "type": "boolean" },
                   "max_tokens": { "type": "integer" },

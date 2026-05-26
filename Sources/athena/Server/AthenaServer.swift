@@ -688,8 +688,11 @@ struct AthenaServer {
         // (M41.2) rebind the slot to body.model when the request asks for
         // a specific allowlist member — a budget event still becomes a
         // 503 here; an unknown id becomes a 400 `model_not_available`
-        // (never a silent fallback or on-request download).
-        if let err = await governedLLM(requestedModel: body.model) {
+        // (never a silent fallback or on-request download). M41.4: an
+        // actual rebind emits a `model.rebind` audit record.
+        if let err = await governedLLM(
+            request: request, requestedModel: body.model)
+        {
             return err
         }
         let model = await servedLLMModel()
@@ -898,6 +901,13 @@ struct AthenaServer {
 
         do {
             try await governor.ensureLoaded(.textEmbedding)
+            // M41.4: a real resident-id change from per-request `model`
+            // is audited (the embedder also self-rebinds inside embed(),
+            // which becomes a no-op once the slot already matches).
+            if let m = body.model, !m.isEmpty {
+                try await auditedRebind(
+                    request, module: .textEmbedding, target: m)
+            }
         } catch let e as AthenaError {
             return Self.error(
                 status: HTTPResponse.Status(code: e.httpStatus),
@@ -977,9 +987,11 @@ struct AthenaServer {
             try await governor.ensureLoaded(.transcription)
             // M41.3: a `model` form field selects among the operator-
             // declared whisper allowlist; an unknown id ⇒ 400
-            // model_not_available via the classified path.
+            // model_not_available via the classified path. M41.4: an
+            // actual rebind is audited (`model.rebind` trigger=inference).
             if let m = form.text("model"), !m.isEmpty {
-                try await selectable(.transcription).rebind(to: m)
+                try await auditedRebind(
+                    request, module: .transcription, target: m)
             }
         } catch let e as AthenaError {
             return Self.error(
@@ -1132,9 +1144,11 @@ struct AthenaServer {
 
         do {
             try await governor.ensureLoaded(.diarization)
-            // M41.3 per-request diarization model selection.
+            // M41.3 per-request diarization model selection;
+            // M41.4 audited on a real resident-id change.
             if let m = form.text("model"), !m.isEmpty {
-                try await selectable(.diarization).rebind(to: m)
+                try await auditedRebind(
+                    request, module: .diarization, target: m)
             }
         } catch let e as AthenaError {
             return Self.error(
@@ -1297,9 +1311,11 @@ struct AthenaServer {
 
         do {
             try await governor.ensureLoaded(.speakerEmbedding)
-            // M41.3 per-request speaker-embedding model selection.
+            // M41.3 per-request speaker-embedding model selection;
+            // M41.4 audited on a real resident-id change.
             if let m = form.text("model"), !m.isEmpty {
-                try await selectable(.speakerEmbedding).rebind(to: m)
+                try await auditedRebind(
+                    request, module: .speakerEmbedding, target: m)
             }
         } catch let e as AthenaError {
             return Self.error(
@@ -2058,9 +2074,12 @@ struct AthenaServer {
     /// prompt-cache preflight, all classified. Returns an error
     /// `Response` to send, or nil when the request may proceed.
     private func governedPreflight(
-        messages: [ChatTurn], requestedModel: String? = nil
+        messages: [ChatTurn], requestedModel: String? = nil,
+        request: Request? = nil
     ) async -> Response? {
-        if let err = await governedLLM(requestedModel: requestedModel) {
+        if let err = await governedLLM(
+            request: request, requestedModel: requestedModel)
+        {
             return err
         }
         do {
@@ -2122,7 +2141,8 @@ struct AthenaServer {
             ChatTurn(role: $0.role, content: $0.content)
         }
         if let err = await governedPreflight(
-            messages: turns, requestedModel: body.model)
+            messages: turns, requestedModel: body.model,
+            request: request)
         {
             return err
         }
@@ -2434,13 +2454,17 @@ struct AthenaServer {
     /// rebind in place (validated against the allowlist; an unknown id
     /// becomes a classified 400 `model_not_available`). Returns an
     /// error `Response` to short-circuit, or nil when the request may
-    /// proceed.
-    private func governedLLM(requestedModel: String?) async -> Response? {
+    /// proceed. M41.4: an actual rebind (resident-id changed) emits an
+    /// `model.rebind` audit record (M30 trail), so a per-request slot
+    /// swap is attributable to the caller.
+    private func governedLLM(
+        request: Request? = nil, requestedModel: String?
+    ) async -> Response? {
         do {
             try await governor.ensureLoaded(.llm)
             if let m = requestedModel, !m.isEmpty {
-                let sel = selectable(.llm)
-                try await sel.rebind(to: m)
+                try await auditedRebind(
+                    request, module: .llm, target: m)
             }
         } catch let e as AthenaError {
             return Self.error(
@@ -2450,6 +2474,26 @@ struct AthenaServer {
             return Self.classified(error, module: .llm)
         }
         return nil
+    }
+
+    /// M41.4 — rebind `module`'s slot to `target` and audit an actual
+    /// resident-id change (no-op rebinds are not audited; that would
+    /// drown the trail on every request). `request` is optional so
+    /// non-HTTP-driven callers (queue worker) can skip the audit (the
+    /// queue owner is recorded on the JobRow itself).
+    private func auditedRebind(
+        _ request: Request?, module: ModuleID, target: String
+    ) async throws {
+        let sel = selectable(module)
+        let before = await sel.residentModelId()
+        try await sel.rebind(to: target)
+        let after = await sel.residentModelId()
+        guard before != after, let request else { return }
+        await audit(
+            request, action: "model.rebind",
+            target: "\(module.rawValue):\(target)", result: "ok",
+            detail: "from=\(before ?? "-") to=\(after ?? "-") "
+                + "trigger=inference")
     }
 
     /// The id actually resident in the LLM slot; falls back to the
