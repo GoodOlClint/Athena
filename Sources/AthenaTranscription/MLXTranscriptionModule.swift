@@ -10,13 +10,18 @@ import MLXLMCommon
 /// disk until first download); live reconciliation is the shared M5
 /// follow-up. The HF cache root follows `HF_HOME` (SSD-or-local — set
 /// by the serve entrypoint), so this module stays location-agnostic.
-public actor MLXTranscriptionModule: TranscriptionModule {
+public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
     public nonisolated let id: ModuleID = .transcription
+    public nonisolated var moduleID: ModuleID { .transcription }
 
     private let modelId: String
     private let estimatedBytes: Int
     private var model: WhisperModel?
     private var tokenizer: (any MLXLMCommon.Tokenizer)?
+    /// nil ⇒ unloaded; otherwise the id resident in `model`. M41.1
+    /// single-id allowlist; M41.3 generalizes to a repeatable
+    /// `--whisper-model` set with per-request rebind.
+    private var residentId: String?
 
     /// - Parameters:
     ///   - modelId: HF id (default `mlx-community/whisper-large-v3-turbo`).
@@ -40,6 +45,7 @@ public actor MLXTranscriptionModule: TranscriptionModule {
         do {
             model = try await WhisperLoader.load(modelId: modelId)
             tokenizer = try await WhisperLoader.loadTokenizer()
+            residentId = modelId
         } catch {
             throw AthenaError.moduleLoadFailed(
                 .transcription,
@@ -50,6 +56,20 @@ public actor MLXTranscriptionModule: TranscriptionModule {
     public func unload() async {
         model = nil
         tokenizer = nil
+        residentId = nil
+    }
+
+    // M41 — ModelSelectable. M41.1 single-id allowlist; M41.3
+    // generalizes to a repeatable `--whisper-model` set.
+    public func allowedModelIds() -> [String] { [modelId] }
+    public func defaultModelId() -> String { modelId }
+    public func residentModelId() -> String? { residentId }
+    public func rebind(to id: String?) async throws {
+        let target = id ?? modelId
+        guard target == modelId else {
+            throw AthenaError.modelNotAvailable(
+                requested: target, available: [modelId])
+        }
     }
 
     public func transcribe(

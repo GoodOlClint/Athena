@@ -17,20 +17,45 @@ public protocol TranscriptionModule: InferenceModule {
 /// M0 placeholder, still used by `--engine stub`. Returns a fixed
 /// string so `/v1/audio/transcriptions` is demoable without a model and
 /// the governor wiring/budget accounting are exercised.
-public actor StubTranscriptionModule: TranscriptionModule {
+public actor StubTranscriptionModule: TranscriptionModule, ModelSelectable {
     public nonisolated let id: ModuleID = .transcription
+    public nonisolated var moduleID: ModuleID { .transcription }
 
     private let reserveBytes: Int
-    private var loaded = false
+    private let modelIds: [String]
+    private let defaultId: String
+    private var residentId: String?
 
-    public init(reserveBytes: Int = 2 * 1024 * 1024 * 1024) {
+    public init(
+        reserveBytes: Int = 2 * 1024 * 1024 * 1024,
+        modelIds: [String] = ["athena-stub-whisper"]
+    ) {
+        precondition(
+            !modelIds.isEmpty,
+            "StubTranscriptionModule needs at least one model id")
         self.reserveBytes = reserveBytes
+        self.modelIds = modelIds
+        self.defaultId = modelIds[0]
     }
 
-    public var residentBytes: Int { loaded ? reserveBytes : 0 }
+    public var residentBytes: Int { residentId == nil ? 0 : reserveBytes }
     public func memoryEstimate() -> Int { reserveBytes }
-    public func load(reservation: MemoryReservation) async throws { loaded = true }
-    public func unload() async { loaded = false }
+    public func load(reservation: MemoryReservation) async throws {
+        if residentId == nil { residentId = defaultId }
+    }
+    public func unload() async { residentId = nil }
+
+    public func allowedModelIds() -> [String] { modelIds }
+    public func defaultModelId() -> String { defaultId }
+    public func residentModelId() -> String? { residentId }
+    public func rebind(to id: String?) async throws {
+        let target = id ?? defaultId
+        guard modelIds.contains(target) else {
+            throw AthenaError.modelNotAvailable(
+                requested: target, available: modelIds)
+        }
+        residentId = target
+    }
 
     public func transcribe(
         audio: Data, filename: String?, language: String?,

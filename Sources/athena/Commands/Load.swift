@@ -217,7 +217,43 @@ struct Load: AsyncParsableCommand {
     )
     var encryptStore = false
 
+    @Option(
+        name: .customLong("module"),
+        help: """
+            M41.1: rebind a module's slot on the RUNNING daemon at \
+            --host:--port (no daemon-start). Pair with --id (omit ⇒ the \
+            module's default). One of: llm, textEmbedding, \
+            transcription, diarization, speakerEmbedding.
+            """
+    )
+    var rebindModule: String?
+
+    @Option(
+        name: .customLong("id"),
+        help: "Model id within the module's allowlist (M41.1 rebind).")
+    var rebindId: String?
+
+    @Option(
+        name: .customLong("key"),
+        help:
+            "Bearer key for the M41 rebind path (else ATHENA_KEY env / Keychain)."
+    )
+    var rebindKey: String?
+
     mutating func run() async throws {
+        // M41.1 dual-mode: when `--module` is set, this invocation is a
+        // rebind on the running daemon at --host:--port, NOT a fresh
+        // daemon-start. The daemon flags below stay no-ops on this
+        // path. With no --module, fall through to the daemon-foreground
+        // entrypoint.
+        if let m = rebindModule, !m.isEmpty {
+            var opts = DaemonOptions()
+            opts.host = host
+            opts.port = port
+            opts.key = rebindKey
+            try await RemoteModels.load(opts, module: m, id: rebindId)
+            return
+        }
         // Centralized logging first — must precede any Logger creation
         // (Hummingbird/NIO included) so everything routes through the
         // stdout + unified-logging multiplex (M10). Invalid level ⇒

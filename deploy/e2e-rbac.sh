@@ -737,6 +737,88 @@ echo "$ML" | grep -q '"fake-model"' \
   || bad "model list missing fake-model ($ML)"
 
 echo
+echo "== phase 3.66: per-module model lifecycle /api/models/{load,unload,resident} (M41.1) =="
+# Generalizes M39's embedding-only model selection across every module.
+# GET resident = model.read; POST load/unload = model.write. RBAC mirrors
+# the other native model-store routes.
+code 401 GET  /api/models/resident ""              # no token
+code 200 GET  /api/models/resident "$ADMIN_TOK"
+code 200 GET  /api/models/resident "$RO_TOK"       # readonly ∋ model.read
+code 403 GET  /api/models/resident "$ALICE_TOK"    # member ∌ model.read
+code 403 POST /api/models/load     "$ALICE_TOK" '{"module":"textEmbedding"}'
+code 403 POST /api/models/load     "$RO_TOK"    '{"module":"textEmbedding"}'
+code 401 POST /api/models/load     ""           '{"module":"textEmbedding"}'
+# Unknown module + unknown id are classified 400s, not 5xx.
+code 400 POST /api/models/load     "$ADMIN_TOK" '{"module":"nope"}'
+code 400 POST /api/models/load     "$ADMIN_TOK" '{"module":"textEmbedding","id":"nope/not-loaded"}'
+# Resident snapshot has all 5 module slots with allowlist + default.
+RES="$(curl -s -H "Authorization: Bearer $ADMIN_TOK" \
+  "http://127.0.0.1:$PORT/api/models/resident")"
+for m in llm textEmbedding transcription diarization speakerEmbedding; do
+  echo "$RES" | grep -q "\"module\":\"$m\"" \
+    && ok "resident snapshot carries module=$m slot" \
+    || bad "resident missing module=$m ($RES)"
+done
+# Load the embedding slot to its default (omit id ⇒ default).
+LDR="$(curl -s -X POST -H "Authorization: Bearer $ADMIN_TOK" \
+  -H 'Content-Type: application/json' \
+  -d '{"module":"textEmbedding"}' \
+  "http://127.0.0.1:$PORT/api/models/load")"
+echo "$LDR" | grep -q '"status":"loaded"' \
+  && ok "explicit load returned status=loaded ($LDR)" \
+  || bad "explicit load missing status=loaded ($LDR)"
+echo "$LDR" | grep -q '"module":"textEmbedding"' \
+  && ok "explicit load echoes module" \
+  || bad "explicit load missing module ($LDR)"
+# After explicit load, /api/models/resident shows the resident id.
+RES2="$(curl -s -H "Authorization: Bearer $ADMIN_TOK" \
+  "http://127.0.0.1:$PORT/api/models/resident")"
+echo "$RES2" \
+  | python3 -c '
+import json, sys
+s=json.load(sys.stdin)
+slot=[x for x in s["slots"] if x["module"]=="textEmbedding"][0]
+r=slot.get("resident")
+assert r is not None, "textEmbedding resident is null/absent"
+assert r==slot["default"], "resident != default after default-load"
+' && ok "textEmbedding resident reflects default load" \
+   || bad "textEmbedding resident not reflected ($RES2)"
+# Unload that module's slot.
+ULR="$(curl -s -X POST -H "Authorization: Bearer $ADMIN_TOK" \
+  -H 'Content-Type: application/json' \
+  -d '{"module":"textEmbedding"}' \
+  "http://127.0.0.1:$PORT/api/models/unload")"
+echo "$ULR" | grep -q '"status":"unloaded"' \
+  && ok "explicit unload returned status=unloaded ($ULR)" \
+  || bad "explicit unload missing status=unloaded ($ULR)"
+# After unload, /api/models/resident shows resident=null.
+RES3="$(curl -s -H "Authorization: Bearer $ADMIN_TOK" \
+  "http://127.0.0.1:$PORT/api/models/resident")"
+echo "$RES3" \
+  | python3 -c '
+import json, sys
+s=json.load(sys.stdin)
+slot=[x for x in s["slots"] if x["module"]=="textEmbedding"][0]
+# absent key (Swift omits nil Codable Optional) and JSON null both count
+# as "not resident" here.
+assert slot.get("resident") is None, "textEmbedding still resident"
+' && ok "textEmbedding slot freed after unload" \
+   || bad "textEmbedding slot still resident ($RES3)"
+# Unload all modules at once.
+code 200 POST /api/models/unload "$ADMIN_TOK" '{}'
+# Audit trail captures model.load / model.unload mutations (M30 + M41).
+AUD="$(curl -s -H "Authorization: Bearer $ADMIN_TOK" \
+  "http://127.0.0.1:$PORT/api/audit?action=model.load&limit=20")"
+echo "$AUD" | grep -q 'model.load' \
+  && ok "audit trail recorded model.load (M41 + M30)" \
+  || bad "audit trail missing model.load ($AUD)"
+AUD2="$(curl -s -H "Authorization: Bearer $ADMIN_TOK" \
+  "http://127.0.0.1:$PORT/api/audit?action=model.unload&limit=20")"
+echo "$AUD2" | grep -q 'model.unload' \
+  && ok "audit trail recorded model.unload (M41 + M30)" \
+  || bad "audit trail missing model.unload ($AUD2)"
+
+echo
 echo "== phase 3.65: OpenAI model discovery /v1/models (M31.1) =="
 # Read-only store projection in the OpenAI list/retrieve shape; gated
 # model.read (same as the native /api/models reads), NOT the inference

@@ -38,13 +38,16 @@ public protocol EmbeddingModule: InferenceModule {
 /// M0 placeholder, still used by `--engine stub`. Returns a deterministic
 /// low-dim vector per input so `/v1/embeddings` is demoable without a
 /// model and the governor wiring/budget accounting are exercised.
-public actor StubEmbeddingModule: EmbeddingModule {
+public actor StubEmbeddingModule: EmbeddingModule, ModelSelectable {
     public nonisolated let id: ModuleID = .textEmbedding
+    public nonisolated var moduleID: ModuleID { .textEmbedding }
 
-    private let allowedModelIds: [String]
-    private let defaultModelId: String
+    private let allowedIds: [String]
+    private let defaultId: String
     private let reserveBytes: Int
-    private var loaded = false
+    /// nil ⇒ unloaded. The stub has no real container; the value tracks
+    /// which id is "resident" for M39/M41 selection + rebind semantics.
+    private var residentId: String?
 
     /// - Parameters:
     ///   - modelIds: the selectable set (first = default). The stub
@@ -57,15 +60,29 @@ public actor StubEmbeddingModule: EmbeddingModule {
         precondition(
             !modelIds.isEmpty,
             "StubEmbeddingModule needs at least one model id")
-        self.allowedModelIds = modelIds
-        self.defaultModelId = modelIds[0]
+        self.allowedIds = modelIds
+        self.defaultId = modelIds[0]
         self.reserveBytes = reserveBytes
     }
 
-    public var residentBytes: Int { loaded ? reserveBytes : 0 }
+    public var residentBytes: Int { residentId == nil ? 0 : reserveBytes }
     public func memoryEstimate() -> Int { reserveBytes }
-    public func load(reservation: MemoryReservation) async throws { loaded = true }
-    public func unload() async { loaded = false }
+    public func load(reservation: MemoryReservation) async throws {
+        if residentId == nil { residentId = defaultId }
+    }
+    public func unload() async { residentId = nil }
+
+    public func allowedModelIds() -> [String] { allowedIds }
+    public func defaultModelId() -> String { defaultId }
+    public func residentModelId() -> String? { residentId }
+    public func rebind(to id: String?) async throws {
+        let target = id ?? defaultId
+        guard allowedIds.contains(target) else {
+            throw AthenaError.modelNotAvailable(
+                requested: target, available: allowedIds)
+        }
+        residentId = target
+    }
 
     /// Deterministic 8-dim pseudo-embedding (FNV-1a byte folds). Not
     /// semantically meaningful — only stable per input so the endpoint
@@ -80,11 +97,15 @@ public actor StubEmbeddingModule: EmbeddingModule {
     public func embed(_ texts: [String], model: String? = nil) async throws
         -> EmbeddingBatch
     {
-        let served = model ?? defaultModelId
-        guard allowedModelIds.contains(served) else {
+        let served = model ?? defaultId
+        guard allowedIds.contains(served) else {
             throw AthenaError.modelNotAvailable(
-                requested: served, available: allowedModelIds)
+                requested: served, available: allowedIds)
         }
+        // M41: per-request selection rebinds the slot's "resident" id in the
+        // stub too, so /api/models/resident reflects what an embed call
+        // would actually serve.
+        residentId = served
         let vectors = texts.map { text in
             var h: UInt64 = 1_469_598_103_934_665_603
             var v = [Float](repeating: 0, count: 8)

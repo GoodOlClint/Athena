@@ -150,6 +150,106 @@ public enum RemoteModels {
         print("default model = \(r.model)  (\(r.source))")
     }
 
+    // MARK: - Per-module model lifecycle (M41.1)
+
+    private struct LoadReq: Encodable {
+        let module: String
+        let id: String?
+    }
+    private struct LoadResp: Decodable {
+        let module: String
+        let id: String
+        let status: String
+    }
+    private struct UnloadReq: Encodable { let module: String? }
+    private struct UnloadResp: Decodable {
+        let modules: [String]
+        let status: String
+    }
+    private struct SlotResp: Decodable {
+        let module: String
+        let allowed: [String]
+        let `default`: String
+        let resident: String?
+    }
+    private struct ResidentResp: Decodable { let slots: [SlotResp] }
+
+    /// Rebind a module's slot to `id` (nil ⇒ the module's default).
+    /// Server-side `model.write` gate, allowlist check, governor load
+    /// + in-place rebind. Prints the daemon's reply and exits non-zero
+    /// on `>= 400` (faithful surfacing of the server's outcome).
+    public static func load(
+        _ d: DaemonOptions, module: String, id: String?
+    ) async throws {
+        let body = try JSONEncoder().encode(
+            LoadReq(module: module, id: id))
+        let (code, data): (Int, Data)
+        do {
+            (code, data) = try await HTTPClient.send(
+                "POST", d.base + "/api/models/load", body: body,
+                key: d.authKey)
+        } catch { HTTPClient.noDaemon(d, error) }
+        guard code < 400,
+            let r = try? JSONDecoder().decode(
+                LoadResp.self, from: data)
+        else { return try fail(code, data) }
+        print("loaded \(r.module) ⇐ \(r.id)")
+    }
+
+    /// Release a module's slot (or every slot when `module` is nil /
+    /// "all"). Same idempotent shape as the prior `athena unload` — the
+    /// next inference reloads lazily.
+    public static func unload(
+        _ d: DaemonOptions, module: String?
+    ) async throws {
+        let body = try JSONEncoder().encode(
+            UnloadReq(module: module))
+        let (code, data): (Int, Data)
+        do {
+            (code, data) = try await HTTPClient.send(
+                "POST", d.base + "/api/models/unload", body: body,
+                key: d.authKey)
+        } catch { HTTPClient.noDaemon(d, error) }
+        guard code < 400,
+            let r = try? JSONDecoder().decode(
+                UnloadResp.self, from: data)
+        else { return try fail(code, data) }
+        print("unloaded \(r.modules.joined(separator: ", "))")
+    }
+
+    /// `GET /api/models/resident` — every module's allowlist + default
+    /// + resident-id. Prints a compact table.
+    public static func resident(_ d: DaemonOptions) async throws {
+        let (code, data): (Int, Data)
+        do {
+            (code, data) = try await HTTPClient.send(
+                "GET", d.base + "/api/models/resident",
+                key: d.authKey)
+        } catch { HTTPClient.noDaemon(d, error) }
+        guard code < 400,
+            let r = try? JSONDecoder().decode(
+                ResidentResp.self, from: data)
+        else { return try fail(code, data) }
+        print(
+            "MODULE".padding(
+                toLength: 20, withPad: " ", startingAt: 0)
+                + "RESIDENT".padding(
+                    toLength: 40, withPad: " ", startingAt: 0)
+                + "DEFAULT".padding(
+                    toLength: 40, withPad: " ", startingAt: 0)
+                + "ALLOWED")
+        for s in r.slots {
+            print(
+                s.module.padding(
+                    toLength: 20, withPad: " ", startingAt: 0)
+                    + (s.resident ?? "-").padding(
+                        toLength: 40, withPad: " ", startingAt: 0)
+                    + s.default.padding(
+                        toLength: 40, withPad: " ", startingAt: 0)
+                    + s.allowed.joined(separator: ", "))
+        }
+    }
+
     /// Submit a long-running op (pull/convert/prune). The route is
     /// `model.write`-gated server-side; the reply is `202 {job_id}`.
     /// Then `--follow` streams `/v1/queue/:id` transitions, `--wait N`
@@ -390,6 +490,42 @@ public struct ShowCmd: AsyncParsableCommand {
     public init() {}
     public func run() async throws {
         try await RemoteModels.show(daemon, name: model)
+    }
+}
+
+/// `athena load --module M [--id I]` — rebind a module's slot on the
+/// daemon. Portable + remote-only by definition (no local daemon in
+/// the portable client; the macOS `Load` reuses this same wire format
+/// via its --module/--id overload). M41.1.
+public struct LoadCmd: AsyncParsableCommand {
+    public static let configuration = CommandConfiguration(
+        commandName: "load",
+        abstract:
+            "Rebind a module's resident slot to a model id (M41.1).")
+    @OptionGroup public var daemon: DaemonOptions
+    @Option(
+        help:
+            "Module class: llm, textEmbedding, transcription, diarization, speakerEmbedding."
+    )
+    public var module: String
+    @Option(help: "Model id (omit ⇒ the module's default).")
+    public var id: String?
+    public init() {}
+    public func run() async throws {
+        try await RemoteModels.load(daemon, module: module, id: id)
+    }
+}
+
+/// `athena resident` — every module's allowlist + default + resident
+/// id (M41.1). Read-only model-store projection (`model.read`).
+public struct ResidentCmd: AsyncParsableCommand {
+    public static let configuration = CommandConfiguration(
+        commandName: "resident",
+        abstract: "Show every module's resident model slot (M41.1).")
+    @OptionGroup public var daemon: DaemonOptions
+    public init() {}
+    public func run() async throws {
+        try await RemoteModels.resident(daemon)
     }
 }
 

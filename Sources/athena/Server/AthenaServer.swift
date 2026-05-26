@@ -503,6 +503,20 @@ struct AthenaServer {
                 _ in nil
             }
         }
+        // Explicit per-module model lifecycle (M41.1): rebind a slot or
+        // release it without bouncing the daemon. Generalizes M39's
+        // embedding pattern across every module class (llm /
+        // textEmbedding / transcription / diarization / speakerEmbedding).
+        // Literal sub-paths so they win over the `:name` route below.
+        router.get("/api/models/resident") { _, _ -> Response in
+            await handleModelsResident()
+        }
+        router.post("/api/models/load") { request, _ -> Response in
+            await handleModelsLoad(request)
+        }
+        router.post("/api/models/unload") { request, _ -> Response in
+            await handleModelsUnload(request)
+        }
         router.get("/api/models/:name") { _, context -> Response in
             handleModelShow(context.parameters.get("name"))
         }
@@ -2384,6 +2398,154 @@ struct AthenaServer {
             result: "ok")
         return Self.json(
             DefaultModelResponse(model: name, source: "config"))
+    }
+
+    // MARK: - Per-module model lifecycle (M41.1)
+
+    /// The `any ModelSelectable` corresponding to `id`. Every concrete
+    /// module conforms (the stubs too), so this is total — no `nil`.
+    private func selectable(_ id: ModuleID) -> any ModelSelectable {
+        switch id {
+        case .llm: return llm as! any ModelSelectable
+        case .textEmbedding:
+            return embedding as! any ModelSelectable
+        case .transcription:
+            return transcription as! any ModelSelectable
+        case .diarization:
+            return diarization as! any ModelSelectable
+        case .speakerEmbedding:
+            return speakerEmbedding as! any ModelSelectable
+        }
+    }
+
+    /// `GET /api/models/resident` (M41.1) — every slot's allowlist +
+    /// default + currently-resident id. Read-only model-store
+    /// projection: gated `model.read` by AuthPolicy.
+    private func handleModelsResident() async -> Response {
+        var slots: [ModelSlotDTO] = []
+        for id in ModuleID.allCases {
+            let sel = selectable(id)
+            let allowed = await sel.allowedModelIds()
+            let def = await sel.defaultModelId()
+            let resident = await sel.residentModelId()
+            slots.append(
+                ModelSlotDTO(
+                    module: id.rawValue, allowed: allowed,
+                    default: def, resident: resident))
+        }
+        return Self.json(ModelResidentResponse(slots: slots))
+    }
+
+    /// `POST /api/models/load` (M41.1) — rebind `body.module`'s slot to
+    /// `body.id` (omit ⇒ the module's default). The slot is governor-
+    /// loaded first (so the rebind has its fixed reservation), then
+    /// the module rebinds in place. An id outside the module's
+    /// allowlist surfaces as a classified 400 (`model_not_available`);
+    /// a substrate load failure becomes a classified
+    /// 500/503 (Metal OOM). Gated `model.write` by AuthPolicy. Audited
+    /// (M30): caller + module + id + result.
+    private func handleModelsLoad(_ request: Request) async -> Response {
+        let decoded = await decodeJSON(request, ModelLoadRequest.self)
+        guard case .ok(let body) = decoded else {
+            if case .fail(let r) = decoded { return r }
+            fatalError()
+        }
+        guard
+            let moduleId = ModuleID(rawValue: body.module)
+        else {
+            await audit(
+                request, action: "model.load", target: body.module,
+                result: "denied", detail: "unknown module")
+            return Self.error(
+                status: .badRequest,
+                message: "unknown module '\(body.module)'",
+                type: "invalid_request_error", code: "invalid_module")
+        }
+        let sel = selectable(moduleId)
+        let allowed = await sel.allowedModelIds()
+        let def = await sel.defaultModelId()
+        let target = body.id ?? def
+        guard allowed.contains(target) else {
+            await audit(
+                request, action: "model.load",
+                target: "\(moduleId.rawValue):\(target)",
+                result: "denied", detail: "id outside allowlist")
+            return Self.error(
+                status: .badRequest,
+                message:
+                    "Model '\(target)' is not available. Configured "
+                    + "models for \(moduleId.rawValue): "
+                    + "\(allowed.joined(separator: ", ")).",
+                type: "invalid_request_error",
+                code: "model_not_available")
+        }
+        do {
+            try await governor.ensureLoaded(moduleId)
+            try await sel.rebind(to: target)
+        } catch let e as AthenaError {
+            await audit(
+                request, action: "model.load",
+                target: "\(moduleId.rawValue):\(target)",
+                result: "denied", detail: e.code)
+            return Self.error(
+                status: HTTPResponse.Status(code: e.httpStatus),
+                message: e.message, type: "server_error", code: e.code)
+        } catch {
+            await audit(
+                request, action: "model.load",
+                target: "\(moduleId.rawValue):\(target)",
+                result: "denied", detail: String(describing: error))
+            return Self.classified(error, module: moduleId)
+        }
+        await audit(
+            request, action: "model.load",
+            target: "\(moduleId.rawValue):\(target)", result: "ok")
+        return Self.json(
+            ModelLoadResponse(
+                module: moduleId.rawValue, id: target,
+                status: "loaded"))
+    }
+
+    /// `POST /api/models/unload` (M41.1) — release a single module's
+    /// slot, or all of them when `module` is absent / `"all"`. Daemon
+    /// keeps running; the next inference reloads the module's default
+    /// lazily. Gated `model.write` by AuthPolicy. Audited (M30).
+    private func handleModelsUnload(_ request: Request) async
+        -> Response
+    {
+        let decoded = await decodeJSON(request, ModelUnloadRequest.self)
+        guard case .ok(let body) = decoded else {
+            if case .fail(let r) = decoded { return r }
+            fatalError()
+        }
+        let targets: [ModuleID]
+        if let raw = body.module, raw != "all", !raw.isEmpty {
+            guard let m = ModuleID(rawValue: raw) else {
+                await audit(
+                    request, action: "model.unload", target: raw,
+                    result: "denied", detail: "unknown module")
+                return Self.error(
+                    status: .badRequest,
+                    message: "unknown module '\(raw)'",
+                    type: "invalid_request_error",
+                    code: "invalid_module")
+            }
+            targets = [m]
+        } else {
+            targets = ModuleID.allCases
+        }
+        var unloaded: [String] = []
+        for m in targets {
+            await governor.unload(m)
+            unloaded.append(m.rawValue)
+        }
+        await audit(
+            request, action: "model.unload",
+            target: unloaded.joined(separator: ","),
+            result: "ok")
+        return Self.json(
+            ModelUnloadResponse(
+                modules: unloaded, status: "unloaded"))
     }
 
     /// Enqueue a long-running model op (M16.3). The route is already

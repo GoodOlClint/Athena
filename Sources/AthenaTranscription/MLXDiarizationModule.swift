@@ -16,12 +16,14 @@ private struct Send<T>: @unchecked Sendable {
 /// reconciliation is handled by the M5 governor probe. HF cache root
 /// follows `HF_HOME` (SSD/local fallback), so this stays
 /// location-agnostic.
-public actor MLXDiarizationModule: DiarizationModule {
+public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
     public nonisolated let id: ModuleID = .diarization
+    public nonisolated var moduleID: ModuleID { .diarization }
 
     private let modelId: String
     private let estimatedBytes: Int
     private var model: SortformerModel?
+    private var residentId: String?
 
     /// - Parameters:
     ///   - modelId: HF id (default the ungated mlx-community 4-speaker
@@ -47,13 +49,30 @@ public actor MLXDiarizationModule: DiarizationModule {
         if model != nil { return }
         do {
             model = try await SortformerModel.fromPretrained(modelId)
+            residentId = modelId
         } catch {
             throw AthenaError.moduleLoadFailed(
                 .diarization, reason: "sortformer \(modelId): \(error)")
         }
     }
 
-    public func unload() async { model = nil }
+    public func unload() async {
+        model = nil
+        residentId = nil
+    }
+
+    // M41 — ModelSelectable. M41.1 single-id allowlist; M41.3
+    // generalizes to a repeatable `--diarization-model` set.
+    public func allowedModelIds() -> [String] { [modelId] }
+    public func defaultModelId() -> String { modelId }
+    public func residentModelId() -> String? { residentId }
+    public func rebind(to id: String?) async throws {
+        let target = id ?? modelId
+        guard target == modelId else {
+            throw AthenaError.modelNotAvailable(
+                requested: target, available: [modelId])
+        }
+    }
 
     public func diarize(
         audio: Data, filename: String?

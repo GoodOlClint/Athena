@@ -555,6 +555,47 @@ enum OpenAPISpec {
                 }
               }
             },
+            "/api/models/resident": {
+              "get": {
+                "tags": ["Model store"],
+                "summary": "Every module's resident model slot.",
+                "description": "Reports, for each module class (llm, textEmbedding, transcription, diarization, speakerEmbedding), the operator-declared allowlist, the default (first declared), and the id currently resident in the slot (nil ⇒ unloaded). M41.1. Requires `model.read`.",
+                "responses": {
+                  "200": { "description": "Resident slots.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ModelResidentResponse" } } } },
+                  "401": { "$ref": "#/components/responses/Unauthorized" },
+                  "403": { "$ref": "#/components/responses/Forbidden" }
+                }
+              }
+            },
+            "/api/models/load": {
+              "post": {
+                "tags": ["Model store"],
+                "summary": "Rebind a module's slot to a model id (M41.1).",
+                "description": "Loads `body.module`'s slot (under the governor) and rebinds it to `body.id` (omit ⇒ the module's default). An id outside the module's allowlist is a 400 (`model_not_available`) — never a silent fallback or on-request download. Requires `model.write`.",
+                "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ModelLoadRequest" } } } },
+                "responses": {
+                  "200": { "description": "Loaded.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ModelLoadResponse" } } } },
+                  "400": { "$ref": "#/components/responses/BadRequest" },
+                  "401": { "$ref": "#/components/responses/Unauthorized" },
+                  "403": { "$ref": "#/components/responses/Forbidden" },
+                  "503": { "$ref": "#/components/responses/Overloaded" }
+                }
+              }
+            },
+            "/api/models/unload": {
+              "post": {
+                "tags": ["Model store"],
+                "summary": "Release a module's slot (M41.1).",
+                "description": "Unloads `body.module`'s slot and returns its bytes to the governor; absent / `\"all\"` ⇒ every module. The daemon keeps running; the next inference lazily reloads the module's default. Requires `model.write`.",
+                "requestBody": { "required": false, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ModelUnloadRequest" } } } },
+                "responses": {
+                  "200": { "description": "Unloaded.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ModelUnloadResponse" } } } },
+                  "400": { "$ref": "#/components/responses/BadRequest" },
+                  "401": { "$ref": "#/components/responses/Unauthorized" },
+                  "403": { "$ref": "#/components/responses/Forbidden" }
+                }
+              }
+            },
             "/api/models/{name}": {
               "get": {
                 "tags": ["Model store"],
@@ -952,6 +993,12 @@ enum OpenAPISpec {
               "ModelConvertRequest": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string" }, "revision": { "type": "string" }, "bits": { "type": "integer" }, "group_size": { "type": "integer" }, "name": { "type": "string" } } },
               "ModelPruneRequest": { "type": "object", "properties": { "dry_run": { "type": "boolean" } } },
               "ModelJobResponse": { "type": "object", "properties": { "job_id": { "type": "string" }, "status": { "type": "string" } } },
+              "ModelSlot": { "type": "object", "properties": { "module": { "type": "string", "enum": ["llm", "textEmbedding", "transcription", "diarization", "speakerEmbedding"] }, "allowed": { "type": "array", "items": { "type": "string" } }, "default": { "type": "string" }, "resident": { "type": "string", "nullable": true } } },
+              "ModelResidentResponse": { "type": "object", "properties": { "slots": { "type": "array", "items": { "$ref": "#/components/schemas/ModelSlot" } } } },
+              "ModelLoadRequest": { "type": "object", "required": ["module"], "properties": { "module": { "type": "string", "enum": ["llm", "textEmbedding", "transcription", "diarization", "speakerEmbedding"] }, "id": { "type": "string", "description": "Model id within the module's allowlist. Omit ⇒ the module's default (first declared at `athena load`)." } } },
+              "ModelLoadResponse": { "type": "object", "properties": { "module": { "type": "string" }, "id": { "type": "string", "description": "Id actually loaded into the slot." }, "status": { "type": "string", "enum": ["loaded"] } } },
+              "ModelUnloadRequest": { "type": "object", "properties": { "module": { "type": "string", "description": "Module class to unload, or absent / `\"all\"` for every module." } } },
+              "ModelUnloadResponse": { "type": "object", "properties": { "modules": { "type": "array", "items": { "type": "string" } }, "status": { "type": "string", "enum": ["unloaded"] } } },
               "UserSummary": { "type": "object", "properties": { "username": { "type": "string" }, "roles": { "type": "array", "items": { "type": "string" } } } },
               "UserListResponse": { "type": "object", "properties": { "users": { "type": "array", "items": { "$ref": "#/components/schemas/UserSummary" } } } },
               "CreateUserRequest": { "type": "object", "required": ["username", "password"], "properties": { "username": { "type": "string" }, "password": { "type": "string" }, "role": { "type": "string" } } },

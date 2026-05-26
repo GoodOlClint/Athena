@@ -74,6 +74,51 @@ struct AthenaStopResponse: Codable {
     let model: String
 }
 
+// MARK: - /api/models/{load,unload,resident} (M41.1 — explicit per-module
+// model lifecycle, generalizing the M39 embedding pattern to every
+// module class)
+
+/// One module's selectable-set snapshot: the allowlist (operator-
+/// declared at `load` time), the default (first declared), and the id
+/// currently resident in the slot (nil ⇒ unloaded).
+struct ModelSlotDTO: Codable {
+    let module: String  // ModuleID.rawValue
+    let allowed: [String]
+    let `default`: String
+    let resident: String?
+}
+
+/// `GET /api/models/resident` — every module's slot at once.
+struct ModelResidentResponse: Codable {
+    let slots: [ModelSlotDTO]
+}
+
+/// `POST /api/models/load` — rebind a module's slot to `id` (omit ⇒
+/// the default), loading the module first if it is unloaded. An id
+/// outside the module's allowlist is a 400 (`model_not_available`).
+struct ModelLoadRequest: Codable {
+    let module: String  // ModuleID.rawValue
+    let id: String?
+}
+
+/// `POST /api/models/load` reply once the slot is resident.
+struct ModelLoadResponse: Codable {
+    let module: String
+    let id: String  // id actually loaded
+    let status: String  // "loaded"
+}
+
+/// `POST /api/models/unload` — release a module's reservation (or all
+/// when `module` is absent / `"all"`); the daemon keeps running.
+struct ModelUnloadRequest: Codable {
+    let module: String?  // ModuleID.rawValue, or absent/"all"
+}
+
+struct ModelUnloadResponse: Codable {
+    let modules: [String]  // modules actually unloaded
+    let status: String  // "unloaded"
+}
+
 /// `/api/admin/status` — native daemon + RBAC posture for a remote
 /// admin (distinct from open `/healthz` governor state and
 /// `/metrics`). M16.5.

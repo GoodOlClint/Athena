@@ -60,10 +60,16 @@ public struct LLMGenerationParameters: Sendable {
 /// Memory accounting in M1 is the on-disk safetensors footprint: an honest
 /// pre-load admission estimate for the governor. Live Metal-footprint
 /// reconciliation is deferred to M5 (OOM/cache hardening).
-public actor MLXLLMModule: LLMModule {
+public actor MLXLLMModule: LLMModule, ModelSelectable {
     public nonisolated let id: ModuleID = .llm
+    public nonisolated var moduleID: ModuleID { .llm }
 
     private let modelDirectory: URL
+    /// M41: store-name (the directory's lastPathComponent) is the
+    /// public id exposed via `/api/models/resident`. M41.1 keeps the
+    /// single-id allowlist; M41.2 generalizes to a repeatable set with
+    /// per-request rebind.
+    private let modelName: String
     private let params: LLMGenerationParameters
     private let estimatedBytes: Int
     private var container: ModelContainer?
@@ -98,6 +104,7 @@ public actor MLXLLMModule: LLMModule {
         promptCacheCapBytes: Int = 0
     ) {
         self.modelDirectory = modelDirectory
+        self.modelName = modelDirectory.lastPathComponent
         self.params = parameters
         self.estimatedBytes = Self.estimateBytes(forModelAt: modelDirectory)
         self.promptCacheCapBytes = promptCacheCapBytes
@@ -193,6 +200,24 @@ public actor MLXLLMModule: LLMModule {
 
     public func unload() async {
         container = nil
+    }
+
+    // M41 — ModelSelectable. M41.1 single-id allowlist: the loaded
+    // directory's store name. M41.2 generalizes to a repeatable
+    // `--llm-model` set with per-request rebind.
+    public func allowedModelIds() -> [String] { [modelName] }
+    public func defaultModelId() -> String { modelName }
+    public func residentModelId() -> String? {
+        container == nil ? nil : modelName
+    }
+    public func rebind(to id: String?) async throws {
+        let target = id ?? modelName
+        guard target == modelName else {
+            throw AthenaError.modelNotAvailable(
+                requested: target, available: [modelName])
+        }
+        // Single-id allowlist: rebind to the resident id is a no-op,
+        // and any other target was just rejected above.
     }
 
     public nonisolated func generate(prompt: String) -> AsyncStream<String> {

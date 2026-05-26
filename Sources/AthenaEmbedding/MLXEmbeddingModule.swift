@@ -19,20 +19,21 @@ import Tokenizers
 /// Memory accounting is a fixed pre-load estimate (the weights aren't on
 /// disk until the first download, so there is nothing to size); live
 /// Metal-footprint reconciliation is the shared M5 follow-up.
-public actor MLXEmbeddingModule: EmbeddingModule {
+public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
     public nonisolated let id: ModuleID = .textEmbedding
+    public nonisolated var moduleID: ModuleID { .textEmbedding }
 
     /// The selectable set (M39). The single resident slot is rebound to
     /// whichever member a request asks for; an id outside this set is a
     /// `modelNotAvailable` 400 — a request can never trigger an arbitrary
     /// HF download. (Future governor evolution: a multi-resident pool so
     /// hot models stay loaded; today it is one-at-a-time.)
-    private let allowedModelIds: [String]
-    private let defaultModelId: String
+    private let allowedIds: [String]
+    private let defaultId: String
     private let estimatedBytes: Int
     private var container: EmbedderModelContainer?
     /// The id currently resident in `container` (nil ⇒ nothing loaded).
-    private var residentModelId: String?
+    private var residentId: String?
 
     /// - Parameters:
     ///   - modelIds: the selectable set of embedding model HF ids; the
@@ -50,8 +51,8 @@ public actor MLXEmbeddingModule: EmbeddingModule {
         precondition(
             !modelIds.isEmpty,
             "MLXEmbeddingModule needs at least one model id")
-        self.allowedModelIds = modelIds
-        self.defaultModelId = modelIds[0]
+        self.allowedIds = modelIds
+        self.defaultId = modelIds[0]
         self.estimatedBytes = estimatedBytes
     }
 
@@ -61,12 +62,31 @@ public actor MLXEmbeddingModule: EmbeddingModule {
 
     public func load(reservation: MemoryReservation) async throws {
         if container != nil { return }
-        try await loadContainer(defaultModelId)
+        try await loadContainer(defaultId)
     }
 
     public func unload() async {
         container = nil
-        residentModelId = nil
+        residentId = nil
+    }
+
+    public func allowedModelIds() -> [String] { allowedIds }
+    public func defaultModelId() -> String { defaultId }
+    public func residentModelId() -> String? { residentId }
+    /// M41 explicit rebind: validate id ∈ allowlist and (when the slot
+    /// is currently loaded) unload+reload to switch the resident model
+    /// in place. If the slot is unloaded the call only stages the target
+    /// id by triggering a fresh load — same fixed governor reservation.
+    public func rebind(to id: String?) async throws {
+        let target = id ?? defaultId
+        guard allowedIds.contains(target) else {
+            throw AthenaError.modelNotAvailable(
+                requested: target, available: allowedIds)
+        }
+        if residentId == target, container != nil { return }
+        container = nil
+        residentId = nil
+        try await loadContainer(target)
     }
 
     /// Load `id` into the single resident slot, replacing whatever was
@@ -80,10 +100,10 @@ public actor MLXEmbeddingModule: EmbeddingModule {
                         session: AthenaProxy.proxiedURLSession())),
                 using: #huggingFaceTokenizerLoader(),
                 configuration: ModelConfiguration(id: id))
-            residentModelId = id
+            residentId = id
         } catch {
             container = nil
-            residentModelId = nil
+            residentId = nil
             throw AthenaError.moduleLoadFailed(
                 .textEmbedding,
                 reason: "embedding model \(id): \(error)")
@@ -104,14 +124,14 @@ public actor MLXEmbeddingModule: EmbeddingModule {
     public func embed(_ texts: [String], model: String? = nil) async throws
         -> EmbeddingBatch
     {
-        let target = model ?? defaultModelId
-        guard allowedModelIds.contains(target) else {
+        let target = model ?? defaultId
+        guard allowedIds.contains(target) else {
             throw AthenaError.modelNotAvailable(
-                requested: target, available: allowedModelIds)
+                requested: target, available: allowedIds)
         }
-        if residentModelId != target || container == nil {
+        if residentId != target || container == nil {
             container = nil
-            residentModelId = nil
+            residentId = nil
             try await loadContainer(target)
         }
         guard let container else {

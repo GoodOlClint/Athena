@@ -63,23 +63,48 @@ public protocol SpeakerEmbeddingModule: InferenceModule {
 /// `--engine stub` placeholder: a deterministic pseudo-vector per
 /// segment so the endpoint + governor wiring/accounting work without a
 /// model. Matches the real 256-d shape and is L2-normalized.
-public actor StubSpeakerEmbeddingModule: SpeakerEmbeddingModule {
+public actor StubSpeakerEmbeddingModule: SpeakerEmbeddingModule,
+    ModelSelectable
+{
     public nonisolated let id: ModuleID = .speakerEmbedding
+    public nonisolated var moduleID: ModuleID { .speakerEmbedding }
 
     private let reserveBytes: Int
     private let dimension = 256
-    private var loaded = false
+    private let modelIds: [String]
+    private let defaultId: String
+    private var residentId: String?
 
-    public init(reserveBytes: Int = 256 * 1024 * 1024) {
+    public init(
+        reserveBytes: Int = 256 * 1024 * 1024,
+        modelIds: [String] = ["athena-stub-wespeaker"]
+    ) {
+        precondition(
+            !modelIds.isEmpty,
+            "StubSpeakerEmbeddingModule needs at least one model id")
         self.reserveBytes = reserveBytes
+        self.modelIds = modelIds
+        self.defaultId = modelIds[0]
     }
 
-    public var residentBytes: Int { loaded ? reserveBytes : 0 }
+    public var residentBytes: Int { residentId == nil ? 0 : reserveBytes }
     public func memoryEstimate() -> Int { reserveBytes }
     public func load(reservation: MemoryReservation) async throws {
-        loaded = true
+        if residentId == nil { residentId = defaultId }
     }
-    public func unload() async { loaded = false }
+    public func unload() async { residentId = nil }
+
+    public func allowedModelIds() -> [String] { modelIds }
+    public func defaultModelId() -> String { defaultId }
+    public func residentModelId() -> String? { residentId }
+    public func rebind(to id: String?) async throws {
+        let target = id ?? defaultId
+        guard modelIds.contains(target) else {
+            throw AthenaError.modelNotAvailable(
+                requested: target, available: modelIds)
+        }
+        residentId = target
+    }
 
     public func embed(
         audio: Data, filename: String?, segments: [SpeakerSegmentRequest]

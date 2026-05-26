@@ -186,28 +186,55 @@ extension LLMModule {
 /// M0 governed stub. It holds no model — it exists to prove the thesis path
 /// end-to-end: a request loads it through the governor (reserving real
 /// budget), streams tokens over the API, and releases on unload.
-public actor StubLLMModule: LLMModule {
+public actor StubLLMModule: LLMModule, ModelSelectable {
     public nonisolated let id: ModuleID = .llm
+    public nonisolated var moduleID: ModuleID { .llm }
 
     private let reserveBytes: Int
-    private var loaded = false
+    private let modelIds: [String]
+    private let defaultId: String
+    private var residentId: String?
 
     /// `reserveBytes` defaults to a representative multi-GB LLM footprint so
     /// budget pressure behaves realistically; tests inject small values.
-    public init(reserveBytes: Int = 8 * 1024 * 1024 * 1024) {
+    /// `modelIds` is the M41 selectable set; first = default. The stub
+    /// "serves" any of them truthfully so explicit `/api/models/load` and
+    /// the inference-time `model` field exercise rebind under the stub
+    /// engine without a model on disk.
+    public init(
+        reserveBytes: Int = 8 * 1024 * 1024 * 1024,
+        modelIds: [String] = ["athena-stub"]
+    ) {
+        precondition(
+            !modelIds.isEmpty,
+            "StubLLMModule needs at least one model id")
         self.reserveBytes = reserveBytes
+        self.modelIds = modelIds
+        self.defaultId = modelIds[0]
     }
 
-    public var residentBytes: Int { loaded ? reserveBytes : 0 }
+    public var residentBytes: Int { residentId == nil ? 0 : reserveBytes }
 
     public func memoryEstimate() -> Int { reserveBytes }
 
     public func load(reservation: MemoryReservation) async throws {
-        loaded = true
+        if residentId == nil { residentId = defaultId }
     }
 
     public func unload() async {
-        loaded = false
+        residentId = nil
+    }
+
+    public func allowedModelIds() -> [String] { modelIds }
+    public func defaultModelId() -> String { defaultId }
+    public func residentModelId() -> String? { residentId }
+    public func rebind(to id: String?) async throws {
+        let target = id ?? defaultId
+        guard modelIds.contains(target) else {
+            throw AthenaError.modelNotAvailable(
+                requested: target, available: modelIds)
+        }
+        residentId = target
     }
 
     public nonisolated func generate(prompt: String) -> AsyncStream<String> {

@@ -5,50 +5,35 @@ import Foundation
     import FoundationNetworking
 #endif
 
-/// `athena unload [MODEL]` — unload the running model so the governor
-/// reclaims its budget; the daemon keeps running. (Was `stop`; `stop`
-/// now controls the daemon process — M9.4.)
+/// `athena unload [MODEL] [--module M]` — release a module's slot so
+/// the governor reclaims its budget; the daemon keeps running. M41.1
+/// generalizes this from "the LLM only" to any module (or all). The
+/// default `--module llm` preserves the prior single-arg behavior.
+/// (Was `stop`; `stop` now controls the daemon process — M9.4.)
 public struct Unload: AsyncParsableCommand {
     public static let configuration = CommandConfiguration(
         commandName: "unload",
-        abstract: "Unload the running model and free its budget."
+        abstract: "Release a module's slot and free its budget."
     )
 
-    @Argument(help: "Model name (single-model: passed through).")
+    @Argument(
+        help: "Model name (single-model: passed through; informational).")
     public var model: String?
 
-    @Option(help: "Daemon host.")
-    public var host: String = "127.0.0.1"
+    @Option(
+        help: """
+            Module class to unload (llm, textEmbedding, transcription, \
+            diarization, speakerEmbedding). Pass `all` to release every \
+            module. Default: llm (M41.1).
+            """)
+    public var module: String = "llm"
 
-    @Option(help: "Daemon port.")
-    public var port: Int = athenaDefaultPort
+    @OptionGroup public var daemon: DaemonOptions
 
     public init() {}
 
     public func run() async throws {
-        var req = URLRequest(
-            url: URL(string: "http://\(host):\(port)/api/admin/stop")!)
-        req.httpMethod = "POST"
-        if let k = Credentials.resolve(
-            explicit: nil, host: host, port: port), !k.isEmpty
-        {
-            req.setValue(
-                "Bearer \(k)", forHTTPHeaderField: "Authorization")
-        }
-        let data: Data
-        do {
-            (data, _) = try await URLSession.shared.data(for: req)
-        } catch {
-            print(
-                "no running athena daemon at \(host):\(port) "
-                    + "(\(error.localizedDescription))")
-            throw ExitCode.failure
-        }
-        let obj =
-            (try? JSONSerialization.jsonObject(with: data))
-            as? [String: Any]
-        print(
-            "unloaded "
-                + "\(obj?["model"] as? String ?? model ?? "model")")
+        try await RemoteModels.unload(
+            daemon, module: module.isEmpty ? nil : module)
     }
 }

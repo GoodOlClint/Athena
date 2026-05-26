@@ -8,12 +8,16 @@ import Foundation
 /// not on disk until first download); the M5 governor probe reconciles
 /// to the real footprint. HF cache root follows `HF_HOME`
 /// (SSD/local fallback), so this stays location-agnostic.
-public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule {
+public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule,
+    ModelSelectable
+{
     public nonisolated let id: ModuleID = .speakerEmbedding
+    public nonisolated var moduleID: ModuleID { .speakerEmbedding }
 
     private let modelId: String
     private let estimatedBytes: Int
     private var model: WeSpeakerModel?
+    private var residentId: String?
 
     /// - Parameters:
     ///   - modelId: HF id (default the ungated WeSpeaker ResNet34-LM
@@ -40,13 +44,30 @@ public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule {
         if model != nil { return }
         do {
             model = try await WeSpeakerModel.fromPretrained(modelId)
+            residentId = modelId
         } catch {
             throw AthenaError.moduleLoadFailed(
                 .speakerEmbedding, reason: "wespeaker \(modelId): \(error)")
         }
     }
 
-    public func unload() async { model = nil }
+    public func unload() async {
+        model = nil
+        residentId = nil
+    }
+
+    // M41 — ModelSelectable. M41.1 single-id allowlist; M41.3
+    // generalizes to a repeatable `--speaker-embedding-model` set.
+    public func allowedModelIds() -> [String] { [modelId] }
+    public func defaultModelId() -> String { modelId }
+    public func residentModelId() -> String? { residentId }
+    public func rebind(to id: String?) async throws {
+        let target = id ?? modelId
+        guard target == modelId else {
+            throw AthenaError.modelNotAvailable(
+                requested: target, available: [modelId])
+        }
+    }
 
     public func embed(
         audio: Data, filename: String?, segments: [SpeakerSegmentRequest]

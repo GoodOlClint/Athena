@@ -38,22 +38,45 @@ public protocol DiarizationModule: InferenceModule {
 
 /// `--engine stub` placeholder: a single canned turn so the endpoint
 /// and governor wiring/accounting work without a model.
-public actor StubDiarizationModule: DiarizationModule {
+public actor StubDiarizationModule: DiarizationModule, ModelSelectable {
     public nonisolated let id: ModuleID = .diarization
+    public nonisolated var moduleID: ModuleID { .diarization }
 
     private let reserveBytes: Int
-    private var loaded = false
+    private let modelIds: [String]
+    private let defaultId: String
+    private var residentId: String?
 
-    public init(reserveBytes: Int = 512 * 1024 * 1024) {
+    public init(
+        reserveBytes: Int = 512 * 1024 * 1024,
+        modelIds: [String] = ["athena-stub-diarization"]
+    ) {
+        precondition(
+            !modelIds.isEmpty,
+            "StubDiarizationModule needs at least one model id")
         self.reserveBytes = reserveBytes
+        self.modelIds = modelIds
+        self.defaultId = modelIds[0]
     }
 
-    public var residentBytes: Int { loaded ? reserveBytes : 0 }
+    public var residentBytes: Int { residentId == nil ? 0 : reserveBytes }
     public func memoryEstimate() -> Int { reserveBytes }
     public func load(reservation: MemoryReservation) async throws {
-        loaded = true
+        if residentId == nil { residentId = defaultId }
     }
-    public func unload() async { loaded = false }
+    public func unload() async { residentId = nil }
+
+    public func allowedModelIds() -> [String] { modelIds }
+    public func defaultModelId() -> String { defaultId }
+    public func residentModelId() -> String? { residentId }
+    public func rebind(to id: String?) async throws {
+        let target = id ?? defaultId
+        guard modelIds.contains(target) else {
+            throw AthenaError.modelNotAvailable(
+                requested: target, available: modelIds)
+        }
+        residentId = target
+    }
 
     public func diarize(
         audio: Data, filename: String?
