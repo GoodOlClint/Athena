@@ -77,7 +77,51 @@ struct Start: AsyncParsableCommand {
     @Option(help: "Bearer-auth keys file (see `athena load --help`).")
     var authKeysFile: String?
 
+    @Option(help: "launchd label for a system (boot) daemon.")
+    var label: String = "me.goodolclint.athena"
+
     func run() async throws {
+        // Root + an installed plist ⇒ delegate to launchctl so the
+        // daemon runs as the plist's `UserName` (the service user the
+        // installer recorded), not root. The pre-fix `Process()` spawn
+        // inherited the sudo'ing caller's euid, leaving the daemon as
+        // root — which under macOS hardened-runtime spawn semantics
+        // broke Swift's `Bundle.main.bundleURL` resolution and made
+        // mlx-c print "Failed to load the default metallib library
+        // not found …" four times on first MLX init. The same binary
+        // worked foreground because the shell launched it as a normal
+        // user with argv[0] = the full executable path. `athena stop`
+        // already symmetrically goes through launchctl bootout; this
+        // closes the loop on start.
+        if geteuid() == 0, isValidLabel(label) {
+            let plist = InstallPlan.plistPath(label: label)
+            if FileManager.default.fileExists(atPath: plist.path) {
+                // bootout is non-fatal (returns 3 when the service
+                // isn't loaded); bootstrap is the actual load.
+                _ = launchctl(["bootout", "system", plist.path])
+                let rc = launchctl(
+                    ["bootstrap", "system", plist.path])
+                if rc != 0 {
+                    FailableExit.die(
+                        "error: launchctl bootstrap "
+                            + "\(plist.path) failed (status \(rc))")
+                }
+                print(
+                    "started system athena daemon via launchd "
+                        + "(\(label)) — logs in "
+                        + "/usr/local/var/log/athena/")
+                return
+            }
+            // Root, but no plist → fall through to Process() spawn
+            // with a warning so the operator notices the gap.
+            FileHandle.standardError.write(
+                Data(
+                    ("warning: running as root but no installed "
+                        + "launchd plist at \(plist.path). Falling "
+                        + "back to a root-owned Process() daemon — "
+                        + "`athena install` first to get a "
+                        + "user-owned launchd service.\n").utf8))
+        }
         if let pid = livePid(dataDir) {
             FailableExit.die(
                 "error: daemon already running (pid \(pid))")
