@@ -14,26 +14,41 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
     public nonisolated let id: ModuleID = .transcription
     public nonisolated var moduleID: ModuleID { .transcription }
 
-    private let modelId: String
+    /// M41.3 operator-declared allowlist (HF ids; the substrate's HF
+    /// cache is the load source). First-declared = the default.
+    private let allowedIds: [String]
+    private let defaultId: String
     private let estimatedBytes: Int
     private var model: WhisperModel?
     private var tokenizer: (any MLXLMCommon.Tokenizer)?
-    /// nil ⇒ unloaded; otherwise the id resident in `model`. M41.1
-    /// single-id allowlist; M41.3 generalizes to a repeatable
-    /// `--whisper-model` set with per-request rebind.
+    /// nil ⇒ unloaded; otherwise the id resident in `model`.
     private var residentId: String?
 
     /// - Parameters:
-    ///   - modelId: HF id (default `mlx-community/whisper-large-v3-turbo`).
+    ///   - modelIds: HF id allowlist (first = default). Default
+    ///     `[mlx-community/whisper-large-v3-turbo]`. M41.3.
     ///   - estimatedBytes: governor admission estimate. Default 3 GiB:
     ///     headroom over the F16 weights (~1.6 GB) + tokenizer + the
-    ///     encoder/decoder activation working set.
+    ///     encoder/decoder activation working set. One model is
+    ///     resident at a time, so the fixed estimate bounds the slot.
     public init(
-        modelId: String = "mlx-community/whisper-large-v3-turbo",
+        modelIds: [String] = ["mlx-community/whisper-large-v3-turbo"],
         estimatedBytes: Int = 3 * 1024 * 1024 * 1024
     ) {
-        self.modelId = modelId
+        precondition(
+            !modelIds.isEmpty,
+            "MLXTranscriptionModule needs at least one model id")
+        self.allowedIds = modelIds
+        self.defaultId = modelIds[0]
         self.estimatedBytes = estimatedBytes
+    }
+
+    /// Source-compat init for callers that still pass a single id.
+    public init(
+        modelId: String,
+        estimatedBytes: Int = 3 * 1024 * 1024 * 1024
+    ) {
+        self.init(modelIds: [modelId], estimatedBytes: estimatedBytes)
     }
 
     public var residentBytes: Int { model == nil ? 0 : estimatedBytes }
@@ -42,14 +57,28 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
 
     public func load(reservation: MemoryReservation) async throws {
         if model != nil { return }
+        try await loadModel(id: residentId ?? defaultId)
+    }
+
+    private func loadModel(id: String) async throws {
+        guard allowedIds.contains(id) else {
+            throw AthenaError.modelNotAvailable(
+                requested: id, available: allowedIds)
+        }
         do {
-            model = try await WhisperLoader.load(modelId: modelId)
+            // WhisperLoader.load also seeds the alignment_heads needed
+            // for M26 word timestamps; an unload+load on rebind picks
+            // up the new model's heads (not just the base weights).
+            model = try await WhisperLoader.load(modelId: id)
             tokenizer = try await WhisperLoader.loadTokenizer()
-            residentId = modelId
+            residentId = id
         } catch {
+            model = nil
+            tokenizer = nil
+            residentId = nil
             throw AthenaError.moduleLoadFailed(
                 .transcription,
-                reason: "whisper \(modelId): \(error)")
+                reason: "whisper \(id): \(error)")
         }
     }
 
@@ -59,17 +88,23 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
         residentId = nil
     }
 
-    // M41 — ModelSelectable. M41.1 single-id allowlist; M41.3
-    // generalizes to a repeatable `--whisper-model` set.
-    public func allowedModelIds() -> [String] { [modelId] }
-    public func defaultModelId() -> String { modelId }
+    // M41 — ModelSelectable. M41.3 generalizes to a repeatable
+    // `--whisper-model` allowlist; rebind unloads + reloads in place
+    // under the same governor reservation.
+    public func allowedModelIds() -> [String] { allowedIds }
+    public func defaultModelId() -> String { defaultId }
     public func residentModelId() -> String? { residentId }
     public func rebind(to id: String?) async throws {
-        let target = id ?? modelId
-        guard target == modelId else {
+        let target = id ?? defaultId
+        guard allowedIds.contains(target) else {
             throw AthenaError.modelNotAvailable(
-                requested: target, available: [modelId])
+                requested: target, available: allowedIds)
         }
+        if residentId == target, model != nil { return }
+        model = nil
+        tokenizer = nil
+        residentId = nil
+        try await loadModel(id: target)
     }
 
     public func transcribe(

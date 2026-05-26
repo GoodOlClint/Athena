@@ -95,22 +95,40 @@ struct Load: AsyncParsableCommand {
     var embeddingModels: [String] = [Load.defaultEmbeddingModel]
 
     @Option(
-        help:
-            "Speech-to-text model HF id (default mlx-community/whisper-large-v3-turbo)."
+        name: .customLong("whisper-model"),
+        help: """
+            Speech-to-text model HF id. Repeatable: pass it more than \
+            once to make several whisper models selectable per-request \
+            via the `model` form field; the FIRST is the default. M41.3.
+            """
     )
-    var transcriptionModel: String = Load.defaultTranscriptionModel
+    var transcriptionModels: [String] = [
+        Load.defaultTranscriptionModel
+    ]
 
     @Option(
-        help:
-            "Speaker-diarization model HF id (default mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16)."
+        name: .customLong("diarization-model"),
+        help: """
+            Speaker-diarization model HF id. Repeatable: pass it more \
+            than once to make several diarization models selectable \
+            per-request via the `model` form field; the FIRST is the \
+            default. M41.3.
+            """
     )
-    var diarizationModel: String = Load.defaultDiarizationModel
+    var diarizationModels: [String] = [Load.defaultDiarizationModel]
 
     @Option(
-        help:
-            "Speaker-embedding (voice/speaker-verification) model HF id (default aufklarer/WeSpeaker-ResNet34-LM-MLX)."
+        name: .customLong("speaker-embedding-model"),
+        help: """
+            Speaker-embedding (voice/speaker-verification) model HF id. \
+            Repeatable: pass it more than once to make several speaker- \
+            embedding models selectable per-request via the `model` \
+            form field; the FIRST is the default. M41.3.
+            """
     )
-    var speakerEmbeddingModel: String = Load.defaultSpeakerEmbeddingModel
+    var speakerEmbeddingModels: [String] = [
+        Load.defaultSpeakerEmbeddingModel
+    ]
 
     @Option(
         help:
@@ -404,32 +422,38 @@ struct Load: AsyncParsableCommand {
         }
         // Transcription: real Whisper under the mlx engine, stub under
         // the stub engine. Evictable — the LLM is the primary workload.
+        // M41.3: each audio module carries the operator-declared
+        // allowlist on the stub too, so /api/models/resident + the
+        // per-request `model` form field exercise the selectable shape.
         let transcription: any TranscriptionModule
         switch engine {
         case .stub:
-            transcription = StubTranscriptionModule()
+            transcription = StubTranscriptionModule(
+                modelIds: transcriptionModels)
         case .mlx:
             transcription = MLXTranscriptionModule(
-                modelId: transcriptionModel)
+                modelIds: transcriptionModels)
         }
         // Diarization: vendored Sortformer under mlx, stub under stub.
         let diarization: any DiarizationModule
         switch engine {
         case .stub:
-            diarization = StubDiarizationModule()
+            diarization = StubDiarizationModule(
+                modelIds: diarizationModels)
         case .mlx:
             diarization = MLXDiarizationModule(
-                modelId: diarizationModel)
+                modelIds: diarizationModels)
         }
         // Speaker embeddings: vendored WeSpeaker under mlx, stub under
         // stub. Evictable — the LLM is the primary workload.
         let speakerEmbedding: any SpeakerEmbeddingModule
         switch engine {
         case .stub:
-            speakerEmbedding = StubSpeakerEmbeddingModule()
+            speakerEmbedding = StubSpeakerEmbeddingModule(
+                modelIds: speakerEmbeddingModels)
         case .mlx:
             speakerEmbedding = MLXSpeakerEmbeddingModule(
-                modelId: speakerEmbeddingModel)
+                modelIds: speakerEmbeddingModels)
         }
         await governor.register(llm, evictable: false)
         await governor.register(transcription, evictable: true)

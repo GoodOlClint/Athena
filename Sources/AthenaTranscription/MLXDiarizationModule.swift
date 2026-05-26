@@ -20,25 +20,38 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
     public nonisolated let id: ModuleID = .diarization
     public nonisolated var moduleID: ModuleID { .diarization }
 
-    private let modelId: String
+    private let allowedIds: [String]
+    private let defaultId: String
     private let estimatedBytes: Int
     private var model: SortformerModel?
     private var residentId: String?
 
     /// - Parameters:
-    ///   - modelId: HF id (default the ungated mlx-community 4-speaker
-    ///     streaming Sortformer).
+    ///   - modelIds: HF id allowlist (first = default). Default
+    ///     `[mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16]`.
     ///   - estimatedBytes: governor admission estimate. 1 GiB:
     ///     conservative headroom over the small fp16 weights + the
     ///     FastConformer/transformer activation working set on long
     ///     audio (M5 reconciles to the real footprint post-load).
     public init(
-        modelId: String =
-            "mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16",
+        modelIds: [String] = [
+            "mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16"
+        ],
         estimatedBytes: Int = 1 * 1024 * 1024 * 1024
     ) {
-        self.modelId = modelId
+        precondition(
+            !modelIds.isEmpty,
+            "MLXDiarizationModule needs at least one model id")
+        self.allowedIds = modelIds
+        self.defaultId = modelIds[0]
         self.estimatedBytes = estimatedBytes
+    }
+
+    public init(
+        modelId: String,
+        estimatedBytes: Int = 1 * 1024 * 1024 * 1024
+    ) {
+        self.init(modelIds: [modelId], estimatedBytes: estimatedBytes)
     }
 
     public var residentBytes: Int { model == nil ? 0 : estimatedBytes }
@@ -47,12 +60,22 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
 
     public func load(reservation: MemoryReservation) async throws {
         if model != nil { return }
+        try await loadModel(id: residentId ?? defaultId)
+    }
+
+    private func loadModel(id: String) async throws {
+        guard allowedIds.contains(id) else {
+            throw AthenaError.modelNotAvailable(
+                requested: id, available: allowedIds)
+        }
         do {
-            model = try await SortformerModel.fromPretrained(modelId)
-            residentId = modelId
+            model = try await SortformerModel.fromPretrained(id)
+            residentId = id
         } catch {
+            model = nil
+            residentId = nil
             throw AthenaError.moduleLoadFailed(
-                .diarization, reason: "sortformer \(modelId): \(error)")
+                .diarization, reason: "sortformer \(id): \(error)")
         }
     }
 
@@ -61,17 +84,21 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
         residentId = nil
     }
 
-    // M41 — ModelSelectable. M41.1 single-id allowlist; M41.3
-    // generalizes to a repeatable `--diarization-model` set.
-    public func allowedModelIds() -> [String] { [modelId] }
-    public func defaultModelId() -> String { modelId }
+    // M41 — ModelSelectable. M41.3 repeatable `--diarization-model`
+    // allowlist with in-place rebind.
+    public func allowedModelIds() -> [String] { allowedIds }
+    public func defaultModelId() -> String { defaultId }
     public func residentModelId() -> String? { residentId }
     public func rebind(to id: String?) async throws {
-        let target = id ?? modelId
-        guard target == modelId else {
+        let target = id ?? defaultId
+        guard allowedIds.contains(target) else {
             throw AthenaError.modelNotAvailable(
-                requested: target, available: [modelId])
+                requested: target, available: allowedIds)
         }
+        if residentId == target, model != nil { return }
+        model = nil
+        residentId = nil
+        try await loadModel(id: target)
     }
 
     public func diarize(

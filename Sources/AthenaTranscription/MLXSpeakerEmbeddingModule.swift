@@ -14,26 +14,38 @@ public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule,
     public nonisolated let id: ModuleID = .speakerEmbedding
     public nonisolated var moduleID: ModuleID { .speakerEmbedding }
 
-    private let modelId: String
+    private let allowedIds: [String]
+    private let defaultId: String
     private let estimatedBytes: Int
     private var model: WeSpeakerModel?
     private var residentId: String?
 
     /// - Parameters:
-    ///   - modelId: HF id (default the ungated WeSpeaker ResNet34-LM
-    ///     safetensors mirror — the substrate can't read the
-    ///     mlx-community `.npz`).
+    ///   - modelIds: HF id allowlist (first = default). Default
+    ///     `[aufklarer/WeSpeaker-ResNet34-LM-MLX]` — the ungated
+    ///     safetensors mirror (substrate cannot read the mlx-community
+    ///     `.npz`).
     ///   - estimatedBytes: governor admission estimate. 512 MiB: the
     ///     weights are tiny (~25 MB) but ResNet activations over a
     ///     long segment's mel grid dominate; conservative headroom that
     ///     M5 reconciles to the real footprint post-load.
     public init(
-        modelId: String =
-            "aufklarer/WeSpeaker-ResNet34-LM-MLX",
+        modelIds: [String] = ["aufklarer/WeSpeaker-ResNet34-LM-MLX"],
         estimatedBytes: Int = 512 * 1024 * 1024
     ) {
-        self.modelId = modelId
+        precondition(
+            !modelIds.isEmpty,
+            "MLXSpeakerEmbeddingModule needs at least one model id")
+        self.allowedIds = modelIds
+        self.defaultId = modelIds[0]
         self.estimatedBytes = estimatedBytes
+    }
+
+    public init(
+        modelId: String,
+        estimatedBytes: Int = 512 * 1024 * 1024
+    ) {
+        self.init(modelIds: [modelId], estimatedBytes: estimatedBytes)
     }
 
     public var residentBytes: Int { model == nil ? 0 : estimatedBytes }
@@ -42,12 +54,23 @@ public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule,
 
     public func load(reservation: MemoryReservation) async throws {
         if model != nil { return }
+        try await loadModel(id: residentId ?? defaultId)
+    }
+
+    private func loadModel(id: String) async throws {
+        guard allowedIds.contains(id) else {
+            throw AthenaError.modelNotAvailable(
+                requested: id, available: allowedIds)
+        }
         do {
-            model = try await WeSpeakerModel.fromPretrained(modelId)
-            residentId = modelId
+            model = try await WeSpeakerModel.fromPretrained(id)
+            residentId = id
         } catch {
+            model = nil
+            residentId = nil
             throw AthenaError.moduleLoadFailed(
-                .speakerEmbedding, reason: "wespeaker \(modelId): \(error)")
+                .speakerEmbedding,
+                reason: "wespeaker \(id): \(error)")
         }
     }
 
@@ -56,17 +79,21 @@ public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule,
         residentId = nil
     }
 
-    // M41 — ModelSelectable. M41.1 single-id allowlist; M41.3
-    // generalizes to a repeatable `--speaker-embedding-model` set.
-    public func allowedModelIds() -> [String] { [modelId] }
-    public func defaultModelId() -> String { modelId }
+    // M41 — ModelSelectable. M41.3 repeatable
+    // `--speaker-embedding-model` allowlist with in-place rebind.
+    public func allowedModelIds() -> [String] { allowedIds }
+    public func defaultModelId() -> String { defaultId }
     public func residentModelId() -> String? { residentId }
     public func rebind(to id: String?) async throws {
-        let target = id ?? modelId
-        guard target == modelId else {
+        let target = id ?? defaultId
+        guard allowedIds.contains(target) else {
             throw AthenaError.modelNotAvailable(
-                requested: target, available: [modelId])
+                requested: target, available: allowedIds)
         }
+        if residentId == target, model != nil { return }
+        model = nil
+        residentId = nil
+        try await loadModel(id: target)
     }
 
     public func embed(

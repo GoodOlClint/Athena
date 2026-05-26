@@ -853,6 +853,63 @@ echo "$ABAD" | grep -q 'model_not_available' \
   || bad "native chat unknown model not refused ($ABAD)"
 
 echo
+echo "== phase 3.68: per-request audio model selection (M41.3) =="
+# A non-empty fake file lets the request pass missing_file and reach
+# the rebind gate (which validates `model` ∈ allowlist before any
+# audio decode). Bytes are non-WAV but server-side rebind fires before
+# the decoder ever runs.
+DUMMY_AUDIO="$D/audio.dummy"
+printf 'audio-fake-bytes' > "$DUMMY_AUDIO"
+# /api/models/resident also lists transcription / diarization /
+# speakerEmbedding allowlists (their `--whisper-model` /
+# `--diarization-model` / `--speaker-embedding-model` declarations).
+# An unknown `model` form-field on any audio endpoint ⇒ 400
+# model_not_available (no on-request HF download).
+RES4="$(curl -s -H "Authorization: Bearer $ADMIN_TOK" \
+  "http://127.0.0.1:$PORT/api/models/resident")"
+echo "$RES4" \
+  | python3 -c '
+import json, sys
+s=json.load(sys.stdin)
+have = {x["module"]: x for x in s["slots"]}
+for m in ["transcription","diarization","speakerEmbedding"]:
+    slot=have[m]
+    assert slot["allowed"], f"{m} allowed empty"
+    assert slot["default"], f"{m} default missing"
+' && ok "resident snapshot exposes whisper/diarization/speaker allowlists" \
+   || bad "audio allowlists missing in resident ($RES4)"
+# Forging an audio request with a tiny fake-file part is enough to
+# reach the rebind gate; the model_not_available 400 fires before any
+# decode. Use plain multipart with a 4-byte file body.
+T_BAD=$(curl -s -o /tmp/abad.json -w '%{http_code}' \
+  -H "Authorization: Bearer $ADMIN_TOK" \
+  -F "file=@$DUMMY_AUDIO;filename=x.wav" \
+  -F 'model=nope/not-in-allowlist' \
+  "http://127.0.0.1:$PORT/v1/audio/transcriptions")
+[ "$T_BAD" = "400" ] \
+  && grep -q 'model_not_available' /tmp/abad.json \
+  && ok "transcription unknown model ⇒ 400 model_not_available" \
+  || bad "transcription unknown model not refused ($T_BAD: $(cat /tmp/abad.json))"
+D_BAD=$(curl -s -o /tmp/dbad.json -w '%{http_code}' \
+  -H "Authorization: Bearer $ADMIN_TOK" \
+  -F "file=@$DUMMY_AUDIO;filename=x.wav" \
+  -F 'model=nope/not-in-allowlist' \
+  "http://127.0.0.1:$PORT/v1/audio/diarizations")
+[ "$D_BAD" = "400" ] \
+  && grep -q 'model_not_available' /tmp/dbad.json \
+  && ok "diarization unknown model ⇒ 400 model_not_available" \
+  || bad "diarization unknown model not refused ($D_BAD: $(cat /tmp/dbad.json))"
+S_BAD=$(curl -s -o /tmp/sbad.json -w '%{http_code}' \
+  -H "Authorization: Bearer $ADMIN_TOK" \
+  -F "file=@$DUMMY_AUDIO;filename=x.wav" \
+  -F 'model=nope/not-in-allowlist' \
+  "http://127.0.0.1:$PORT/v1/audio/embeddings")
+[ "$S_BAD" = "400" ] \
+  && grep -q 'model_not_available' /tmp/sbad.json \
+  && ok "speaker-embedding unknown model ⇒ 400 model_not_available" \
+  || bad "speaker-embedding unknown model not refused ($S_BAD: $(cat /tmp/sbad.json))"
+
+echo
 echo "== phase 3.65: OpenAI model discovery /v1/models (M31.1) =="
 # Read-only store projection in the OpenAI list/retrieve shape; gated
 # model.read (same as the native /api/models reads), NOT the inference

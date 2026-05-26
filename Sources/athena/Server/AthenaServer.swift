@@ -975,6 +975,12 @@ struct AthenaServer {
 
         do {
             try await governor.ensureLoaded(.transcription)
+            // M41.3: a `model` form field selects among the operator-
+            // declared whisper allowlist; an unknown id ⇒ 400
+            // model_not_available via the classified path.
+            if let m = form.text("model"), !m.isEmpty {
+                try await selectable(.transcription).rebind(to: m)
+            }
         } catch let e as AthenaError {
             return Self.error(
                 status: HTTPResponse.Status(code: e.httpStatus),
@@ -1126,6 +1132,10 @@ struct AthenaServer {
 
         do {
             try await governor.ensureLoaded(.diarization)
+            // M41.3 per-request diarization model selection.
+            if let m = form.text("model"), !m.isEmpty {
+                try await selectable(.diarization).rebind(to: m)
+            }
         } catch let e as AthenaError {
             return Self.error(
                 status: HTTPResponse.Status(code: e.httpStatus),
@@ -1287,6 +1297,10 @@ struct AthenaServer {
 
         do {
             try await governor.ensureLoaded(.speakerEmbedding)
+            // M41.3 per-request speaker-embedding model selection.
+            if let m = form.text("model"), !m.isEmpty {
+                try await selectable(.speakerEmbedding).rebind(to: m)
+            }
         } catch let e as AthenaError {
             return Self.error(
                 status: HTTPResponse.Status(code: e.httpStatus),
@@ -1307,6 +1321,13 @@ struct AthenaServer {
             return Self.classified(error, module: .speakerEmbedding)
         }
 
+        // M41.3: response.model echoes the id ACTUALLY served (post-
+        // rebind), not the form-field passthrough — same truthful-echo
+        // discipline as the M39 embedding batch.
+        let selSpeaker = selectable(.speakerEmbedding)
+        let resSpeaker = await selSpeaker.residentModelId()
+        let defSpeaker = await selSpeaker.defaultModelId()
+        let servedSpeaker = resSpeaker ?? defSpeaker
         return Self.json(
             SpeakerEmbeddingResponse(
                 object: "list",
@@ -1318,7 +1339,7 @@ struct AthenaServer {
                         embedding: s.embedding,
                         duration_seconds: s.durationSeconds)
                 },
-                model: form.text("model") ?? "athena-speaker-embedding",
+                model: servedSpeaker,
                 dimension: result.dimension))
     }
 
