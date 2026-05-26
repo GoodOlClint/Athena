@@ -6,27 +6,18 @@ import XCTest
 /// Parity guard for the vendored Qwen3.5: the substrate's config Codable
 /// was copied + type-renamed, so this asserts it still decodes a real
 /// Qwen3.5 `config.json`. Pure (no MLX); skips when the model isn't on
-/// this machine so CI without the external SSD stays green.
+/// this machine so CI without a local model stays green.
 final class AthenaModelsConfigTests: XCTestCase {
 
     func testVendoredConfigDecodesRealQwen35() throws {
         // The default checkpoint (MTP-preserving, coherent after the
-        // norm-shift fix). Prefers the small local mtp model so this runs
-        // without the external SSD; falls back to the SSD 27B; else skips.
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let candidates = [
-            home.appendingPathComponent(
-                "mlx-models/Qwen3.5-2B-4bit-mtp/config.json"),
-            URL(
-                fileURLWithPath:
-                    "/Volumes/SB-XTM5/mlx-models/Qwen3.5-27B-4bit-mtp/config.json"
-            ),
-        ]
-        guard
-            let configURL = candidates.first(where: {
-                FileManager.default.fileExists(atPath: $0.path)
-            })
-        else {
+        // norm-shift fix). Looks for a small local mtp model under
+        // `~/mlx-models/`; skips when absent so CI on a vanilla host
+        // stays green.
+        let configURL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(
+                "mlx-models/Qwen3.5-2B-4bit-mtp/config.json")
+        guard FileManager.default.fileExists(atPath: configURL.path) else {
             throw XCTSkip("no Qwen3.5 mtp model present on this machine")
         }
         let data = try Data(contentsOf: configURL)

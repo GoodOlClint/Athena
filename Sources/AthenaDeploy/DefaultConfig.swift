@@ -43,7 +43,7 @@ public enum DefaultConfig {
         # model = "Qwen3.5-27B-4bit-mtp"
         # Model-store ROOT. Commented ⇒ "~/.athena/models" of the
         # daemon's user. Set to relocate the store (e.g. an external SSD).
-        # model_store = "/Volumes/SB-XTM5/mlx-models"
+        # model_store = "/Volumes/<your-disk>/mlx-models"
 
 
         # ── Inference tuning (commented ⇒ built-in default) ───────────

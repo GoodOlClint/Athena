@@ -32,10 +32,12 @@ final class SpeculativeGateTests: XCTestCase {
 /// ModelStore path resolution — pure logic, no MLX, always runs in CI.
 final class ModelStoreTests: XCTestCase {
 
-    func testDefaultResolvesToExternalSSDModel() {
-        let url = ModelStore().resolve(nil)
+    func testNilReferenceResolvesToDefaultModelUnderStoreRoot() {
+        let store = ModelStore(
+            rootDirectory: URL(fileURLWithPath: "/tmp/store"))
         XCTAssertEqual(
-            url.path, "/Volumes/SB-XTM5/mlx-models/Qwen3.5-27B-4bit-mtp")
+            store.resolve(nil).path,
+            "/tmp/store/" + ModelStore.defaultModelName)
     }
 
     func testEmptyStringResolvesToDefault() {
