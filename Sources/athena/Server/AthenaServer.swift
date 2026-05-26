@@ -1864,8 +1864,12 @@ struct AthenaServer {
             // Same greedy-only guard as the sync paths (issue #1) —
             // surfaced as a job error rather than HTTP 400 because the
             // submit endpoint already accepted the body; the contract
-            // violation only becomes evident at execution.
-            if req.speculative == true, let t = req.temperature, t > 0 {
+            // violation only becomes evident at execution. The same
+            // M40.2 env-flag bypass applies so the sampling-mode loop
+            // can be host-validated through the queued path too.
+            if req.speculative == true, let t = req.temperature, t > 0,
+                !SpeculativeSampling.enabledForNonZeroTemperature
+            {
                 return (
                     nil,
                     "speculative=true requires temperature=0 (greedy only "
@@ -3459,14 +3463,20 @@ struct AthenaServer {
             status: status)
     }
 
-    /// MTP speculative is greedy-only (issue #1). An explicit
-    /// `speculative=true` request paired with a non-zero `temperature`
-    /// gets a 400 with a clear code rather than a silent fallback. nil
-    /// when the request is fine, a 400 Response when it's a conflict.
+    /// MTP speculative is greedy-only in production through M40.2
+    /// (issue #1). An explicit `speculative=true` paired with non-zero
+    /// `temperature` gets a 400 with a clear code rather than a silent
+    /// fallback. The internal `ATHENA_ENABLE_SAMPLING_SPECULATIVE=1`
+    /// kill-switch stands the guard down so the sampling-mode loop
+    /// (M40.2 wiring) can be host-validated end-to-end; M40.3 removes
+    /// both the guard and the env flag.
     static func rejectSpeculativeWithTemperature(
         speculative: Bool?, temperature: Double?
     ) -> Response? {
         guard speculative == true, let t = temperature, t > 0 else {
+            return nil
+        }
+        if SpeculativeSampling.enabledForNonZeroTemperature {
             return nil
         }
         return error(

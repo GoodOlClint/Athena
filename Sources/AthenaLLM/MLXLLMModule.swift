@@ -231,7 +231,8 @@ public actor MLXLLMModule: LLMModule {
                         messages: messages, schemaJSON: schemaJSON,
                         tools: tools, maxTokens: maxTokens,
                         requestSpeculative: speculative,
-                        requestTemperature: temperature)
+                        requestTemperature: temperature,
+                        requestTopP: topP, requestSeed: seed)
                     {
                         usage = speculative.usage
                         continuation.yield(.text(speculative.text))
@@ -283,38 +284,50 @@ public actor MLXLLMModule: LLMModule {
         }
     }
 
-    /// MTP greedy speculative path. Returns the full decoded text, or nil
-    /// when not eligible (speculative off, temp>0, or no MTP head) so the
-    /// caller falls back to the standard substrate stream. Non-streaming:
-    /// one decode of the full id sequence keeps the bit-identical-greedy
-    /// comparison unambiguous.
+    /// MTP speculative path — greedy at temp == 0 (bit-identical to the
+    /// non-speculative greedy path) AND sampling-mode at temp > 0 (M40.2,
+    /// internal: gated on `ATHENA_ENABLE_SAMPLING_SPECULATIVE=1`).
     /// Returns the full decoded text, or nil to fall back to the
     /// unconstrained substrate stream. A structured request (`schemaJSON`)
     /// ALWAYS takes a guided path (greedy): the MTP speculative loop when
     /// eligible (faster), else a plain guided-greedy loop. An
-    /// unstructured request takes the opt-in speculative path only.
+    /// unstructured request takes the opt-in speculative path only;
+    /// sampling-mode is unstructured-only (the Guide masks to one valid
+    /// token, so sampling has no meaning there).
     private func runSpeculative(
         messages: [ChatTurn], schemaJSON: String?,
         tools: [[String: any Sendable]]?, maxTokens: Int?,
         requestSpeculative: Bool?,
-        requestTemperature: Double?
+        requestTemperature: Double?,
+        requestTopP: Double?,
+        requestSeed: Int?
     ) async throws -> (text: String, usage: TokenUsage)? {
         guard let container else { return nil }
         // Per-request override (the consuming application intent): if the caller
         // explicitly passes `speculative=true/false`, that wins for THIS
-        // request; if nil, fall back to the daemon's loaded default. The
-        // greedy-only constraint is per-call too — an explicit
-        // `speculative=true` with `temperature>0` is already rejected
-        // upstream (400) by the server; here we only need to compute the
-        // effective temperature for eligibility, treating an opt-in
-        // request as implicitly greedy when no temperature was supplied.
+        // request; if nil, fall back to the daemon's loaded default. An
+        // opt-in `speculative=true` without an explicit temperature
+        // stays implicitly greedy (temperature 0) so the older
+        // "speculative implies greedy" contract is preserved through
+        // M40.2; sampling-mode requires both `speculative=true` AND an
+        // explicit `temperature > 0`.
         let effectiveSpec = requestSpeculative ?? params.speculative
         let effectiveTemp: Double =
             requestTemperature
             ?? (requestSpeculative == true ? 0.0 : Double(params.temperature))
-        let speculativeEligible =
-            effectiveSpec && effectiveTemp == 0
-        if schemaJSON == nil && !speculativeEligible { return nil }
+        let greedyEligible = effectiveSpec && effectiveTemp == 0
+        // M40.2: sampling-mode speculative is gated behind the env flag
+        // until M40.3 lifts it for production. Structured/guided is out
+        // of scope (the Guide masks to one valid token; sampling has no
+        // meaning), so `schemaJSON == nil` is the hard precondition.
+        let samplingEligible =
+            effectiveSpec
+            && effectiveTemp > 0
+            && schemaJSON == nil
+            && SpeculativeSampling.enabledForNonZeroTemperature
+        if schemaJSON == nil && !greedyEligible && !samplingEligible {
+            return nil
+        }
 
         let lmInput = try await container.prepare(
             input: UserInput(
@@ -353,6 +366,19 @@ public actor MLXLLMModule: LLMModule {
         let vocabTokens = cachedVocabTokens
 
         let cfgVocab = configVocabSize
+        // Resolve sampling knobs for the M40.2 sampling-mode branch
+        // outside the (non-isolated) closure: same positive-wins
+        // resolution the standard substrate path uses, expressed in
+        // the types the pure-math helper wants. Inert when the branch
+        // doesn't engage (greedy path ignores them).
+        let samplingTemp = Float(effectiveTemp)
+        let samplingTopP: Float? = {
+            if let t = requestTopP, t > 0, t < 1 { return Float(t) }
+            if params.topP > 0, params.topP < 1 { return params.topP }
+            return nil
+        }()
+        let samplingSeed: Int? =
+            requestSeed.flatMap { $0 >= 0 ? $0 : nil }
         // The closure returns the decoded text plus the completion token
         // count (`ids.count`); the prompt count is `promptTokens.count`
         // from the outer scope. nil ⇒ fall back to the substrate stream.
@@ -391,11 +417,21 @@ public actor MLXLLMModule: LLMModule {
                 model.triAttentionEviction = nil
 
                 let ids: [Int]
-                if speculativeEligible && model.hasMTPHead {
+                if greedyEligible && model.hasMTPHead {
                     ids = SpeculativeGeneration.generate(
                         model: model, promptTokens: promptTokens,
                         maxTokens: maxTokens,
                         eosTokenId: ctx.tokenizer.eosTokenId, guide: guide)
+                } else if samplingEligible && model.hasMTPHead {
+                    // M40.2 sampling-mode (internal). The Guide is nil
+                    // here by construction — `samplingEligible` requires
+                    // `schemaJSON == nil`.
+                    ids = SpeculativeSampling.generate(
+                        model: model, promptTokens: promptTokens,
+                        maxTokens: maxTokens,
+                        eosTokenId: ctx.tokenizer.eosTokenId,
+                        temperature: samplingTemp,
+                        topP: samplingTopP, seed: samplingSeed)
                 } else if guide != nil {
                     // Structured but no speculative/MTP path available.
                     ids = GuidedGreedy.generate(
