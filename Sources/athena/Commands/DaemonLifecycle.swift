@@ -108,20 +108,21 @@ struct Start: AsyncParsableCommand {
             flags += ["--auth-keys-file", authKeysFile]
         }
 
-        // Spawn the sibling `athenad` daemon (M14.2d); fall back to
-        // re-exec `athena load` in a tree without it.
+        // Spawn `athena load …` directly. Was: spawn the sibling
+        // `athenad` (M14.2d) which `execv`-ed `athena` with
+        // `argv[0]="athena"` (bare). That argv[0] / kernel-binary-path
+        // discrepancy made Swift's `Bundle.main.bundleURL` resolve to
+        // the wrong directory under macOS hardened-runtime spawn
+        // semantics, so mlx-c's SwiftPM-bundle lookup couldn't find
+        // `mlx-swift_Cmlx.bundle` and `MLX.Memory.memoryLimit = …`
+        // crashed the daemon with "Failed to load the default metallib
+        // library not found …" on first MLX init. Spawning the
+        // self-binary keeps argv[0] aligned with the resolved path —
+        // same fix as the M42 launchd plist.
         let selfPath = selfExecutable()
-        let daemonPath =
-            (selfPath as NSString).deletingLastPathComponent
-            + "/athenad"
         let proc = Process()
-        if FileManager.default.isExecutableFile(atPath: daemonPath) {
-            proc.executableURL = URL(fileURLWithPath: daemonPath)
-            proc.arguments = flags
-        } else {
-            proc.executableURL = URL(fileURLWithPath: selfPath)
-            proc.arguments = ["load"] + flags
-        }
+        proc.executableURL = URL(fileURLWithPath: selfPath)
+        proc.arguments = ["load"] + flags
         proc.standardOutput = logFH
         proc.standardError = logFH
         proc.standardInput = FileHandle.nullDevice

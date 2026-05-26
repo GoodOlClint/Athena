@@ -115,7 +115,7 @@ struct Install: AsyncParsableCommand {
         // `--data-dir`, so cwd doesn't need to BE the data dir.
         let plistData = try LaunchdPlist.xmlData(
             label: label,
-            executablePath: plan.installedDaemon.path,
+            executablePath: plan.installedBinary.path,
             user: serviceUser,
             workingDirectory: plan.libexecDir.path,
             config: cfg)

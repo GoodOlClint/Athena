@@ -1660,6 +1660,23 @@ echo "$DR" | tr '\n' ' ' \
   | grep -qE '<key>WorkingDirectory</key>[[:space:]]*<string>[^<]*libexec/athena</string>' \
   && ok "launchd WorkingDirectory points at libexec (metallib reachable)" \
   || bad "launchd WorkingDirectory does not target libexec ($DR)"
+# v0.10.40: launchd MUST exec `athena load …` directly. The pre-fix
+# plist ran `athenad`, which `execv`-ed `athena` with `argv[0]="athena"`
+# (bare); under launchd that argv[0]/binary-path discrepancy broke
+# Swift's Bundle.main resolution, so mlx-c couldn't find its SwiftPM
+# bundle and the daemon failed with "Failed to load the default
+# metallib library not found …" on first MLX call. Foreground
+# `athena load` was unaffected (shell preserved the full path as
+# argv[0]). The plist's ProgramArguments[0] now points at the athena
+# binary, with "load" as the first arg.
+echo "$DR" | tr '\n' ' ' \
+  | grep -qE '<key>ProgramArguments</key>[[:space:]]*<array>[[:space:]]*<string>[^<]*/athena</string>[[:space:]]*<string>load</string>' \
+  && ok "launchd exec target = athena (not athenad) + first arg = load" \
+  || bad "launchd ProgramArguments not '<athena> load …' ($DR)"
+echo "$DR" | tr '\n' ' ' \
+  | grep -q 'athenad</string>' \
+  && bad "launchd plist still references athenad (regressed)" \
+  || ok "launchd plist no longer references athenad"
 rm -rf "$IT"
 # Explicit --config to a missing path still errors (unchanged behavior).
 EC="$("$ATHENA_ABS" install --config /no/such/athena.toml --dry-run 2>&1)"

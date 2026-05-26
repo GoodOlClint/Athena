@@ -13,10 +13,23 @@ public enum LaunchdPlist {
         workingDirectory: String,
         config: AthenaConfig
     ) -> [String: Any] {
-        // `executablePath` is the `athenad` launcher (M14.2d): it
-        // execs `athena load` itself, so no "load" arg here.
+        // `executablePath` is the `athena` binary itself; the launchd
+        // daemon runs `athena load …` directly. The pre-M42 plist
+        // execed the `athenad` shim, which then `execv`-ed `athena`
+        // with `argv[0]="athena"` (bare). Under launchd, that argv[0]
+        // / actual-binary-path discrepancy made Swift's
+        // `Bundle.main.bundleURL` resolve to the wrong directory, so
+        // mlx-c's SwiftPM-bundle lookup couldn't find
+        // `mlx-swift_Cmlx.bundle` and `MLX.Memory.memoryLimit = …`
+        // threw "Failed to load the default metallib library not
+        // found …" four times at first call. Foreground `athena load`
+        // worked because the shell exec preserved the full path as
+        // argv[0]. Skipping `athenad` from the launchd path keeps
+        // argv[0] aligned with the kernel's view, so Bundle.main
+        // resolves correctly.
         var args: [String] = [
             executablePath,
+            "load",
             "--host", config.listenHost,
             "--port", String(config.listenPort),
         ]
