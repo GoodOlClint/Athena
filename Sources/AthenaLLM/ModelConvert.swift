@@ -38,9 +38,15 @@ public enum ModelConvert {
     /// `progress` (0…1) covers the DOWNLOAD phase only; the
     /// quantization tail has no HF progress. Default nil keeps the
     /// daemon/queue caller unchanged.
+    ///
+    /// `bits` is **opt-in** (matching `mlx_lm convert -q`/`ollama
+    /// --quantize`): nil ⇒ no quantization, the model is converted into
+    /// the MLX-native on-disk layout in source precision (output name
+    /// `<base>-mlx`); set to N ⇒ quantize to N-bit with `groupSize`
+    /// (output name `<base>-Nbit`, as before).
     public static func convert(
         id: String, revision: String? = nil,
-        bits: Int = 4, groupSize: Int = 64,
+        bits: Int? = nil, groupSize: Int = 64,
         into storeRoot: URL, name: String? = nil,
         progress: (@Sendable (Double) -> Void)? = nil
     ) async throws -> Result {
@@ -66,7 +72,8 @@ public enum ModelConvert {
             from: snapshot, using: #huggingFaceTokenizerLoader())
 
         let base = id.split(separator: "/").last.map(String.init) ?? id
-        let outName = name ?? "\(base)-\(bits)bit"
+        let outName =
+            name ?? (bits.map { "\(base)-\($0)bit" } ?? "\(base)-mlx")
         let dest = storeRoot.appendingPathComponent(
             outName, isDirectory: true)
         try? FileManager.default.removeItem(at: dest)
@@ -82,7 +89,9 @@ public enum ModelConvert {
             // `any LanguageModel` is always a `Module` subclass
             // (BaseLanguageModel: Module), so this is an upcast.
             let model = ctx.model as Module
-            quantize(model: model, groupSize: groupSize, bits: bits)
+            if let bits {
+                quantize(model: model, groupSize: groupSize, bits: bits)
+            }
             let weights = Dictionary(
                 uniqueKeysWithValues:
                     model.parameters().flattened())
@@ -118,8 +127,10 @@ public enum ModelConvert {
 
     /// Rewrite config.json with a `quantization` block so the loader
     /// rebuilds quantized layers; all other model fields are preserved.
+    /// `bits == nil` ⇒ no-quantize convert: copy the config through
+    /// unchanged (no `quantization` block).
     private static func writeConfig(
-        from snapshot: URL, to dest: URL, bits: Int, groupSize: Int
+        from snapshot: URL, to dest: URL, bits: Int?, groupSize: Int
     ) throws {
         let src = snapshot.appendingPathComponent("config.json")
             .resolvingSymlinksInPath()
@@ -131,9 +142,11 @@ public enum ModelConvert {
             throw AthenaError.moduleLoadFailed(
                 .llm, reason: "source config.json is not an object")
         }
-        obj["quantization"] = [
-            "group_size": groupSize, "bits": bits,
-        ]
+        if let bits {
+            obj["quantization"] = [
+                "group_size": groupSize, "bits": bits,
+            ]
+        }
         let out = try JSONSerialization.data(
             withJSONObject: obj,
             options: [.prettyPrinted, .sortedKeys])

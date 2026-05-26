@@ -3,24 +3,39 @@ import AthenaClient
 import AthenaLLM
 import Foundation
 
-/// `athena convert MODEL` — download an HF repo and quantize it into
-/// the model store (the `mlx_lm.convert` equivalent, in-process). M9.5a.
+/// `athena convert MODEL` — download an HF repo and convert it into
+/// the model store (the `mlx_lm.convert` equivalent, in-process), with
+/// optional quantization. M9.5a.
 struct Convert: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "convert",
-        abstract: "Quantize an HF model into the local store."
+        abstract:
+            "Convert an HF model into the local MLX-format store "
+            + "(optionally quantize)."
     )
 
     @Argument(help: "HF repo id, e.g. Qwen/Qwen3.5-27B")
     var model: String
 
-    @Option(help: "Quantization bits (default 4).")
-    var qBits: Int = 4
+    @Option(
+        help: """
+            Quantize to N-bit. OMIT to convert without quantizing (the
+            model is written in source precision, MLX-native layout).
+            Matches `mlx_lm convert -q` / `ollama --quantize`: quantization
+            is opt-in.
+            """
+    )
+    var qBits: Int?
 
-    @Option(help: "Quantization group size (default 64).")
+    @Option(help: "Quantization group size (default 64; only with --q-bits).")
     var qGroupSize: Int = 64
 
-    @Option(help: "Output name in the store (default <repo>-<bits>bit).")
+    @Option(
+        help: """
+            Output name in the store. Default: <repo>-<bits>bit when
+            --q-bits is set, otherwise <repo>-mlx.
+            """
+    )
     var name: String?
 
     @Option(help: "Git revision / branch / tag (remote only).")
@@ -40,8 +55,9 @@ struct Convert: AsyncParsableCommand {
     func run() async throws {
         if daemon.isRemote {
             var b: [String: Any] = [
-                "id": model, "bits": qBits, "group_size": qGroupSize,
+                "id": model, "group_size": qGroupSize,
             ]
+            if let qBits { b["bits"] = qBits }
             if let name { b["name"] = name }
             if let revision { b["revision"] = revision }
             try await RemoteModels.job(
@@ -54,8 +70,10 @@ struct Convert: AsyncParsableCommand {
             ?? ModelStore.defaultRoot
         ProxyEnv.applyConfigAndAuth()  // egress proxy (M13.2)
         HFAuth.exportToEnv()  // gated/private repos (M13)
-        print("converting \(model) → \(qBits)-bit (download, "
-            + "then quantize) …")
+        let target =
+            qBits.map { "\($0)-bit" } ?? "MLX format (no quantization)"
+        let tail = qBits == nil ? "save" : "quantize"
+        print("converting \(model) → \(target) (download, then \(tail)) …")
         let bar = ProgressBar("  \(model)")
         do {
             let r = try await ModelConvert.convert(

@@ -1955,9 +1955,11 @@ struct AthenaServer {
                     ModelConvertRequest.self, from: request)
             else { return (nil, "invalid model_convert body") }
             do {
+                // M-conv: `bits` is opt-in (mlx_lm-style). Omit ⇒ no
+                // quantization; explicit N ⇒ quantize to N-bit.
                 let r = try await ModelConvert.convert(
                     id: req.id, revision: req.revision,
-                    bits: req.bits ?? 4,
+                    bits: req.bits,
                     groupSize: req.group_size ?? 64,
                     into: modelStoreRoot, name: req.name)
                 return (

@@ -153,9 +153,10 @@ non-loopback deployment needs TLS. Two options — pick one, never both:
 
 ## Next steps
 
-- **Models** — `athena pull <hf-id>`, `athena convert` (quantize),
-  `athena ls`, `athena default <name>`, `athena init` (pull the
-  auxiliary embedding/transcription/diarization models).
+- **Models** — `athena pull <hf-id>`, `athena convert <hf-id>` (MLX
+  conversion; pass `--q-bits 4` to also quantize), `athena ls`,
+  `athena default <name>`, `athena init` (pull the auxiliary
+  embedding/transcription/diarization models).
 - **Config** — `athena config get|set <key>`; see
   [deploy/athena.toml](../deploy/athena.toml) for every key.
 - **Diagnostics** — `athena doctor` (read-only environment + TLS + rate
