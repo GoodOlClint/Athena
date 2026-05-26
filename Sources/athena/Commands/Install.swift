@@ -101,11 +101,23 @@ struct Install: AsyncParsableCommand {
                 from: previousVersion, to: Athena.appVersion)
             == .downgrade
 
+        // The LaunchDaemon's cwd MUST be the libexec dir (the binary's
+        // enclosing directory + every `*.bundle` resource sits there).
+        // mlx-swift's `Bundle.module` resolver falls back through a
+        // chain of cwd-adjacent candidates to locate
+        // `mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib`;
+        // when cwd is the data dir (`/usr/local/var/athena`) those
+        // candidates all miss and the daemon prints "Failed to load
+        // the default metallib library not found …" four times at
+        // first MLX call. Foreground `athena load` worked because the
+        // operator's shell cwd happened to be the build/install dir.
+        // The daemon still addresses its data dir explicitly via
+        // `--data-dir`, so cwd doesn't need to BE the data dir.
         let plistData = try LaunchdPlist.xmlData(
             label: label,
             executablePath: plan.installedDaemon.path,
             user: serviceUser,
-            workingDirectory: plan.workingDir.path,
+            workingDirectory: plan.libexecDir.path,
             config: cfg)
 
         if dryRun {

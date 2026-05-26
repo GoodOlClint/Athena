@@ -1649,6 +1649,17 @@ echo "$DR" | grep -q "listen_port = 7447" \
 echo "$DR" | grep -q "<key>Label</key>" \
   && ok "dry-run still renders the launchd plist" \
   || bad "dry-run plist missing"
+# v0.10.39: the LaunchDaemon's WorkingDirectory MUST be the libexec
+# dir so mlx-swift's Bundle.module resolver finds
+# `mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib` via the
+# cwd-adjacent candidate chain. cwd=data_dir leaves MLX printing
+# "Failed to load the default metallib library not found …" on every
+# init at launchd-spawned startup; foreground `athena load` works
+# because the operator's shell cwd happens to be the build dir.
+echo "$DR" | tr '\n' ' ' \
+  | grep -qE '<key>WorkingDirectory</key>[[:space:]]*<string>[^<]*libexec/athena</string>' \
+  && ok "launchd WorkingDirectory points at libexec (metallib reachable)" \
+  || bad "launchd WorkingDirectory does not target libexec ($DR)"
 rm -rf "$IT"
 # Explicit --config to a missing path still errors (unchanged behavior).
 EC="$("$ATHENA_ABS" install --config /no/such/athena.toml --dry-run 2>&1)"
