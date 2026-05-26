@@ -177,6 +177,18 @@ grep -q "auth: enabled (RBAC" "$D/daemon.log" \
 
 code 401 POST /v1/chat/completions "" "$CHAT"          # no token
 code 401 POST /v1/chat/completions "sk-athena-bogus" "$CHAT"
+# v0.10.38 — auth-deny bodies must be valid JSON. The pre-fix
+# hand-formatted string produced three consecutive double-quotes
+# between `auth_error,` and `"code"`, breaking strict JSON parsers.
+DENYBODY="$(curl -s "http://127.0.0.1:$PORT/v1/chat/completions" \
+  -H 'Content-Type: application/json' -d "$CHAT")"
+echo "$DENYBODY" | python3 -c 'import json,sys; json.loads(sys.stdin.read())' \
+  >/dev/null 2>&1 \
+  && ok "auth deny body parses as JSON" \
+  || bad "auth deny body is malformed JSON ($DENYBODY)"
+echo "$DENYBODY" | grep -q '"code":"unauthorized"' \
+  && ok "auth deny body carries code:unauthorized" \
+  || bad "auth deny body missing code field ($DENYBODY)"
 code 200 POST /v1/chat/completions "$ALICE_TOK" "$CHAT" # member: inference
 code 200 GET  /metrics "$ADMIN_TOK"                     # admin: all
 code 403 GET  /metrics "$ALICE_TOK"                     # member ∌ metricsRead

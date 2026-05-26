@@ -408,11 +408,23 @@ struct AuthMiddleware<Context: RequestContext>: RouterMiddleware {
     private static func deny(
         _ status: HTTPResponse.Status, _ msg: String, _ code: String
     ) -> Response {
-        let body =
-            #"{"error":{"message":"\#(msg)","type":"auth_error",""#
-            + #""code":"\#(code)"}}"#
+        // JSON-encoded so the message + code can carry any character
+        // safely. The hand-formatted predecessor concatenated two raw
+        // string literals around a `","` seam, which produced
+        // `"type":"auth_error",""code":` — three quotes — and broke
+        // JSON parsing for clients that strict-parse the error body.
+        let envelope: [String: Any] = [
+            "error": [
+                "message": msg,
+                "type": "auth_error",
+                "code": code,
+            ]
+        ]
+        let bodyData =
+            (try? JSONSerialization.data(withJSONObject: envelope))
+            ?? Data(#"{"error":{"message":"auth error"}}"#.utf8)
         var buf = ByteBuffer()
-        buf.writeBytes(Data(body.utf8))
+        buf.writeBytes(bodyData)
         var headers = HTTPFields()
         headers[.contentType] = "application/json"
         if status == .unauthorized {
