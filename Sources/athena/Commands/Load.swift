@@ -466,6 +466,7 @@ struct Load: AsyncParsableCommand {
         case .mlx:
             llm = MLXLLMModule(
                 modelDirectories: llmURLs,
+                modelStoreRoot: store.rootDirectory,
                 parameters: .init(
                     maxTokens: maxTokens,
                     temperature: Float(temperature ?? 0.7),

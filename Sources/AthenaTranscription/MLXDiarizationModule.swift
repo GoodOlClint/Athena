@@ -20,8 +20,8 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
     public nonisolated let id: ModuleID = .diarization
     public nonisolated var moduleID: ModuleID { .diarization }
 
-    private let allowedIds: [String]
-    private let defaultId: String
+    private var allowedIds: [String]
+    private var defaultId: String
     private let estimatedBytes: Int
     private var model: SortformerModel?
     private var residentId: String?
@@ -99,6 +99,15 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
         model = nil
         residentId = nil
         try await loadModel(id: target)
+    }
+
+    public func setAllowedModelIds(_ ids: [String]) {
+        allowedIds = ids
+        defaultId = ids.first ?? defaultId
+        if let r = residentId, !ids.contains(r) {
+            model = nil
+            residentId = nil
+        }
     }
 
     public func diarize(

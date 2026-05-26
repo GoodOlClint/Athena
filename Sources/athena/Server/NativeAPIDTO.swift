@@ -119,6 +119,38 @@ struct ModelUnloadResponse: Codable {
     let status: String  // "unloaded"
 }
 
+// MARK: - /api/models/allow (M42 — persistent operator-declared
+// allowlist; survives daemon restarts. CLI flags are first-boot seeds
+// only; mutations here are the source of truth from M42 onward).
+
+struct AllowlistEntryDTO: Codable {
+    let module: String  // ModuleID.rawValue
+    let id: String
+    let `default`: Bool
+    let declared: Double  // epoch seconds
+}
+
+struct AllowlistResponse: Codable {
+    let allowlist: [AllowlistEntryDTO]
+}
+
+struct AddAllowlistRequest: Codable {
+    let module: String
+    let id: String
+    let `default`: Bool?
+}
+
+struct AllowlistMutationResponse: Codable {
+    let module: String
+    let id: String
+    let status: String  // "added" | "removed" | "default_set"
+}
+
+struct SetAllowlistDefaultRequest: Codable {
+    let module: String
+    let id: String
+}
+
 /// `/api/admin/status` — native daemon + RBAC posture for a remote
 /// admin (distinct from open `/healthz` governor state and
 /// `/metrics`). M16.5.

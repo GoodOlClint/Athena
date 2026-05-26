@@ -71,8 +71,8 @@ public actor StubSpeakerEmbeddingModule: SpeakerEmbeddingModule,
 
     private let reserveBytes: Int
     private let dimension = 256
-    private let modelIds: [String]
-    private let defaultId: String
+    private var modelIds: [String]
+    private var defaultId: String
     private var residentId: String?
 
     public init(
@@ -104,6 +104,12 @@ public actor StubSpeakerEmbeddingModule: SpeakerEmbeddingModule,
                 requested: target, available: modelIds)
         }
         residentId = target
+    }
+
+    public func setAllowedModelIds(_ ids: [String]) {
+        modelIds = ids
+        defaultId = ids.first ?? defaultId
+        if let r = residentId, !ids.contains(r) { residentId = nil }
     }
 
     public func embed(

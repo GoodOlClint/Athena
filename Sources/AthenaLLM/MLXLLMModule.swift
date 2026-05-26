@@ -69,8 +69,12 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     /// or when a request omits `model`). A request whose `model` is
     /// outside this map is `modelNotAvailable` (400) — never a silent
     /// fallback, never an on-request download.
-    private let modelDirectories: [(name: String, url: URL)]
-    private let defaultName: String
+    /// M42.2: mutable so the persistent allowlist can be pushed in at
+    /// runtime; `modelStoreRoot` lets us resolve a newly-allowed name
+    /// to its directory without operator restart.
+    private var modelDirectories: [(name: String, url: URL)]
+    private var defaultName: String
+    private let modelStoreRoot: URL
     private let params: LLMGenerationParameters
     /// Governor admission estimate. M41.2 sizes this as the MAX across
     /// the allowlist, so the fixed slot bounds the largest member —
@@ -109,7 +113,9 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
 
     /// Single-model convenience init kept for source-compat with M27/M40
     /// call sites; forwards to the M41.2 list form with a 1-entry
-    /// allowlist.
+    /// allowlist. The store root is inferred from the directory's
+    /// parent (so new ids added via /api/models/allow at runtime
+    /// resolve to siblings of the seed model).
     public init(
         modelDirectory: URL,
         parameters: LLMGenerationParameters = .init(),
@@ -117,14 +123,19 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     ) {
         self.init(
             modelDirectories: [modelDirectory],
+            modelStoreRoot: modelDirectory.deletingLastPathComponent(),
             parameters: parameters,
             promptCacheCapBytes: promptCacheCapBytes)
     }
 
     /// M41.2: operator-declared list (first = default). Empty ⇒
     /// precondition trap — every daemon must declare at least one LLM.
+    /// `modelStoreRoot` (M42.2) is the directory that hosts every
+    /// declared model and any later additions via /api/models/allow;
+    /// defaults to the parent of `urls[0]` for source-compat.
     public init(
         modelDirectories urls: [URL],
+        modelStoreRoot: URL? = nil,
         parameters: LLMGenerationParameters = .init(),
         promptCacheCapBytes: Int = 0
     ) {
@@ -135,6 +146,8 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             (name: $0.lastPathComponent, url: $0)
         }
         self.defaultName = self.modelDirectories[0].name
+        self.modelStoreRoot =
+            modelStoreRoot ?? urls[0].deletingLastPathComponent()
         self.params = parameters
         // MAX across the allowlist so the slot still bounds the largest
         // declared member after a rebind.
@@ -301,6 +314,30 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         residentName = nil
         cachedVocabTokens = nil
         try await loadModel(name: target)
+    }
+
+    public func setAllowedModelIds(_ ids: [String]) {
+        // Resolve every name to a URL under the model store root. An
+        // absolute path (rare; an operator who pre-knows the directory)
+        // is honored as-is. New names get a fresh URL; existing names
+        // keep their URL.
+        let existing = Dictionary(
+            uniqueKeysWithValues: modelDirectories.map { ($0.name, $0.url) })
+        modelDirectories = ids.map { name in
+            let url =
+                existing[name]
+                ?? (name.hasPrefix("/")
+                    ? URL(fileURLWithPath: name, isDirectory: true)
+                    : modelStoreRoot.appendingPathComponent(
+                        name, isDirectory: true))
+            return (name: name, url: url)
+        }
+        defaultName = modelDirectories.first?.name ?? defaultName
+        if let r = residentName, !ids.contains(r) {
+            container = nil
+            residentName = nil
+            cachedVocabTokens = nil
+        }
     }
 
     public nonisolated func generate(prompt: String) -> AsyncStream<String> {

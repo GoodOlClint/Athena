@@ -22,8 +22,8 @@ public actor StubTranscriptionModule: TranscriptionModule, ModelSelectable {
     public nonisolated var moduleID: ModuleID { .transcription }
 
     private let reserveBytes: Int
-    private let modelIds: [String]
-    private let defaultId: String
+    private var modelIds: [String]
+    private var defaultId: String
     private var residentId: String?
 
     public init(
@@ -55,6 +55,12 @@ public actor StubTranscriptionModule: TranscriptionModule, ModelSelectable {
                 requested: target, available: modelIds)
         }
         residentId = target
+    }
+
+    public func setAllowedModelIds(_ ids: [String]) {
+        modelIds = ids
+        defaultId = ids.first ?? defaultId
+        if let r = residentId, !ids.contains(r) { residentId = nil }
     }
 
     public func transcribe(

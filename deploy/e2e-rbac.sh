@@ -913,6 +913,72 @@ S_BAD=$(curl -s -o /tmp/sbad.json -w '%{http_code}' \
   || bad "speaker-embedding unknown model not refused ($S_BAD: $(cat /tmp/sbad.json))"
 
 echo
+echo "== phase 3.685: persistent allowlist via /api/models/allow (M42) =="
+# Read = model.read; mutations = model.write. RBAC mirrors the rest
+# of /api/models/*. Add/remove/default round-trip + the running
+# module's allowlist refreshes in place (so the next inference
+# validates against the new set without a restart).
+code 401 GET    /api/models/allow ""
+code 200 GET    /api/models/allow "$ADMIN_TOK"
+code 200 GET    /api/models/allow "$RO_TOK"        # readonly ∋ read
+code 403 POST   /api/models/allow "$ALICE_TOK" '{"module":"textEmbedding","id":"athena-embedding-third"}'
+code 403 POST   /api/models/allow "$RO_TOK"    '{"module":"textEmbedding","id":"athena-embedding-third"}'
+# Add a third id to the textEmbedding allowlist.
+code 200 POST   /api/models/allow "$ADMIN_TOK" '{"module":"textEmbedding","id":"athena-embedding-third"}'
+ALL="$(curl -s -H "Authorization: Bearer $ADMIN_TOK" \
+  "http://127.0.0.1:$PORT/api/models/allow?module=textEmbedding")"
+echo "$ALL" | grep -q '"id":"athena-embedding-third"' \
+  && ok "allow add: row visible in /api/models/allow" \
+  || bad "allow add: row missing ($ALL)"
+# Live refresh: the next /v1/embeddings request with the new id rebinds
+# successfully (would have been 400 model_not_available pre-mutation).
+EOK="$(curl -s -X POST -H "Authorization: Bearer $ALICE_TOK" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"athena-embedding-third","input":"hi"}' \
+  "http://127.0.0.1:$PORT/v1/embeddings")"
+echo "$EOK" | grep -q '"model":"athena-embedding-third"' \
+  && ok "live refresh: new id served without daemon restart" \
+  || bad "live refresh: new id not served ($EOK)"
+# Mark the new id as default; subsequent default-request must serve it.
+code 200 PUT    /api/models/allow/default "$ADMIN_TOK" '{"module":"textEmbedding","id":"athena-embedding-third"}'
+EDEF="$(curl -s -X POST -H "Authorization: Bearer $ALICE_TOK" \
+  -H 'Content-Type: application/json' \
+  -d '{"input":"hi"}' \
+  "http://127.0.0.1:$PORT/v1/embeddings")"
+echo "$EDEF" | grep -q '"model":"athena-embedding-third"' \
+  && ok "allow default: nil-model request serves the new default" \
+  || bad "allow default: default did not change ($EDEF)"
+# Remove the new default; the resident slot is invalidated and the
+# next nil-model request serves whichever row now sits at position 0.
+code 200 DELETE "/api/models/allow?module=textEmbedding&id=athena-embedding-third" "$ADMIN_TOK"
+EREM="$(curl -s -X POST -H "Authorization: Bearer $ALICE_TOK" \
+  -H 'Content-Type: application/json' \
+  -d '{"input":"hi"}' \
+  "http://127.0.0.1:$PORT/v1/embeddings")"
+echo "$EREM" | grep -q '"model":"athena-embedding-third"' \
+  && bad "allow rm: removed id still resident ($EREM)" \
+  || ok "allow rm: resident slot rotated to a remaining row"
+# A subsequent inference with the removed id is now a 400.
+code 400 POST /v1/embeddings "$ALICE_TOK" \
+  '{"model":"athena-embedding-third","input":"hi"}'
+# Audit captures the three mutations.
+AUDA="$(curl -s -H "Authorization: Bearer $ADMIN_TOK" \
+  "http://127.0.0.1:$PORT/api/audit?action=model.allow.add&limit=20")"
+echo "$AUDA" | grep -q 'model.allow.add' \
+  && ok "audit recorded model.allow.add" \
+  || bad "audit missing model.allow.add ($AUDA)"
+AUDD="$(curl -s -H "Authorization: Bearer $ADMIN_TOK" \
+  "http://127.0.0.1:$PORT/api/audit?action=model.allow.default&limit=20")"
+echo "$AUDD" | grep -q 'model.allow.default' \
+  && ok "audit recorded model.allow.default" \
+  || bad "audit missing model.allow.default ($AUDD)"
+AUDR="$(curl -s -H "Authorization: Bearer $ADMIN_TOK" \
+  "http://127.0.0.1:$PORT/api/audit?action=model.allow.rm&limit=20")"
+echo "$AUDR" | grep -q 'model.allow.rm' \
+  && ok "audit recorded model.allow.rm" \
+  || bad "audit missing model.allow.rm ($AUDR)"
+
+echo
 echo "== phase 3.69: inference-time rebind audited (M41.4) =="
 # An /v1/embeddings request that names a NON-resident allowlist member
 # rebinds the slot in place + audits the change (trigger=inference).

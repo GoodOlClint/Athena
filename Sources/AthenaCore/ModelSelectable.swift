@@ -24,4 +24,14 @@ public protocol ModelSelectable: Actor {
     /// an id outside `allowedModelIds()` (400) and
     /// `AthenaError.moduleLoadFailed` on a substrate failure.
     func rebind(to id: String?) async throws
+
+    /// M42.2 — replace the live allowlist (the persistent
+    /// `model_allowlist` table is the source of truth; this push keeps
+    /// the running module in sync after an operator edit). `ids[0]` is
+    /// the new default. An empty list leaves the slot un-servable
+    /// until the next `add` — the next rebind/inference 400s
+    /// (explicit failure, the safe direction). If the currently
+    /// resident model is no longer in the new set, callers should
+    /// `unload` the slot; this method does not implicitly evict.
+    func setAllowedModelIds(_ ids: [String]) async
 }

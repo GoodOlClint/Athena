@@ -191,8 +191,8 @@ public actor StubLLMModule: LLMModule, ModelSelectable {
     public nonisolated var moduleID: ModuleID { .llm }
 
     private let reserveBytes: Int
-    private let modelIds: [String]
-    private let defaultId: String
+    private var modelIds: [String]
+    private var defaultId: String
     private var residentId: String?
 
     /// `reserveBytes` defaults to a representative multi-GB LLM footprint so
@@ -235,6 +235,14 @@ public actor StubLLMModule: LLMModule, ModelSelectable {
                 requested: target, available: modelIds)
         }
         residentId = target
+    }
+
+    public func setAllowedModelIds(_ ids: [String]) {
+        modelIds = ids
+        defaultId = ids.first ?? defaultId
+        if let r = residentId, !ids.contains(r) {
+            residentId = nil
+        }
     }
 
     public nonisolated func generate(prompt: String) -> AsyncStream<String> {

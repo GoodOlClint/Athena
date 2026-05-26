@@ -14,8 +14,8 @@ public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule,
     public nonisolated let id: ModuleID = .speakerEmbedding
     public nonisolated var moduleID: ModuleID { .speakerEmbedding }
 
-    private let allowedIds: [String]
-    private let defaultId: String
+    private var allowedIds: [String]
+    private var defaultId: String
     private let estimatedBytes: Int
     private var model: WeSpeakerModel?
     private var residentId: String?
@@ -94,6 +94,15 @@ public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule,
         model = nil
         residentId = nil
         try await loadModel(id: target)
+    }
+
+    public func setAllowedModelIds(_ ids: [String]) {
+        allowedIds = ids
+        defaultId = ids.first ?? defaultId
+        if let r = residentId, !ids.contains(r) {
+            model = nil
+            residentId = nil
+        }
     }
 
     public func embed(

@@ -28,8 +28,8 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
     /// `modelNotAvailable` 400 — a request can never trigger an arbitrary
     /// HF download. (Future governor evolution: a multi-resident pool so
     /// hot models stay loaded; today it is one-at-a-time.)
-    private let allowedIds: [String]
-    private let defaultId: String
+    private var allowedIds: [String]
+    private var defaultId: String
     private let estimatedBytes: Int
     private var container: EmbedderModelContainer?
     /// The id currently resident in `container` (nil ⇒ nothing loaded).
@@ -87,6 +87,15 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
         container = nil
         residentId = nil
         try await loadContainer(target)
+    }
+
+    public func setAllowedModelIds(_ ids: [String]) {
+        allowedIds = ids
+        defaultId = ids.first ?? defaultId
+        if let r = residentId, !ids.contains(r) {
+            container = nil
+            residentId = nil
+        }
     }
 
     /// Load `id` into the single resident slot, replacing whatever was

@@ -16,8 +16,10 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
 
     /// M41.3 operator-declared allowlist (HF ids; the substrate's HF
     /// cache is the load source). First-declared = the default.
-    private let allowedIds: [String]
-    private let defaultId: String
+    /// M42.2: mutable so the persistent DB allowlist can be pushed in
+    /// at runtime without a daemon restart.
+    private var allowedIds: [String]
+    private var defaultId: String
     private let estimatedBytes: Int
     private var model: WhisperModel?
     private var tokenizer: (any MLXLMCommon.Tokenizer)?
@@ -105,6 +107,16 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
         tokenizer = nil
         residentId = nil
         try await loadModel(id: target)
+    }
+
+    public func setAllowedModelIds(_ ids: [String]) {
+        allowedIds = ids
+        defaultId = ids.first ?? defaultId
+        if let r = residentId, !ids.contains(r) {
+            model = nil
+            tokenizer = nil
+            residentId = nil
+        }
     }
 
     public func transcribe(

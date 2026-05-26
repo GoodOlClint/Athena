@@ -42,8 +42,8 @@ public actor StubEmbeddingModule: EmbeddingModule, ModelSelectable {
     public nonisolated let id: ModuleID = .textEmbedding
     public nonisolated var moduleID: ModuleID { .textEmbedding }
 
-    private let allowedIds: [String]
-    private let defaultId: String
+    private var allowedIds: [String]
+    private var defaultId: String
     private let reserveBytes: Int
     /// nil ⇒ unloaded. The stub has no real container; the value tracks
     /// which id is "resident" for M39/M41 selection + rebind semantics.
@@ -82,6 +82,12 @@ public actor StubEmbeddingModule: EmbeddingModule, ModelSelectable {
                 requested: target, available: allowedIds)
         }
         residentId = target
+    }
+
+    public func setAllowedModelIds(_ ids: [String]) {
+        allowedIds = ids
+        defaultId = ids.first ?? defaultId
+        if let r = residentId, !ids.contains(r) { residentId = nil }
     }
 
     /// Deterministic 8-dim pseudo-embedding (FNV-1a byte folds). Not
