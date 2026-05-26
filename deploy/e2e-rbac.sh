@@ -121,7 +121,7 @@ stop_daemon() {
   DPID=""
 }
 
-CHAT='{"model":"x","messages":[{"role":"user","content":"hi"}]}'
+CHAT='{"model":"Qwen3.5-27B-4bit-mtp","messages":[{"role":"user","content":"hi"}]}'
 
 echo
 echo "== phase 0: seed RBAC subjects (offline CLI) =="
@@ -189,7 +189,7 @@ echo "== phase 2.1: OpenAI finish_reason length on truncation (M31.2) =="
 # A positive max_tokens truncates the stub stream ⇒ finish_reason
 # "length"; an uncapped request ends naturally ⇒ "stop". Same signal on
 # the sync body and the terminal SSE chunk.
-CHATCAP='{"model":"x","messages":[{"role":"user","content":"hi"}],"max_tokens":2}'
+CHATCAP='{"model":"Qwen3.5-27B-4bit-mtp","messages":[{"role":"user","content":"hi"}],"max_tokens":2}'
 FRL="$(curl -s -H "Authorization: Bearer $ALICE_TOK" \
   -H 'Content-Type: application/json' -d "$CHATCAP" \
   "http://127.0.0.1:$PORT/v1/chat/completions")"
@@ -204,7 +204,7 @@ echo "$FRS" | grep -q '"finish_reason":"stop"' \
   || bad "sync finish_reason not stop ($FRS)"
 SSEL="$(curl -s -N -H "Authorization: Bearer $ALICE_TOK" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"x","messages":[{"role":"user","content":"hi"}],"stream":true,"max_tokens":2}' \
+  -d '{"model":"Qwen3.5-27B-4bit-mtp","messages":[{"role":"user","content":"hi"}],"stream":true,"max_tokens":2}' \
   "http://127.0.0.1:$PORT/v1/chat/completions")"
 echo "$SSEL" | grep -q '"finish_reason":"length"' \
   && ok "SSE truncation ⇒ terminal finish_reason length" \
@@ -218,18 +218,18 @@ echo "== phase 2.2: OpenAI sampling params — stop/seed/top_p + 400s (M31.3) ==
 # Unsupported under greedy/MTP/structured determinism ⇒ a clear 400
 # (NOT a silent ignore). Member token clears auth so the handler runs.
 code 400 POST /v1/chat/completions "$ALICE_TOK" \
-  '{"model":"x","messages":[{"role":"user","content":"hi"}],"n":2}'
+  '{"model":"Qwen3.5-27B-4bit-mtp","messages":[{"role":"user","content":"hi"}],"n":2}'
 code 400 POST /v1/chat/completions "$ALICE_TOK" \
-  '{"model":"x","messages":[{"role":"user","content":"hi"}],"logprobs":true}'
+  '{"model":"Qwen3.5-27B-4bit-mtp","messages":[{"role":"user","content":"hi"}],"logprobs":true}'
 code 400 POST /v1/chat/completions "$ALICE_TOK" \
-  '{"model":"x","messages":[{"role":"user","content":"hi"}],"logit_bias":{"50256":-100}}'
+  '{"model":"Qwen3.5-27B-4bit-mtp","messages":[{"role":"user","content":"hi"}],"logit_bias":{"50256":-100}}'
 # n:1 is the supported single-decode case ⇒ 200.
 code 200 POST /v1/chat/completions "$ALICE_TOK" \
-  '{"model":"x","messages":[{"role":"user","content":"hi"}],"n":1}'
+  '{"model":"Qwen3.5-27B-4bit-mtp","messages":[{"role":"user","content":"hi"}],"n":1}'
 # top_p/seed are accepted (inert on the stub's model-less path) ⇒ 200.
 TPS="$(curl -s -H "Authorization: Bearer $ALICE_TOK" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"x","messages":[{"role":"user","content":"hi"}],"top_p":0.9,"seed":42}' \
+  -d '{"model":"Qwen3.5-27B-4bit-mtp","messages":[{"role":"user","content":"hi"}],"top_p":0.9,"seed":42}' \
   "http://127.0.0.1:$PORT/v1/chat/completions")"
 echo "$TPS" | grep -q '"finish_reason":"stop"' \
   && ok "top_p+seed accepted ⇒ 200/stop" \
@@ -238,7 +238,7 @@ echo "$TPS" | grep -q '"finish_reason":"stop"' \
 # the text after the sequence is gone (string form).
 STOPR="$(curl -s -H "Authorization: Bearer $ALICE_TOK" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"x","messages":[{"role":"user","content":"hi"}],"stop":"governed"}' \
+  -d '{"model":"Qwen3.5-27B-4bit-mtp","messages":[{"role":"user","content":"hi"}],"stop":"governed"}' \
   "http://127.0.0.1:$PORT/v1/chat/completions")"
 echo "$STOPR" | grep -q '"finish_reason":"stop"' \
   && ok "stop hit ⇒ finish_reason stop" \
@@ -249,7 +249,7 @@ echo "$STOPR" | grep -q 'governed' \
 # stop also accepts an array form, applied on the SSE stream.
 SSES="$(curl -s -N -H "Authorization: Bearer $ALICE_TOK" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"x","messages":[{"role":"user","content":"hi"}],"stream":true,"stop":["governed"]}' \
+  -d '{"model":"Qwen3.5-27B-4bit-mtp","messages":[{"role":"user","content":"hi"}],"stream":true,"stop":["governed"]}' \
   "http://127.0.0.1:$PORT/v1/chat/completions")"
 echo "$SSES" | grep -q '"finish_reason":"stop"' \
   && ok "SSE stop ⇒ terminal finish_reason stop" \
@@ -585,7 +585,7 @@ echo "$LU" | grep -q 'u:alice' \
 
 echo
 echo "== phase 2.12: streamed usage — stream_options.include_usage (M27.4) =="
-SREQ='{"model":"x","messages":[{"role":"user","content":"hi"}],"stream":true,"stream_options":{"include_usage":true}}'
+SREQ='{"model":"Qwen3.5-27B-4bit-mtp","messages":[{"role":"user","content":"hi"}],"stream":true,"stream_options":{"include_usage":true}}'
 SBODY="$(curl -s -N -X POST -H "Authorization: Bearer $ALICE_TOK" \
   -H 'Content-Type: application/json' -d "$SREQ" \
   "http://127.0.0.1:$PORT/v1/chat/completions")"
@@ -599,7 +599,7 @@ echo "$SBODY" | grep -q '\[DONE\]' \
   && ok "stream still terminates with [DONE]" \
   || bad "stream missing [DONE] ($SBODY)"
 # Without opting in, a streamed response carries NO usage object.
-NREQ='{"model":"x","messages":[{"role":"user","content":"hi"}],"stream":true}'
+NREQ='{"model":"Qwen3.5-27B-4bit-mtp","messages":[{"role":"user","content":"hi"}],"stream":true}'
 NBODY="$(curl -s -N -X POST -H "Authorization: Bearer $ALICE_TOK" \
   -H 'Content-Type: application/json' -d "$NREQ" \
   "http://127.0.0.1:$PORT/v1/chat/completions")"
@@ -817,6 +817,40 @@ AUD2="$(curl -s -H "Authorization: Bearer $ADMIN_TOK" \
 echo "$AUD2" | grep -q 'model.unload' \
   && ok "audit trail recorded model.unload (M41 + M30)" \
   || bad "audit trail missing model.unload ($AUD2)"
+
+echo
+echo "== phase 3.67: per-request LLM model selection (M41.2) =="
+# body.model on /v1/chat/completions and /api/chat SELECTS among the
+# operator-declared LLM allowlist (--llm-model, repeatable). Default
+# daemon was started without --llm-model ⇒ a single-id allowlist
+# ("Qwen3.5-27B-4bit-mtp"). The echo + resident snapshot must reflect
+# the served model truthfully; an unknown id is a 400.
+CHATM="$(curl -s -X POST \
+  -H "Authorization: Bearer $ALICE_TOK" \
+  -H 'Content-Type: application/json' \
+  -d "$CHAT" \
+  "http://127.0.0.1:$PORT/v1/chat/completions")"
+echo "$CHATM" | grep -q '"model":"Qwen3.5-27B-4bit-mtp"' \
+  && ok "chat response.model echoes resident id (default allowlist)" \
+  || bad "chat response.model not resident id ($CHATM)"
+# An LLM id outside the allowlist ⇒ 400 model_not_available.
+code 400 POST /v1/chat/completions "$ALICE_TOK" \
+  '{"model":"nope/not-in-allowlist","messages":[{"role":"user","content":"hi"}]}'
+LBAD="$(curl -s -X POST -H "Authorization: Bearer $ALICE_TOK" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"nope/not-in-allowlist","messages":[{"role":"user","content":"hi"}]}' \
+  "http://127.0.0.1:$PORT/v1/chat/completions")"
+echo "$LBAD" | grep -q 'model_not_available' \
+  && ok "chat unknown model ⇒ model_not_available" \
+  || bad "chat unknown model not refused ($LBAD)"
+# Native chat: same per-request gate.
+ABAD="$(curl -s -X POST -H "Authorization: Bearer $ALICE_TOK" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"nope/not-in-allowlist","messages":[{"role":"user","content":"hi"}]}' \
+  "http://127.0.0.1:$PORT/api/chat")"
+echo "$ABAD" | grep -q 'model_not_available' \
+  && ok "native chat unknown model ⇒ model_not_available" \
+  || bad "native chat unknown model not refused ($ABAD)"
 
 echo
 echo "== phase 3.65: OpenAI model discovery /v1/models (M31.1) =="
@@ -1769,7 +1803,7 @@ echo "$TO" | grep -q '"code":"inference_timeout"' \
 # truncates and still closes the wire cleanly with data: [DONE].
 SR="$(curl -s -N -H "Authorization: Bearer $ALICE_TOK" \
   -H "Content-Type: application/json" \
-  -d '{"model":"x","stream":true,"messages":[{"role":"user","content":"hi"}]}' \
+  -d '{"model":"Qwen3.5-27B-4bit-mtp","stream":true,"messages":[{"role":"user","content":"hi"}]}' \
   "http://127.0.0.1:$PORT/v1/chat/completions")"
 echo "$SR" | grep -q "data: \[DONE\]" \
   && ok "streamed generation truncates but closes with [DONE]" \

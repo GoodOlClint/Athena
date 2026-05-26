@@ -684,25 +684,15 @@ struct AthenaServer {
                 code: "unsupported_parameter")
         }
 
-        // The governed path: load the LLM under the global budget. A budget
-        // event becomes a classified 503 here, never a Metal abort.
-        do {
-            try await governor.ensureLoaded(.llm)
-        } catch let e as AthenaError {
-            return Self.error(
-                status: HTTPResponse.Status(code: e.httpStatus),
-                message: e.message,
-                type: "server_error",
-                code: e.code)
-        } catch {
-            return Self.error(
-                status: .internalServerError,
-                message: String(describing: error),
-                type: "server_error",
-                code: "internal_error")
+        // The governed path: load the LLM under the global budget and
+        // (M41.2) rebind the slot to body.model when the request asks for
+        // a specific allowlist member — a budget event still becomes a
+        // 503 here; an unknown id becomes a 400 `model_not_available`
+        // (never a silent fallback or on-request download).
+        if let err = await governedLLM(requestedModel: body.model) {
+            return err
         }
-
-        let model = body.model ?? "athena-stub"
+        let model = await servedLLMModel()
         // M24.1: carry the FULL conversation (system/user/assistant/tool)
         // into the model, not a user-only join — system instructions and
         // prior turns must reach the chat template. A message with no text
@@ -1869,6 +1859,12 @@ struct AthenaServer {
             }
             do {
                 try await governor.ensureLoaded(.llm)
+                // M41.2: a queued job selects the LLM model the same
+                // way the sync chat handler does — rebind under the
+                // governor before the preflight + decode.
+                if let m = req.model, !m.isEmpty {
+                    try await selectable(.llm).rebind(to: m)
+                }
                 try await llm.preflightPromptCache(messages: turns)
             } catch let e as AthenaError {
                 return (nil, e.message)
@@ -1906,12 +1902,15 @@ struct AthenaServer {
             // job result so a polled queued job carries the SAME
             // `choices[0].message.{content,tool_calls}` shape as the sync
             // endpoint — one result envelope across sync and async.
-            // M27.1: the envelope carries real `usage` too.
+            // M27.1/.2: the envelope carries real `usage` too. M41.2: the
+            // `model` field reports the LLM actually served (post-rebind),
+            // not the unused request echo.
+            let servedModel = await servedLLMModel()
             return (
                 try? JSONEncoder().encode(
                     Self.chatCompletionResponse(
                         id: "chatcmpl-\(UUID().uuidString)",
-                        model: req.model ?? modelName,
+                        model: servedModel,
                         created: Int(Date().timeIntervalSince1970),
                         text: text,
                         isToolCall: effective?.isToolCall == true,
@@ -2033,14 +2032,17 @@ struct AthenaServer {
         }
     }
 
-    /// Governed gate for `/api/chat`: ensureLoaded(.llm) + the 4b
-    /// prompt-cache preflight, both classified. Returns an error
+    /// Governed gate for `/api/chat`: ensureLoaded(.llm) + (M41.2)
+    /// optional per-request rebind to `requestedModel` + the 4b
+    /// prompt-cache preflight, all classified. Returns an error
     /// `Response` to send, or nil when the request may proceed.
     private func governedPreflight(
-        messages: [ChatTurn]
+        messages: [ChatTurn], requestedModel: String? = nil
     ) async -> Response? {
+        if let err = await governedLLM(requestedModel: requestedModel) {
+            return err
+        }
         do {
-            try await governor.ensureLoaded(.llm)
             try await llm.preflightPromptCache(messages: messages)
             return nil
         } catch let e as AthenaError {
@@ -2092,14 +2094,18 @@ struct AthenaServer {
             fatalError()
         }
         // M24.1: full conversation reaches the model (system + prior
-        // turns), not a user-only join.
+        // turns), not a user-only join. M41.2: body.model selects the
+        // LLM slot's resident model from the allowlist (governedPreflight
+        // does the rebind under the governor).
         let turns = body.messages.map {
             ChatTurn(role: $0.role, content: $0.content)
         }
-        if let err = await governedPreflight(messages: turns) {
+        if let err = await governedPreflight(
+            messages: turns, requestedModel: body.model)
+        {
             return err
         }
-        let model = body.model ?? modelName
+        let model = await servedLLMModel()
         if body.stream == true {
             return Self.streamNDJSON(
                 tokens: deadlineBounded(
@@ -2401,6 +2407,40 @@ struct AthenaServer {
     }
 
     // MARK: - Per-module model lifecycle (M41.1)
+
+    /// M41.2 — governed LLM gate: ensure the slot is loaded, then if
+    /// `requestedModel` is non-empty and differs from the resident,
+    /// rebind in place (validated against the allowlist; an unknown id
+    /// becomes a classified 400 `model_not_available`). Returns an
+    /// error `Response` to short-circuit, or nil when the request may
+    /// proceed.
+    private func governedLLM(requestedModel: String?) async -> Response? {
+        do {
+            try await governor.ensureLoaded(.llm)
+            if let m = requestedModel, !m.isEmpty {
+                let sel = selectable(.llm)
+                try await sel.rebind(to: m)
+            }
+        } catch let e as AthenaError {
+            return Self.error(
+                status: HTTPResponse.Status(code: e.httpStatus),
+                message: e.message, type: "server_error", code: e.code)
+        } catch {
+            return Self.classified(error, module: .llm)
+        }
+        return nil
+    }
+
+    /// The id actually resident in the LLM slot; falls back to the
+    /// module's default when the slot is somehow still empty. Used for
+    /// truthful `model` echo on responses (M41.2 — same discipline as
+    /// the M39 embedding batch).
+    private func servedLLMModel() async -> String {
+        let sel = selectable(.llm)
+        if let r = await sel.residentModelId() { return r }
+        return await sel.defaultModelId()
+    }
+
 
     /// The `any ModelSelectable` corresponding to `id`. Every concrete
     /// module conforms (the stubs too), so this is total — no `nil`.

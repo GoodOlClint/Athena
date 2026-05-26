@@ -66,6 +66,19 @@ struct Load: AsyncParsableCommand {
     @Option(help: "Model directory path, or a name under the model store.")
     var model: String?
 
+    @Option(
+        name: .customLong("llm-model"),
+        help: """
+            LLM model id (store name or absolute directory). Repeatable: \
+            pass it more than once to make several models selectable \
+            per-request via the `model` body field; the FIRST is the \
+            default (used when a request omits `model`). An id outside \
+            this set is a 400 (`model_not_available`) — never an \
+            on-request download. When unset, falls back to --model. M41.2.
+            """
+    )
+    var llmModels: [String] = []
+
     @Option(help: "Model store root. Default: ~/.athena/models.")
     var modelStore: String?
 
@@ -331,7 +344,14 @@ struct Load: AsyncParsableCommand {
             rootDirectory: modelStore.map {
                 URL(fileURLWithPath: $0, isDirectory: true)
             } ?? ModelStore.defaultRoot)
-        let modelURL = store.resolve(model)
+        // M41.2: --llm-model is the new repeatable allowlist. If unset,
+        // desugar from the single --model so existing scripts keep
+        // working unchanged. Either way the FIRST entry is the default
+        // (used when a request omits `model`).
+        let llmRefs: [String?] =
+            llmModels.isEmpty ? [model] : llmModels.map { Optional($0) }
+        let llmURLs = llmRefs.map { store.resolve($0) }
+        let modelURL = llmURLs[0]
 
         // M23 fork B: a VALID kv_compression codec that can't serve the
         // loaded architecture (TriAttention eviction is Qwen3.5-only)
@@ -358,10 +378,14 @@ struct Load: AsyncParsableCommand {
         let llm: any LLMModule
         switch engine {
         case .stub:
-            llm = StubLLMModule()
+            // M41.2: surface the operator-declared LLM allowlist on the
+            // stub too so /api/models/resident and per-request model
+            // selection exercise the same selectable shape as MLX.
+            llm = StubLLMModule(
+                modelIds: llmURLs.map { $0.lastPathComponent })
         case .mlx:
             llm = MLXLLMModule(
-                modelDirectory: modelURL,
+                modelDirectories: llmURLs,
                 parameters: .init(
                     maxTokens: maxTokens,
                     temperature: Float(temperature ?? 0.7),

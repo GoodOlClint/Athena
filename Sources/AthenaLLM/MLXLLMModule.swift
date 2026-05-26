@@ -64,19 +64,28 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     public nonisolated let id: ModuleID = .llm
     public nonisolated var moduleID: ModuleID { .llm }
 
-    private let modelDirectory: URL
-    /// M41: store-name (the directory's lastPathComponent) is the
-    /// public id exposed via `/api/models/resident`. M41.1 keeps the
-    /// single-id allowlist; M41.2 generalizes to a repeatable set with
-    /// per-request rebind.
-    private let modelName: String
+    /// M41.2: operator-declared allowlist as store-name → directory URL.
+    /// First-declared = the default (loaded when the slot first comes up
+    /// or when a request omits `model`). A request whose `model` is
+    /// outside this map is `modelNotAvailable` (400) — never a silent
+    /// fallback, never an on-request download.
+    private let modelDirectories: [(name: String, url: URL)]
+    private let defaultName: String
     private let params: LLMGenerationParameters
+    /// Governor admission estimate. M41.2 sizes this as the MAX across
+    /// the allowlist, so the fixed slot bounds the largest member —
+    /// admitting a small default but later rebinding to a giant would
+    /// otherwise under-account. Same approach M39 took (implicit) for
+    /// embeddings.
     private let estimatedBytes: Int
     private var container: ModelContainer?
+    /// Currently-resident model name (nil ⇒ slot unloaded).
+    private var residentName: String?
     /// Cached structured-output vocabulary tokens (the ~150k
     /// `tokenizer.decode` calls are model-fixed and schema-independent —
     /// build once, reuse every structured request). Sendable, so it
-    /// crosses into the `container.perform` closure safely.
+    /// crosses into the `container.perform` closure safely. M41.2:
+    /// invalidated on rebind — different models have different vocabs.
     private var cachedVocabTokens:
         (tokens: [VocabToken], eos: UInt32, opener: [UInt32: UInt32])?
 
@@ -92,40 +101,67 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     /// constant when the dims are absent. TurboQuant stores ~4-bit K/V so
     /// it gets a quarter of the fp16 bound (still over-estimates — the
     /// safe direction for an OOM guard). M20.2 / M23 fork C.
-    private let perTokenKVBytes: Int
-    /// `vocab_size` from config.json, captured at init so structured
-    /// output works on any architecture (the vendored Qwen3.5 model
-    /// exposes it directly; substrate arches do not). M23 fork A.
-    private let configVocabSize: Int?
+    /// M41.2: recomputed on each rebind from the new model's config.
+    private var perTokenKVBytes: Int
+    /// `vocab_size` from config.json (captured per loaded model). M23
+    /// fork A; M41.2 makes it per-rebind.
+    private var configVocabSize: Int?
 
+    /// Single-model convenience init kept for source-compat with M27/M40
+    /// call sites; forwards to the M41.2 list form with a 1-entry
+    /// allowlist.
     public init(
         modelDirectory: URL,
         parameters: LLMGenerationParameters = .init(),
         promptCacheCapBytes: Int = 0
     ) {
-        self.modelDirectory = modelDirectory
-        self.modelName = modelDirectory.lastPathComponent
+        self.init(
+            modelDirectories: [modelDirectory],
+            parameters: parameters,
+            promptCacheCapBytes: promptCacheCapBytes)
+    }
+
+    /// M41.2: operator-declared list (first = default). Empty ⇒
+    /// precondition trap — every daemon must declare at least one LLM.
+    public init(
+        modelDirectories urls: [URL],
+        parameters: LLMGenerationParameters = .init(),
+        promptCacheCapBytes: Int = 0
+    ) {
+        precondition(
+            !urls.isEmpty,
+            "MLXLLMModule needs at least one model directory")
+        self.modelDirectories = urls.map {
+            (name: $0.lastPathComponent, url: $0)
+        }
+        self.defaultName = self.modelDirectories[0].name
         self.params = parameters
-        self.estimatedBytes = Self.estimateBytes(forModelAt: modelDirectory)
+        // MAX across the allowlist so the slot still bounds the largest
+        // declared member after a rebind.
+        self.estimatedBytes = urls.lazy
+            .map { Self.estimateBytes(forModelAt: $0) }
+            .max() ?? 0
         self.promptCacheCapBytes = promptCacheCapBytes
 
-        // Size the prompt-cache cap from the model's own KV geometry. The
-        // old flat 256 KiB constant over-capped small models ~8× (refusing
-        // valid prompts) and would under-cap an arch with larger KV — the
-        // dangerous direction. Fall back to the conservative constant when
-        // config.json omits the dims. M23 fork C.
-        let info = ModelConfigInfo.read(modelDirectory: modelDirectory)
+        // Initial cap geometry seeded from the DEFAULT model; rebind
+        // recomputes from the new model's config.
+        let info = ModelConfigInfo.read(modelDirectory: urls[0])
         self.configVocabSize = info?.vocabSize
         let fp16PerToken =
             info?.perTokenKVBytes(bytesPerElement: 2) ?? (256 * 1024)
-        // TurboQuant ~4-bit K/V → a quarter of the fp16 bound (still
-        // conservative). TriAttention does NOT shrink per-token bytes (it
-        // caps token COUNT and pins the prefill at full precision), so it
-        // keeps the full fp16 bound like `none`.
         switch parameters.kvCompression {
         case .turboquant: self.perTokenKVBytes = max(1, fp16PerToken / 4)
         case .none, .triattention: self.perTokenKVBytes = fp16PerToken
         }
+    }
+
+    private func directoryURL(for name: String) -> URL? {
+        modelDirectories.first { $0.name == name }?.url
+    }
+
+    private var residentDirectory: URL {
+        directoryURL(for: residentName ?? defaultName)
+            ?? modelDirectories[0].url
     }
 
     /// Brief 4b: refuse a prompt whose KV/prompt-cache would exceed the
@@ -166,6 +202,26 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
 
     public func load(reservation: MemoryReservation) async throws {
         if container != nil { return }
+        try await loadModel(name: residentName ?? defaultName)
+    }
+
+    public func unload() async {
+        container = nil
+        residentName = nil
+        cachedVocabTokens = nil
+    }
+
+    /// M41.2 — load `name`'s directory into `container` and (re)seed the
+    /// per-model state (KV geometry, vocab size, structured-output cache
+    /// invalidation, registry's Qwen3.5 routing). Caller guarantees
+    /// `name` is in the allowlist; container is left nil on failure so
+    /// the next request reattempts.
+    private func loadModel(name: String) async throws {
+        guard let url = directoryURL(for: name) else {
+            throw AthenaError.modelNotAvailable(
+                requested: name,
+                available: modelDirectories.map { $0.name })
+        }
         // Route Qwen3.5 directories to Athena's vendored model so the
         // substrate stays pristine. Idempotent; must precede the load.
         // Debug seam: ATHENA_DISABLE_VENDORED_MODEL=1 keeps the substrate's
@@ -175,17 +231,16 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         {
             // Tell the registry which checkpoint is about to load so it
             // can suppress the MTP head when the weights lack mtp.*.
-            AthenaModelRegistration.currentModelDirectory = modelDirectory
+            AthenaModelRegistration.currentModelDirectory = url
             await AthenaModelRegistration.install()
         }
         guard
             FileManager.default.fileExists(
-                atPath: modelDirectory.appendingPathComponent("config.json").path)
+                atPath: url.appendingPathComponent("config.json").path)
         else {
             throw AthenaError.moduleLoadFailed(
                 .llm,
-                reason:
-                    "no model at \(modelDirectory.path) (missing config.json)")
+                reason: "no model at \(url.path) (missing config.json)")
         }
         // Resolve the store-entry symlink: `athena pull` lands a model as
         // a symlink (~/.athena/models/<name> → HF snapshot dir). The
@@ -193,31 +248,59 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         // follow a symlinked ROOT, so it would load ZERO shards → the model
         // fails with keyNotFound on its first parameter. Convert-produced
         // models are real dirs and were unaffected; every pulled model was.
-        self.container = try await loadModelContainer(
-            from: modelDirectory.resolvingSymlinksInPath(),
-            using: #huggingFaceTokenizerLoader())
+        let loaded: ModelContainer
+        do {
+            loaded = try await loadModelContainer(
+                from: url.resolvingSymlinksInPath(),
+                using: #huggingFaceTokenizerLoader())
+        } catch {
+            container = nil
+            residentName = nil
+            cachedVocabTokens = nil
+            throw error
+        }
+        // Refresh per-model geometry: vocab size + KV per-token bound
+        // for THIS model's config.json (each rebind may change arch).
+        let info = ModelConfigInfo.read(modelDirectory: url)
+        configVocabSize = info?.vocabSize
+        let fp16PerToken =
+            info?.perTokenKVBytes(bytesPerElement: 2) ?? (256 * 1024)
+        switch params.kvCompression {
+        case .turboquant: perTokenKVBytes = max(1, fp16PerToken / 4)
+        case .none, .triattention: perTokenKVBytes = fp16PerToken
+        }
+        // Different model ⇒ a fresh structured-vocab cache; the old
+        // tokens belong to the previous tokenizer.
+        cachedVocabTokens = nil
+        container = loaded
+        residentName = name
     }
 
-    public func unload() async {
-        container = nil
+    // M41 — ModelSelectable. M41.2 generalizes to a repeatable
+    // `--llm-model` allowlist (M41.1 shipped the protocol shape with a
+    // single-id allowlist).
+    public func allowedModelIds() -> [String] {
+        modelDirectories.map { $0.name }
     }
-
-    // M41 — ModelSelectable. M41.1 single-id allowlist: the loaded
-    // directory's store name. M41.2 generalizes to a repeatable
-    // `--llm-model` set with per-request rebind.
-    public func allowedModelIds() -> [String] { [modelName] }
-    public func defaultModelId() -> String { modelName }
+    public func defaultModelId() -> String { defaultName }
     public func residentModelId() -> String? {
-        container == nil ? nil : modelName
+        container == nil ? nil : residentName
     }
     public func rebind(to id: String?) async throws {
-        let target = id ?? modelName
-        guard target == modelName else {
+        let target = id ?? defaultName
+        let allowed = modelDirectories.map { $0.name }
+        guard allowed.contains(target) else {
             throw AthenaError.modelNotAvailable(
-                requested: target, available: [modelName])
+                requested: target, available: allowed)
         }
-        // Single-id allowlist: rebind to the resident id is a no-op,
-        // and any other target was just rejected above.
+        if residentName == target, container != nil { return }
+        // Drop the current container (and its caches) before swapping
+        // so the substrate's working set is released before the new
+        // load — same fixed governor reservation either way.
+        container = nil
+        residentName = nil
+        cachedVocabTokens = nil
+        try await loadModel(name: target)
     }
 
     public nonisolated func generate(prompt: String) -> AsyncStream<String> {
