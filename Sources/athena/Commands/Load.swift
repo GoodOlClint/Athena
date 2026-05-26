@@ -6,6 +6,7 @@ import AthenaEmbedding
 import AthenaLLM
 import AthenaStore
 import AthenaTranscription
+import Darwin
 import Foundation
 import Logging
 import MLX
@@ -346,12 +347,23 @@ struct Load: AsyncParsableCommand {
         // buffer pool can't overshoot the box into a Metal OOM.
         MLX.Memory.memoryLimit = config.totalBudgetBytes
 
-        // M5.1: reconcile reservations to the real Metal/MLX footprint.
+        // M5.1 + M5.5 (M41 follow-up): reconcile reservations to the
+        // real Metal/MLX footprint. The probe is process RSS, NOT
+        // `MLX.Memory.activeMemory` — the latter sees only the MLX
+        // allocator's buffer pool and MISSES file-backed mmaps from
+        // the HF hub cache (the embedder / whisper / diarizer / speaker
+        // load that way). On a 4B embedder with HF-cache mmaps the
+        // activeMemory delta is ~120 MB even though the process holds
+        // ~8 GB of weights; reconcile to that under-counted number
+        // and the governor's admission math is off by an order of
+        // magnitude. RSS (`mach_task_basic_info.resident_size`)
+        // captures both MLX bytes AND mmap'd weight pages — the
+        // honest "what's in this process" number.
         // M5.2: trim the MLX buffer pool whenever a module unloads so
         // freed bytes actually leave the process.
         let governor = MemoryGovernor(
             config: config,
-            memoryProbe: { MLX.Memory.activeMemory },
+            memoryProbe: { Self.processResidentBytes() },
             onUnloaded: { MLX.Memory.clearCache() },
             onEvent: { id, msg in
                 Logger(label: AthenaLogLabel.model(id))
@@ -549,5 +561,32 @@ struct Load: AsyncParsableCommand {
             vectorTtlSecs: vectorTtlSecs ?? 0,
             dropRequestContent: dropRequestContent)
         try await server.run()
+    }
+
+    /// Process resident-set bytes via Mach `task_info`. Includes
+    /// file-backed mmaps (the HF hub cache), MLX allocator pages, the
+    /// heap, and stack — i.e., "what this process is actually holding".
+    /// The governor's M5 reconcile uses this so its admission math
+    /// honestly accounts for mmap-loaded weights (the previous
+    /// `MLX.Memory.activeMemory` probe under-counted those by an order
+    /// of magnitude). Returns 0 on a Mach call failure — the governor
+    /// degrades to the pre-load estimate, which was the prior
+    /// behaviour anyway.
+    static func processResidentBytes() -> Int {
+        var info = mach_task_basic_info_data_t()
+        var count = mach_msg_type_number_t(
+            MemoryLayout<mach_task_basic_info_data_t>.stride
+                / MemoryLayout<natural_t>.stride)
+        let kerr = withUnsafeMutablePointer(to: &info) { infoPtr in
+            infoPtr.withMemoryRebound(
+                to: integer_t.self, capacity: Int(count)
+            ) { intPtr in
+                task_info(
+                    mach_task_self_,
+                    task_flavor_t(MACH_TASK_BASIC_INFO),
+                    intPtr, &count)
+            }
+        }
+        return kerr == KERN_SUCCESS ? Int(info.resident_size) : 0
     }
 }
