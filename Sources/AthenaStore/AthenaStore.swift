@@ -41,6 +41,23 @@ public struct UsageRow: Sendable, Equatable {
 /// One append-only audit-log entry (M30): a security/admin mutation —
 /// who did it, to what, and the outcome. Rows are inserted, never
 /// updated, so the trail is tamper-evident at the application layer.
+/// One row of the M42 model allowlist: (module, id) is unique;
+/// exactly one row per `module` carries `isDefault == true`.
+public struct ModelAllowlistRow: Sendable, Equatable {
+    public let module: String
+    public let id: String
+    public let isDefault: Bool
+    public let declared: Double
+    public init(
+        module: String, id: String, isDefault: Bool, declared: Double
+    ) {
+        self.module = module
+        self.id = id
+        self.isDefault = isDefault
+        self.declared = declared
+    }
+}
+
 public struct AuditRow: Sendable, Equatable {
     public let id: Int
     /// Epoch seconds of the recorded event.
@@ -196,6 +213,11 @@ public actor AthenaStore {
               action TEXT NOT NULL, target TEXT,
               result TEXT NOT NULL, detail TEXT);
             CREATE INDEX IF NOT EXISTS audit_ts ON audit_log(ts);
+            CREATE TABLE IF NOT EXISTS model_allowlist(
+              module TEXT NOT NULL, id TEXT NOT NULL,
+              is_default INTEGER NOT NULL DEFAULT 0,
+              declared REAL NOT NULL,
+              PRIMARY KEY(module, id));
             """)
         // Migration for stores created before M12.6 (no IF NOT
         // EXISTS for columns; the dup-column error is expected and
@@ -779,6 +801,125 @@ public actor AthenaStore {
             throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
         }
         return Int(sqlite3_changes(db))
+    }
+
+    // MARK: Model allowlist (M42 — operator-declared per-module
+    // selectable set, persisted across daemon restarts; one row per
+    // (module, id), exactly one row per module marked `is_default`).
+
+    public func listModelAllowlist(module: String? = nil)
+        -> [ModelAllowlistRow]
+    {
+        let sql: String
+        if module != nil {
+            sql =
+                "SELECT module,id,is_default,declared "
+                + "FROM model_allowlist WHERE module=? "
+                + "ORDER BY is_default DESC, declared ASC;"
+        } else {
+            sql =
+                "SELECT module,id,is_default,declared "
+                + "FROM model_allowlist "
+                + "ORDER BY module, is_default DESC, declared ASC;"
+        }
+        guard let st = try? Self.prepared(db, sql) else { return [] }
+        defer { sqlite3_finalize(st) }
+        if let module {
+            sqlite3_bind_text(st, 1, module, -1, Self.transient)
+        }
+        var out: [ModelAllowlistRow] = []
+        while sqlite3_step(st) == SQLITE_ROW {
+            out.append(
+                ModelAllowlistRow(
+                    module: String(cString: sqlite3_column_text(st, 0)),
+                    id: String(cString: sqlite3_column_text(st, 1)),
+                    isDefault: sqlite3_column_int(st, 2) != 0,
+                    declared: sqlite3_column_double(st, 3)))
+        }
+        return out
+    }
+
+    /// Returns nil when the module's allowlist is empty.
+    public func defaultModelAllowlistID(module: String) -> String? {
+        let rows = listModelAllowlist(module: module)
+        if let d = rows.first(where: { $0.isDefault }) { return d.id }
+        return rows.first?.id
+    }
+
+    public func modelAllowlistCount(module: String) -> Int {
+        guard let st = try? Self.prepared(db,
+            "SELECT COUNT(*) FROM model_allowlist WHERE module=?;")
+        else { return 0 }
+        defer { sqlite3_finalize(st) }
+        sqlite3_bind_text(st, 1, module, -1, Self.transient)
+        return sqlite3_step(st) == SQLITE_ROW
+            ? Int(sqlite3_column_int64(st, 0)) : 0
+    }
+
+    /// Idempotent: INSERT OR IGNORE under (module, id). When
+    /// `isDefault: true`, clears the prior default and sets this row.
+    public func addModelAllowlist(
+        module: String, id: String, isDefault: Bool = false
+    ) throws {
+        let ins = try Self.prepared(db,
+            "INSERT OR IGNORE INTO model_allowlist"
+                + "(module,id,is_default,declared) "
+                + "VALUES(?,?,?,?);")
+        defer { sqlite3_finalize(ins) }
+        sqlite3_bind_text(ins, 1, module, -1, Self.transient)
+        sqlite3_bind_text(ins, 2, id, -1, Self.transient)
+        sqlite3_bind_int(ins, 3, isDefault ? 1 : 0)
+        sqlite3_bind_double(ins, 4, Date().timeIntervalSince1970)
+        guard sqlite3_step(ins) == SQLITE_DONE else {
+            throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
+        }
+        if isDefault {
+            try setModelAllowlistDefault(module: module, id: id)
+        }
+    }
+
+    @discardableResult
+    public func removeModelAllowlist(module: String, id: String)
+        -> Bool
+    {
+        guard let st = try? Self.prepared(db,
+            "DELETE FROM model_allowlist WHERE module=? AND id=?;")
+        else { return false }
+        defer { sqlite3_finalize(st) }
+        sqlite3_bind_text(st, 1, module, -1, Self.transient)
+        sqlite3_bind_text(st, 2, id, -1, Self.transient)
+        guard sqlite3_step(st) == SQLITE_DONE else { return false }
+        return sqlite3_changes(db) > 0
+    }
+
+    /// Exactly-one-default-per-module enforced by the two-step swap:
+    /// clear all defaults in this module, then mark the chosen row.
+    /// Throws when `id` is not in the module's allowlist (so a default
+    /// can't drift to an unknown id).
+    public func setModelAllowlistDefault(
+        module: String, id: String
+    ) throws {
+        let exists = listModelAllowlist(module: module)
+            .contains { $0.id == id }
+        guard exists else {
+            throw StoreError.sql(
+                "model_allowlist: '\(id)' is not in the \(module) "
+                + "allowlist")
+        }
+        let clr = try Self.prepared(db,
+            "UPDATE model_allowlist SET is_default=0 WHERE module=?;")
+        defer { sqlite3_finalize(clr) }
+        sqlite3_bind_text(clr, 1, module, -1, Self.transient)
+        _ = sqlite3_step(clr)
+        let set = try Self.prepared(db,
+            "UPDATE model_allowlist SET is_default=1 "
+                + "WHERE module=? AND id=?;")
+        defer { sqlite3_finalize(set) }
+        sqlite3_bind_text(set, 1, module, -1, Self.transient)
+        sqlite3_bind_text(set, 2, id, -1, Self.transient)
+        guard sqlite3_step(set) == SQLITE_DONE else {
+            throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
+        }
     }
 
     // MARK: Auth — users (PBKDF2 salt/hash computed by the caller;

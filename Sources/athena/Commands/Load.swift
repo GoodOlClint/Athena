@@ -374,14 +374,64 @@ struct Load: AsyncParsableCommand {
             rootDirectory: modelStore.map {
                 URL(fileURLWithPath: $0, isDirectory: true)
             } ?? ModelStore.defaultRoot)
+
+        // M42.1: open the SQLite store BEFORE building modules so each
+        // module's allowlist resolves from the persisted
+        // `model_allowlist` table. An empty table seeds from the
+        // operator CLI flags (so a fresh install is never blank) and
+        // every later edit via `/api/models/allow` survives a restart.
+        let dataRoot =
+            dataDir.map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? AthenaEnv.userHome()
+                .appendingPathComponent(".athena", isDirectory: true)
+        let dbPath = dataRoot.appendingPathComponent("athena.sqlite")
+        let storeKey: String?
+        if encryptStore {
+            let key = try StoreKey.ensure()
+            if AthenaStore.isPlaintextDatabase(at: dbPath) {
+                Logger(label: AthenaLogLabel.daemon).notice(
+                    "encrypt_store: migrating plaintext store to encrypted")
+                try AthenaStore.migrateToEncrypted(at: dbPath, key: key)
+                Logger(label: AthenaLogLabel.daemon).notice(
+                    "encrypt_store: store is now encrypted at rest")
+            }
+            storeKey = key
+        } else {
+            storeKey = StoreKey.resolve()
+        }
+        let athenaStore = try AthenaStore(path: dbPath, key: storeKey)
+
         // M41.2: --llm-model is the new repeatable allowlist. If unset,
         // desugar from the single --model so existing scripts keep
         // working unchanged. Either way the FIRST entry is the default
         // (used when a request omits `model`).
         let llmRefs: [String?] =
             llmModels.isEmpty ? [model] : llmModels.map { Optional($0) }
-        let llmURLs = llmRefs.map { store.resolve($0) }
+        let llmURLsFromFlags = llmRefs.map { store.resolve($0) }
+        let llmIdsFromFlags = llmURLsFromFlags.map { $0.lastPathComponent }
+        // M42.1: resolve each module's effective allowlist from the
+        // persisted table (seeding on empty). The default sits at
+        // position 0 — modules keep treating `[0]` as default and need
+        // no awareness of the DB layer.
+        let llmIds = await Self.resolveAllowlist(
+            store: athenaStore, module: .llm, seed: llmIdsFromFlags)
+        let llmURLs = llmIds.map { name in
+            llmURLsFromFlags.first { $0.lastPathComponent == name }
+                ?? store.resolve(name)
+        }
         let modelURL = llmURLs[0]
+        let embeddingIds = await Self.resolveAllowlist(
+            store: athenaStore, module: .textEmbedding,
+            seed: embeddingModels)
+        let transcriptionIds = await Self.resolveAllowlist(
+            store: athenaStore, module: .transcription,
+            seed: transcriptionModels)
+        let diarizationIds = await Self.resolveAllowlist(
+            store: athenaStore, module: .diarization,
+            seed: diarizationModels)
+        let speakerEmbeddingIds = await Self.resolveAllowlist(
+            store: athenaStore, module: .speakerEmbedding,
+            seed: speakerEmbeddingModels)
 
         // M23 fork B: a VALID kv_compression codec that can't serve the
         // loaded architecture (TriAttention eviction is Qwen3.5-only)
@@ -405,14 +455,14 @@ struct Load: AsyncParsableCommand {
         // The LLM is non-evictable (the primary workload); transcription and
         // embedding remain governed stubs (real impls land in M4) and are
         // evictable so the governor can reclaim their budget under pressure.
+        // M42.1: each module's allowlist resolves from the persisted
+        // `model_allowlist` table (seeded above from CLI flags on first
+        // boot). The default is `llmIds[0]` / etc. — already
+        // DB-default-first.
         let llm: any LLMModule
         switch engine {
         case .stub:
-            // M41.2: surface the operator-declared LLM allowlist on the
-            // stub too so /api/models/resident and per-request model
-            // selection exercise the same selectable shape as MLX.
-            llm = StubLLMModule(
-                modelIds: llmURLs.map { $0.lastPathComponent })
+            llm = StubLLMModule(modelIds: llmIds)
         case .mlx:
             llm = MLXLLMModule(
                 modelDirectories: llmURLs,
@@ -423,49 +473,37 @@ struct Load: AsyncParsableCommand {
                     kvCompression: kvCompression),
                 promptCacheCapBytes: config.promptCacheCapBytes)
         }
-        // Embeddings: real MLX module under the mlx engine, stub under
-        // the stub engine. Evictable — the LLM is the primary workload.
         let embedding: any EmbeddingModule
         switch engine {
         case .stub:
-            embedding = StubEmbeddingModule(modelIds: embeddingModels)
+            embedding = StubEmbeddingModule(modelIds: embeddingIds)
         case .mlx:
-            embedding = MLXEmbeddingModule(modelIds: embeddingModels)
+            embedding = MLXEmbeddingModule(modelIds: embeddingIds)
         }
-        // Transcription: real Whisper under the mlx engine, stub under
-        // the stub engine. Evictable — the LLM is the primary workload.
-        // M41.3: each audio module carries the operator-declared
-        // allowlist on the stub too, so /api/models/resident + the
-        // per-request `model` form field exercise the selectable shape.
         let transcription: any TranscriptionModule
         switch engine {
         case .stub:
             transcription = StubTranscriptionModule(
-                modelIds: transcriptionModels)
+                modelIds: transcriptionIds)
         case .mlx:
             transcription = MLXTranscriptionModule(
-                modelIds: transcriptionModels)
+                modelIds: transcriptionIds)
         }
-        // Diarization: vendored Sortformer under mlx, stub under stub.
         let diarization: any DiarizationModule
         switch engine {
         case .stub:
-            diarization = StubDiarizationModule(
-                modelIds: diarizationModels)
+            diarization = StubDiarizationModule(modelIds: diarizationIds)
         case .mlx:
-            diarization = MLXDiarizationModule(
-                modelIds: diarizationModels)
+            diarization = MLXDiarizationModule(modelIds: diarizationIds)
         }
-        // Speaker embeddings: vendored WeSpeaker under mlx, stub under
-        // stub. Evictable — the LLM is the primary workload.
         let speakerEmbedding: any SpeakerEmbeddingModule
         switch engine {
         case .stub:
             speakerEmbedding = StubSpeakerEmbeddingModule(
-                modelIds: speakerEmbeddingModels)
+                modelIds: speakerEmbeddingIds)
         case .mlx:
             speakerEmbedding = MLXSpeakerEmbeddingModule(
-                modelIds: speakerEmbeddingModels)
+                modelIds: speakerEmbeddingIds)
         }
         await governor.register(llm, evictable: false)
         await governor.register(transcription, evictable: true)
@@ -489,32 +527,8 @@ struct Load: AsyncParsableCommand {
             """)
 
         // M7: one embedded SQLite store (vectors + queue) under the
-        // data dir. Governor-capped resident vector working set.
-        let dataRoot =
-            dataDir.map { URL(fileURLWithPath: $0, isDirectory: true) }
-            ?? AthenaEnv.userHome()
-                .appendingPathComponent(".athena", isDirectory: true)
-        // M34.3b: at-rest encryption. `encrypt_store` ensures a key
-        // exists (env > Keychain, else mint+store — fail-closed) and
-        // migrates a plaintext store to SQLCipher-encrypted on first
-        // start. Otherwise honor an already-configured key if present, so
-        // an existing encrypted store still opens.
-        let dbPath = dataRoot.appendingPathComponent("athena.sqlite")
-        let storeKey: String?
-        if encryptStore {
-            let key = try StoreKey.ensure()
-            if AthenaStore.isPlaintextDatabase(at: dbPath) {
-                Logger(label: AthenaLogLabel.daemon).notice(
-                    "encrypt_store: migrating plaintext store to encrypted")
-                try AthenaStore.migrateToEncrypted(at: dbPath, key: key)
-                Logger(label: AthenaLogLabel.daemon).notice(
-                    "encrypt_store: store is now encrypted at rest")
-            }
-            storeKey = key
-        } else {
-            storeKey = StoreKey.resolve()
-        }
-        let athenaStore = try AthenaStore(path: dbPath, key: storeKey)
+        // data dir. The handle was opened above (M42.1 needed it for
+        // allowlist resolution); the rest of the data plane reuses it.
         let vectorStore = VectorStore(
             store: athenaStore,
             capBytes: vectorCapBytes
@@ -561,6 +575,38 @@ struct Load: AsyncParsableCommand {
             vectorTtlSecs: vectorTtlSecs ?? 0,
             dropRequestContent: dropRequestContent)
         try await server.run()
+    }
+
+    /// M42.1 — resolve a module's effective allowlist from the
+    /// persisted `model_allowlist` table; seed from the operator's CLI
+    /// flags on first boot (empty table for this module). Returns the
+    /// allowlist with the DB-marked default at position 0, so every
+    /// module type can keep treating `modelIds[0]` as its default.
+    /// A non-empty DB allowlist WINS over the CLI flags (an operator
+    /// edit via `/api/models/allow` survives restarts).
+    static func resolveAllowlist(
+        store: AthenaStore, module: ModuleID, seed: [String]
+    ) async -> [String] {
+        let seedClean = seed.filter { !$0.isEmpty }
+        let count = await store.modelAllowlistCount(
+            module: module.rawValue)
+        if count == 0, !seedClean.isEmpty {
+            for (idx, id) in seedClean.enumerated() {
+                try? await store.addModelAllowlist(
+                    module: module.rawValue, id: id,
+                    isDefault: idx == 0)
+            }
+        }
+        let rows = await store.listModelAllowlist(
+            module: module.rawValue)
+        guard !rows.isEmpty else { return seedClean }
+        // Default first, then declaration order.
+        let def = rows.first { $0.isDefault } ?? rows[0]
+        var ordered = [def.id]
+        for row in rows where row.id != def.id {
+            ordered.append(row.id)
+        }
+        return ordered
     }
 
     /// Process resident-set bytes via Mach `task_info`. Includes
