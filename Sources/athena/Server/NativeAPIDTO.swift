@@ -20,6 +20,11 @@ struct AthenaChatRequest: Codable {
     /// Per-request generation overrides (M24.3); absent ⇒ loaded defaults.
     let max_tokens: Int?
     let temperature: Double?
+    /// Per-request MTP speculative override. Absent ⇒ loaded
+    /// `--speculative` default; `true` opts in (requires temperature 0
+    /// + an MTP-capable model), `false` forces standard path. `true`
+    /// with non-zero temperature is a 400 (issue #1).
+    let speculative: Bool?
 }
 
 /// Non-streamed `/api/chat` reply. The full generation is in

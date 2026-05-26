@@ -205,14 +205,15 @@ public actor MLXLLMModule: LLMModule {
         generate(
             messages: [ChatTurn(role: "user", content: prompt)],
             schemaJSON: schemaJSON, tools: tools,
-            maxTokens: nil, temperature: nil)
+            maxTokens: nil, temperature: nil, speculative: nil)
     }
 
     public nonisolated func generateMetered(
         messages: [ChatTurn], schemaJSON: String?,
         tools: [[String: any Sendable]]?,
         maxTokens: Int?, temperature: Double?,
-        topP: Double?, seed: Int?
+        topP: Double?, seed: Int?,
+        speculative: Bool?
     ) -> AsyncStream<GenChunk> {
         // `messages` ([ChatTurn]) is Sendable and crosses into the actor;
         // the non-Sendable `Chat.Message` mapping happens INSIDE the actor
@@ -228,7 +229,9 @@ public actor MLXLLMModule: LLMModule {
                 do {
                     if let speculative = try await self.runSpeculative(
                         messages: messages, schemaJSON: schemaJSON,
-                        tools: tools, maxTokens: maxTokens)
+                        tools: tools, maxTokens: maxTokens,
+                        requestSpeculative: speculative,
+                        requestTemperature: temperature)
                     {
                         usage = speculative.usage
                         continuation.yield(.text(speculative.text))
@@ -292,10 +295,25 @@ public actor MLXLLMModule: LLMModule {
     /// unstructured request takes the opt-in speculative path only.
     private func runSpeculative(
         messages: [ChatTurn], schemaJSON: String?,
-        tools: [[String: any Sendable]]?, maxTokens: Int?
+        tools: [[String: any Sendable]]?, maxTokens: Int?,
+        requestSpeculative: Bool?,
+        requestTemperature: Double?
     ) async throws -> (text: String, usage: TokenUsage)? {
         guard let container else { return nil }
-        let speculativeEligible = params.speculativeGreedyEligible
+        // Per-request override (the consuming application intent): if the caller
+        // explicitly passes `speculative=true/false`, that wins for THIS
+        // request; if nil, fall back to the daemon's loaded default. The
+        // greedy-only constraint is per-call too — an explicit
+        // `speculative=true` with `temperature>0` is already rejected
+        // upstream (400) by the server; here we only need to compute the
+        // effective temperature for eligibility, treating an opt-in
+        // request as implicitly greedy when no temperature was supplied.
+        let effectiveSpec = requestSpeculative ?? params.speculative
+        let effectiveTemp: Double =
+            requestTemperature
+            ?? (requestSpeculative == true ? 0.0 : Double(params.temperature))
+        let speculativeEligible =
+            effectiveSpec && effectiveTemp == 0
         if schemaJSON == nil && !speculativeEligible { return nil }
 
         let lmInput = try await container.prepare(

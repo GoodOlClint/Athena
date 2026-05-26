@@ -782,7 +782,8 @@ enum OpenAPISpec {
                   "n": { "type": "integer", "description": "Rejected with 400 when > 1." },
                   "logprobs": { "description": "Rejected with 400 when requested." },
                   "top_logprobs": { "type": "integer", "description": "Rejected with 400 when present." },
-                  "logit_bias": { "type": "object", "description": "Rejected with 400 when non-empty." }
+                  "logit_bias": { "type": "object", "description": "Rejected with 400 when non-empty." },
+                  "speculative": { "type": "boolean", "description": "Athena extension. Per-request MTP speculative override: true opts in (requires temperature=0 and an MTP-capable model); false forces the standard path; omit ⇒ daemon's --speculative default. Pairing true with non-zero temperature returns 400 speculative_requires_greedy (issue #1; sampling speculative is a separate milestone)." }
                 }
               },
               "ChatChoice": {
@@ -913,7 +914,8 @@ enum OpenAPISpec {
                   "messages": { "type": "array", "items": { "type": "object", "properties": { "role": { "type": "string" }, "content": { "type": "string" } } } },
                   "stream": { "type": "boolean" },
                   "max_tokens": { "type": "integer" },
-                  "temperature": { "type": "number" }
+                  "temperature": { "type": "number" },
+                  "speculative": { "type": "boolean", "description": "Per-request MTP speculative override (same semantics as on /v1/chat/completions; true requires temperature=0)." }
                 }
               },
               "AthenaChatResponse": { "type": "object", "properties": { "model": { "type": "string" }, "content": { "type": "string" }, "done": { "type": "boolean" } } },

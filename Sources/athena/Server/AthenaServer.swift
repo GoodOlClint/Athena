@@ -670,6 +670,18 @@ struct AthenaServer {
                 code: "unsupported_parameter")
         }
 
+        // Per-request MTP speculative override: greedy-only constraint
+        // (issue #1). An explicit `speculative=true` paired with a
+        // non-zero `temperature` is a 400 — never a silent fallback to
+        // non-speculative sampling — so callers (e.g. the consuming application) get
+        // honest feedback that sampling-mode speculative is its own
+        // milestone, not this request.
+        if let r = Self.rejectSpeculativeWithTemperature(
+            speculative: body.speculative, temperature: body.temperature)
+        {
+            return r
+        }
+
         // The governed path: load the LLM under the global budget. A budget
         // event becomes a classified 503 here, never a Metal abort.
         do {
@@ -730,7 +742,8 @@ struct AthenaServer {
                         messages: turns, schemaJSON: schemaJSON,
                         tools: toolSpecs, maxTokens: body.max_tokens,
                         temperature: body.temperature,
-                        topP: body.top_p, seed: body.seed)),
+                        topP: body.top_p, seed: body.seed,
+                        speculative: body.speculative)),
                 includeUsage: includeUsage, stops: stops,
                 record: { usage in
                     await meter(principal: principal, usage: usage)
@@ -744,7 +757,8 @@ struct AthenaServer {
                     messages: turns, schemaJSON: schemaJSON,
                     tools: toolSpecs, maxTokens: body.max_tokens,
                     temperature: body.temperature,
-                    topP: body.top_p, seed: body.seed))
+                    topP: body.top_p, seed: body.seed,
+                    speculative: body.speculative))
         } catch let e as AthenaError {
             // M33.1: the only AthenaError collectMetered raises is the
             // per-request timeout → classified 504.
@@ -1847,6 +1861,17 @@ struct AthenaServer {
                 let req = try? JSONDecoder().decode(
                     ChatCompletionRequest.self, from: request)
             else { return (nil, "invalid conversation body") }
+            // Same greedy-only guard as the sync paths (issue #1) —
+            // surfaced as a job error rather than HTTP 400 because the
+            // submit endpoint already accepted the body; the contract
+            // violation only becomes evident at execution.
+            if req.speculative == true, let t = req.temperature, t > 0 {
+                return (
+                    nil,
+                    "speculative=true requires temperature=0 (greedy only "
+                        + "— sampling-mode speculative is a separate "
+                        + "milestone, see issue #1).")
+            }
             let turns = req.messages.compactMap { m -> ChatTurn? in
                 guard let c = m.content else { return nil }
                 return ChatTurn(role: m.role, content: c)
@@ -1867,7 +1892,8 @@ struct AthenaServer {
                         messages: turns, schemaJSON: effective?.json,
                         tools: req.toolSpecs(), maxTokens: req.max_tokens,
                         temperature: req.temperature,
-                        topP: req.top_p, seed: req.seed))
+                        topP: req.top_p, seed: req.seed,
+                        speculative: req.speculative))
             } catch let e as AthenaError {
                 return (nil, e.message)  // M33.1: timeout → job error
             } catch {
@@ -2079,6 +2105,12 @@ struct AthenaServer {
         let turns = body.messages.map {
             ChatTurn(role: $0.role, content: $0.content)
         }
+        // Same greedy-only guard as /v1/chat (issue #1).
+        if let r = Self.rejectSpeculativeWithTemperature(
+            speculative: body.speculative, temperature: body.temperature)
+        {
+            return r
+        }
         if let err = await governedPreflight(messages: turns) {
             return err
         }
@@ -2090,7 +2122,8 @@ struct AthenaServer {
                     llm.generate(
                         messages: turns, schemaJSON: nil, tools: nil,
                         maxTokens: body.max_tokens,
-                        temperature: body.temperature))
+                        temperature: body.temperature,
+                        speculative: body.speculative))
             ) { content, done in
                 try? JSONEncoder().encode(
                     AthenaChatChunk(
@@ -2099,7 +2132,8 @@ struct AthenaServer {
         }
         let stream = llm.generate(
             messages: turns, schemaJSON: nil, tools: nil,
-            maxTokens: body.max_tokens, temperature: body.temperature)
+            maxTokens: body.max_tokens, temperature: body.temperature,
+            speculative: body.speculative)
         let text: String
         do {
             text = try await withInferenceDeadline(
@@ -3423,6 +3457,26 @@ struct AthenaServer {
             APIErrorBody(
                 error: .init(message: message, type: type, code: code)),
             status: status)
+    }
+
+    /// MTP speculative is greedy-only (issue #1). An explicit
+    /// `speculative=true` request paired with a non-zero `temperature`
+    /// gets a 400 with a clear code rather than a silent fallback. nil
+    /// when the request is fine, a 400 Response when it's a conflict.
+    static func rejectSpeculativeWithTemperature(
+        speculative: Bool?, temperature: Double?
+    ) -> Response? {
+        guard speculative == true, let t = temperature, t > 0 else {
+            return nil
+        }
+        return error(
+            status: .badRequest,
+            message:
+                "speculative=true requires temperature=0 (greedy only — "
+                + "sampling-mode speculative is a separate milestone, "
+                + "see issue #1).",
+            type: "invalid_request_error",
+            code: "speculative_requires_greedy")
     }
 
     /// Classify an arbitrary inference error: a genuine MLX/Metal OOM

@@ -42,7 +42,8 @@ public protocol LLMModule: InferenceModule {
         messages: [ChatTurn], schemaJSON: String?,
         tools: [[String: any Sendable]]?,
         maxTokens: Int?, temperature: Double?,
-        topP: Double?, seed: Int?
+        topP: Double?, seed: Int?,
+        speculative: Bool?
     ) -> AsyncStream<GenChunk>
 
     /// Override-aware String variant (M24.3). `maxTokens`/`temperature`,
@@ -54,7 +55,8 @@ public protocol LLMModule: InferenceModule {
     nonisolated func generate(
         messages: [ChatTurn], schemaJSON: String?,
         tools: [[String: any Sendable]]?,
-        maxTokens: Int?, temperature: Double?
+        maxTokens: Int?, temperature: Double?,
+        speculative: Bool?
     ) -> AsyncStream<String>
 
     /// Reject — before any generation — a prompt whose KV/prompt-cache
@@ -81,20 +83,21 @@ extension LLMModule {
     ) -> AsyncStream<String> {
         generate(
             messages: messages, schemaJSON: schemaJSON, tools: tools,
-            maxTokens: nil, temperature: nil)
+            maxTokens: nil, temperature: nil, speculative: nil)
     }
 
     public nonisolated func generate(
         messages: [ChatTurn], schemaJSON: String?,
         tools: [[String: any Sendable]]?,
-        maxTokens: Int?, temperature: Double?
+        maxTokens: Int?, temperature: Double?,
+        speculative: Bool?
     ) -> AsyncStream<String> {
         // Single source of truth: stream the metered events and forward
         // only the text chunks (drop the terminal usage).
         let events = generateMetered(
             messages: messages, schemaJSON: schemaJSON, tools: tools,
             maxTokens: maxTokens, temperature: temperature,
-            topP: nil, seed: nil)
+            topP: nil, seed: nil, speculative: speculative)
         return AsyncStream { continuation in
             let task = Task {
                 for await event in events {
@@ -116,10 +119,14 @@ extension LLMModule {
         messages: [ChatTurn], schemaJSON: String?,
         tools: [[String: any Sendable]]?,
         maxTokens: Int?, temperature: Double?,
-        topP: Double?, seed: Int?
+        topP: Double?, seed: Int?,
+        speculative: Bool?
     ) -> AsyncStream<GenChunk> {
-        // The model-free stub has no sampler, so topP/seed are accepted
-        // and ignored; the e2e gate exercises them via stop/max_tokens.
+        // The model-free stub has no sampler, so topP/seed/speculative
+        // are accepted and ignored; the e2e gate exercises the sampling
+        // knobs via stop/max_tokens, and the speculative flag itself is
+        // exercised end-to-end against the real MLX module on the
+        // manual host-bound tier.
         let prompt = messages.flattenedPrompt()
         let chunks = generate(
             prompt: prompt, schemaJSON: schemaJSON, tools: tools)
