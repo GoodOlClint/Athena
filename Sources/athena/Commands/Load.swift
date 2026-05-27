@@ -578,25 +578,38 @@ struct Load: AsyncParsableCommand {
         try await server.run()
     }
 
-    /// M42.1 — resolve a module's effective allowlist from the
-    /// persisted `model_allowlist` table; seed from the operator's CLI
-    /// flags on first boot (empty table for this module). Returns the
-    /// allowlist with the DB-marked default at position 0, so every
-    /// module type can keep treating `modelIds[0]` as its default.
-    /// A non-empty DB allowlist WINS over the CLI flags (an operator
-    /// edit via `/api/models/allow` survives restarts).
+    /// Resolve a module's effective allowlist from the persisted
+    /// `model_allowlist` table. On every boot any id in the CLI seed
+    /// that isn't already in the DB is idempotently added; the CLI
+    /// never REMOVES rows (operator `athena allowlist rm` is preserved)
+    /// and never re-flips the default once the table has any rows
+    /// (operator `athena allowlist default` is preserved). On a TRULY
+    /// fresh table the first seed entry becomes the default, so a new
+    /// install still gets a sensible default from the CLI/TOML alone.
+    ///
+    /// Behaviour history. M42.1 originally seeded the table on first
+    /// boot and treated later CLI edits as no-ops (DB wins); M43.4
+    /// added a divergence notice. M44.2 turned the CLI into a merge
+    /// writer on every boot so the operator's `--*-model` intent
+    /// actually takes effect on restart — at the cost that a flag
+    /// they removed via `athena allowlist rm` will come back unless
+    /// they also strike it from the CLI/TOML.
     static func resolveAllowlist(
         store: AthenaStore, module: ModuleID, seed: [String]
     ) async -> [String] {
         let seedClean = seed.filter { !$0.isEmpty }
-        let count = await store.modelAllowlistCount(
-            module: module.rawValue)
-        if count == 0, !seedClean.isEmpty {
-            for (idx, id) in seedClean.enumerated() {
-                try? await store.addModelAllowlist(
-                    module: module.rawValue, id: id,
-                    isDefault: idx == 0)
-            }
+        let emptyAtStart =
+            await store.modelAllowlistCount(
+                module: module.rawValue) == 0
+        for (idx, id) in seedClean.enumerated() {
+            // Only the FIRST seed on a fresh table becomes default;
+            // every subsequent boot (or later seed in this list) adds
+            // with isDefault=false so an operator's `allowlist default`
+            // choice is never silently overwritten.
+            let asDefault = emptyAtStart && idx == 0
+            try? await store.addModelAllowlist(
+                module: module.rawValue, id: id,
+                isDefault: asDefault)
         }
         let rows = await store.listModelAllowlist(
             module: module.rawValue)
@@ -606,21 +619,6 @@ struct Load: AsyncParsableCommand {
         var ordered = [def.id]
         for row in rows where row.id != def.id {
             ordered.append(row.id)
-        }
-        // M43.4 fragility #6 — the DB-wins contract is otherwise
-        // silent: after seeding once, a later CLI edit to athena.toml's
-        // `--*-model` flag has no effect on restart because the table
-        // already has rows. Log a notice when the DB and the just-passed
-        // seed disagree, so the operator stops re-editing the TOML and
-        // reaches for `athena allowlist` instead.
-        if !seedClean.isEmpty, Set(ordered) != Set(seedClean) {
-            Logger(label: AthenaLogLabel.daemon).notice(
-                """
-                model_allowlist DB differs from `--*-model` seed for \
-                \(module.rawValue): DB=\(ordered) seed=\(seedClean). \
-                The DB wins (M42); edit via `athena allowlist {add|rm|\
-                default}` instead of the CLI flags / TOML.
-                """)
         }
         return ordered
     }

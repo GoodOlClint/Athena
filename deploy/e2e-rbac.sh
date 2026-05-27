@@ -1415,6 +1415,85 @@ echo "== phase 5: last-admin protection =="
 stop_daemon
 
 echo
+echo "== phase 5.5: CLI seeds merge on every boot (M44.2) =="
+# Pre-M44.2 the seed was first-boot-only: editing --*-model on the
+# launchd plist and restarting did nothing because the table already
+# had rows. Post-M44.2 each boot idempotently INSERTs the seeded ids,
+# so the CLI flag means what it says; but it never removes or flips
+# the default, so an operator's `allowlist rm` / `allowlist default`
+# choices are preserved (modulo the documented trade — a seed flag
+# the operator removed comes BACK if the flag is still set).
+D5="$(mktemp -d)"
+"$ATHENA" auth user add admin --password adminpass1 --role admin \
+  --data-dir "$D5" >/dev/null && ok "seed D5 admin" || bad "seed admin"
+A5="$("$ATHENA" auth token add --user admin --data-dir "$D5" \
+  2>/dev/null | grep -o 'sk-athena-[A-Za-z0-9_-]*' | head -1)"
+# First boot: seed two LLM models from CLI. The DB table for the llm
+# module is empty ⇒ the first seed becomes the default.
+start_daemon "$D5" 127.0.0.1 \
+  --llm-model fake-model --llm-model alt-llm-id \
+  || { echo "d5 failed"; cat "$D/daemon.log"; exit 1; }
+# Row-extraction helper: print the {…} object for a given id (order-
+# agnostic so this doesn't hinge on JSON key emission order).
+row_for() { # JSON ID  → prints the matching {…} object, or empty
+  printf '%s' "$1" | tr '{}' '\n\n' | grep "\"id\":\"$2\"" | head -1
+}
+AL5="$(curl -s -H "Authorization: Bearer $A5" \
+  "http://127.0.0.1:$PORT/api/models/allow?module=llm")"
+R="$(row_for "$AL5" fake-model)"
+[ -n "$R" ] && echo "$R" | grep -q '"default":true' \
+  && ok "first boot: fake-model becomes the seeded default" \
+  || bad "first boot default missing ($AL5)"
+[ -n "$(row_for "$AL5" alt-llm-id)" ] \
+  && ok "first boot: alt-llm-id seeded too" \
+  || bad "first boot alt-llm-id missing ($AL5)"
+# Operator-only edits via /api: add a custom id (operator-x) and
+# rotate the default to it; then REMOVE alt-llm-id. Neither write
+# touches the boot-seed flags.
+curl -s -X POST -H "Authorization: Bearer $A5" \
+  -H 'Content-Type: application/json' \
+  -d '{"module":"llm","id":"operator-x"}' \
+  "http://127.0.0.1:$PORT/api/models/allow" >/dev/null
+curl -s -X PUT -H "Authorization: Bearer $A5" \
+  -H 'Content-Type: application/json' \
+  -d '{"module":"llm","id":"operator-x"}' \
+  "http://127.0.0.1:$PORT/api/models/allow/default" >/dev/null
+curl -s -o /dev/null -X DELETE -H "Authorization: Bearer $A5" \
+  "http://127.0.0.1:$PORT/api/models/allow?module=llm&id=alt-llm-id"
+stop_daemon
+# Second boot: SAME CLI flags. Behavior contract:
+#   - alt-llm-id was rm'd by operator → COMES BACK (CLI flag still set
+#     — the M44.2 trade the brief flagged).
+#   - operator-x was added by operator → still there (CLI never removes).
+#   - default is operator-x (CLI never re-flips the default once the
+#     table has rows).
+start_daemon "$D5" 127.0.0.1 \
+  --llm-model fake-model --llm-model alt-llm-id \
+  || { echo "d5 restart failed"; cat "$D/daemon.log"; exit 1; }
+AL5b="$(curl -s -H "Authorization: Bearer $A5" \
+  "http://127.0.0.1:$PORT/api/models/allow?module=llm")"
+[ -n "$(row_for "$AL5b" alt-llm-id)" ] \
+  && ok "merge: CLI re-adds operator-removed seed on restart" \
+  || bad "alt-llm-id not re-added ($AL5b)"
+[ -n "$(row_for "$AL5b" operator-x)" ] \
+  && ok "preserve: operator-added id survives restart" \
+  || bad "operator-x lost on restart ($AL5b)"
+R="$(row_for "$AL5b" operator-x)"
+echo "$R" | grep -q '"default":true' \
+  && ok "preserve: operator-chosen default survives restart" \
+  || bad "default reverted on restart ($AL5b)"
+R="$(row_for "$AL5b" fake-model)"
+echo "$R" | grep -q '"default":true' \
+  && bad "default leaked back to the first seed (regression)" \
+  || ok "first seed is NOT re-flipped to default on restart"
+# The M43.4 divergence notice must NOT fire — there's no divergence
+# anymore (the DB is a superset of the seed by construction).
+grep -q "model_allowlist DB differs" "$D/daemon.log" \
+  && bad "stale divergence-notice log line emitted" \
+  || ok "divergence notice dropped (no longer applicable)"
+stop_daemon
+
+echo
 echo "== phase 6: fail-safe — no creds + non-loopback ⇒ refuse =="
 out="$("$ATHENA" load --engine stub --host 0.0.0.0 --port "$PORT" \
   --data-dir "$EMPTY" 2>&1)"
