@@ -89,6 +89,38 @@ public enum RemoteAllowlist {
                 MutateResp.self, from: data)
         else { return try fail(code, data) }
         print("\(r.status) \(r.module):\(r.id)")
+        // M43.2 usability #4 — warn when an LLM id isn't in the local
+        // model store. Without this the operator's next inference would
+        // surface as 503 module_loading (the M43.2 cold-load 503 is the
+        // accurate signal, but only AFTER a request was attempted).
+        // Best-effort: a 401/network failure is silent — the add itself
+        // already succeeded.
+        if module == "llm" {
+            await warnIfMissingFromStore(d, id: id)
+        }
+    }
+
+    private static func warnIfMissingFromStore(
+        _ d: DaemonOptions, id: String
+    ) async {
+        struct Entry: Decodable { let name: String }
+        struct Resp: Decodable { let models: [Entry] }
+        let (code, data): (Int, Data)
+        do {
+            (code, data) = try await HTTPClient.send(
+                "GET", d.base + "/api/models", key: d.authKey)
+        } catch { return }
+        guard code < 400,
+            let r = try? JSONDecoder().decode(Resp.self, from: data)
+        else { return }
+        if r.models.contains(where: { $0.name == id }) { return }
+        FileHandle.standardError.write(
+            Data(
+                ("warning: '\(id)' is not in the local model store; "
+                    + "run `athena pull \(id)` to prefetch it, "
+                    + "otherwise the next inference returns 503 "
+                    + "module_loading while the daemon downloads.\n")
+                    .utf8))
     }
 
     public static func remove(

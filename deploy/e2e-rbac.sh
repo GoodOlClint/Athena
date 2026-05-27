@@ -93,6 +93,17 @@ code() {
   fi
   local got
   got="$(curl "${args[@]}")"
+  # M43.2 — cold-load 503 is a transient signal that a module is
+  # warming; retry briefly when the test expects something other than
+  # 503 (mirrors what a Retry-After-aware client does). Tests that
+  # explicitly want 503 (budget pressure) skip this entirely.
+  if [ "$got" = "503" ] && [ "$want" != "503" ]; then
+    for _ in $(seq 1 20); do
+      sleep 0.1
+      got="$(curl "${args[@]}")"
+      [ "$got" != "503" ] && break
+    done
+  fi
   if [ "$got" = "$want" ]; then
     ok "$method $path ($bearer) → $got"
   else
@@ -119,6 +130,26 @@ stop_daemon() {
   [ -n "$DPID" ] && kill "$DPID" 2>/dev/null
   wait "$DPID" 2>/dev/null
   DPID=""
+}
+
+# M43.2 — preload all module slots via /api/models/load (the explicit-
+# load endpoint kept blocking semantics on purpose). Lets body-parsing
+# tests that fire a single inference call avoid the cold-load 503. The
+# stub loads in microseconds; retries cover the brief loading-state
+# window. ADMIN_TOK must be set; explicit-load needs `model.write`.
+warm() {
+  local tok="$1" mod rc
+  for mod in llm textEmbedding transcription diarization speakerEmbedding; do
+    for _ in $(seq 1 30); do
+      rc="$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+        -H "Authorization: Bearer $tok" \
+        -H 'Content-Type: application/json' \
+        -d "{\"module\":\"$mod\"}" \
+        "http://127.0.0.1:$PORT/api/models/load")"
+      [ "$rc" = "200" ] && break
+      sleep 0.05
+    done
+  done
 }
 
 CHAT='{"model":"Qwen3.5-27B-4bit-mtp","messages":[{"role":"user","content":"hi"}]}'
@@ -174,6 +205,9 @@ start_daemon "$D" 127.0.0.1 \
   cat "$D/daemon.log"; exit 1; }
 grep -q "auth: enabled (RBAC" "$D/daemon.log" \
   && ok "daemon reports RBAC enabled" || bad "RBAC-enabled log line"
+# M43.2 — pre-warm module slots so body-parsing tests don't trip on
+# the new cold-load 503 (handled in phase 3.687 explicitly).
+warm "$ADMIN_TOK"
 
 code 401 POST /v1/chat/completions "" "$CHAT"          # no token
 code 401 POST /v1/chat/completions "sk-athena-bogus" "$CHAT"
@@ -471,6 +505,9 @@ echo "== phase 2.9: usage accounting — non-zero token counts (M27.1) =="
 # The OpenAI `usage` object must report REAL token counts (was a
 # hardcoded {0,0,0}). Under --engine stub the counts are synthesized
 # from whitespace tokenization, so they're deterministic and non-zero.
+# M43.2 — phase 2.7's /api/admin/stop unloaded the LLM; re-warm so the
+# first body-parsed inference call doesn't trip on the cold-load 503.
+warm "$ADMIN_TOK"
 intfield() { # JSON FIELD  → echoes the integer value (or empty)
   printf '%s' "$1" | grep -o "\"$2\":[0-9]*" | grep -o '[0-9]*' | head -1
 }
@@ -702,6 +739,9 @@ code 403 POST /api/chat       "$RO_TOK" "$CHAT"     # readonly ∌ infer
 code 200 POST /api/embed      "$ALICE_TOK" '{"input":"hi"}'
 code 403 POST /api/admin/stop "$ALICE_TOK"          # ∌ daemonAdmin
 code 200 POST /api/admin/stop "$ADMIN_TOK"          # admin: daemonAdmin
+# M43.2 — the admin/stop unloaded every module; re-warm before the
+# body-parsed native-chat assertion below.
+warm "$ADMIN_TOK"
 # Ollama is GONE — deleted routes 404 (auth passes; no route).
 code 404 GET  /api/tags       "$ALICE_TOK"
 code 404 GET  /api/version    "$ALICE_TOK"
@@ -821,6 +861,9 @@ assert slot.get("resident") is None, "textEmbedding still resident"
    || bad "textEmbedding slot still resident ($RES3)"
 # Unload all modules at once.
 code 200 POST /api/models/unload "$ADMIN_TOK" '{}'
+# M43.2 — phase 3.66 just emptied every slot. Re-warm so subsequent
+# body-parsing inference tests don't trip on cold-load 503.
+warm "$ADMIN_TOK"
 # Audit trail captures model.load / model.unload mutations (M30 + M41).
 AUD="$(curl -s -H "Authorization: Bearer $ADMIN_TOK" \
   "http://127.0.0.1:$PORT/api/audit?action=model.load&limit=20")"
@@ -1047,6 +1090,70 @@ if te["state"] != "unloaded" or te["reservedBytes"] != 0:
 ' >/dev/null \
   && ok "governor reconciled on allowlist drop (state=unloaded, reservedBytes=0)" \
   || bad "governor lies after allowlist drop ($HZ2)"
+
+echo
+echo "== phase 3.687: cold-load 503 Retry-After + allowlist warn + init (M43.2) =="
+# Phase 3.686 ended with textEmbedding in state=unloaded after the
+# allowlist drop. The FIRST request now goes through
+# `governor.beginLoadIfNeeded` which kicks a detached load task and
+# returns .loading synchronously — so the response is 503 +
+# Retry-After: 5 instead of blocking the request thread on a multi-GB
+# HF download (the fragility #2 hang).
+CL_HEADERS="$(curl -s -D - -o /dev/null -X POST \
+  -H "Authorization: Bearer $ALICE_TOK" \
+  -H 'Content-Type: application/json' \
+  -d '{"input":"hi"}' \
+  "http://127.0.0.1:$PORT/v1/embeddings")"
+echo "$CL_HEADERS" | grep -qi '^HTTP/.* 503' \
+  && ok "cold-load returns 503 instead of blocking on first request" \
+  || bad "cold-load did not 503 ($CL_HEADERS)"
+echo "$CL_HEADERS" | grep -qi '^retry-after: *5' \
+  && ok "503 carries Retry-After: 5 hint" \
+  || bad "missing Retry-After header ($CL_HEADERS)"
+CL_BODY="$(curl -s -X POST \
+  -H "Authorization: Bearer $ALICE_TOK" \
+  -H 'Content-Type: application/json' \
+  -d '{"input":"hi"}' \
+  "http://127.0.0.1:$PORT/v1/embeddings")"
+# The second call may STILL be .loading (race with the detached task)
+# OR already .loaded — poll up to ~2s for the warm state so the rest of
+# the e2e doesn't trip on a cold slot. Stub loads in microseconds so
+# this almost always resolves in one extra iteration.
+for _ in $(seq 1 20); do
+  RC="$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+    -H "Authorization: Bearer $ALICE_TOK" \
+    -H 'Content-Type: application/json' \
+    -d '{"input":"hi"}' \
+    "http://127.0.0.1:$PORT/v1/embeddings")"
+  [ "$RC" = "200" ] && break
+  sleep 0.1
+done
+[ "$RC" = "200" ] \
+  && ok "cold-load completes detached and serves on retry" \
+  || bad "cold-load never finished (last code $RC)"
+
+# `athena allowlist add` warns on stderr when the LLM id isn't in the
+# local model store. The store on D has no entries, so any add should
+# trigger the warning. Best-effort: a 401/network error is silent (the
+# add itself already succeeded).
+WARN_OUT="$("$ATHENA" allowlist add --module llm --id ghost/not-in-store \
+  --host 127.0.0.1 --port $PORT --key "$ADMIN_TOK" 2>&1 >/dev/null || true)"
+echo "$WARN_OUT" | grep -q "not in the local model store" \
+  && ok "allowlist add warns when llm id absent from /api/models" \
+  || bad "allowlist add did not warn ($WARN_OUT)"
+# Clean up the test row so subsequent phases see a stable LLM allowlist.
+"$ATHENA" allowlist rm --module llm --id ghost/not-in-store \
+  --host 127.0.0.1 --port $PORT --key "$ADMIN_TOK" >/dev/null 2>&1 || true
+
+# `athena init --from-allowlist` against an EMPTY data-dir reports the
+# no-rows message instead of pulling the compiled-in defaults. Validates
+# the flag is wired + the DB-read path opens cleanly.
+EMPTY2="$(mktemp -d)"
+INIT_OUT="$("$ATHENA" init --from-allowlist --data-dir "$EMPTY2" 2>&1 || true)"
+echo "$INIT_OUT" | grep -q "no allowlist rows" \
+  && ok "init --from-allowlist reports no-rows on empty data-dir" \
+  || bad "init --from-allowlist behavior unexpected ($INIT_OUT)"
+rm -rf "$EMPTY2"
 
 echo
 echo "== phase 3.69: inference-time rebind audited (M41.4) =="
@@ -1905,7 +2012,7 @@ echo "== phase 19: per-principal rate limiting — 429 + Retry-After (M29.1) =="
 # exempt /healthz are unaffected. Same invariants: --engine stub,
 # loopback, ephemeral data dir, port 17447.
 stop_daemon
-start_daemon "$D" 127.0.0.1 --rate-limit 1 --rate-burst 1 \
+start_daemon "$D" 127.0.0.1 --rate-limit 1 --rate-burst 1 --preload \
   || { echo "rate-limited daemon failed"; cat "$D/daemon.log"; exit 1; }
 grep -q "auth: enabled (RBAC" "$D/daemon.log" \
   && ok "rate-limited daemon still enforces auth" \
@@ -1960,6 +2067,7 @@ hold() { # BEARER  → backgrounds a ~150 ms in-flight chat, sets $HPID
 # while a DIFFERENT principal (bob) is unaffected.
 stop_daemon
 start_daemon "$D" 127.0.0.1 --max-concurrency-per-principal 1 \
+  --preload \
   || { echo "concurrency daemon failed"; cat "$D/daemon.log"; exit 1; }
 hold "$ALICE_TOK"
 probe 429 "$ALICE_TOK" \
@@ -1983,7 +2091,7 @@ stop_daemon
 # 20b: global cap = 1 (per-principal unlimited). One in-flight request
 # fills the whole daemon, so a DIFFERENT principal is rejected — proving
 # the cap is global, not per-caller.
-start_daemon "$D" 127.0.0.1 --max-concurrency 1 \
+start_daemon "$D" 127.0.0.1 --max-concurrency 1 --preload \
   || { echo "global-concurrency daemon failed"; cat "$D/daemon.log"; \
        exit 1; }
 hold "$ALICE_TOK"
@@ -2052,7 +2160,7 @@ echo "== phase 22: per-request inference timeout — 504 + truncate (M33.1) =="
 # ephemeral data dir, the authed $D realm (timeout is orthogonal to RBAC).
 stop_daemon
 export ATHENA_STUB_DELAY_MS=200
-start_daemon "$D" 127.0.0.1 --request-timeout-secs 1 \
+start_daemon "$D" 127.0.0.1 --request-timeout-secs 1 --preload \
   || { echo "timeout daemon failed"; cat "$D/daemon.log"; exit 1; }
 # 22a: a sync chat that overruns the 1 s deadline → classified 504.
 TO="$(curl -s -i -H "Authorization: Bearer $ALICE_TOK" \
@@ -2076,7 +2184,7 @@ echo "$SR" | grep -q "data: \[DONE\]" \
 stop_daemon
 # 22c: the SAME slow generation under a generous timeout is NOT killed —
 # proves the deadline doesn't false-fire on legitimate work.
-start_daemon "$D" 127.0.0.1 --request-timeout-secs 30 \
+start_daemon "$D" 127.0.0.1 --request-timeout-secs 30 --preload \
   || { echo "generous-timeout daemon failed"; cat "$D/daemon.log"; exit 1; }
 code 200 POST /v1/chat/completions "$ALICE_TOK" "$CHAT"
 stop_daemon
@@ -2091,7 +2199,7 @@ echo "== phase 23: graceful shutdown — drain in-flight on SIGTERM (M33.2) =="
 # the request is reliably mid-generation when the signal lands.
 stop_daemon
 export ATHENA_STUB_DELAY_MS=300
-start_daemon "$D" 127.0.0.1 \
+start_daemon "$D" 127.0.0.1 --preload \
   || { echo "graceful-shutdown daemon failed"; cat "$D/daemon.log"; exit 1; }
 GDPID="$DPID"
 INFLIGHT="$(mktemp)"

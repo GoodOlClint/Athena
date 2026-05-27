@@ -925,7 +925,13 @@ struct AthenaServer {
         }
 
         do {
-            try await governor.ensureLoaded(.textEmbedding)
+            // M43.2: never block the request thread on a multi-GB
+            // cold-load. `.loading` ⇒ 503+Retry-After so the client
+            // paces its retries instead of hitting its own timeout.
+            switch try await governor.beginLoadIfNeeded(.textEmbedding) {
+            case .loaded: break
+            case .loading: return Self.coldLoadResponse(.textEmbedding)
+            }
             // M41.4: a real resident-id change from per-request `model`
             // is audited (the embedder also self-rebinds inside embed(),
             // which becomes a no-op once the slot already matches).
@@ -1009,7 +1015,11 @@ struct AthenaServer {
         }
 
         do {
-            try await governor.ensureLoaded(.transcription)
+            // M43.2: non-blocking cold-load (see /v1/embeddings).
+            switch try await governor.beginLoadIfNeeded(.transcription) {
+            case .loaded: break
+            case .loading: return Self.coldLoadResponse(.transcription)
+            }
             // M41.3: a `model` form field selects among the operator-
             // declared whisper allowlist; an unknown id ⇒ 400
             // model_not_available via the classified path. M41.4: an
@@ -1073,7 +1083,11 @@ struct AthenaServer {
             var turns: [DiarizationTurn] = []
             if form.text("diarize") == "true" {
                 do {
-                    try await governor.ensureLoaded(.diarization)
+                    // M43.2: non-blocking cold-load.
+                    switch try await governor.beginLoadIfNeeded(.diarization) {
+                    case .loaded: break
+                    case .loading: return Self.coldLoadResponse(.diarization)
+                    }
                     turns = try await diarization.diarize(
                         audio: file.data, filename: file.filename
                     ).turns
@@ -1168,7 +1182,11 @@ struct AthenaServer {
         }
 
         do {
-            try await governor.ensureLoaded(.diarization)
+            // M43.2: non-blocking cold-load.
+            switch try await governor.beginLoadIfNeeded(.diarization) {
+            case .loaded: break
+            case .loading: return Self.coldLoadResponse(.diarization)
+            }
             // M41.3 per-request diarization model selection;
             // M41.4 audited on a real resident-id change.
             if let m = form.text("model"), !m.isEmpty {
@@ -1214,7 +1232,11 @@ struct AthenaServer {
         let threshold = form.text("threshold").flatMap(Float.init) ?? 0.75
 
         do {
-            try await governor.ensureLoaded(.speakerEmbedding)
+            // M43.2: non-blocking cold-load.
+            switch try await governor.beginLoadIfNeeded(.speakerEmbedding) {
+            case .loaded: break
+            case .loading: return Self.coldLoadResponse(.speakerEmbedding)
+            }
         } catch let e as AthenaError {
             return Self.error(
                 status: HTTPResponse.Status(code: e.httpStatus),
@@ -1335,7 +1357,11 @@ struct AthenaServer {
         }
 
         do {
-            try await governor.ensureLoaded(.speakerEmbedding)
+            // M43.2: non-blocking cold-load.
+            switch try await governor.beginLoadIfNeeded(.speakerEmbedding) {
+            case .loaded: break
+            case .loading: return Self.coldLoadResponse(.speakerEmbedding)
+            }
             // M41.3 per-request speaker-embedding model selection;
             // M41.4 audited on a real resident-id change.
             if let m = form.text("model"), !m.isEmpty {
@@ -2221,7 +2247,13 @@ struct AthenaServer {
         _ inputs: [String], module: ModuleID, model: String? = nil
     ) async -> Outcome<EmbeddingBatch> {
         do {
-            try await governor.ensureLoaded(.textEmbedding)
+            // M43.2: non-blocking cold-load — surfaces as
+            // `503 module_loading` to the native /api/embed caller too.
+            switch try await governor.beginLoadIfNeeded(.textEmbedding) {
+            case .loaded: break
+            case .loading:
+                return .fail(Self.coldLoadResponse(.textEmbedding))
+            }
         } catch let e as AthenaError {
             return .fail(
                 Self.error(
@@ -2486,7 +2518,12 @@ struct AthenaServer {
         request: Request? = nil, requestedModel: String?
     ) async -> Response? {
         do {
-            try await governor.ensureLoaded(.llm)
+            // M43.2: non-blocking cold-load — covers /v1/chat/completions
+            // AND /api/chat (the brief's biggest hang vector).
+            switch try await governor.beginLoadIfNeeded(.llm) {
+            case .loaded: break
+            case .loading: return Self.coldLoadResponse(.llm)
+            }
             if let m = requestedModel, !m.isEmpty {
                 try await auditedRebind(
                     request, module: .llm, target: m)
@@ -3947,6 +3984,27 @@ struct AthenaServer {
             APIErrorBody(
                 error: .init(message: message, type: type, code: code)),
             status: status)
+    }
+
+    /// M43.2 — response for a request that hit a still-cold module. The
+    /// load runs detached on the background path; the caller gets a
+    /// `503` with a fixed `Retry-After: 5` so the next attempt is paced
+    /// instead of hammering the daemon while the multi-GB download
+    /// finishes. 5 s is the brief's locked default; long enough to not
+    /// thrash, short enough to feel responsive.
+    private static func coldLoadResponse(_ id: ModuleID) -> Response {
+        let body =
+            #"{"error":{"message":"module "# + id.rawValue
+            + #" is loading; retry shortly","type":"server_error","#
+            + #""code":"module_loading"}}"#
+        var buf = ByteBuffer()
+        buf.writeBytes(Data(body.utf8))
+        var headers = HTTPFields()
+        headers[.contentType] = "application/json"
+        headers[.retryAfter] = "5"
+        return Response(
+            status: .serviceUnavailable, headers: headers,
+            body: ResponseBody(byteBuffer: buf))
     }
 
     /// Classify an arbitrary inference error: a genuine MLX/Metal OOM

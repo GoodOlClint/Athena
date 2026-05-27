@@ -103,6 +103,47 @@ public actor MemoryGovernor {
         )
     }
 
+    /// M43.2 — outcome of `beginLoadIfNeeded` for request-thread call
+    /// sites that must not block on a multi-GB cold-load.
+    ///   - `.loaded`  ⇒ slot is hot; caller may proceed with inference.
+    ///   - `.loading` ⇒ a background load is in flight (just kicked off,
+    ///     or already running); caller should respond `503` with a
+    ///     `Retry-After` header so the client retries shortly.
+    public enum LoadStatus: Sendable {
+        case loaded
+        case loading
+    }
+
+    /// M43.2 — non-blocking variant of `ensureLoaded` for sync inference
+    /// handlers. Returns `.loaded` if the slot is hot, otherwise starts
+    /// a background load (if one isn't already in flight) and returns
+    /// `.loading` immediately. The cold-load runs detached and is
+    /// joinable by any concurrent `ensureLoaded` (which keeps blocking
+    /// semantics — used by the queue worker and the preload-on-start
+    /// path, both legitimately off the request thread).
+    public func beginLoadIfNeeded(_ id: ModuleID) throws -> LoadStatus {
+        guard let entry = entries[id] else {
+            throw AthenaError.moduleNotRegistered(id)
+        }
+        relievePressure(except: id)
+        if entry.state == .loaded {
+            entries[id]?.lastUsed = Date()
+            return .loaded
+        }
+        if inFlight[id] != nil { return .loading }
+        let task = Task<Void, Error> { try await self.performLoad(id) }
+        inFlight[id] = task
+        Task { [weak self] in
+            _ = try? await task.value
+            await self?.clearInFlight(id)
+        }
+        return .loading
+    }
+
+    private func clearInFlight(_ id: ModuleID) {
+        inFlight[id] = nil
+    }
+
     /// Ensure the module is loaded and bill its memory. Concurrent callers
     /// for the same module await a single shared load. Throws
     /// `AthenaError.memoryBudgetExceeded` (→ 503) when admission fails.
