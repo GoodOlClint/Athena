@@ -754,17 +754,22 @@ echo "== phase 2.13: OpenAPI spec discovery /openapi.json (M32.1) =="
 # running daemon's version stamped into info.version.
 code 200 GET /openapi.json ""                            # public, no token
 SPEC="$(curl -s "http://127.0.0.1:$PORT/openapi.json")"
-echo "$SPEC" | grep -q '"openapi": "3.0.3"' \
-  && ok "openapi 3.0.3 document" || bad "not an openapi 3.0.3 doc"
+# M45.5: bash substring match (no pipeline) — the prior `echo "$SPEC"
+# | grep -q ...` pattern raced with SIGPIPE under `set -o pipefail`
+# once the embedded spec grew past ~64KB (echo gets SIGPIPE the moment
+# grep -q matches and exits; pipefail propagates 141, sinking the
+# whole pipeline). Bash globbing is in-process — no race.
 VER="$("$ATHENA" --version)"
-echo "$SPEC" | grep -q "\"version\": \"$VER\"" \
+[[ "$SPEC" == *'"openapi": "3.0.3"'* ]] \
+  && ok "openapi 3.0.3 document" || bad "not an openapi 3.0.3 doc"
+[[ "$SPEC" == *"\"version\": \"$VER\""* ]] \
   && ok "info.version matches binary ($VER)" \
   || bad "info.version != binary version $VER"
-echo "$SPEC" | grep -q '"bearerAuth"' \
+[[ "$SPEC" == *'"bearerAuth"'* ]] \
   && ok "bearerAuth security scheme present" || bad "no bearerAuth scheme"
-echo "$SPEC" | grep -q '"/v1/chat/completions"' \
+[[ "$SPEC" == *'"/v1/chat/completions"'* ]] \
   && ok "documents /v1/chat/completions" || bad "missing chat path"
-echo "$SPEC" | grep -q '"error"' \
+[[ "$SPEC" == *'"error"'* ]] \
   && ok "documents the error envelope" || bad "missing error shape"
 
 echo
@@ -1359,12 +1364,56 @@ done
 echo "$LOGS_HELP" | grep -q -- "--source" \
   && bad "--source still appears in athena logs --help (pre-M45 surface)" \
   || ok "--source dropped from athena logs --help"
-# A real `athena logs --since 1m` should run (might be empty if the
-# host's unified log doesn't have recent athena entries; just check
-# exit code).
-"$ATHENA" logs --since 1m >/dev/null 2>&1 \
-  && ok "athena logs --since 1m exits 0" \
-  || bad "athena logs --since 1m failed"
+# `athena logs --offline --since 1m` is the offline escape hatch
+# (direct /usr/bin/log shell-out, no daemon). Should exit 0.
+"$ATHENA" logs --offline --since 1m >/dev/null 2>&1 \
+  && ok "athena logs --offline --since 1m exits 0" \
+  || bad "athena logs --offline --since 1m failed"
+
+echo
+echo '== phase 3.6893: /api/logs API surface (M45.5) =='
+# M45.5: athena logs becomes a client of /api/logs (one-shot JSON)
+# and /api/logs/stream (SSE), both gated daemon.admin so they work
+# remotely + respect RBAC.
+code 401 GET "/api/logs"                                  # no token
+code 401 GET "/api/logs/stream"                           # no token
+code 403 GET "/api/logs"           "$ALICE_TOK"           # member ∌ daemonAdmin
+code 403 GET "/api/logs/stream"    "$ALICE_TOK"
+code 200 GET "/api/logs?since=1m"  "$ADMIN_TOK"           # admin: 200
+LOGS_JSON="$(curl -s -H "Authorization: Bearer $ADMIN_TOK" \
+  "http://127.0.0.1:$PORT/api/logs?since=1m")"
+echo "$LOGS_JSON" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+sys.exit(0 if isinstance(d.get("logs"), list) else 1)' \
+  && ok "/api/logs returns {logs: [...]}" \
+  || bad "/api/logs response shape wrong ($LOGS_JSON)"
+# `athena logs` defaults to API: with --host 127.0.0.1 + admin key,
+# should produce some output (the daemon's been emitting notice logs
+# for several phases by now).
+LOGS_OUT="$("$ATHENA" logs --host 127.0.0.1 --port $PORT \
+  --key "$ADMIN_TOK" --since 5m 2>&1 || true)"
+[ -n "$LOGS_OUT" ] && ! echo "$LOGS_OUT" | grep -q '^error:' \
+  && ok "athena logs (API mode) produced output" \
+  || bad "athena logs (API mode) failed: $(echo "$LOGS_OUT" | head -2)"
+# Non-admin invocation → API returns 403; client surfaces as JSON.
+LOGS_DENY="$("$ATHENA" logs --host 127.0.0.1 --port $PORT \
+  --key "$ALICE_TOK" --since 5m 2>&1 || true)"
+echo "$LOGS_DENY" | grep -q -E 'forbidden|insufficient' \
+  && ok "athena logs surfaces 403 for non-admin" \
+  || bad "athena logs non-admin → unexpected: $(echo "$LOGS_DENY" | head -2)"
+# SSE content-delivery is NOT asserted here — `log stream` has
+# variable startup latency on macOS (200ms–1.5s observed), and the
+# stream-vs-trigger ordering is timing-sensitive enough that any
+# bounded window flakes. The 401/403/200 RBAC + content-type checks
+# above cover endpoint plumbing; SSE content correctness is verified
+# by direct manual testing rather than in the gate.
+SSE_HEAD="$(curl -s -D - -o /dev/null --max-time 1 \
+  -H "Authorization: Bearer $ADMIN_TOK" \
+  "http://127.0.0.1:$PORT/api/logs/stream" 2>&1 || true)"
+echo "$SSE_HEAD" | grep -qi 'content-type:[[:space:]]*text/event-stream' \
+  && ok "/api/logs/stream returns text/event-stream" \
+  || bad "/api/logs/stream missing event-stream content-type"
 
 echo
 echo "== phase 3.69: inference-time rebind audited (M41.4) =="

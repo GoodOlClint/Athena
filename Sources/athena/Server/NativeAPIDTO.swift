@@ -339,6 +339,28 @@ struct AuditEntryDTO: Codable {
 /// `GET /api/audit` — admin-only oversight view, most-recent-first.
 struct AuditReportResponse: Codable { let audit: [AuditEntryDTO] }
 
+// MARK: - /api/logs (M45.5 — daemon's macOS unified-log entries)
+
+/// One log entry, projected from the subset of `/usr/bin/log show
+/// --style ndjson` fields Athena cares about. `ts` is ISO 8601 UTC
+/// (the unified log's native timestamp). Level is the OSLogType name
+/// (`debug` | `info` | `default` | `error` | `fault`); the daemon
+/// emits at the swift-log mapping documented in
+/// `docs/logging.md`. The full ndjson record carries more fields
+/// (pid, tid, process, etc.) — we drop them for compactness.
+struct LogEntryDTO: Codable {
+    let ts: String
+    let level: String
+    let category: String
+    let message: String
+}
+
+/// `GET /api/logs` — admin-only daemon-log oversight, oldest-first
+/// (matches `log show` default order; client sorts/reverses as
+/// needed). Pull only — the streaming sibling at
+/// `/api/logs/stream` is SSE.
+struct LogsReportResponse: Codable { let logs: [LogEntryDTO] }
+
 /// Generic mutation acknowledgements.
 struct OkResponse: Codable { let ok: Bool }
 struct UserRemovedResponse: Codable {

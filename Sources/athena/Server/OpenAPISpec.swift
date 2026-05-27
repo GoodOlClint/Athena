@@ -464,6 +464,40 @@ enum OpenAPISpec {
                 }
               }
             },
+            "/api/logs": {
+              "get": {
+                "tags": ["Logs"],
+                "summary": "Daemon unified-log entries (one-shot).",
+                "description": "Admin-only projection of `subsystem == \"athena\"` from the macOS unified log, oldest-first. Mirrors `/usr/bin/log show --style ndjson` filtered to the daemon's subsystem. Requires `daemon.admin`.",
+                "parameters": [
+                  { "name": "since", "in": "query", "required": false, "schema": { "type": "string", "default": "1h" }, "description": "How far back to look, e.g. `5m`, `1h`, `1d` (passed to `log show --last`)." },
+                  { "name": "category", "in": "query", "required": false, "schema": { "type": "array", "items": { "type": "string" } }, "style": "form", "explode": true, "description": "Category filter, repeatable. e.g. `daemon`, `audit`, `model.llm`." },
+                  { "name": "debug", "in": "query", "required": false, "schema": { "type": "boolean" }, "description": "Include memory-only info/debug entries (requires `log config --mode \"level:debug\"`)." },
+                  { "name": "limit", "in": "query", "required": false, "schema": { "type": "integer", "default": 200, "maximum": 5000 } }
+                ],
+                "responses": {
+                  "200": { "description": "Log entries.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LogsReportResponse" } } } },
+                  "401": { "$ref": "#/components/responses/Unauthorized" },
+                  "403": { "$ref": "#/components/responses/Forbidden" }
+                }
+              }
+            },
+            "/api/logs/stream": {
+              "get": {
+                "tags": ["Logs"],
+                "summary": "Daemon unified-log entries (SSE follow).",
+                "description": "Admin-only SSE wrapper over `log stream --style ndjson` filtered to `subsystem == \"athena\"`. Each event is `data: {<LogEntry JSON>}\\n\\n`. Capped at ~10 min per connection. Requires `daemon.admin`.",
+                "parameters": [
+                  { "name": "category", "in": "query", "required": false, "schema": { "type": "array", "items": { "type": "string" } }, "style": "form", "explode": true },
+                  { "name": "debug", "in": "query", "required": false, "schema": { "type": "boolean" } }
+                ],
+                "responses": {
+                  "200": { "description": "SSE stream of LogEntry events.", "content": { "text/event-stream": { "schema": { "type": "string" } } } },
+                  "401": { "$ref": "#/components/responses/Unauthorized" },
+                  "403": { "$ref": "#/components/responses/Forbidden" }
+                }
+              }
+            },
             "/api/models": {
               "get": {
                 "tags": ["Model store"],
@@ -1039,6 +1073,11 @@ enum OpenAPISpec {
                 "properties": { "id": { "type": "integer" }, "ts": { "type": "number" }, "principal": { "type": "string" }, "action": { "type": "string" }, "target": { "type": "string", "nullable": true }, "result": { "type": "string" }, "detail": { "type": "string", "nullable": true } }
               },
               "AuditReportResponse": { "type": "object", "properties": { "audit": { "type": "array", "items": { "$ref": "#/components/schemas/AuditEntry" } } } },
+              "LogEntry": {
+                "type": "object",
+                "properties": { "ts": { "type": "string", "description": "ISO 8601 timestamp (unified-log native format)." }, "level": { "type": "string", "description": "OSLogType name: debug | info | default | error | fault." }, "category": { "type": "string", "description": "swift-log label minus the `athena.` prefix (e.g. `daemon`, `audit`, `model.llm`)." }, "message": { "type": "string", "description": "Daemon-emitted message body; includes `req=`/`principal=`/`function=` fields when the line was emitted inside a request task hierarchy (M45.3)." } }
+              },
+              "LogsReportResponse": { "type": "object", "properties": { "logs": { "type": "array", "items": { "$ref": "#/components/schemas/LogEntry" } } } },
               "ModelEntry": { "type": "object", "properties": { "name": { "type": "string" }, "bytes": { "type": "integer" }, "modified": { "type": "string" } } },
               "ModelListResponse": { "type": "object", "properties": { "models": { "type": "array", "items": { "$ref": "#/components/schemas/ModelEntry" } } } },
               "ModelDetailResponse": { "type": "object", "properties": { "name": { "type": "string" }, "path": { "type": "string" }, "bytes": { "type": "integer" }, "config": {} } },

@@ -313,6 +313,13 @@ enum AuthPolicy {
         // The audit trail is a privileged oversight view — admin-only
         // (daemon.admin), no owner-scoping (M30.2).
         if path == "/api/audit" { return .daemonAdmin }
+        // M45.5: daemon-log oversight. The unified-log entries carry
+        // req=/principal= across all users + reveal internal call
+        // sites; admin-only (daemon.admin) matches the
+        // sensitivity profile of /api/audit.
+        if path == "/api/logs" || path == "/api/logs/stream" {
+            return .daemonAdmin
+        }
         // Usage is inference-tier: any authenticated caller sees its OWN
         // counters (handler owner-scopes); an admin sees all. Billing-
         // sensitive, so NOT exposed to the read-only role (M27.3).

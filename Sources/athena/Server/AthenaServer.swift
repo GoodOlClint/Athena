@@ -484,6 +484,18 @@ struct AthenaServer {
             await handleAudit(request)
         }
 
+        // M45.5 — daemon unified-log oversight. Admin-only; mirrors
+        // the audit trail's sensitivity profile (entries carry
+        // req=/principal=/function= across all users + reveal internal
+        // call sites). `/api/logs` = one-shot historical;
+        // `/api/logs/stream` = SSE follow.
+        router.get("/api/logs") { request, _ -> Response in
+            await handleLogs(request)
+        }
+        router.get("/api/logs/stream") { request, _ -> Response in
+            await handleLogsStream(request)
+        }
+
         // Model store (M16.2). Literal sub-paths are registered
         // BEFORE `:name` so Hummingbird's trie (sibling match in
         // registration order) resolves them first; `default`/`copy`
@@ -1723,6 +1735,234 @@ struct AthenaServer {
                         target: $0.target, result: $0.result,
                         detail: $0.detail)
                 }))
+    }
+
+    /// `GET /api/logs` (M45.5). Admin-only daemon-log oversight,
+    /// projected from `/usr/bin/log show --style ndjson` filtered to
+    /// `subsystem == "athena"`. Query params:
+    ///   - `since=<dur>` (default 1h; passed to `log show --last`)
+    ///   - `category=<X>` (repeatable; AND'd into the predicate)
+    ///   - `debug=1` (include info+debug entries; default notice+)
+    ///   - `limit=<n>` (default 200, capped 5000)
+    /// Pull-only JSON; the SSE sibling at `/api/logs/stream` follows
+    /// new entries live.
+    private func handleLogs(_ request: Request) async -> Response {
+        var since = "1h"
+        var categories: [String] = []
+        var debug = false
+        var limit = 200
+        if let q = request.uri.query {
+            for kv in q.split(separator: "&") {
+                let p = kv.split(separator: "=", maxSplits: 1)
+                guard let k = p.first.map(String.init) else { continue }
+                let raw = p.count == 2 ? String(p[1]) : ""
+                let v = raw.removingPercentEncoding ?? raw
+                switch k {
+                case "since": if !v.isEmpty { since = v }
+                case "category": if !v.isEmpty { categories.append(v) }
+                case "debug": debug = (v == "1" || v == "true")
+                case "limit":
+                    limit = min(5000, max(1, Int(v) ?? 200))
+                default: break
+                }
+            }
+        }
+        // Build predicate the same way `athena logs` does — pre-baked
+        // subsystem, optional categories.
+        guard let predicate = Self.logPredicate(categories: categories)
+        else {
+            return Self.error(
+                status: .badRequest,
+                message: "invalid category (must be alphanum + dot)",
+                type: "invalid_request_error",
+                code: "invalid_category")
+        }
+        var args = [
+            "show", "--style", "ndjson", "--last", since,
+            "--predicate", predicate,
+        ]
+        if debug { args += ["--info", "--debug"] }
+        let entries = (try? await Self.collectLogEntries(
+            args: args, limit: limit)) ?? []
+        return Self.json(LogsReportResponse(logs: entries))
+    }
+
+    /// `GET /api/logs/stream` (M45.5). Admin-only SSE following
+    /// `log stream --style ndjson` filtered to subsystem athena.
+    /// Each event line is `data: {<LogEntryDTO JSON>}\n\n`. Capped at
+    /// ~10 min so a dropped client doesn't pin a process forever; the
+    /// subprocess is terminated on `continuation.onTermination`.
+    private func handleLogsStream(_ request: Request) async -> Response {
+        var categories: [String] = []
+        var debug = false
+        if let q = request.uri.query {
+            for kv in q.split(separator: "&") {
+                let p = kv.split(separator: "=", maxSplits: 1)
+                guard let k = p.first.map(String.init) else { continue }
+                let raw = p.count == 2 ? String(p[1]) : ""
+                let v = raw.removingPercentEncoding ?? raw
+                switch k {
+                case "category": if !v.isEmpty { categories.append(v) }
+                case "debug": debug = (v == "1" || v == "true")
+                default: break
+                }
+            }
+        }
+        guard let predicate = Self.logPredicate(categories: categories)
+        else {
+            return Self.error(
+                status: .badRequest,
+                message: "invalid category (must be alphanum + dot)",
+                type: "invalid_request_error",
+                code: "invalid_category")
+        }
+        var args = [
+            "stream", "--style", "ndjson", "--predicate", predicate,
+        ]
+        if debug { args += ["--info", "--debug"] }
+        let stream = AsyncStream<ByteBuffer> { continuation in
+            let proc = Process()
+            proc.executableURL = URL(
+                fileURLWithPath: "/usr/bin/log")
+            proc.arguments = args
+            let pipe = Pipe()
+            proc.standardOutput = pipe
+            proc.standardError = FileHandle.nullDevice
+            let task = Task.detached {
+                let h = pipe.fileHandleForReading
+                var buffer = Data()
+                let deadline = Date().addingTimeInterval(600)
+                while Date() < deadline {
+                    if Task.isCancelled { break }
+                    let chunk = h.availableData
+                    if chunk.isEmpty {
+                        // Process exited — bail.
+                        break
+                    }
+                    buffer.append(chunk)
+                    while let nl = buffer.firstIndex(of: 0x0A) {
+                        let line = buffer.subdata(
+                            in: buffer.startIndex..<nl)
+                        buffer = buffer.subdata(
+                            in: (nl + 1)..<buffer.endIndex)
+                        if let entry = Self.parseNDJSONLogLine(line),
+                            let json = try? JSONEncoder().encode(entry)
+                        {
+                            var b = ByteBuffer()
+                            b.writeString("data: ")
+                            b.writeBytes(json)
+                            b.writeString("\n\n")
+                            continuation.yield(b)
+                        }
+                    }
+                }
+                if proc.isRunning { proc.terminate() }
+                continuation.finish()
+            }
+            do { try proc.run() } catch {
+                task.cancel()
+                continuation.finish()
+                return
+            }
+            continuation.onTermination = { _ in
+                task.cancel()
+                if proc.isRunning { proc.terminate() }
+            }
+        }
+        var headers = HTTPFields()
+        headers[.contentType] = "text/event-stream"
+        headers[.cacheControl] = "no-cache"
+        return Response(
+            status: .ok, headers: headers,
+            body: ResponseBody(asyncSequence: stream))
+    }
+
+    /// Build the `log` predicate: subsystem pin + optional category
+    /// AND-filter. Returns nil if any category contains characters
+    /// outside `[A-Za-z0-9._-]` (defensive — predicate-injection
+    /// guard since the value is interpolated into a quoted string).
+    private static func logPredicate(categories: [String]) -> String? {
+        let safe = CharacterSet(
+            charactersIn:
+                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
+        )
+        for c in categories {
+            guard !c.isEmpty,
+                c.unicodeScalars.allSatisfy({ safe.contains($0) })
+            else { return nil }
+        }
+        var p = "subsystem == \"athena\""
+        if !categories.isEmpty {
+            let list = categories
+                .map { "\"\($0)\"" }
+                .joined(separator: ", ")
+            p += " AND category IN { \(list) }"
+        }
+        return p
+    }
+
+    /// Run `/usr/bin/log` with the supplied args, parse each ndjson
+    /// line into a LogEntryDTO, return up to `limit` entries. The
+    /// process is killed on timeout (5s) so a hung `log` invocation
+    /// can't pin a request thread.
+    private static func collectLogEntries(
+        args: [String], limit: Int
+    ) async throws -> [LogEntryDTO] {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/log")
+        proc.arguments = args
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = FileHandle.nullDevice
+        try proc.run()
+        let deadline = Date().addingTimeInterval(5)
+        // Read all available data; bound by deadline + limit.
+        var buffer = Data()
+        var entries: [LogEntryDTO] = []
+        let h = pipe.fileHandleForReading
+        while Date() < deadline && entries.count < limit {
+            let chunk = h.availableData
+            if chunk.isEmpty {
+                if !proc.isRunning { break }
+                try await Task.sleep(nanoseconds: 50_000_000)
+                continue
+            }
+            buffer.append(chunk)
+            while let nl = buffer.firstIndex(of: 0x0A),
+                entries.count < limit
+            {
+                let line = buffer.subdata(
+                    in: buffer.startIndex..<nl)
+                buffer = buffer.subdata(
+                    in: (nl + 1)..<buffer.endIndex)
+                if let entry = parseNDJSONLogLine(line) {
+                    entries.append(entry)
+                }
+            }
+        }
+        if proc.isRunning { proc.terminate() }
+        return entries
+    }
+
+    /// Decode one `log show --style ndjson` line into our compact
+    /// LogEntryDTO. Returns nil for header rows / parse failures —
+    /// best-effort projection, not strict decoding.
+    private static func parseNDJSONLogLine(_ data: Data) -> LogEntryDTO?
+    {
+        guard !data.isEmpty,
+            let obj = try? JSONSerialization.jsonObject(with: data)
+                as? [String: Any]
+        else { return nil }
+        // `log show` emits a header row first; skip if there's no
+        // eventMessage.
+        guard let msg = obj["eventMessage"] as? String else {
+            return nil
+        }
+        let ts = obj["timestamp"] as? String ?? ""
+        let levelRaw = obj["messageType"] as? String ?? "default"
+        let category = obj["category"] as? String ?? "daemon"
+        return LogEntryDTO(
+            ts: ts, level: levelRaw, category: category, message: msg)
     }
 
     /// May this caller see/act on `job`? Open when auth is off;

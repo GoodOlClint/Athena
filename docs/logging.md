@@ -158,10 +158,38 @@ In some shells the bare `log` command is shadowed by a builtin
 (notably under nix or homebrew-overrides). The cheatsheet uses
 `/usr/bin/log` explicitly so the recipes work everywhere.
 
+## Reading logs through the daemon (remote / RBAC-gated)
+
+`athena logs` is a CLIENT of `GET /api/logs` (one-shot) and
+`GET /api/logs/stream` (SSE), both gated on `daemon.admin` and
+documented in [openapi.json](../Sources/athena/Server/OpenAPISpec.swift). So:
+
+- **Local box**: `athena logs --since 1h --category daemon` —
+  goes through the API. Same shape as `log show` underneath, but the
+  flag surface is **controlled by Athena**, not by whatever the
+  `/usr/bin/log` binary's current version supports. RBAC enforced.
+- **Remote daemon**: `athena --host studio.example --port 7447 logs
+  --follow` — talks to that daemon's `/api/logs/stream` SSE. No SSH,
+  no host-local `log` command, no operator account on the daemon box.
+- **Daemon is DOWN, need to triage**: `athena logs --offline` shells
+  out to local `/usr/bin/log` directly — bypasses the daemon (so RBAC
+  doesn't apply, and remote `--host` is ignored). For "what crashed"
+  triage scenarios only.
+
+Roles that can read the API: `admin`. Non-admin requests get `403`.
+Auth-off (loopback + no keys file) leaves the endpoint open, mirroring
+the rest of the daemon's admin surface.
+
 ## Off-box log shipping
 
-Athena emits nothing outbound — by design (the passive-oracle
-contract; see `MEMORY.md`). To ship Athena's unified-log entries
-elsewhere (SIEM, central log host, etc.), run a collector that
-reads the macOS unified log. Tested recipes are in
-[docs/logging-shipping.md](logging-shipping.md).
+To ship Athena's unified-log entries to a SIEM or central log host,
+two paths are supported:
+
+1. **Pull via `/api/logs`** — collectors that can talk HTTP/JSON or
+   SSE just hit the daemon. Same RBAC story as `athena logs`.
+2. **Tap the macOS unified log locally** — for FluentBit / vector.dev
+   / syslog-ng running on the daemon box. Tested recipes are in
+   [docs/logging-shipping.md](logging-shipping.md).
+
+Athena itself emits nothing outbound by design (the passive-oracle
+contract; see `MEMORY.md`).

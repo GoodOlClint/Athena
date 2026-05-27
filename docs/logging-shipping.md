@@ -122,6 +122,34 @@ emission was inside a request task hierarchy. After a `logfmt`
 parser on the collector side, those become first-class queryable
 fields in your SIEM.
 
+## Lighter-weight option: pull from /api/logs
+
+If you don't want to deploy a collector on the daemon box, the
+daemon itself exposes the same data over HTTP:
+
+- `GET /api/logs?since=1h&category=daemon` → JSON (one-shot)
+- `GET /api/logs/stream?category=daemon` → SSE (live)
+
+Both require a `daemon.admin`-permissioned bearer token. Any
+HTTP-aware collector or shell loop can pull this with no special
+macOS knowledge. Example one-liner to ship to a remote endpoint:
+
+```sh
+curl -s -H "Authorization: Bearer $ATHENA_KEY" \
+  "https://athena.internal/api/logs/stream?category=daemon" \
+  | while read line; do
+      [[ "$line" =~ ^data:\ (.+)$ ]] && \
+        echo "${BASH_REMATCH[1]}" | curl -s -X POST -d @- \
+          https://your-siem.internal/ingest
+    done
+```
+
+Trade-off vs. FluentBit/vector.dev: the daemon's
+`/api/logs/stream` caps each connection at ~10 minutes (defensive,
+keeps a stuck client from pinning a subprocess forever). For
+indefinite tailing, prefer the collector path; for ad-hoc / cron
+pulls, the HTTP API is simpler.
+
 ## What does NOT get shipped
 
 The M30 SQLite **audit_log** table is NOT in the unified log
