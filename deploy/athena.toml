@@ -215,10 +215,11 @@ engine = "mlx"
 # by max_tokens. A sync request that overruns returns HTTP 504 (code
 # inference_timeout); a streamed one is truncated and the stream closed.
 # The work is cancelled so it stops holding the worker. 0 or negative ⇒
-# no deadline (a hung request hangs indefinitely). M43.2 ships a 120 s
-# default — long enough to cover most legitimate completions, short
-# enough that a stuck request 504s within an operator's reasonable wait.
-request_timeout_secs = 120              # cancel any decode past 2 min
+# no deadline (a hung request hangs indefinitely). Daemon ships opt-in:
+# commented ⇒ no deadline (the CLI help's documented default). Uncomment
+# + set above your slowest legitimate generation if you want a cap;
+# extraction-shape decodes on 27B-class models routinely need 300-600 s.
+# request_timeout_secs = 600
 
 # Preload (warm) the LLM at startup instead of lazily on the first
 # request. With it off (default) the model loads on first inference, so

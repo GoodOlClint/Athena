@@ -61,7 +61,10 @@ struct Load: AsyncParsableCommand {
     @Option(help: "Max generated tokens.")
     var maxTokens: Int = 1024
 
-    @Flag(help: "Enable MTP speculative decoding (greedy/temp 0 only).")
+    @Flag(
+        help:
+            "Enable MTP speculative decoding. Bit-identical-greedy at temperature 0; Leviathan/Chen sampling speculative (distributionally identical to non-speculative sampling at the same temp/top_p/seed) at temperature > 0. Requires the loaded model to have an MTP head. Per-request `speculative` override available on /v1 + /api."
+    )
     var speculative = false
 
     @Option(help: "Model directory path, or a name under the model store.")

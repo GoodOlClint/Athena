@@ -4321,7 +4321,22 @@ struct AthenaServer {
         status: HTTPResponse.Status, message: String, type: String,
         code: String
     ) -> Response {
-        json(
+        // Operator legibility (M43.4 follow-up): every 5xx the daemon
+        // sends must leave a server-side trace. Classified errors that
+        // skip ``classified(_:module:)`` were previously silent — a
+        // ``requestTimedOut`` 504 / cold-load 503 / OOM 503 reached the
+        // wire with no log line, so an operator reading `log show` saw
+        // the client hang up but no daemon explanation. 4xx is left
+        // silent — it's a client-shape problem, surfaced by the audit
+        // log (M30) when it matters and noisy otherwise.
+        if status.code >= 500 {
+            log.warning(
+                """
+                governed request failed status=\(status.code) \
+                code=\(code) \(message)
+                """)
+        }
+        return json(
             APIErrorBody(
                 error: .init(message: message, type: type, code: code)),
             status: status)
