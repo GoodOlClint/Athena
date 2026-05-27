@@ -367,7 +367,7 @@ final class LaunchdPlistTests: XCTestCase {
     private func cfg(
         budget: Int? = nil, model: String? = nil,
         modelStore: String? = nil, dataDir: String? = nil,
-        logLevel: String? = nil, syslogRemote: String? = nil,
+        logLevel: String? = nil,
         maxTokens: Int? = nil, temperature: String? = nil,
         speculative: Bool? = nil, vectorCapBytes: Int? = nil,
         authKeysFile: String? = nil,
@@ -389,7 +389,7 @@ final class LaunchdPlistTests: XCTestCase {
             listenHost: "127.0.0.1", listenPort: 7447, budgetBytes: budget,
             engine: "mlx", model: model, modelStore: modelStore,
             dataDir: dataDir, logLevel: logLevel,
-            syslogRemote: syslogRemote, maxTokens: maxTokens,
+            maxTokens: maxTokens,
             temperature: temperature, speculative: speculative,
             vectorCapBytes: vectorCapBytes,
             authKeysFile: authKeysFile,
@@ -419,6 +419,8 @@ final class LaunchdPlistTests: XCTestCase {
             d["ProgramArguments"] as? [String],
             [
                 "/usr/local/libexec/athena/athenad",
+                "load",
+                "--background",
                 "--host", "127.0.0.1", "--port", "7447",
                 "--engine", "mlx",
             ])
@@ -434,7 +436,6 @@ final class LaunchdPlistTests: XCTestCase {
                 budget: 36_000_000_000, model: "M",
                 modelStore: "/srv/models", dataDir: "/srv/a",
                 logLevel: "debug",
-                syslogRemote: "udp://10.0.0.5:514",
                 maxTokens: 2048, temperature: "0.2",
                 speculative: true, vectorCapBytes: 1_000_000,
                 authKeysFile: "/etc/athena/auth.keys",
@@ -455,12 +456,12 @@ final class LaunchdPlistTests: XCTestCase {
         XCTAssertEqual(
             d["ProgramArguments"] as? [String],
             [
-                "/bin/athena", "--host", "127.0.0.1",
+                "/bin/athena", "load", "--background",
+                "--host", "127.0.0.1",
                 "--port", "7447", "--budget-bytes", "36000000000",
                 "--engine", "mlx", "--model", "M",
                 "--model-store", "/srv/models",
                 "--data-dir", "/srv/a", "--log-level", "debug",
-                "--syslog-remote", "udp://10.0.0.5:514",
                 "--max-tokens", "2048", "--temperature", "0.2",
                 "--speculative", "--vector-cap-bytes", "1000000",
                 "--auth-keys-file", "/etc/athena/auth.keys",

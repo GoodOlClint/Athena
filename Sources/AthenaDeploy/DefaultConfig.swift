@@ -87,11 +87,18 @@ public enum DefaultConfig {
 
 
         # ── Logging ──────────────────────────────────────────────────
+        # Crash-dump capture file under launchd (StandardErrorPath).
+        # The diagnostic surface is the macOS unified log — query via
+        # `log show --predicate 'subsystem == "athena"'`. M45.1
+        # dropped per-sink stdout/file/UDP shippers; off-box shipping
+        # is now an operator concern (FluentBit / vector.dev against
+        # subsystem "athena").
         log_dir = "\(logDir)"
+        # Foreground terminal verbosity (no effect under launchd; the
+        # unified log captures everything regardless). Use
+        # `sudo log config --mode "level:debug" --subsystem athena`
+        # to tune the unified-log gate at runtime without a restart.
         # log_level = "info"
-        # Opt-in remote syslog (the single passive-oracle exception;
-        # logs only, default off). Form: "udp://host[:514]".
-        # syslog_remote = "udp://10.0.0.5:514"
         """
     }
 }

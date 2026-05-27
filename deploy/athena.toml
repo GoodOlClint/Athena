@@ -250,16 +250,17 @@ request_timeout_secs = 120              # cancel any decode past 2 min
 
 # ── Logging ──────────────────────────────────────────────────────────
 
-# Directory for athena.out.log / athena.err.log (launchd-managed).
+# Crash-dump capture file (launchd StandardErrorPath). The diagnostic
+# surface is the macOS unified log — query via:
+#   log show --predicate 'subsystem == "athena"'
+# M45.1 dropped the stdout/file/UDP shippers; off-box log shipping is
+# an operator concern via FluentBit / vector.dev / syslog-ng against
+# subsystem "athena".
 log_dir = "/usr/local/var/log/athena"
 
-# Verbosity floor for stdout AND the macOS unified log
-# (subsystem "athena"): trace|debug|info|notice|warning|error|
-# critical. Commented ⇒ "info". "debug" (or "trace") = maximum.
+# Foreground terminal verbosity (trace|debug|info|notice|warning|
+# error|critical; default "info"). NO EFFECT under launchd — the
+# unified log captures everything regardless. Use
+#   sudo log config --mode "level:debug" --subsystem athena
+# to tune the unified-log gate at runtime without a daemon restart.
 # log_level = "info"
-
-# Opt-in remote syslog sink (RFC5424 over UDP). This is the SINGLE
-# sanctioned exception to the passive-oracle "no outbound" rule —
-# LOGS ONLY, never inference data; default OFF (commented). Form:
-# "udp://host[:514]". Same level floor as log_level applies.
-# syslog_remote = "udp://10.0.0.5:514"

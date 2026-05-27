@@ -143,15 +143,15 @@ struct Load: AsyncParsableCommand {
 
     @Option(
         help:
-            "Log level trace|debug|info|notice|warning|error|critical (default info; debug/trace = max)."
+            "Terminal verbosity (trace|debug|info|notice|warning|error|critical; default info). Foreground only — the macOS unified log captures everything regardless. Use `sudo log config --mode \"level:debug\" --subsystem athena` for live tuning of the unified-log gate."
     )
     var logLevel: String?
 
-    @Option(
-        help:
-            "Opt-in remote syslog sink udp://host[:514] (logs only; the one passive-oracle exception; default off)."
-    )
-    var syslogRemote: String?
+    @Flag(
+        help: ArgumentHelp(
+            "Set by the launchd plist. Drops the foreground stdout sink so the macOS unified log is the sole surface. Operators rarely set this directly.",
+            visibility: .hidden))
+    var background = false
 
     @Option(
         help:
@@ -288,16 +288,18 @@ struct Load: AsyncParsableCommand {
         }
         // Centralized logging first — must precede any Logger creation
         // (Hummingbird/NIO included) so everything routes through the
-        // stdout + unified-logging multiplex (M10). Invalid level ⇒
-        // warn + info.
+        // unified-log handler (M10 → M45.1). Invalid level ⇒ warn +
+        // info. `--log-level` gates only the foreground terminal
+        // sink; under `--background` (launchd) it's inert because the
+        // terminal handler isn't constructed.
         if let lv = logLevel, AthenaLog.level(lv) == nil {
             let msg =
                 "warning: invalid --log-level '\(lv)', using info\n"
             FileHandle.standardError.write(Data(msg.utf8))
         }
         AthenaLog.bootstrap(
-            level: AthenaLog.level(logLevel) ?? .info,
-            syslogRemote: syslogRemote)
+            background: background,
+            terminalLevel: AthenaLog.level(logLevel) ?? .info)
 
         // HF download cache: if an `hf-cache` sits beside the model
         // store (the configured root, or the default), use it;

@@ -23,7 +23,7 @@ enum ConfigEditor {
     static let knownKeys: Set<String> = [
         "listen_host", "listen_port", "budget_bytes", "engine",
         "model", "model_store", "data_dir", "log_level",
-        "syslog_remote", "log_dir", "max_tokens", "temperature",
+        "log_dir", "max_tokens", "temperature",
         "speculative", "vector_cap_bytes", "auth_keys_file",
         "tls_cert", "tls_key", "rate_limit", "rate_burst",
         "max_concurrency", "max_concurrency_per_principal",
@@ -71,7 +71,6 @@ enum ConfigEditor {
         case "model_store": return cfg.modelStore
         case "data_dir": return cfg.dataDir
         case "log_level": return cfg.logLevel
-        case "syslog_remote": return cfg.syslogRemote
         case "log_dir": return cfg.logDir
         case "max_tokens": return cfg.maxTokens.map(String.init)
         case "temperature": return cfg.temperature

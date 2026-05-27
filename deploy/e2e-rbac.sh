@@ -1273,6 +1273,49 @@ echo "$DOC_OUT" | grep -q -- "--prompt-cache-cap-bytes" \
   || bad "doctor missing --prompt-cache-cap-bytes entry"
 
 echo
+echo "== phase 3.689: unified-log consolidation (M45.1) =="
+# M45.1 dropped the opt-in syslog UDP shipper + the `syslog_remote`
+# config knob; logs now live solely in the macOS unified log
+# (foreground adds a stderr terminal handler). Verify:
+# 1. `config set syslog_remote=…` is rejected as unknown key.
+# 2. `config set log_level=…` still works (didn't accidentally drop
+#    the surviving knob).
+# 3. Launchd plist generation injects `--background` so the daemon
+#    drops its stdout sink under launchctl.
+TCFG="$(mktemp)"
+cp deploy/athena.toml "$TCFG"
+CSET_SYSLOG="$("$ATHENA" config set \
+  --config "$TCFG" --no-apply \
+  syslog_remote 'udp://10.0.0.5:514' 2>&1 || true)"
+echo "$CSET_SYSLOG" | grep -q "unknown key 'syslog_remote'" \
+  && ok "config set syslog_remote rejected (M45.1 removed knob)" \
+  || bad "config set syslog_remote should be unknown ($CSET_SYSLOG)"
+CSET_LL="$("$ATHENA" config set \
+  --config "$TCFG" --no-apply \
+  log_level 'notice' 2>&1 || true)"
+if grep -q '^log_level = "notice"' "$TCFG"; then
+  ok "config set log_level still functional (terminal-scoped)"
+else
+  bad "config set log_level didn't update the file ($CSET_LL)"
+fi
+# `athena load --help` should NOT advertise --background (it's
+# launchd-internal; ArgumentParser visibility: .hidden).
+LOAD_HELP="$("$ATHENA" load --help 2>&1 || true)"
+echo "$LOAD_HELP" | grep -q -- "--background" \
+  && bad "--background should be hidden from athena load --help" \
+  || ok "--background hidden from athena load --help (launchd internal)"
+# `athena load --help` should NOT mention --syslog-remote anymore.
+echo "$LOAD_HELP" | grep -q -- "--syslog-remote" \
+  && bad "--syslog-remote still appears in athena load --help" \
+  || ok "--syslog-remote dropped from athena load --help"
+# `athena start --help` should NOT mention --syslog-remote anymore.
+START_HELP="$("$ATHENA" start --help 2>&1 || true)"
+echo "$START_HELP" | grep -q -- "--syslog-remote" \
+  && bad "--syslog-remote still appears in athena start --help" \
+  || ok "--syslog-remote dropped from athena start --help"
+rm -f "$TCFG"
+
+echo
 echo "== phase 3.69: inference-time rebind audited (M41.4) =="
 # An /v1/embeddings request that names a NON-resident allowlist member
 # rebinds the slot in place + audits the change (trigger=inference).

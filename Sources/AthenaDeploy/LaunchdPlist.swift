@@ -27,9 +27,17 @@ public enum LaunchdPlist {
         // argv[0]. Skipping `athenad` from the launchd path keeps
         // argv[0] aligned with the kernel's view, so Bundle.main
         // resolves correctly.
+        //
+        // `--background` (M45.1) tells the daemon it's launchd-spawned
+        // so it drops the foreground stdout sink; the macOS unified
+        // log is the sole diagnostic surface for the installed
+        // daemon. Operators query via `log show / log stream` and
+        // tune verbosity at runtime with `sudo log config --mode
+        // "level:debug" --subsystem athena`.
         var args: [String] = [
             executablePath,
             "load",
+            "--background",
             "--host", config.listenHost,
             "--port", String(config.listenPort),
         ]
@@ -50,9 +58,6 @@ public enum LaunchdPlist {
         }
         if let logLevel = config.logLevel {
             args += ["--log-level", logLevel]
-        }
-        if let syslogRemote = config.syslogRemote {
-            args += ["--syslog-remote", syslogRemote]
         }
         if let maxTokens = config.maxTokens {
             args += ["--max-tokens", String(maxTokens)]
@@ -117,6 +122,13 @@ public enum LaunchdPlist {
             args += ["--encrypt-store"]  // a Flag, not an Option
         }
 
+        // Diagnostic surface is the macOS unified log (M45.1). The
+        // daemon emits nothing to stdout under launchd, so
+        // StandardOutPath is /dev/null. StandardErrorPath stays as a
+        // small file under log_dir to catch process-death output
+        // (fatalError, NIO precondition failures, MLX/Metal panics)
+        // that fires after Logger is torn down — a CRASH DUMP, not a
+        // diagnostic log.
         return [
             "Label": label,
             "ProgramArguments": args,
@@ -125,7 +137,7 @@ public enum LaunchdPlist {
             "KeepAlive": true,
             "ProcessType": "Standard",
             "WorkingDirectory": workingDirectory,
-            "StandardOutPath": "\(config.logDir)/athena.out.log",
+            "StandardOutPath": "/dev/null",
             "StandardErrorPath": "\(config.logDir)/athena.err.log",
             "SoftResourceLimits": ["NumberOfFiles": 8192],
         ]

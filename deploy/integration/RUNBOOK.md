@@ -120,7 +120,7 @@ Open `ath_web` (`http://<studio>:7447/ui`) in Safari/Chrome.
 | D5 | Console → Config: change a value, restart, re-check | change applied after restart | ☐ |
 | D6 | Lockout drill: `athena auth user passwd admin` (offline) | password reset without a token | ☐ |
 | D7 | `athena uninstall` (no `--purge`) | launchd removed; data/config kept | ☐ (P1) |
-| D8 | (opt-in) set `syslog_remote`, restart, watch collector | logs only egress; nothing else leaves | ☐ (P1) |
+| D8 | `log show --last 5m --predicate 'subsystem == "athena"'` after activity | recent entries present; M45.1 unified-log is the sole diagnostic surface | ☐ (P1) |
 
 ## E — Security negatives (by hand)  · P0
 

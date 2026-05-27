@@ -62,7 +62,9 @@ private func selfExecutable() -> String {
 struct Start: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "start",
-        abstract: "Start the daemon process in the background.")
+        abstract:
+            "Start the daemon. Installed (root): launchd-managed; "
+            + "uninstalled: foreground-attached (Ctrl-C to stop).")
     @Option(help: "Listen host.") var host: String = "127.0.0.1"
     @Option(help: "Listen port.")
     var port: Int = GovernorConfig.defaultPort
@@ -70,10 +72,8 @@ struct Start: AsyncParsableCommand {
     @Option(help: "Model dir or store name.") var model: String?
     @Option(help: "Runtime/data dir (default ~/.athena).")
     var dataDir: String?
-    @Option(help: "Log level (trace|debug|info|…; default info).")
+    @Option(help: "Terminal verbosity (trace|debug|info|…; default info). Foreground only.")
     var logLevel: String?
-    @Option(help: "Opt-in remote syslog udp://host[:514] (logs only).")
-    var syslogRemote: String?
     @Option(help: "Bearer-auth keys file (see `athena load --help`).")
     var authKeysFile: String?
 
@@ -134,47 +134,43 @@ struct Start: AsyncParsableCommand {
         let dir = runtimeDir(dataDir)
         try FileManager.default.createDirectory(
             at: dir, withIntermediateDirectories: true)
-        let logURL = dir.appendingPathComponent("athena.log")
-        if !FileManager.default.fileExists(atPath: logURL.path) {
-            FileManager.default.createFile(
-                atPath: logURL.path, contents: nil)
-        }
-        guard let logFH = try? FileHandle(forWritingTo: logURL) else {
-            FailableExit.die(
-                "error: cannot open log \(logURL.path)")
-        }
-        logFH.seekToEndOfFile()
 
         var flags = ["--host", host, "--port", String(port)]
         if let engine { flags += ["--engine", engine] }
         if let model { flags += ["--model", model] }
         if let dataDir { flags += ["--data-dir", dataDir] }
         if let logLevel { flags += ["--log-level", logLevel] }
-        if let syslogRemote {
-            flags += ["--syslog-remote", syslogRemote]
-        }
         if let authKeysFile {
             flags += ["--auth-keys-file", authKeysFile]
         }
 
-        // Spawn `athena load …` directly. Was: spawn the sibling
-        // `athenad` (M14.2d) which `execv`-ed `athena` with
-        // `argv[0]="athena"` (bare). That argv[0] / kernel-binary-path
-        // discrepancy made Swift's `Bundle.main.bundleURL` resolve to
-        // the wrong directory under macOS hardened-runtime spawn
-        // semantics, so mlx-c's SwiftPM-bundle lookup couldn't find
-        // `mlx-swift_Cmlx.bundle` and `MLX.Memory.memoryLimit = …`
-        // crashed the daemon with "Failed to load the default metallib
-        // library not found …" on first MLX init. Spawning the
-        // self-binary keeps argv[0] aligned with the resolved path —
-        // same fix as the M42 launchd plist.
+        // Spawn `athena load …` directly, inheriting our stdio so the
+        // child's TerminalLogHandler emits to the operator's terminal
+        // (M45.1 — no `--background`, so the daemon installs the
+        // TerminalLogHandler alongside the unified-log handler;
+        // TerminalLogHandler writes to stderr).
+        //
+        // Spawn-and-return (NOT waitUntilExit): keeps the historical
+        // `athena start` contract — scripts and the e2e gate expect
+        // start to fork the daemon and return so the shell can
+        // continue with curl tests. The child's stdio FDs survive
+        // the parent's exit (the operator's terminal stays connected
+        // to the daemon until they close it or run `athena stop`).
+        // Pre-M45.1 the child's stdout/stderr were redirected to a
+        // file under the runtime dir; M45.1 drops the file in favor
+        // of terminal inheritance + the unified-log handler.
+        //
+        // Re. argv[0]: spawning the self-binary keeps argv[0] aligned
+        // with the kernel's view, so Swift's `Bundle.main.bundleURL`
+        // resolves correctly under macOS hardened-runtime spawn
+        // semantics — same fix as the M42 launchd plist.
         let selfPath = selfExecutable()
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: selfPath)
         proc.arguments = ["load"] + flags
-        proc.standardOutput = logFH
-        proc.standardError = logFH
         proc.standardInput = FileHandle.nullDevice
+        // standardOutput / standardError left as `nil` (Process
+        // default) so the child inherits our terminal FDs.
         do {
             try proc.run()
         } catch {
@@ -184,7 +180,10 @@ struct Start: AsyncParsableCommand {
         try? Data("\(pid)\n".utf8).write(to: pidFile(dataDir))
         print(
             "started athena daemon (pid \(pid)) on "
-                + "\(host):\(port) — log: \(logURL.path)")
+                + "\(host):\(port) — `athena stop` to halt; "
+                + "logs flow to this terminal until close. "
+                + "For a system daemon: `sudo athena install` then "
+                + "`sudo athena start`.")
     }
 }
 

@@ -17,12 +17,13 @@ public struct AthenaConfig: Sendable, Equatable {
     /// Where the daemon keeps its SQLite store (vectors + queue + jobs).
     /// Optional — the daemon defaults to `~/.athena` when absent.
     public var dataDir: String?
-    /// Log verbosity floor (trace|debug|info|notice|warning|error|
-    /// critical). Optional — daemon defaults to info when absent.
+    /// Foreground terminal verbosity floor (trace|debug|info|notice|
+    /// warning|error|critical). Optional — daemon defaults to info
+    /// when absent. M45.1: gates the foreground stdout handler only;
+    /// the macOS unified log captures everything regardless.
+    /// `sudo log config --mode "level:debug" --subsystem athena` is
+    /// the runtime gate for the unified-log side.
     public var logLevel: String?
-    /// Opt-in remote syslog sink, e.g. "udp://host:514". The single
-    /// documented passive-oracle exception (logs only, default off).
-    public var syslogRemote: String?
     /// Inference tuning. All optional — daemon defaults apply when
     /// absent (max 1024 tokens, temp 0.7, speculative off,
     /// vector cap = budget/8). Kept as the raw scalar for
@@ -114,7 +115,7 @@ public struct AthenaConfig: Sendable, Equatable {
         listenHost: String, listenPort: Int, budgetBytes: Int?,
         engine: String?, model: String?, modelStore: String? = nil,
         dataDir: String? = nil,
-        logLevel: String? = nil, syslogRemote: String? = nil,
+        logLevel: String? = nil,
         maxTokens: Int? = nil, temperature: String? = nil,
         speculative: Bool? = nil, vectorCapBytes: Int? = nil,
         kvCompression: String? = nil,
@@ -144,7 +145,6 @@ public struct AthenaConfig: Sendable, Equatable {
         self.modelStore = modelStore
         self.dataDir = dataDir
         self.logLevel = logLevel
-        self.syslogRemote = syslogRemote
         self.maxTokens = maxTokens
         self.temperature = temperature
         self.speculative = speculative
@@ -288,7 +288,6 @@ public struct AthenaConfig: Sendable, Equatable {
             modelStore: scalar("model_store", in: toml),
             dataDir: scalar("data_dir", in: toml),
             logLevel: scalar("log_level", in: toml),
-            syslogRemote: scalar("syslog_remote", in: toml),
             maxTokens: maxTok,
             temperature: scalar("temperature", in: toml),
             speculative: spec,
