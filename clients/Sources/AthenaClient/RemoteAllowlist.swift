@@ -169,7 +169,7 @@ public struct AllowlistCmd: AsyncParsableCommand {
     public static let configuration = CommandConfiguration(
         commandName: "allowlist",
         abstract:
-            "Manage the persistent per-module model allowlist (M42).",
+            "Manage the persistent per-module model allowlist.",
         subcommands: [
             AllowList.self, AllowAdd.self, AllowRm.self,
             AllowDefault.self,

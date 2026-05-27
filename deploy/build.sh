@@ -53,14 +53,18 @@ fi
 # M43.3 removed the M14.2d `athenad` launcher (its bare argv[0] execv
 # broke MLX's metallib-bundle lookup under hardened-runtime spawn —
 # `athena start` and the LaunchDaemon now point at `athena` directly).
-# `CLANG_ENABLE_CODE_COVERAGE=NO` suppresses C-side coverage
-# instrumentation. The Swift-side `-profile-generate
-# -profile-coverage-mapping` flags come from the SwiftPM-generated
-# scheme's `codeCoverageEnabled=YES` and can only be overridden by
-# committing an explicit xcscheme — deferred (M43 fragility #5).
+# `CLANG_ENABLE_CODE_COVERAGE=NO` suppresses C-side instrumentation;
+# the Swift-side `-profile-generate -profile-coverage-mapping` flags
+# are killed by the committed
+# `.swiftpm/xcode/xcshareddata/xcschemes/athena-Package.xcscheme`
+# (codeCoverageEnabled="NO") which overrides the auto-generated one.
+# `ONLY_ACTIVE_ARCH=YES` keeps the build arm64-only — the appliance
+# is Apple-Silicon-only (README "Requirements") and the auto-scheme
+# previously used the same default; the committed scheme doesn't
+# pin architectures so we set it here.
 xcodebuild -scheme athena-Package -configuration "$CONFIG" \
   -destination 'platform=macOS' -derivedDataPath .build/xcode \
-  CLANG_ENABLE_CODE_COVERAGE=NO \
+  CLANG_ENABLE_CODE_COVERAGE=NO ONLY_ACTIVE_ARCH=YES \
   -skipMacroValidation -skipPackagePluginValidation build
 
 echo

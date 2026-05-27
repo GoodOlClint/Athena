@@ -75,7 +75,7 @@ struct Load: AsyncParsableCommand {
             per-request via the `model` body field; the FIRST is the \
             default (used when a request omits `model`). An id outside \
             this set is a 400 (`model_not_available`) — never an \
-            on-request download. When unset, falls back to --model. M41.2.
+            on-request download. When unset, falls back to --model.
             """
     )
     var llmModels: [String] = []
@@ -100,7 +100,7 @@ struct Load: AsyncParsableCommand {
         help: """
             Speech-to-text model HF id. Repeatable: pass it more than \
             once to make several whisper models selectable per-request \
-            via the `model` form field; the FIRST is the default. M41.3.
+            via the `model` form field; the FIRST is the default.
             """
     )
     var transcriptionModels: [String] = [
@@ -113,7 +113,7 @@ struct Load: AsyncParsableCommand {
             Speaker-diarization model HF id. Repeatable: pass it more \
             than once to make several diarization models selectable \
             per-request via the `model` form field; the FIRST is the \
-            default. M41.3.
+            default.
             """
     )
     var diarizationModels: [String] = [Load.defaultDiarizationModel]
@@ -124,7 +124,7 @@ struct Load: AsyncParsableCommand {
             Speaker-embedding (voice/speaker-verification) model HF id. \
             Repeatable: pass it more than once to make several speaker- \
             embedding models selectable per-request via the `model` \
-            form field; the FIRST is the default. M41.3.
+            form field; the FIRST is the default.
             """
     )
     var speakerEmbeddingModels: [String] = [
@@ -252,7 +252,7 @@ struct Load: AsyncParsableCommand {
     @Option(
         name: .customLong("module"),
         help: """
-            M41.1: rebind a module's slot on the RUNNING daemon at \
+            Rebind a module's slot on the RUNNING daemon at \
             --host:--port (no daemon-start). Pair with --id (omit ⇒ the \
             module's default). One of: llm, textEmbedding, \
             transcription, diarization, speakerEmbedding.
@@ -262,13 +262,13 @@ struct Load: AsyncParsableCommand {
 
     @Option(
         name: .customLong("id"),
-        help: "Model id within the module's allowlist (M41.1 rebind).")
+        help: "Model id within the module's allowlist (rebind target).")
     var rebindId: String?
 
     @Option(
         name: .customLong("key"),
         help:
-            "Bearer key for the M41 rebind path (else ATHENA_KEY env / Keychain)."
+            "Bearer key for the rebind path (else ATHENA_KEY env / Keychain)."
     )
     var rebindKey: String?
 

@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Committed shared scheme overriding the auto-generated SwiftPM one.
+  Sole purpose: codeCoverageEnabled = "NO" on every action so the
+  Swift driver stops adding `-profile-generate -profile-coverage-
+  mapping` to compile lines. That instrumentation drops default.profraw
+  into the binary's working directory at every start, which under
+  launchd lands as repeated "LLVM Profile Error: Failed to write file
+  ..." entries in athena.err.log (the daemon's working dir is
+  /usr/local/libexec/athena, which the non-root service user can
+  write to, but the noise is still gratuitous and the instrumentation
+  carries a 5-15% perf overhead). M44.3 — finishes the M43.3
+  fragility-#5 cleanup that suppressed only the C-side coverage.
+
+  ARCHS / ONLY_ACTIVE_ARCH come from build.sh's xcodebuild invocation,
+  not this scheme — so we don't pin them here.
+
+  Editing in Xcode regenerates this file with the same shape; the
+  toggle is Product → Scheme → Edit Scheme → Test → Code Coverage.
+-->
+<Scheme
+   LastUpgradeVersion = "1600"
+   version = "1.7">
+   <BuildAction
+      parallelizeBuildables = "YES"
+      buildImplicitDependencies = "YES">
+      <BuildActionEntries>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "athena"
+               BuildableName = "athena"
+               BlueprintName = "athena"
+               ReferencedContainer = "container:">
+            </BuildableReference>
+         </BuildActionEntry>
+      </BuildActionEntries>
+   </BuildAction>
+   <TestAction
+      buildConfiguration = "Debug"
+      selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
+      selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
+      shouldUseLaunchSchemeArgsEnv = "YES"
+      codeCoverageEnabled = "NO">
+      <Testables>
+      </Testables>
+   </TestAction>
+   <LaunchAction
+      buildConfiguration = "Debug"
+      selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
+      selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
+      launchStyle = "0"
+      useCustomWorkingDirectory = "NO"
+      ignoresPersistentStateOnLaunch = "NO"
+      debugDocumentVersioning = "YES"
+      debugServiceExtension = "internal"
+      allowLocationSimulation = "YES">
+   </LaunchAction>
+   <ProfileAction
+      buildConfiguration = "Release"
+      shouldUseLaunchSchemeArgsEnv = "YES"
+      savedToolIdentifier = ""
+      useCustomWorkingDirectory = "NO"
+      debugDocumentVersioning = "YES">
+   </ProfileAction>
+   <AnalyzeAction
+      buildConfiguration = "Debug">
+   </AnalyzeAction>
+   <ArchiveAction
+      buildConfiguration = "Release"
+      revealArchiveInOrganizer = "YES">
+   </ArchiveAction>
+</Scheme>

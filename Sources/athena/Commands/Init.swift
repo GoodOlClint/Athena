@@ -40,7 +40,7 @@ struct Init: AsyncParsableCommand {
     @Flag(
         name: .customLong("from-allowlist"),
         help: """
-            Read the persistent allowlist (M42) and pull every allowed id \
+            Read the persistent allowlist and pull every allowed id \
             instead of the compiled-in defaults. After an operator adds \
             a new model via `athena allowlist add`, this re-runs init to \
             prefetch it. The data-dir hosts the SQLite store; default \

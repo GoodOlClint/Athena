@@ -1,6 +1,14 @@
 .DS_Store
 .build/
-.swiftpm/
+.swiftpm/*
+# …except committed shared schemes (M44.3 needs athena-Package.xcscheme
+# to override the auto-generated `codeCoverageEnabled="YES"` and stop
+# Swift coverage instrumentation from being baked into the binary).
+!.swiftpm/xcode
+.swiftpm/xcode/*
+!.swiftpm/xcode/xcshareddata
+.swiftpm/xcode/xcshareddata/*
+!.swiftpm/xcode/xcshareddata/xcschemes
 *.xcodeproj
 *.xcframework
 # Package.resolved IS committed — Athena is a deployed appliance; pinned

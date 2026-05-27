@@ -24,7 +24,7 @@ public struct Unload: AsyncParsableCommand {
         help: """
             Module class to unload (llm, textEmbedding, transcription, \
             diarization, speakerEmbedding). Pass `all` to release every \
-            module. Default: llm (M41.1).
+            module. Default: llm.
             """)
     public var module: String = "llm"
 

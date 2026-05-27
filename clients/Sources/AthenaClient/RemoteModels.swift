@@ -501,7 +501,7 @@ public struct LoadCmd: AsyncParsableCommand {
     public static let configuration = CommandConfiguration(
         commandName: "load",
         abstract:
-            "Rebind a module's resident slot to a model id (M41.1).")
+            "Rebind a module's resident slot to a model id.")
     @OptionGroup public var daemon: DaemonOptions
     @Option(
         help:
@@ -521,7 +521,7 @@ public struct LoadCmd: AsyncParsableCommand {
 public struct ResidentCmd: AsyncParsableCommand {
     public static let configuration = CommandConfiguration(
         commandName: "resident",
-        abstract: "Show every module's resident model slot (M41.1).")
+        abstract: "Show every module's resident model slot.")
     @OptionGroup public var daemon: DaemonOptions
     public init() {}
     public func run() async throws {

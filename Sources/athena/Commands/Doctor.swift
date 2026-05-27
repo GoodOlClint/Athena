@@ -525,9 +525,11 @@ struct Doctor: AsyncParsableCommand {
             (
                 "--llm-model | --embedding-model | --whisper-model | "
                     + "--diarization-model | --speaker-embedding-model",
-                "first-boot seeds for the per-module allowlist (M42); "
-                    + "the SQLite table wins thereafter — edit via "
-                    + "`athena allowlist {add|rm|default}`"
+                "merged into the per-module allowlist (SQLite) on "
+                    + "every boot: any seed id missing from the table "
+                    + "is added; existing rows + the default flag are "
+                    + "preserved. Manage with `athena allowlist "
+                    + "{add|rm|default}`."
             ),
         ]
         say(
