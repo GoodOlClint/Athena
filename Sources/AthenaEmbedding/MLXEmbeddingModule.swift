@@ -34,6 +34,13 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
     private var container: EmbedderModelContainer?
     /// The id currently resident in `container` (nil ⇒ nothing loaded).
     private var residentId: String?
+    /// Real weight footprint, summed at load by walking
+    /// `model.parameters().flattened()`. Surfaced via `residentBytes` so
+    /// `/healthz` reports what the loaded model actually holds instead
+    /// of the static `estimatedBytes` (a 4B embedder's true footprint
+    /// is several GB; the static estimate is sized for the bge-small
+    /// default and lies by an order of magnitude for larger members).
+    private var weightBytes: Int?
 
     /// - Parameters:
     ///   - modelIds: the selectable set of embedding model HF ids; the
@@ -56,7 +63,9 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
         self.estimatedBytes = estimatedBytes
     }
 
-    public var residentBytes: Int { container == nil ? 0 : estimatedBytes }
+    public var residentBytes: Int {
+        container == nil ? 0 : (weightBytes ?? estimatedBytes)
+    }
 
     public func memoryEstimate() -> Int { estimatedBytes }
 
@@ -68,6 +77,7 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
     public func unload() async {
         container = nil
         residentId = nil
+        weightBytes = nil
     }
 
     public func allowedModelIds() -> [String] { allowedIds }
@@ -86,6 +96,7 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
         if residentId == target, container != nil { return }
         container = nil
         residentId = nil
+        weightBytes = nil
         try await loadContainer(target)
     }
 
@@ -95,6 +106,7 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
         if let r = residentId, !ids.contains(r) {
             container = nil
             residentId = nil
+            weightBytes = nil
         }
     }
 
@@ -103,16 +115,28 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
     /// nil) so the next request re-attempts rather than wedging.
     private func loadContainer(_ id: String) async throws {
         do {
-            container = try await EmbedderModelFactory.shared.loadContainer(
-                from: #hubDownloader(
-                    HuggingFace.HubClient(
-                        session: AthenaProxy.proxiedURLSession())),
-                using: #huggingFaceTokenizerLoader(),
-                configuration: ModelConfiguration(id: id))
+            let loaded =
+                try await EmbedderModelFactory.shared.loadContainer(
+                    from: #hubDownloader(
+                        HuggingFace.HubClient(
+                            session: AthenaProxy.proxiedURLSession())),
+                    using: #huggingFaceTokenizerLoader(),
+                    configuration: ModelConfiguration(id: id))
+            container = loaded
             residentId = id
+            // Sum `nbytes` over every parameter array — the substrate's
+            // wired-memory.md calls this "the most accurate approach"
+            // and the measurements there put it within ~MB of MLX's own
+            // active-memory delta. `nbytes` is metadata-only (no
+            // realization cost), so this is essentially free.
+            weightBytes = await loaded.perform { ctx in
+                ctx.model.parameters().flattened()
+                    .reduce(0) { $0 + $1.1.nbytes }
+            }
         } catch {
             container = nil
             residentId = nil
+            weightBytes = nil
             throw AthenaError.moduleLoadFailed(
                 .textEmbedding,
                 reason: "embedding model \(id): \(error)")
@@ -141,6 +165,7 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
         if residentId != target || container == nil {
             container = nil
             residentId = nil
+            weightBytes = nil
             try await loadContainer(target)
         }
         guard let container else {
@@ -157,29 +182,85 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
                 tokenizer.encode(text: $0, addSpecialTokens: true)
             }
             let promptTokens = encoded.reduce(0) { $0 + $1.count }
-            let maxLength = encoded.reduce(into: 1) {
-                $0 = max($0, $1.count)
-            }
             let pad = tokenizer.eosTokenId ?? 0
-            let padded = stacked(
-                encoded.map {
-                    MLXArray(
-                        $0
-                            + Array(
-                                repeating: pad,
-                                count: maxLength - $0.count))
-                })
-            let mask = padded .!= pad
-            let tokenTypes = MLXArray.zeros(like: padded)
-            let out = ctx.model(
-                padded, positionIds: nil, tokenTypeIds: tokenTypes,
-                attentionMask: mask)
-            let result = ctx.pooling(
-                out, normalize: true, applyLayerNorm: true)
-            result.eval()
+
+            // Length-bucketing. The substrate's pad-to-max in a single
+            // batch makes one 2500-token outlier in a batch of 64 cost
+            // as if all 64 were 2500 tokens — attention is O(B·L²) and
+            // activations are O(B·L·H). On a corpus that mixes ~400-
+            // token text with multi-thousand-token sections, that
+            // produced 100× per-batch latency outliers and enough
+            // allocator/kernel pressure to evict cold weight pages,
+            // forcing the *next* batch to fault them back in from
+            // SSD. Sort by token length, then greedy-pack mini-
+            // batches under a fixed `count × maxLen` token budget:
+            // short texts pack many-per-batch, long texts pack few-
+            // per-batch, no item is ever padded by more than the
+            // span of its own bucket. Results are reassembled in
+            // input order so the EmbeddingBatch contract is unchanged.
+            let order = (0..<encoded.count).sorted {
+                encoded[$0].count < encoded[$1].count
+            }
+            // 32 768 ≈ batch=64 × L=512 (typical embedding workload).
+            // A bucket with L=2500 packs ~13 items; one with L=200
+            // packs 64 (hard cap below).
+            let tokenBudget = 32_768
+            let maxItemsPerBucket = 64
+            var buckets: [[Int]] = []
+            var current: [Int] = []
+            var currentMaxLen = 0
+            for idx in order {
+                let L = max(1, encoded[idx].count)
+                let nextMaxLen = max(currentMaxLen, L)
+                let nextWork = (current.count + 1) * nextMaxLen
+                if !current.isEmpty
+                    && (nextWork > tokenBudget
+                        || current.count >= maxItemsPerBucket)
+                {
+                    buckets.append(current)
+                    current = [idx]
+                    currentMaxLen = L
+                } else {
+                    current.append(idx)
+                    currentMaxLen = nextMaxLen
+                }
+            }
+            if !current.isEmpty { buckets.append(current) }
+
+            var vectors = [[Float]](
+                repeating: [], count: texts.count)
+            for bucket in buckets {
+                let bucketEncoded = bucket.map { encoded[$0] }
+                let maxLength = bucketEncoded.reduce(into: 1) {
+                    $0 = max($0, $1.count)
+                }
+                let padded = stacked(
+                    bucketEncoded.map {
+                        MLXArray(
+                            $0
+                                + Array(
+                                    repeating: pad,
+                                    count: maxLength - $0.count))
+                    })
+                let mask = padded .!= pad
+                let tokenTypes = MLXArray.zeros(like: padded)
+                let out = ctx.model(
+                    padded, positionIds: nil,
+                    tokenTypeIds: tokenTypes,
+                    attentionMask: mask)
+                let result = ctx.pooling(
+                    out, normalize: true, applyLayerNorm: true)
+                result.eval()
+                let bucketVectors = result.map {
+                    $0.asArray(Float.self)
+                }
+                for (k, idx) in bucket.enumerated() {
+                    vectors[idx] = bucketVectors[k]
+                }
+            }
             return EmbeddingBatch(
-                vectors: result.map { $0.asArray(Float.self) },
-                promptTokens: promptTokens, model: target)
+                vectors: vectors, promptTokens: promptTokens,
+                model: target)
         }
     }
 }
