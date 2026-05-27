@@ -232,6 +232,11 @@ echo "$DENYBODY" | grep -q '"hint":' \
 echo "$DENYBODY" | grep -q "ATHENA_KEY" \
   && ok "auth hint mentions ATHENA_KEY remediation" \
   || bad "auth hint did not name the standard remediation"
+# M45.6: hint also names `athena auth login` so operators know about
+# the Keychain-cache path (not just env + flag).
+echo "$DENYBODY" | grep -q "athena auth login" \
+  && ok 'auth hint mentions "athena auth login" (Keychain cache)' \
+  || bad "auth hint omits the Keychain-cache remediation"
 FORBODY="$(curl -s -H "Authorization: Bearer $ALICE_TOK" \
   "http://127.0.0.1:$PORT/v1/store/stats")"
 echo "$FORBODY" | grep -q '"hint":' \

@@ -69,6 +69,53 @@ public enum Secrets {
                 account,
             ]).0 == 0
         }
+
+        /// Store a secret in the INVOKING USER's Keychain even when
+        /// the current process is running as root via sudo (M45.6).
+        /// `geteuid() == 0` + `SUDO_USER` set ⇒ drop priv via
+        /// `sudo -u <user>` to invoke `security`; otherwise behaves
+        /// like `store(_:account:)`. Operator-Keychain writes from
+        /// `sudo athena install` would otherwise land in root's
+        /// Keychain (useless to the operator's interactive
+        /// session).
+        ///
+        /// Best-effort: throws if the security call fails (e.g.
+        /// locked Keychain, no GUI session). Callers should catch
+        /// and surface a one-line "couldn't auto-stash, run
+        /// `athena auth login`" fallback.
+        public static func storeAsInvokingOperator(
+            _ value: String, account: String
+        ) throws {
+            let env = ProcessInfo.processInfo.environment
+            guard geteuid() == 0,
+                let sudoUser = env["SUDO_USER"],
+                !sudoUser.isEmpty, sudoUser != "root"
+            else {
+                try store(value, account: account)
+                return
+            }
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
+            // `-u` drops to the invoking user; `-H` sets HOME so
+            // `security` finds that user's login Keychain (not
+            // root's). `-n` makes sudo non-interactive — root → any
+            // user doesn't need a password, so this should succeed
+            // without blocking on stdin.
+            p.arguments = [
+                "-u", sudoUser, "-H", "-n",
+                "/usr/bin/security", "add-generic-password",
+                "-U", "-s", service, "-a", account, "-w", value,
+            ]
+            p.standardOutput = FileHandle.nullDevice
+            p.standardError = FileHandle.nullDevice
+            try p.run()
+            p.waitUntilExit()
+            guard p.terminationStatus == 0 else {
+                throw CredentialError.keychain(
+                    "sudo -u \(sudoUser) security failed "
+                        + "(\(p.terminationStatus))")
+            }
+        }
     #else
         public static func read(account: String) -> String? { nil }
         public static func store(_ value: String, account: String)
@@ -78,6 +125,11 @@ public enum Secrets {
         }
         @discardableResult
         public static func remove(account: String) -> Bool { false }
+        public static func storeAsInvokingOperator(
+            _ value: String, account: String
+        ) throws {
+            throw CredentialError.unsupported
+        }
     #endif
 }
 
@@ -116,6 +168,18 @@ public enum Credentials {
         _ key: String, host: String, port: Int
     ) throws {
         try Secrets.store(key, account: account(host, port))
+    }
+
+    /// M45.6: install-time variant. When invoked under `sudo`, this
+    /// writes to the INVOKING operator's Keychain (`$SUDO_USER`) so
+    /// `athena <verb>` works from their interactive shell without
+    /// `athena auth login`. Falls back to the regular `store` when
+    /// not sudo.
+    public static func storeAsInvokingOperator(
+        _ key: String, host: String, port: Int
+    ) throws {
+        try Secrets.storeAsInvokingOperator(
+            key, account: account(host, port))
     }
 
     @discardableResult

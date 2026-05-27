@@ -423,8 +423,10 @@ struct AuthMiddleware<Context: RequestContext>: RouterMiddleware {
                 .unauthorized, "missing or invalid bearer token",
                 "unauthorized",
                 hint:
-                    "Set ATHENA_KEY, pass --key <secret>, or sign in "
-                    + "at /ui/login. Mint a token with `athena auth "
+                    "Set ATHENA_KEY, pass --key <secret>, run "
+                    + "`athena auth login --host <h> --port <p>` to "
+                    + "cache it in your Keychain, or sign in at "
+                    + "/ui/login. Mint a token with `athena auth "
                     + "token add --user <name>` (admin) or offline "
                     + "via `--data-dir`.")
         }

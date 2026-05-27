@@ -1,4 +1,5 @@
 import ArgumentParser
+import AthenaClient
 import AthenaCore
 import AthenaDeploy
 import AthenaStore
@@ -334,6 +335,20 @@ struct Install: AsyncParsableCommand {
             print("  │ `athena auth user passwd admin`.          │")
             print("  └──────────────────────────────────────────┘")
             if let tok = seededToken {
+                // M45.6 auto-stash: write the seeded admin token to
+                // the INVOKING operator's Keychain so `athena <verb>`
+                // works from their shell with no --key / ATHENA_KEY /
+                // `athena auth login` step. Failures (locked Keychain,
+                // weird sudo path) fall back to the manual hint.
+                let port = cfg.listenPort
+                var stashed = false
+                do {
+                    try Credentials.storeAsInvokingOperator(
+                        tok, host: "127.0.0.1", port: port)
+                    stashed = true
+                } catch {
+                    // Non-fatal; we still print the raw token.
+                }
                 print("")
                 print("  admin bearer token (SAVE NOW — shown once):")
                 print("    \(tok)")
@@ -342,6 +357,20 @@ struct Install: AsyncParsableCommand {
                 print(
                     "    mint more: `athena auth token add --user "
                         + "<u>`")
+                if stashed {
+                    let who =
+                        ProcessInfo.processInfo
+                        .environment["SUDO_USER"] ?? "current user"
+                    print(
+                        "    cached in \(who)'s Keychain at "
+                            + "127.0.0.1:\(port) — `athena logs` "
+                            + "etc. work with no --key.")
+                } else {
+                    print(
+                        "    cache for repeat use: `athena auth "
+                            + "login --host 127.0.0.1 --port "
+                            + "\(port)` (then paste the token).")
+                }
             }
             print("")
         } else {
