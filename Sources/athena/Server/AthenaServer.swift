@@ -135,9 +135,16 @@ struct AthenaServer {
         }
         router.add(middleware: MetricsMiddleware(metrics: metrics))
 
-        router.get("/healthz") { _, _ -> Response in
+        router.get("/healthz") { [metrics, queue] _, _ -> Response in
             let snapshot = await governor.snapshot()
-            return Self.json(snapshot)
+            let (inflight, lastAt) = await metrics.healthFields()
+            let depth = await queue.depth()
+            return Self.json(
+                HealthResponse(
+                    snapshot: snapshot,
+                    inflight: inflight,
+                    queueDepth: depth,
+                    lastRequestAt: lastAt))
         }
 
         router.get("/metrics") { request, _ -> Response in
@@ -2859,17 +2866,43 @@ struct AthenaServer {
     /// module so its next request validates against the new set
     /// without a daemon restart. Default-first ordering matches what
     /// `resolveAllowlist` does at boot.
+    ///
+    /// M43.1 — every module's `setAllowedModelIds` nils its container
+    /// directly when the resident id drops out of the new list. That
+    /// bypasses the governor's bookkeeping, so the slot's reservation +
+    /// state would otherwise stay stale (the lying-`/healthz` symptom).
+    /// After the live push, ask the module for `residentBytes` — 0 means
+    /// the container was just dropped — and reconcile the governor.
     private func refreshAllowlist(module: ModuleID) async {
         let rows = await store.listModelAllowlist(
             module: module.rawValue)
-        guard !rows.isEmpty else {
-            await selectable(module).setAllowedModelIds([])
-            return
+        let ordered: [String]
+        if rows.isEmpty {
+            ordered = []
+        } else {
+            let def = rows.first { $0.isDefault } ?? rows[0]
+            var arr = [def.id]
+            for r in rows where r.id != def.id { arr.append(r.id) }
+            ordered = arr
         }
-        let def = rows.first { $0.isDefault } ?? rows[0]
-        var ordered = [def.id]
-        for r in rows where r.id != def.id { ordered.append(r.id) }
         await selectable(module).setAllowedModelIds(ordered)
+        let bytes = await inferenceModule(module).residentBytes
+        if bytes == 0 {
+            await governor.releaseSlot(module)
+        }
+    }
+
+    /// `any InferenceModule` corresponding to `id`. Parallel to
+    /// `selectable(_:)` — used where the governor-side residentBytes
+    /// probe is needed (M43.1 allowlist-drop reconcile).
+    private func inferenceModule(_ id: ModuleID) -> any InferenceModule {
+        switch id {
+        case .llm: return llm
+        case .textEmbedding: return embedding
+        case .transcription: return transcription
+        case .diarization: return diarization
+        case .speakerEmbedding: return speakerEmbedding
+        }
     }
 
     /// Enqueue a long-running model op (M16.3). The route is already
@@ -3934,6 +3967,37 @@ struct AthenaServer {
         return error(
             status: HTTPResponse.Status(code: e.httpStatus),
             message: e.message, type: "server_error", code: e.code)
+    }
+}
+
+/// M43.1 — /healthz response, flattening `GovernorSnapshot` for
+/// backwards compat with consumers that read top-level `reservedBytes`
+/// etc., plus three new live signals so a hung daemon is legible
+/// without scraping /metrics: `inflight` (active request count),
+/// `queueDepth` (jobs in `queued` status), `lastRequestAt` (epoch
+/// seconds; 0 ⇒ none since boot).
+struct HealthResponse: Encodable {
+    let totalBudgetBytes: Int
+    let reservedBytes: Int
+    let freeBytes: Int
+    let promptCacheCapBytes: Int
+    let modules: [ModuleSnapshot]
+    let inflight: Int
+    let queueDepth: Int
+    let lastRequestAt: Double
+
+    init(
+        snapshot: GovernorSnapshot, inflight: Int,
+        queueDepth: Int, lastRequestAt: Double
+    ) {
+        self.totalBudgetBytes = snapshot.totalBudgetBytes
+        self.reservedBytes = snapshot.reservedBytes
+        self.freeBytes = snapshot.freeBytes
+        self.promptCacheCapBytes = snapshot.promptCacheCapBytes
+        self.modules = snapshot.modules
+        self.inflight = inflight
+        self.queueDepth = queueDepth
+        self.lastRequestAt = lastRequestAt
     }
 }
 

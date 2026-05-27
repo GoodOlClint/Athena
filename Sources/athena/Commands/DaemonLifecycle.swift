@@ -112,15 +112,20 @@ struct Start: AsyncParsableCommand {
                         + "/usr/local/var/log/athena/")
                 return
             }
-            // Root, but no plist → fall through to Process() spawn
-            // with a warning so the operator notices the gap.
-            FileHandle.standardError.write(
-                Data(
-                    ("warning: running as root but no installed "
-                        + "launchd plist at \(plist.path). Falling "
-                        + "back to a root-owned Process() daemon — "
-                        + "`athena install` first to get a "
-                        + "user-owned launchd service.\n").utf8))
+            // M43.1 — refuse: a root-owned Process() spawn re-hits the
+            // same metallib-bundle lookup bug that drove the v0.10.38–41
+            // chase (mlx-c's SwiftPM-resource lookup mis-resolves under
+            // hardened-runtime spawn from root). The prior stderr-only
+            // warning here was invisible to scripts that
+            // `2>/dev/null`, so the daemon would come up broken with
+            // `athena status` reporting healthy. Hard fail with the
+            // install gate is the unambiguous remedy.
+            FailableExit.die(
+                "error: cannot start a root-owned daemon — no installed "
+                    + "launchd plist at \(plist.path). Run "
+                    + "`sudo athena install` first to install the system "
+                    + "LaunchDaemon, or re-run without sudo to start a "
+                    + "user-context daemon.")
         }
         if let pid = livePid(dataDir) {
             FailableExit.die(

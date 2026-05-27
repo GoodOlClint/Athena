@@ -991,6 +991,64 @@ echo "$AUDR" | grep -q 'model.allow.rm' \
   || bad "audit missing model.allow.rm ($AUDR)"
 
 echo
+echo "== phase 3.686: governor truth + /healthz signals (M43.1) =="
+# Three things in one phase:
+#   1. /healthz carries inflight, queueDepth, lastRequestAt (new fields).
+#   2. After serving a request, lastRequestAt > 0.
+#   3. Removing the resident id from the allowlist used to leave the
+#      governor at state=loaded with stale reservedBytes (the lying-
+#      /healthz symptom). Post-M43.1 refreshAllowlist reconciles the
+#      governor when the module drops its container, so state goes to
+#      unloaded and reservedBytes goes to 0.
+# Force the textEmbedding slot loaded so the post-drop assertion is
+# meaningful.
+curl -s -X POST -H "Authorization: Bearer $ALICE_TOK" \
+  -H 'Content-Type: application/json' \
+  -d '{"input":"hi"}' \
+  "http://127.0.0.1:$PORT/v1/embeddings" >/dev/null
+HZ1="$(curl -s "http://127.0.0.1:$PORT/healthz")"
+echo "$HZ1" | python3 -c '
+import json, sys
+h = json.loads(sys.stdin.read())
+for k in ("inflight", "queueDepth", "lastRequestAt"):
+    if k not in h:
+        sys.exit("missing:" + k)
+if h["lastRequestAt"] <= 0:
+    sys.exit("lastRequestAt=0")
+te = [m for m in h["modules"] if m["id"] == "textEmbedding"][0]
+if te["state"] != "loaded" or te["reservedBytes"] <= 0:
+    sys.exit("textEmbedding not loaded:" + json.dumps(te))
+' >/dev/null \
+  && ok "/healthz adds inflight/queueDepth/lastRequestAt + loaded state" \
+  || bad "/healthz missing M43.1 fields or textEmbedding not loaded ($HZ1)"
+# Add a second id and make it default so the next nil-model rebinds the
+# resident slot onto it.
+code 200 POST /api/models/allow "$ADMIN_TOK" \
+  '{"module":"textEmbedding","id":"athena-embedding-m43"}'
+code 200 PUT  /api/models/allow/default "$ADMIN_TOK" \
+  '{"module":"textEmbedding","id":"athena-embedding-m43"}'
+curl -s -X POST -H "Authorization: Bearer $ALICE_TOK" \
+  -H 'Content-Type: application/json' \
+  -d '{"input":"hi"}' \
+  "http://127.0.0.1:$PORT/v1/embeddings" >/dev/null
+# Remove the now-resident id. Pre-M43.1 the module nils its container
+# directly and the governor never sees it; /healthz then lies. Post-fix
+# refreshAllowlist calls governor.releaseSlot when residentBytes==0.
+code 200 DELETE \
+  "/api/models/allow?module=textEmbedding&id=athena-embedding-m43" \
+  "$ADMIN_TOK"
+HZ2="$(curl -s "http://127.0.0.1:$PORT/healthz")"
+echo "$HZ2" | python3 -c '
+import json, sys
+h = json.loads(sys.stdin.read())
+te = [m for m in h["modules"] if m["id"] == "textEmbedding"][0]
+if te["state"] != "unloaded" or te["reservedBytes"] != 0:
+    sys.exit("textEmbedding lies post-drop:" + json.dumps(te))
+' >/dev/null \
+  && ok "governor reconciled on allowlist drop (state=unloaded, reservedBytes=0)" \
+  || bad "governor lies after allowlist drop ($HZ2)"
+
+echo
 echo "== phase 3.69: inference-time rebind audited (M41.4) =="
 # An /v1/embeddings request that names a NON-resident allowlist member
 # rebinds the slot in place + audits the change (trigger=inference).

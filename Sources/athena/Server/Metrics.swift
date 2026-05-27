@@ -28,6 +28,14 @@ actor AthenaMetrics {
     /// Last N request durations (ms); bounded so memory is flat.
     private var lat: [Double] = []
     private let cap = 1024
+    /// M43.1 — live request count (incremented on handler entry,
+    /// decremented on exit/throw via `MetricsMiddleware`). Surfaces in
+    /// `/healthz` so a hung daemon is legible without scraping
+    /// `/metrics`.
+    private var inflight = 0
+    /// Unix-epoch seconds the most recent request entered the
+    /// metered surface; 0 ⇒ none since boot.
+    private var lastRequestAt: Double = 0
 
     func record(kind: String, ms: Double, isError: Bool) {
         total += 1
@@ -38,6 +46,24 @@ actor AthenaMetrics {
     }
 
     func addTokens(_ n: Int) { tokens += n }
+
+    /// M43.1 — call on handler entry. Increments the live counter and
+    /// stamps `lastRequestAt`.
+    func enter() {
+        inflight += 1
+        lastRequestAt = Date().timeIntervalSince1970
+    }
+
+    /// M43.1 — call on handler exit (or throw). Never goes negative.
+    func leave() {
+        if inflight > 0 { inflight -= 1 }
+    }
+
+    /// M43.1 — snapshot of the live signals the /healthz response
+    /// surfaces. `lastRequestAt == 0` ⇒ never-served sentinel.
+    func healthFields() -> (inflight: Int, lastRequestAt: Double) {
+        (inflight, lastRequestAt)
+    }
 
     func snapshot() -> Snapshot {
         let sorted = lat.sorted()
@@ -141,14 +167,17 @@ struct MetricsMiddleware<Context: RequestContext>: RouterMiddleware {
         func ms() -> Double {
             Double(DispatchTime.now().uptimeNanoseconds - t0) / 1e6
         }
+        await metrics.enter()
         do {
             let resp = try await next(request, context)
             await metrics.record(
                 kind: kind, ms: ms(),
                 isError: resp.status.code >= 400)
+            await metrics.leave()
             return resp
         } catch {
             await metrics.record(kind: kind, ms: ms(), isError: true)
+            await metrics.leave()
             throw error
         }
     }

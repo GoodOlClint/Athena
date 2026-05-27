@@ -54,11 +54,11 @@ enum OpenAPISpec {
             "/healthz": {
               "get": {
                 "tags": ["Operational"],
-                "summary": "Liveness + memory-governor snapshot.",
-                "description": "Always open (no auth). Returns the governor's current reservations and budget.",
+                "summary": "Liveness + memory-governor snapshot + live signals.",
+                "description": "Always open (no auth). Returns the governor's current reservations and budget, plus `inflight` (live request count), `queueDepth` (jobs in queued status), and `lastRequestAt` (unix-epoch seconds; 0 ⇒ none since boot) for at-a-glance diagnosis of a hung daemon (M43.1).",
                 "security": [],
                 "responses": {
-                  "200": { "description": "Governor snapshot.", "content": { "application/json": { "schema": { "type": "object" } } } }
+                  "200": { "description": "Governor snapshot + live signals.", "content": { "application/json": { "schema": { "type": "object" } } } }
                 }
               }
             },

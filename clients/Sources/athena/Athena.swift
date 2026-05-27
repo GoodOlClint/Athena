@@ -14,7 +14,7 @@ struct Athena: AsyncParsableCommand {
         abstract:
             "Project the platform client — remote inference, model store, "
             + "and RBAC admin over a daemon's HTTP API.",
-        version: "0.10.41",
+        version: "0.10.42",
         subcommands: [
             Run.self, Ps.self, CStatus.self, Unload.self,
             LoadCmd.self, ResidentCmd.self, AllowlistCmd.self,

@@ -269,6 +269,23 @@ public actor MemoryGovernor {
         }
     }
 
+    /// M43.1 — reconcile the governor when a module drops its resident
+    /// container outside the load/unload code paths (the allowlist-drop
+    /// case in `setAllowedModelIds`: the module nils `container` directly
+    /// when the resident id falls out of the new allowlist, so the
+    /// governor's reservation + state would otherwise stay stale and
+    /// `/healthz` would lie). Idempotent: a slot already at `.unloaded`
+    /// with no reservation is a no-op.
+    public func releaseSlot(_ id: ModuleID) {
+        guard let entry = entries[id] else { return }
+        if let reservation = entry.reservation {
+            reservedBytes -= reservation.bytes
+        }
+        entries[id]?.reservation = nil
+        entries[id]?.state = .unloaded
+        onEvent?(id, "evicted (allowlist drop)")
+    }
+
     /// Explicitly unload a module and return its bytes to the budget.
     public func unload(_ id: ModuleID) async {
         guard let entry = entries[id] else { return }

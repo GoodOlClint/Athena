@@ -89,6 +89,13 @@ actor RequestQueue {
         await store.listJobs(status: status)
     }
 
+    /// M43.1 — count rows in `queued` for `/healthz`. /healthz is not a
+    /// hot path; reusing `listJobs(status:).count` keeps the code
+    /// trivial without a dedicated COUNT query.
+    func depth() async -> Int {
+        await store.listJobs(status: "queued").count
+    }
+
     /// Remove a job row entirely (cancel-if-queued is implicit — a
     /// deleted row is simply never picked up). Returns whether it
     /// existed.
