@@ -515,6 +515,72 @@ UC="$(curl -s -o /dev/null -w '%{http_code}' -b "$UIJAR_A" -X POST \
   || bad "member user-create → $UC (want 303)"
 
 echo
+echo "== phase 2.85: WebUI allowlist console (M44.1) =="
+# /ui/allowlist + /ui/api/allowlist* re-check the cookie user's
+# model.read (list) / model.write (mutations) + CSRF, then DELEGATE to
+# the SAME M42.2 handlers the bearer /api/models/allow routes use — so
+# the live-refresh + audit tail can't drift between the two surfaces.
+APAGE="$(curl -s -b "$UIJAR" "$B/ui/allowlist")"
+echo "$APAGE" | grep -q 'href="/ui/allowlist"' \
+  && ok "allowlist nav link present (model.read)" \
+  || bad "allowlist nav link missing ($APAGE)"
+echo "$APAGE" | grep -q 'name="write" content="1"' \
+  && ok "allowlist page exposes WRITE=1 for admin (model.write)" \
+  || bad "allowlist page missing WRITE=1 ($APAGE)"
+ACSRF="$(printf '%s' "$APAGE" \
+  | sed -n 's/.*name="csrf" content="\([^"]*\)".*/\1/p' | head -1)"
+[ -n "$ACSRF" ] && ok "allowlist page mints CSRF token" \
+  || bad "allowlist page missing CSRF ($APAGE)"
+# list reuses handleAllowlistList — must include the stub's seeded
+# entries (set by `athena load --llm-model fake-model` at boot).
+AL="$(curl -s -b "$UIJAR" "$B/ui/api/allowlist")"
+echo "$AL" | grep -q '"allowlist"' \
+  && ok "/ui/api/allowlist returns allowlist[] (reuse)" \
+  || bad "/ui/api/allowlist missing allowlist[] ($AL)"
+# add + default + rm via the cookie path. The bearer /api side covers
+# the audit + live-refresh tail (asserted elsewhere); this confirms the
+# JSON-body wrappers reach the SAME handlers.
+uic 403 POST "/ui/api/allowlist" "" \
+  '{"module":"textEmbedding","id":"ui-test-emb"}'  # no CSRF
+uic 403 POST "/ui/api/allowlist" "bad" \
+  '{"module":"textEmbedding","id":"ui-test-emb"}'  # bad CSRF
+uic 400 POST "/ui/api/allowlist" "$ACSRF" \
+  '{"module":"NOPE","id":"x"}'                      # invalid_module
+uic 400 POST "/ui/api/allowlist" "$ACSRF" \
+  '{"module":"textEmbedding","id":""}'              # empty id
+uic 200 POST "/ui/api/allowlist" "$ACSRF" \
+  '{"module":"textEmbedding","id":"ui-test-emb"}'   # added
+# the addition must be visible to the same /ui list reader
+curl -s -b "$UIJAR" "$B/ui/api/allowlist" \
+  | grep -q '"id":"ui-test-emb"' \
+  && ok "added row visible in /ui/api/allowlist (live refresh)" \
+  || bad "added row missing after /ui POST"
+uic 200 POST "/ui/api/allowlist/default" "$ACSRF" \
+  '{"module":"textEmbedding","id":"ui-test-emb"}'
+uic 400 POST "/ui/api/allowlist/rm" "$ACSRF" \
+  '{"module":"NOPE","id":"x"}'                      # invalid body
+uic 404 POST "/ui/api/allowlist/rm" "$ACSRF" \
+  '{"module":"textEmbedding","id":"never-was"}'     # not present
+# rotate the default OFF this row first (current row IS default; rm of
+# a default leaves the slot in the documented "next add wins" state,
+# but here we just want a clean rm — restore the boot-seeded sibling
+# as default before removing the test row).
+uic 200 POST "/ui/api/allowlist/default" "$ACSRF" \
+  '{"module":"textEmbedding","id":"athena-embedding-default"}'
+uic 200 POST "/ui/api/allowlist/rm" "$ACSRF" \
+  '{"module":"textEmbedding","id":"ui-test-emb"}'
+# member: nav/page/mutation all gated pre-handler (∌ daemonAdmin)
+AMC="$(curl -s -o /dev/null -w '%{http_code}' -b "$UIJAR_A" \
+  "$B/ui/allowlist")"
+[ "$AMC" = 303 ] && ok "member /ui/allowlist → 303 (∌ daemonAdmin)" \
+  || bad "member /ui/allowlist → $AMC (want 303)"
+AMM="$(curl -s -o /dev/null -w '%{http_code}' -b "$UIJAR_A" -X POST \
+  -H 'X-CSRF-Token: x' -H 'Content-Type: application/json' \
+  -d '{"module":"llm","id":"x"}' "$B/ui/api/allowlist")"
+[ "$AMM" = 303 ] && ok "member allowlist add → 303 (gated pre-handler)" \
+  || bad "member allowlist add → $AMM (want 303)"
+
+echo
 echo "== phase 2.9: usage accounting — non-zero token counts (M27.1) =="
 # The OpenAI `usage` object must report REAL token counts (was a
 # hardcoded {0,0,0}). Under --engine stub the counts are synthesized

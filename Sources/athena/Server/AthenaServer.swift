@@ -289,6 +289,29 @@ struct AthenaServer {
             await uiAdminStop(request)
         }
 
+        // Allowlist console (M44.1). Cookie + per-action model.read
+        // (list) / model.write (mutations) + CSRF, then REUSE the
+        // M42.2 `/api/models/allow` handlers (handleAllowlist*) so the
+        // server-side refresh-on-mutate path is unchanged. All static
+        // literals (module/id ride the JSON body) ⇒ no trie hazard.
+        router.get("/ui/allowlist") { request, _ -> Response in
+            await handleUIAllowlistPage(request)
+        }
+        router.get("/ui/api/allowlist") { request, _ -> Response in
+            await uiAllowlistList(request)
+        }
+        router.post("/ui/api/allowlist") { request, _ -> Response in
+            await uiAllowlistAdd(request)
+        }
+        router.post("/ui/api/allowlist/rm") { request, _
+            -> Response in
+            await uiAllowlistRm(request)
+        }
+        router.post("/ui/api/allowlist/default") { request, _
+            -> Response in
+            await uiAllowlistDefault(request)
+        }
+
         // RBAC admin console (M18.4). Cookie + per-action
         // users.admin/tokens.admin re-check + CSRF, then REUSE the
         // M16.4 handlers (now cookie-aware via callerPermissions) so
@@ -2837,6 +2860,17 @@ struct AthenaServer {
                 message: "expected ?module=M&id=X with a known module",
                 type: "invalid_request_error", code: "invalid_query")
         }
+        return await removeAllowlistRow(
+            request, moduleId: moduleId, id: id)
+    }
+
+    /// Shared store-write + refresh + audit path used by the bearer
+    /// `DELETE /api/models/allow` (query-string) and the cookie
+    /// `POST /ui/api/allowlist/rm` (JSON body). One implementation so
+    /// the audit + live-refresh contract can't drift between the two.
+    private func removeAllowlistRow(
+        _ request: Request, moduleId: ModuleID, id: String
+    ) async -> Response {
         let removed = await store.removeModelAllowlist(
             module: moduleId.rawValue, id: id)
         if !removed {
@@ -3154,6 +3188,73 @@ struct AthenaServer {
             return Self.uiDeny("need daemon.admin")
         }
         return await adminLoadLLM(r)
+    }
+
+    // MARK: - WebUI allowlist reuse (M44.1)
+
+    /// `/ui/api/allowlist` (cookie). Mirrors `handleAllowlistList` —
+    /// `.modelRead` re-check on the logged-in user, then the same
+    /// list+JSON path.
+    private func uiAllowlistList(_ r: Request) async -> Response {
+        guard await uiCaller(r).perms.contains(.modelRead) else {
+            return Self.uiDeny("need model.read")
+        }
+        return await handleAllowlistList(r)
+    }
+
+    /// `/ui/api/allowlist` POST (cookie). CSRF + `.modelWrite`, then
+    /// delegates to `handleAllowlistAdd` — same JSON body shape, same
+    /// audit + refreshAllowlist tail.
+    private func uiAllowlistAdd(_ r: Request) async -> Response {
+        guard csrfOK(r) else {
+            return Self.uiDeny("csrf token missing or invalid")
+        }
+        guard await uiCaller(r).perms.contains(.modelWrite) else {
+            return Self.uiDeny("need model.write")
+        }
+        return await handleAllowlistAdd(r)
+    }
+
+    /// `/ui/api/allowlist/rm` POST (cookie). The bearer endpoint reads
+    /// `?module=&id=` from the query string; the cookie one reads them
+    /// from the JSON body so the WebUI can POST them like every other
+    /// /ui mutation. Both end at `removeAllowlistRow`.
+    private func uiAllowlistRm(_ r: Request) async -> Response {
+        guard csrfOK(r) else {
+            return Self.uiDeny("csrf token missing or invalid")
+        }
+        guard await uiCaller(r).perms.contains(.modelWrite) else {
+            return Self.uiDeny("need model.write")
+        }
+        let decoded = await decodeJSON(r, SetAllowlistDefaultRequest.self)
+        guard case .ok(let body) = decoded else {
+            if case .fail(let f) = decoded { return f }
+            fatalError()
+        }
+        guard
+            let moduleId = ModuleID(rawValue: body.module),
+            !body.id.isEmpty
+        else {
+            return Self.error(
+                status: .badRequest,
+                message:
+                    "module must be a ModuleID and id must be non-empty",
+                type: "invalid_request_error", code: "invalid_body")
+        }
+        return await removeAllowlistRow(
+            r, moduleId: moduleId, id: body.id)
+    }
+
+    /// `/ui/api/allowlist/default` POST (cookie). CSRF + `.modelWrite`,
+    /// then `handleAllowlistSetDefault` (already JSON-body-shaped).
+    private func uiAllowlistDefault(_ r: Request) async -> Response {
+        guard csrfOK(r) else {
+            return Self.uiDeny("csrf token missing or invalid")
+        }
+        guard await uiCaller(r).perms.contains(.modelWrite) else {
+            return Self.uiDeny("need model.write")
+        }
+        return await handleAllowlistSetDefault(r)
     }
 
     // MARK: - RBAC admin (M16.4)

@@ -204,6 +204,9 @@ extension AthenaServer {
         NavItem(
             label: "models", href: "/ui/models", perm: .modelRead),
         NavItem(
+            label: "allowlist", href: "/ui/allowlist",
+            perm: .modelRead),
+        NavItem(
             label: "daemon", href: "/ui/daemon",
             perm: .daemonAdmin),
         NavItem(
@@ -559,6 +562,120 @@ extension AthenaServer {
           if(r.ok)load();
           else{const j=await r.json();
             alert("delete failed: "+em(j));}
+        }
+        load();
+        </script>
+        """#
+
+    // MARK: - Allowlist page (M44.1)
+
+    /// Persistent per-module model allowlist console. List is gated
+    /// on `.modelRead`; the mutate UI (add/rm/default) renders only
+    /// when the logged-in user holds `.modelWrite`, and every
+    /// /ui/api/allowlist* mutation re-checks it server-side via
+    /// `uiAllowlistMutate` (page is never trusted).
+    func handleUIAllowlistPage(_ request: Request) async -> Response {
+        let c = await uiCaller(request)
+        let csrf = c.user.isEmpty ? "" : session.csrf(user: c.user)
+        let body: String
+        if c.perms.contains(.modelRead) {
+            let w = c.perms.contains(.modelWrite) ? "1" : "0"
+            body =
+                "<meta name=\"write\" content=\"\(w)\">"
+                + Self.allowlistBody
+        } else {
+            body =
+                #"<div class="card">insufficient permission "#
+                + #"(need model.read)</div>"#
+        }
+        return Self.html(
+            Self.uiShell(
+                title: "athena · allowlist", user: c.user,
+                csrf: csrf, perms: c.perms,
+                active: "/ui/allowlist", body: body))
+    }
+
+    static let allowlistBody = #"""
+        <div class="sub">per-module model allowlist · the daemon
+          refreshes its in-memory set after each change (no restart
+          needed)</div>
+        <div class="grid">
+          <div class="card"><h2>Allowlist</h2>
+            <table id="al"><tr><td class=k>loading…</td></tr>
+            </table></div>
+          <div class="card mut"><h2>Add</h2>
+            <label>module</label>
+            <select id="amod">
+              <option value="llm">llm</option>
+              <option value="textEmbedding">textEmbedding</option>
+              <option value="transcription">transcription</option>
+              <option value="diarization">diarization</option>
+              <option value="speakerEmbedding">speakerEmbedding</option>
+            </select>
+            <label>id (HF id for aux modules, store name for llm)</label>
+            <input id="aid">
+            <label><input type="checkbox" id="adef"> mark as default
+              for this module</label>
+            <button onclick="addRow()">Add</button>
+            <div id="amsg" class="k"></div></div>
+        </div>
+        <script>
+        const $=i=>document.getElementById(i);
+        const CSRF=document.querySelector('meta[name=csrf]').content;
+        const WM=document.querySelector('meta[name=write]');
+        const WRITE=WM&&WM.content==="1";
+        const jget=async u=>(await fetch(u)).json();
+        const jpost=(u,b)=>fetch(u,{method:"POST",headers:{
+          "content-type":"application/json","X-CSRF-Token":CSRF},
+          body:JSON.stringify(b)});
+        const em=j=>(j&&j.error&&j.error.message)||
+          (j&&j.error)||"error";
+        const esc=s=>String(s).replace(/[&<>"]/g,c=>(
+          {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"})[c]);
+        async function load(){
+          const m=await jget("/ui/api/allowlist");
+          const rows=(m.allowlist||[]).map(x=>`<tr>
+            <td>${esc(x.module)}</td>
+            <td>${esc(x.id)}</td>
+            <td class=k>${x.default?"*":""}</td>`+(WRITE?
+            `<td>${x.default?"":`<button onclick="mkdef('`+
+              `${esc(x.module)}','${esc(x.id)}')">default</button> `}`+
+            `<button class=danger onclick="rm('${esc(x.module)}',`+
+              `'${esc(x.id)}')">remove</button></td>`:``)+`</tr>`)
+            .join("");
+          $("al").innerHTML="<tr><th>module</th><th>id</th>"+
+            "<th>default</th>"+(WRITE?"<th></th>":"")+"</tr>"+
+            (rows||"<tr><td class=k>no entries</td></tr>");
+        }
+        async function addRow(){
+          const mod=$("amod").value;
+          const id=$("aid").value.trim();
+          if(!id){$("amsg").innerHTML=
+            "<span class=err>id required</span>"; return;}
+          const r=await jpost("/ui/api/allowlist",{
+            module:mod,id:id,default:$("adef").checked});
+          const j=await r.json();
+          if(r.ok){$("amsg").innerHTML=
+            `<span class=ok>added ${esc(mod)}:${esc(id)}</span>`;
+            $("aid").value=""; $("adef").checked=false; load();}
+          else $("amsg").innerHTML=
+            "<span class=err>"+em(j)+"</span>";
+        }
+        async function mkdef(mod,id){
+          const r=await jpost("/ui/api/allowlist/default",
+            {module:mod,id:id});
+          if(r.ok)load();
+          else{const j=await r.json();
+            alert("set default failed: "+em(j));}
+        }
+        async function rm(mod,id){
+          if(!confirm("Remove "+mod+":"+id+" from the allowlist?"))
+            return;
+          const r=await jpost("/ui/api/allowlist/rm",
+            {module:mod,id:id});
+          if(r.ok)load();
+          else{const j=await r.json();
+            alert("remove failed: "+em(j));}
         }
         load();
         </script>

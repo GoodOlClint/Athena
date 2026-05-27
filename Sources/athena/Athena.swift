@@ -6,16 +6,15 @@ import AthenaClient
 /// (`load`/`start`/`stop`/`status`), Apple-host operator ops
 /// (`install`/`pull`/`convert`/…), and the HTTP client verbs
 /// (`run`/`queue`/`vectors`/`store`/`auth`) that work against a local
-/// OR remote daemon. The daemon process itself is `athenad` (M14.2d;
-/// users never type it). Linux/Windows get the same `athena` command
+/// OR remote daemon. Linux/Windows get the same `athena` command
 /// built from the portable client subset only — there is no local
-/// daemon to manage there, so those verbs are remote-only. M14.2c.
+/// daemon to manage there, so those verbs are remote-only.
 @main
 struct Athena: AsyncParsableCommand {
     /// Single source of the daemon version — also stamped into the
     /// served OpenAPI document (`info.version`) so the spec can never
     /// report a version other than the build that serves it.
-    static let appVersion = "0.10.45"
+    static let appVersion = "0.10.46"
 
     static let configuration = CommandConfiguration(
         commandName: "athena",
