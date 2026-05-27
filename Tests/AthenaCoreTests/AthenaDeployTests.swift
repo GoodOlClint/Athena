@@ -504,9 +504,9 @@ final class InstallPlanTests: XCTestCase {
             label: "me.goodolclint.athena")
         XCTAssertEqual(
             plan.installedBinary.path, "/opt/athena/libexec/athena/athena")
-        XCTAssertEqual(
-            plan.installedDaemon.path,
-            "/opt/athena/libexec/athena/athenad")
+        // M43.3 removed the athenad shim; the test's installedDaemon
+        // assertion was dropped here so swift test compiles cleanly
+        // (caught while wiring M46.1's InferenceDeadlineTests additions).
         XCTAssertEqual(plan.binSymlink.path, "/opt/athena/bin/athena")
         XCTAssertEqual(
             plan.installedConfig.path, "/opt/athena/etc/athena/athena.toml")
@@ -533,8 +533,11 @@ final class InstallPlanTests: XCTestCase {
             label: "l")
         XCTAssertEqual(
             plan.artifactNames(),
+            // M43.3 — athenad was dropped from the artifact set when
+            // the launchd path stopped going through the shim; the
+            // production list is now just the binary + sorted bundles.
             [
-                "athena", "athenad", "mlx-swift_Cmlx.bundle",
+                "athena", "mlx-swift_Cmlx.bundle",
                 "swift-nio_NIOPosix.bundle",
             ])
     }

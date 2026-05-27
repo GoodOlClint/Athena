@@ -789,16 +789,25 @@ struct AthenaServer {
             // usage chunk when the client opted in via stream_options.
             let principal = await usagePrincipal(request)
             let includeUsage = body.stream_options?.include_usage == true
+            let deadlineSecs = requestTimeoutSecs
             return Self.streamSSE(
                 id: id, model: model, created: created,
                 events: deadlineBounded(
-                    seconds: requestTimeoutSecs,
+                    seconds: deadlineSecs,
                     llm.generateMetered(
                         messages: turns, schemaJSON: schemaJSON,
                         tools: toolSpecs, maxTokens: body.max_tokens,
                         temperature: body.temperature,
                         topP: body.top_p, seed: body.seed,
-                        speculative: body.speculative)),
+                        speculative: body.speculative),
+                    onTimerFired: {
+                        Self.log.warning(
+                            """
+                            streamed request truncated by deadline \
+                            path=/v1/chat/completions seconds=\
+                            \(deadlineSecs) model=\(model)
+                            """)
+                    }),
                 includeUsage: includeUsage, stops: stops,
                 record: { usage in
                     await meter(principal: principal, usage: usage)
@@ -923,17 +932,61 @@ struct AthenaServer {
     /// generation is cancelled so it stops consuming the worker/budget.
     /// Shared by the sync `/v1/chat/completions`, native `/api/chat`, and
     /// queued `conversation` paths so all three honor the same timeout.
+    ///
+    /// M46.1 — long-generation heartbeat. A sync decode that runs past
+    /// the `heartbeatAfter` threshold emits a `.notice`-level progress
+    /// log every `heartbeatEverySec` seconds OR every `heartbeatEveryTok`
+    /// text chunks, whichever comes first. Closes the silent-while-
+    /// decoding gap: a 10-minute extraction-shape call previously left
+    /// nothing in `log show` between request-start and request-complete,
+    /// making "actively decoding" look identical to "process hung."
+    /// Notice-level so it persists to `log show` per the unified-log
+    /// retention rules.
     private func collectMetered(
         _ events: AsyncStream<GenChunk>
     ) async throws -> GenCollected {
         try await withInferenceDeadline(seconds: requestTimeoutSecs) {
             var c = GenCollected()
+            let started = Date()
+            var lastHeartbeat = started
+            var tokensAtLastHeartbeat = 0
+            var tokensSeen = 0
+            // Locked defaults; small enough to be cheap on a healthy
+            // workload (no log emission at all until 10 s in), large
+            // enough that a multi-minute decode emits a handful of
+            // progress lines rather than a flood.
+            let heartbeatAfter: TimeInterval = 10
+            let heartbeatEverySec: TimeInterval = 5
+            let heartbeatEveryTok = 64
             for await event in events {
                 switch event {
-                case .text(let chunk): c.text += chunk
+                case .text(let chunk):
+                    c.text += chunk
+                    tokensSeen += 1
                 case .usage(let u): c.usage = u
                 case .finish(let r): c.finish = r
                 }
+                let now = Date()
+                let elapsed = now.timeIntervalSince(started)
+                guard elapsed >= heartbeatAfter else { continue }
+                let sinceLast = now.timeIntervalSince(lastHeartbeat)
+                let toksSinceLast = tokensSeen - tokensAtLastHeartbeat
+                guard
+                    sinceLast >= heartbeatEverySec
+                        || toksSinceLast >= heartbeatEveryTok
+                else { continue }
+                let tps =
+                    sinceLast > 0
+                    ? Double(toksSinceLast) / sinceLast : 0
+                Self.log.notice(
+                    """
+                    decode heartbeat elapsed=\(Int(elapsed))s \
+                    tokens=\(tokensSeen) \
+                    tokens_per_sec=\
+                    \(String(format: "%.1f", tps))
+                    """)
+                lastHeartbeat = now
+                tokensAtLastHeartbeat = tokensSeen
             }
             return c
         }
@@ -2462,14 +2515,23 @@ struct AthenaServer {
         }
         let model = await servedLLMModel()
         if body.stream == true {
+            let deadlineSecs = requestTimeoutSecs
             return Self.streamNDJSON(
                 tokens: deadlineBounded(
-                    seconds: requestTimeoutSecs,
+                    seconds: deadlineSecs,
                     llm.generate(
                         messages: turns, schemaJSON: nil, tools: nil,
                         maxTokens: body.max_tokens,
                         temperature: body.temperature,
-                        speculative: body.speculative))
+                        speculative: body.speculative),
+                    onTimerFired: {
+                        Self.log.warning(
+                            """
+                            streamed request truncated by deadline \
+                            path=/api/chat seconds=\(deadlineSecs) \
+                            model=\(model)
+                            """)
+                    })
             ) { content, done in
                 try? JSONEncoder().encode(
                     AthenaChatChunk(

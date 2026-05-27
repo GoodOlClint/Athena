@@ -50,28 +50,52 @@ func withDeadlineNanos<T: Sendable>(
 /// stream cleanly (cancelling the source, which cancels generation), and
 /// the caller's finalizer closes the wire (`[DONE]` / `done:true`). The
 /// reliability win — bounding a runaway decode — holds for streaming too.
+///
+/// M46.1 — `onTimerFired` is invoked exactly once when the deadline
+/// truncates the stream (timer races ahead of the source completing).
+/// AthenaCore stays dependency-free so callers (the daemon target's
+/// streaming handlers) inject a `Logger` warning through this closure,
+/// keeping the truncation visible to `log show`. The closure is NOT
+/// invoked when the source finishes naturally before the deadline.
 public func deadlineBounded<E: Sendable>(
-    seconds: Int, _ source: AsyncStream<E>
+    seconds: Int, _ source: AsyncStream<E>,
+    onTimerFired: (@Sendable () -> Void)? = nil
 ) -> AsyncStream<E> {
     guard seconds > 0 else { return source }
     return deadlineBoundedNanos(
-        UInt64(seconds) * 1_000_000_000, source)
+        UInt64(seconds) * 1_000_000_000, source,
+        onTimerFired: onTimerFired)
 }
 
 /// Nanosecond core of ``deadlineBounded(seconds:_:)`` — internal for
 /// sub-second unit testing.
 func deadlineBoundedNanos<E: Sendable>(
-    _ nanos: UInt64, _ source: AsyncStream<E>
+    _ nanos: UInt64, _ source: AsyncStream<E>,
+    onTimerFired: (@Sendable () -> Void)? = nil
 ) -> AsyncStream<E> {
     AsyncStream<E> { continuation in
+        // Shared race-state for the timer-vs-pump completion order:
+        // whichever wins records itself, and only the timer's
+        // "I won" branch fires `onTimerFired`. NSLock-isolated to
+        // make the read-modify-write Sendable-safe across the two
+        // child tasks.
+        let state = StreamTruncationState()
         let pump = Task {
             for await element in source {
                 continuation.yield(element)
             }
+            state.markPumpFinished()
             continuation.finish()
         }
         let timer = Task {
             try? await Task.sleep(nanoseconds: nanos)
+            // If the pump already finished, the stream ran to natural
+            // completion — no truncation, no callback. Otherwise the
+            // timer is the actual end of the stream and the truncation
+            // is real.
+            if state.markTimerFiredIfFirst() {
+                onTimerFired?()
+            }
             pump.cancel()  // ends iteration → source onTermination → cancel
             continuation.finish()  // idempotent if pump already finished
         }
@@ -79,5 +103,33 @@ func deadlineBoundedNanos<E: Sendable>(
             pump.cancel()
             timer.cancel()
         }
+    }
+}
+
+/// Tracks the race between the pump (source) finishing and the deadline
+/// timer firing so `onTimerFired` fires only on a real truncation, never
+/// on a natural completion. `@unchecked Sendable` because all access is
+/// `NSLock`-isolated. M46.1 — kept internal to `deadlineBoundedNanos`.
+private final class StreamTruncationState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pumpFinished = false
+    private var timerFired = false
+
+    func markPumpFinished() {
+        lock.lock()
+        defer { lock.unlock() }
+        pumpFinished = true
+    }
+
+    /// True iff this call is the first terminal event (the pump hadn't
+    /// already finished) — the caller should treat this as a truncation
+    /// and fire its log callback. Subsequent calls return false so the
+    /// callback can't double-fire even under improbable scheduling.
+    func markTimerFiredIfFirst() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !pumpFinished && !timerFired else { return false }
+        timerFired = true
+        return true
     }
 }
