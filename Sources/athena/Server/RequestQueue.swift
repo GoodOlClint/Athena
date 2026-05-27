@@ -76,7 +76,12 @@ actor RequestQueue {
         let id = UUID().uuidString
         try await store.insertJob(
             id: id, kind: kind, request: request, owner: owner)
-        log.info("queue submit kind=\(kind) id=\(id)")
+        // M45.2: promoted from .info → .notice so queue submit
+        // events survive `log show` without --info. Queue state
+        // transitions are exactly the events an operator wants
+        // visible at post-incident triage (per-job count is low
+        // enough that persisted volume isn't an issue).
+        log.notice("queue submit kind=\(kind) id=\(id)")
         signal.yield(())
         return id
     }
@@ -152,7 +157,7 @@ actor RequestQueue {
                     id: job.id, status: "running", result: nil,
                     error: nil)
             }
-            log.info("queue job running kind=\(job.kind) id=\(job.id)")
+            log.notice("queue job running kind=\(job.kind) id=\(job.id)")
             let (result, error) = await executor(
                 job.kind, job.request, job.owner)
             try? await store.updateJob(
@@ -168,7 +173,7 @@ actor RequestQueue {
                 log.warning(
                     "queue job error id=\(job.id) detail=\(error)")
             } else {
-                log.info("queue job done id=\(job.id)")
+                log.notice("queue job done id=\(job.id)")
             }
         }
     }

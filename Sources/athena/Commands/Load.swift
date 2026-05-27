@@ -293,8 +293,19 @@ struct Load: AsyncParsableCommand {
         // sink; under `--background` (launchd) it's inert because the
         // terminal handler isn't constructed.
         if let lv = logLevel, AthenaLog.level(lv) == nil {
+            // M45.2 F2: this fires BEFORE bootstrap so Logger isn't
+            // available yet. Prefix the line with an ISO 8601 UTC
+            // timestamp so it sorts cleanly against post-bootstrap
+            // TerminalLogHandler output and the unified-log clock
+            // (audit-flagged: pre-bootstrap warnings used to float
+            // untimestamped in the launchd-captured stderr file).
+            let f = ISO8601DateFormatter()
+            f.formatOptions = [
+                .withInternetDateTime, .withFractionalSeconds,
+            ]
             let msg =
-                "warning: invalid --log-level '\(lv)', using info\n"
+                "\(f.string(from: Date())) warning daemon: "
+                + "invalid --log-level '\(lv)', using info\n"
             FileHandle.standardError.write(Data(msg.utf8))
         }
         AthenaLog.bootstrap(
@@ -514,17 +525,17 @@ struct Load: AsyncParsableCommand {
         await governor.register(diarization, evictable: true)
         await governor.register(speakerEmbedding, evictable: true)
 
-        print(
-            "athena: engine=\(engine.rawValue) "
-                + "model=\(modelURL.path) "
-                + "budget=\(config.totalBudgetBytes)B "
-                + "listen=\(config.listenHost):\(config.listenPort)")
-
-        // Persisted unified-log marker (notice ⇒ survives `log show`);
-        // also confirms the centralized-logging pipeline is live.
+        // Startup marker — `.notice` so it persists to `log show`
+        // (`.info` and `.debug` are memory-only by default). Foreground
+        // operators see this via the stderr TerminalLogHandler with a
+        // sortable ISO timestamp; the redundant pre-M45.2 `print()`
+        // bare-stdout duplicate was dropped (it landed untimestamped in
+        // launchd's stdout capture and was the original "log file
+        // missing timestamps" symptom that motivated docs/logging-audit.md).
         Logging.Logger(label: AthenaLog.daemonLabel).notice(
             """
             athena daemon up — engine=\(engine.rawValue) \
+            model=\(modelURL.path) \
             listen=\(config.listenHost):\(config.listenPort) \
             budget=\(config.totalBudgetBytes)B
             """)

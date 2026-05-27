@@ -8,6 +8,16 @@ import MLXNN
 import MLXLMCommon
 import HuggingFace
 import MLXHuggingFace
+import os
+
+// M45.2: vendored port-debug `if verbose { print(...) }` blocks were
+// the only diagnostic stdout in any model module. Converted to
+// os.Logger at `.debug` under the diarization category; the
+// `verbose:` parameter is dropped as dead scaffolding (the
+// diarization module never passed `true`). `log show --info --debug
+// --predicate 'category == "model.diarization"'` surfaces them.
+private let sortformerLog = os.Logger(
+    subsystem: "athena", category: "model.diarization")
 
 private struct UncheckedSendableBox<T>: @unchecked Sendable {
     let value: T
@@ -569,8 +579,7 @@ public class SortformerModel: Module {
         sampleRate: Int = 16000,
         threshold: Float = 0.5,
         minDuration: Float = 0.0,
-        mergeGap: Float = 0.0,
-        verbose: Bool = false
+        mergeGap: Float = 0.0
     ) async throws -> DiarizationOutput {
         let sendableModel = UncheckedSendableBox(self)
         let sendableAudio = UncheckedSendableBox(audio)
@@ -629,13 +638,9 @@ public class SortformerModel: Module {
                     return
                 }
 
-                if verbose {
-                    print("Audio: \(String(format: "%.2f", Float(waveform.dim(0)) / Float(proc.samplingRate)))s")
-                    if trimOffset > 0 {
-                        print("Trimmed \(String(format: "%.2f", trimOffsetSec))s leading silence")
-                    }
-                    print("Features: \(features.shape)")
-                }
+                let audioSec = Float(waveform.dim(0)) / Float(proc.samplingRate)
+                sortformerLog.debug(
+                    "offline: audio=\(audioSec, format: .fixed(precision: 2))s trim_leading=\(trimOffsetSec, format: .fixed(precision: 2))s features_shape=\(features.shape.description, privacy: .public)")
 
                 let preds = model(features, audioSignalLength: featureLengths)
                 eval(preds)
@@ -661,10 +666,8 @@ public class SortformerModel: Module {
                 let activeSpeakers = Set(segments.map { $0.speaker })
                 let elapsed = CFAbsoluteTimeGetCurrent() - startTime
 
-                if verbose {
-                    print("Found \(segments.count) segments with \(activeSpeakers.count) speakers")
-                    print("Processing time: \(String(format: "%.2f", elapsed))s")
-                }
+                sortformerLog.debug(
+                    "offline: segments=\(segments.count) speakers=\(activeSpeakers.count) elapsed=\(elapsed, format: .fixed(precision: 2))s")
 
                 continuation.resume(returning: DiarizationOutput(
                     segments: segments,
@@ -865,8 +868,7 @@ public class SortformerModel: Module {
         minDuration: Float = 0.0,
         mergeGap: Float = 0.0,
         spkcacheMax: Int = 188,
-        fifoMax: Int = 188,
-        verbose: Bool = false
+        fifoMax: Int = 188
     ) -> AsyncThrowingStream<DiarizationOutput, Error> {
         let sendableModel = UncheckedSendableBox(self)
         let sendableAudio = UncheckedSendableBox(audio)
@@ -922,11 +924,10 @@ public class SortformerModel: Module {
                     allPreEmbs = preEmbs
                 }
 
-                if verbose {
-                    let audioDur = Float(waveform.dim(0)) / Float(proc.samplingRate)
-                    let nChunks = Int(ceil(Double(totalMelFrames) / Double(chunkMel)))
-                    print("Streaming: \(String(format: "%.2f", audioDur))s audio in \(nChunks) chunks (\(String(format: "%.1f", chunkDuration))s each)")
-                }
+                let audioDur = Float(waveform.dim(0)) / Float(proc.samplingRate)
+                let nChunks = Int(ceil(Double(totalMelFrames) / Double(chunkMel)))
+                sortformerLog.debug(
+                    "stream: audio=\(audioDur, format: .fixed(precision: 2))s chunks=\(nChunks) chunk_size=\(chunkDuration, format: .fixed(precision: 1))s")
 
                 var state = model.initStreamingState()
                 var offsetMel = 0
@@ -985,12 +986,11 @@ public class SortformerModel: Module {
 
                     let activeSpeakers = Set(segments.map { $0.speaker })
 
-                    if verbose {
-                        chunkIdx += 1
-                        let t0 = chunkTimeOffset + trimOffsetSec
-                        let t1 = t0 + Float(chunkPreds.dim(0)) * frameDuration
-                        print("  Chunk \(chunkIdx): \(String(format: "%.2f", t0))s-\(String(format: "%.2f", t1))s  \(segments.count) segments, context=\(state.spkcacheLen)+\(state.fifoLen) frames")
-                    }
+                    chunkIdx += 1
+                    let t0 = chunkTimeOffset + trimOffsetSec
+                    let t1 = t0 + Float(chunkPreds.dim(0)) * frameDuration
+                    sortformerLog.debug(
+                        "stream: chunk=\(chunkIdx) t0=\(t0, format: .fixed(precision: 2))s t1=\(t1, format: .fixed(precision: 2))s segments=\(segments.count) ctx=\(state.spkcacheLen)+\(state.fifoLen)")
 
                     continuation.yield(DiarizationOutput(
                         segments: segments,
