@@ -1316,6 +1316,34 @@ echo "$START_HELP" | grep -q -- "--syslog-remote" \
 rm -f "$TCFG"
 
 echo
+echo "== phase 3.6891: request-scoped log metadata (M45.3) =="
+# M45.3 plumbs req/principal/function through swift-log's
+# MetadataProvider via the LogScope TaskLocal set by AuthMiddleware.
+# Verify by submitting a queue job and checking the daemon.log line
+# carries req=<uuid> + principal=<admin> + function=<swift fn>.
+M45_3_JID="$(curl -s -X POST \
+  "http://127.0.0.1:$PORT/v1/queue/conversation" \
+  -H "Authorization: Bearer $ADMIN_TOK" \
+  -H 'Content-Type: application/json' \
+  -d '{"messages":[{"role":"user","content":"m45.3"}]}' \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+# Give the worker a moment to log `queue job running` / done.
+sleep 0.5
+# The notice-level emission for THIS job id should carry M45.3
+# metadata.
+M45_3_LINE="$(grep -E "queue (submit|job running|job done).*id=$M45_3_JID" \
+  "$D/daemon.log" | head -1)"
+echo "$M45_3_LINE" | grep -q "req=" \
+  && ok "M45.3 daemon log carries req= field for $M45_3_JID" \
+  || bad "M45.3 daemon log missing req= ($M45_3_LINE)"
+echo "$M45_3_LINE" | grep -q "principal=" \
+  && ok "M45.3 daemon log carries principal= field" \
+  || bad "M45.3 daemon log missing principal= ($M45_3_LINE)"
+echo "$M45_3_LINE" | grep -q "function=" \
+  && ok "M45.3 daemon log carries function= field" \
+  || bad "M45.3 daemon log missing function= ($M45_3_LINE)"
+
+echo
 echo "== phase 3.69: inference-time rebind audited (M41.4) =="
 # An /v1/embeddings request that names a NON-resident allowlist member
 # rebinds the slot in place + audits the change (trigger=inference).

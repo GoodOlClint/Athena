@@ -350,14 +350,36 @@ struct AuthMiddleware<Context: RequestContext>: RouterMiddleware {
         _ request: Request, context: Context,
         next: (Request, Context) async throws -> Response
     ) async throws -> Response {
+        // M45.3: bind a per-request LogScope (req-id + resolved
+        // principal) so every Logger emission within the downstream
+        // task hierarchy auto-includes `req=` / `principal=`
+        // metadata. Operator filter `category == "daemon" AND
+        // eventMessage CONTAINS "req=<uuid>"` correlates all log
+        // lines for a single request across handlers.
+        //
+        // The principal is filled when:
+        //   - auth-off (open mode): nil — req-id alone correlates.
+        //   - cookie session (/ui): the validated user.
+        //   - bearer-authorized: the resolved subject's principal.
+        // Auth-denial paths return BEFORE the next() call, so no
+        // scope is bound for those (the audit_log entry is the
+        // forensic record for denied requests).
         guard config.isEnabled else {
-            return try await next(request, context)  // open mode
+            let scope = LogScope(principal: nil)
+            return try await LogScope.$current.withValue(scope) {
+                try await next(request, context)  // open mode
+            }
         }
         let path = request.uri.path
         guard
             let required = AuthPolicy.required(
                 method: request.method.rawValue, path: path)
-        else { return try await next(request, context) }
+        else {
+            let scope = LogScope(principal: nil)
+            return try await LogScope.$current.withValue(scope) {
+                try await next(request, context)
+            }
+        }
 
         let isUI = path == "/ui" || path.hasPrefix("/ui/")
 
@@ -370,7 +392,10 @@ struct AuthMiddleware<Context: RequestContext>: RouterMiddleware {
         {
             let perms = await config.permissions(forUser: user)
             if perms.contains(required) {
-                return try await next(request, context)
+                let scope = LogScope(principal: "u:\(user)")
+                return try await LogScope.$current.withValue(scope) {
+                    try await next(request, context)
+                }
             }
             return Self.redirect("/ui/login")
         }
@@ -406,7 +431,10 @@ struct AuthMiddleware<Context: RequestContext>: RouterMiddleware {
                     + "grant the role via `athena auth role grant "
                     + "<user> <role>`.")
         }
-        return try await next(request, context)
+        let scope = LogScope(principal: subject.principal)
+        return try await LogScope.$current.withValue(scope) {
+            try await next(request, context)
+        }
     }
 
     private static func redirect(_ location: String) -> Response {

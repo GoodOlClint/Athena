@@ -16,6 +16,32 @@ import os
 // UDP shipper — operators wanting off-box shipping run FluentBit /
 // vector.dev / syslog-ng against `subsystem == "athena"`.
 
+/// Per-request log scope set by `AuthMiddleware` once the principal
+/// is resolved. The swift-log `MetadataProvider` installed at
+/// bootstrap reads this TaskLocal and surfaces `req=…` / `principal=…`
+/// on every log line emitted from within the request task hierarchy,
+/// across `await` boundaries.
+///
+/// Outside any request — startup, queue worker, lifecycle — the
+/// TaskLocal is unbound and no req/principal keys appear, which is
+/// correct: those lines have no request to correlate against.
+///
+/// `principal` is nil for unauthenticated requests (auth-off
+/// loopback mode); the req-id still applies so the line is
+/// correlatable.
+public struct LogScope: Sendable {
+    public let req: String
+    public let principal: String?
+
+    @TaskLocal
+    public static var current: LogScope? = nil
+
+    public init(req: String = UUID().uuidString, principal: String?) {
+        self.req = req
+        self.principal = principal
+    }
+}
+
 enum AthenaLog {
     /// Unified-logging subsystem. Simple, not reverse-DNS (Apple
     /// allows any string; this matches the binary/command name).
@@ -62,17 +88,35 @@ enum AthenaLog {
         background: Bool = false,
         terminalLevel: Logging.Logger.Level = .info
     ) {
-        LoggingSystem.bootstrap { label in
-            var unified = OSUnifiedLogHandler(label: label)
-            unified.logLevel = .trace
-            if background {
-                return unified
+        // M45.3: surface req/principal from the LogScope TaskLocal on
+        // every log line. The provider closure is invoked at each
+        // log() call; if no scope is bound (startup, worker, etc.)
+        // it returns empty metadata and the keys are simply absent.
+        let provider = Logging.Logger.MetadataProvider {
+            guard let scope = LogScope.current else { return [:] }
+            var meta: Logging.Logger.Metadata = [
+                "req": "\(scope.req)"
+            ]
+            if let principal = scope.principal {
+                meta["principal"] = "\(principal)"
             }
-            var terminal = TerminalLogHandler(
-                category: category(forLabel: label))
-            terminal.logLevel = terminalLevel
-            return MultiplexLogHandler([terminal, unified])
+            return meta
         }
+        LoggingSystem.bootstrap(
+            { label, metadataProvider in
+                var unified = OSUnifiedLogHandler(label: label)
+                unified.logLevel = .trace
+                unified.metadataProvider = metadataProvider
+                if background {
+                    return unified
+                }
+                var terminal = TerminalLogHandler(
+                    category: category(forLabel: label))
+                terminal.logLevel = terminalLevel
+                terminal.metadataProvider = metadataProvider
+                return MultiplexLogHandler([terminal, unified])
+            },
+            metadataProvider: provider)
     }
 }
 
@@ -128,6 +172,11 @@ struct TerminalLogHandler: LogHandler {
             merged.merge(provided) { _, new in new }
         }
         if let explicit { merged.merge(explicit) { _, new in new } }
+        // M45.3: per-emission `function=` field, sourced from
+        // swift-log's call-site capture. Always present, sorted with
+        // the rest so the in-merged-view filter (`function=loadModel`)
+        // works regardless of whether req/principal are bound.
+        merged["function"] = "\(function)"
         var text = message.description
         if !merged.isEmpty {
             text +=
@@ -176,6 +225,10 @@ struct OSUnifiedLogHandler: LogHandler {
             merged.merge(provided) { _, new in new }
         }
         if let explicit { merged.merge(explicit) { _, new in new } }
+        // M45.3: same per-emission `function=` field as
+        // TerminalLogHandler so a merged `log show` view filters
+        // identically by function across both sinks.
+        merged["function"] = "\(function)"
 
         var text = message.description
         if !merged.isEmpty {
