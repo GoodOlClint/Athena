@@ -257,6 +257,22 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
                 for (k, idx) in bucket.enumerated() {
                     vectors[idx] = bucketVectors[k]
                 }
+                // M46.6 — release the per-bucket transient buffers
+                // (padded/mask/tokenTypes/out/result) back to the system.
+                // Without this the MLX allocator pool keeps the
+                // activation buffers in cache across calls; a 4B
+                // embedder's residentBytes drifts from its ~8 GiB
+                // weight footprint up to tens of GiB after a handful
+                // of mixed-length batches, eating budget the LLM needs
+                // and pushing total RSS into unified-memory-thrash
+                // territory. Mirrors the LLM decode loops' periodic
+                // clearCache (e.g. SpeculativeGeneration.swift:184) —
+                // the activations are bucket-scoped, so a per-bucket
+                // clear is the embedding analog of "every 256 tokens."
+                // bucketVectors above is already a Swift [Float] copy
+                // before this line, so the clear cannot reclaim
+                // anything the caller still needs.
+                MLX.Memory.clearCache()
             }
             return EmbeddingBatch(
                 vectors: vectors, promptTokens: promptTokens,
