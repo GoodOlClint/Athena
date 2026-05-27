@@ -126,12 +126,22 @@ struct Doctor: AsyncParsableCommand {
             say(.fail, "data dir not writable: \(dataDir.path)")
         }
 
-        // 7. Log dir (config-driven; advisory).
+        // 7. Log dir (config-driven; advisory). M45.1: this dir now
+        //    holds ONLY the launchd StandardErrorPath crash-dump
+        //    (athena.err.log) — not a diagnostic log. The operator
+        //    diagnostic surface is the macOS unified log (`athena
+        //    logs` / `log show --predicate 'subsystem == "athena"'`;
+        //    see docs/logging.md).
         if let log = parsed?.logDir {
             if fm.fileExists(atPath: log) {
-                say(.ok, "log dir present: \(log)")
+                say(.ok,
+                    "log dir present: \(log) (crash-dump capture only; "
+                        + "diagnostic surface is the macOS unified log "
+                        + "— `athena logs`)")
             } else {
-                say(.warn, "log dir missing: \(log) (created on install)")
+                say(.warn,
+                    "log dir missing: \(log) (created on install; "
+                        + "crash-dump capture only)")
             }
         }
 

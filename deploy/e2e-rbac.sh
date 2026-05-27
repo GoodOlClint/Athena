@@ -1344,6 +1344,29 @@ echo "$M45_3_LINE" | grep -q "function=" \
   || bad "M45.3 daemon log missing function= ($M45_3_LINE)"
 
 echo
+echo '== phase 3.6892: athena logs wraps log show/stream (M45.4) =='
+# M45.4 reshaped `athena logs` as an operator-friendly wrapper over
+# /usr/bin/log show / log stream. Verify the new flag surface
+# (--follow, --since, --category, --debug) and the absence of the
+# pre-M45 file-tail surface (--source, --lines).
+LOGS_HELP="$("$ATHENA" logs --help 2>&1 || true)"
+for flag in "--follow" "--since" "--category" "--debug"; do
+  echo "$LOGS_HELP" | grep -q -- "$flag" \
+    && ok "athena logs --help advertises $flag" \
+    || bad "athena logs --help missing $flag"
+done
+# The pre-M45 file-tail flags should be gone (-n / --lines, --source).
+echo "$LOGS_HELP" | grep -q -- "--source" \
+  && bad "--source still appears in athena logs --help (pre-M45 surface)" \
+  || ok "--source dropped from athena logs --help"
+# A real `athena logs --since 1m` should run (might be empty if the
+# host's unified log doesn't have recent athena entries; just check
+# exit code).
+"$ATHENA" logs --since 1m >/dev/null 2>&1 \
+  && ok "athena logs --since 1m exits 0" \
+  || bad "athena logs --since 1m failed"
+
+echo
 echo "== phase 3.69: inference-time rebind audited (M41.4) =="
 # An /v1/embeddings request that names a NON-resident allowlist member
 # rebinds the slot in place + audits the change (trigger=inference).

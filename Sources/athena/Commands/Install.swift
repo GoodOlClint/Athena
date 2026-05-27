@@ -360,7 +360,7 @@ struct Install: AsyncParsableCommand {
         }
         print(
             "  health: curl -s http://\(cfg.listenHost):\(cfg.listenPort)/healthz")
-        print("  logs:   tail -f \(cfg.logDir)/athena.err.log")
+        print("  logs:   athena logs --follow   # or `log stream --predicate 'subsystem == \"athena\"'`")
         print(
             "  console: http://\(cfg.listenHost):\(cfg.listenPort)/ui"
                 + " — sign in to control this RUNNING daemon "

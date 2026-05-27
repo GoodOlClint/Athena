@@ -8,9 +8,11 @@ the box never oversubscribes its unified memory.
 
 Athena is a **passive oracle**. The daemon answers inbound requests only;
 it never initiates outbound connections except to fetch model weights
-from Hugging Face and an opt-in remote-syslog sink. There are no result
-or billing webhooks — anything a client needs is delivered by pull,
-long-poll, or Server-Sent Events.
+from Hugging Face. There are no result or billing webhooks — anything
+a client needs is delivered by pull, long-poll, or Server-Sent Events.
+Diagnostic logs land in the macOS unified log (subsystem `athena`);
+off-box shipping is an operator concern — see [docs/logging.md](docs/logging.md)
+and [docs/logging-shipping.md](docs/logging-shipping.md).
 
 ## Two HTTP dialects
 
