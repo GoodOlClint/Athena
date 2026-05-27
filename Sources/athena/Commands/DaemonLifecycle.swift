@@ -277,6 +277,52 @@ struct Stop: AsyncParsableCommand {
     }
 }
 
+/// `athena restart` — bootout + bootstrap a system LaunchDaemon so the
+/// updated plist (config / install) takes effect. `launchctl kickstart
+/// -k` does NOT re-read the plist; operators reach for that and silently
+/// keep running the old args. M43.4 fragility #7.
+struct Restart: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "restart",
+        abstract:
+            "Re-bootstrap the system LaunchDaemon (re-reads the plist)."
+    )
+    @Option(help: "launchd label for a system (boot) daemon.")
+    var label: String = "me.goodolclint.athena"
+
+    func run() async throws {
+        guard isValidLabel(label) else {
+            FailableExit.die(
+                "error: invalid --label '\(label)' (expected reverse-DNS: "
+                    + "letters, digits, '.', '-', '_')")
+        }
+        let plist = InstallPlan.plistPath(label: label)
+        guard FileManager.default.fileExists(atPath: plist.path) else {
+            FailableExit.die(
+                "error: no installed LaunchDaemon plist at "
+                    + "\(plist.path). Run `sudo athena install` first.")
+        }
+        guard geteuid() == 0 else {
+            FailableExit.die(
+                "error: restart needs root to bootout + bootstrap "
+                    + "system/\(label). Re-run: sudo athena restart "
+                    + "--label \(label)")
+        }
+        // bootout is non-fatal (returns 3 when the service isn't
+        // loaded — same shape `athena start` accepts).
+        _ = launchctl(["bootout", "system", plist.path])
+        let rc = launchctl(["bootstrap", "system", plist.path])
+        if rc != 0 {
+            FailableExit.die(
+                "error: launchctl bootstrap \(plist.path) failed "
+                    + "(status \(rc))")
+        }
+        print(
+            "restarted system athena daemon via launchd (\(label)) — "
+                + "logs in /usr/local/var/log/athena/")
+    }
+}
+
 struct Status: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "status",

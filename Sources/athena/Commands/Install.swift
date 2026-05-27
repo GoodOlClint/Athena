@@ -352,6 +352,11 @@ struct Install: AsyncParsableCommand {
             print(
                 "    \(plan.binSymlink.path) auth user passwd admin "
                     + "--data-dir \(dataDir.path)")
+            print(
+                "  no admin token? mint one offline:")
+            print(
+                "    \(plan.binSymlink.path) auth token add --user "
+                    + "admin --data-dir \(dataDir.path)")
         }
         print(
             "  health: curl -s http://\(cfg.listenHost):\(cfg.listenPort)/healthz")
@@ -365,6 +370,31 @@ struct Install: AsyncParsableCommand {
                 + "even with no model loaded; the console controls a "
                 + "running daemon — it cannot cold-start a stopped "
                 + "one (use launchctl / `athena start`).")
+        // M43.4 #2 — a fresh install ships with no LLM in the store;
+        // the first /v1/chat/completions returns 400 model_not_available
+        // with an empty list. Flag the gap up front and name the fix.
+        if Self.modelStoreEmpty(modelStore) {
+            print("")
+            print(
+                "  no LLM in store — `athena pull <id>` then `athena "
+                    + "default <id>` before the first chat request.")
+        }
+    }
+
+    /// True when the model-store root holds zero entries (so any
+    /// `/v1/chat/completions` will return `model_not_available`).
+    /// Best-effort: a permissions error counts as "not empty" so the
+    /// banner doesn't lie about a store it couldn't read.
+    private static func modelStoreEmpty(_ url: URL) -> Bool {
+        let entries =
+            (try? FileManager.default.contentsOfDirectory(
+                at: url, includingPropertiesForKeys: nil)) ?? []
+        // Ignore dotfiles + bundle directories so a `.DS_Store` doesn't
+        // disguise an empty store.
+        let visible = entries.filter {
+            !$0.lastPathComponent.hasPrefix(".")
+        }
+        return visible.isEmpty
     }
 
     /// A human-typeable random password (~62 bits): 12 chars from an

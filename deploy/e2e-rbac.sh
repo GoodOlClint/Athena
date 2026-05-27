@@ -223,6 +223,20 @@ echo "$DENYBODY" | python3 -c 'import json,sys; json.loads(sys.stdin.read())' \
 echo "$DENYBODY" | grep -q '"code":"unauthorized"' \
   && ok "auth deny body carries code:unauthorized" \
   || bad "auth deny body missing code field ($DENYBODY)"
+# M43.4 #5 — auth-deny envelope carries an operator-facing `hint` so a
+# 401/403 names a remedy (ATHENA_KEY, /ui/login, role grant) instead of
+# bare "missing or invalid bearer token".
+echo "$DENYBODY" | grep -q '"hint":' \
+  && ok "auth deny body carries hint field (M43.4)" \
+  || bad "auth deny body missing hint ($DENYBODY)"
+echo "$DENYBODY" | grep -q "ATHENA_KEY" \
+  && ok "auth hint mentions ATHENA_KEY remediation" \
+  || bad "auth hint did not name the standard remediation"
+FORBODY="$(curl -s -H "Authorization: Bearer $ALICE_TOK" \
+  "http://127.0.0.1:$PORT/v1/store/stats")"
+echo "$FORBODY" | grep -q '"hint":' \
+  && ok "forbidden envelope carries hint field" \
+  || bad "forbidden envelope missing hint ($FORBODY)"
 code 200 POST /v1/chat/completions "$ALICE_TOK" "$CHAT" # member: inference
 code 200 GET  /metrics "$ADMIN_TOK"                     # admin: all
 code 403 GET  /metrics "$ALICE_TOK"                     # member ∌ metricsRead
@@ -1154,6 +1168,43 @@ echo "$INIT_OUT" | grep -q "no allowlist rows" \
   && ok "init --from-allowlist reports no-rows on empty data-dir" \
   || bad "init --from-allowlist behavior unexpected ($INIT_OUT)"
 rm -rf "$EMPTY2"
+
+echo
+echo "== phase 3.688: operator-legibility hints (M43.4) =="
+# CLI surface for the M43.4 cluster: auth-deny `hint` rendered on
+# stderr by the client `fail()` helper, the `athena restart` /
+# `athena config set --no-apply` / `athena doctor`/CLI-only-flags
+# survey, and the model_not_available remediation when the store is
+# empty. None of these need the daemon mutated — we just probe.
+ALLOW_FAIL="$("$ATHENA" allowlist list \
+  --host 127.0.0.1 --port $PORT --key sk-athena-bogus 2>&1 || true)"
+echo "$ALLOW_FAIL" | grep -q "^hint:" \
+  && ok "client fail() renders hint: line on stderr from 401" \
+  || bad "client did not render auth hint ($ALLOW_FAIL)"
+# `athena restart` exists + help mentions bootout/bootstrap (so an
+# operator searching `--help` for `kickstart -k` finds the right verb).
+RESTART_HELP="$("$ATHENA" restart --help 2>&1 || true)"
+echo "$RESTART_HELP" | grep -qi "Re-bootstrap" \
+  && ok "athena restart command surface" \
+  || bad "athena restart not wired ($RESTART_HELP)"
+# `athena config set --no-apply` writes the TOML without trying to
+# bootstrap a plist (which would need root + an installed plist). The
+# subcommand's help carries the flag.
+CSET_HELP="$("$ATHENA" config set --help 2>&1 || true)"
+echo "$CSET_HELP" | grep -q -- "--no-apply" \
+  && ok "athena config set carries --no-apply flag" \
+  || bad "config set missing --no-apply ($CSET_HELP)"
+# `athena doctor` lists CLI-only knobs so operators reading athena.toml
+# know what's not surfaced there (--prompt-cache-cap-bytes, the per-
+# module --*-model seeds).
+DOC_OUT="$("$ATHENA" doctor --config deploy/athena.toml \
+  --model-store "$MSTORE" 2>&1 || true)"
+echo "$DOC_OUT" | grep -q "CLI-only knobs" \
+  && ok "doctor reports the CLI-only flag set" \
+  || bad "doctor missing CLI-only survey ($DOC_OUT)"
+echo "$DOC_OUT" | grep -q -- "--prompt-cache-cap-bytes" \
+  && ok "doctor names --prompt-cache-cap-bytes specifically" \
+  || bad "doctor missing --prompt-cache-cap-bytes entry"
 
 echo
 echo "== phase 3.69: inference-time rebind audited (M41.4) =="

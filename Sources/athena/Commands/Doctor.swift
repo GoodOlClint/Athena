@@ -508,6 +508,37 @@ struct Doctor: AsyncParsableCommand {
             }
         }
 
+        // 16. CLI-only options NOT reflected in the TOML (M43.4 #10).
+        //     A handful of `athena load` / `athena allowlist`-seed
+        //     flags (`--prompt-cache-cap-bytes`, the per-module
+        //     `--*-model` repeatables) have no `athena.toml` key.
+        //     The plist still encodes them at install time, so
+        //     editing the TOML for "the same thing" is a silent
+        //     no-op. List them here so an operator who reads the
+        //     TOML doesn't expect to find every knob there.
+        let cliOnly: [(flag: String, note: String)] = [
+            (
+                "--prompt-cache-cap-bytes",
+                "set on `athena load`; no TOML key (governor cache "
+                    + "ceiling)"
+            ),
+            (
+                "--llm-model | --embedding-model | --whisper-model | "
+                    + "--diarization-model | --speaker-embedding-model",
+                "first-boot seeds for the per-module allowlist (M42); "
+                    + "the SQLite table wins thereafter — edit via "
+                    + "`athena allowlist {add|rm|default}`"
+            ),
+        ]
+        say(
+            .ok,
+            "TOML reflects every `athena load` flag EXCEPT the "
+                + "following CLI-only knobs:")
+        for entry in cliOnly {
+            print("        \(entry.flag)")
+            print("          \(entry.note)")
+        }
+
         if fails > 0 {
             print("\n\(fails) critical issue(s).")
             throw ExitCode.failure

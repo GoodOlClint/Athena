@@ -122,9 +122,25 @@ public enum HTTPClient {
             let s = String(data: pretty, encoding: .utf8)
         {
             print(s)
+            renderHint(obj)
         } else {
             print(String(data: data, encoding: .utf8) ?? "<binary>")
         }
+    }
+
+    /// M43.4 #5 — operator-facing remediation lines for error
+    /// envelopes that carry `error.hint`. Daemon adds these to auth
+    /// denies (`ATHENA_KEY`, `/ui/login`, role-grant guidance) and
+    /// classified inference errors. Printed to stderr so structured
+    /// JSON consumers on stdout aren't disturbed; humans see both.
+    private static func renderHint(_ obj: Any) {
+        guard let root = obj as? [String: Any],
+            let err = root["error"] as? [String: Any],
+            let hint = err["hint"] as? String,
+            !hint.isEmpty
+        else { return }
+        FileHandle.standardError.write(
+            Data(("hint: " + hint + "\n").utf8))
     }
 
     public static func noDaemon(_ d: DaemonOptions, _ e: Error)

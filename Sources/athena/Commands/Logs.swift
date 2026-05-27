@@ -14,11 +14,11 @@ struct Logs: AsyncParsableCommand {
         abstract: "Tail (or follow) the daemon log.")
 
     enum Source: String, ExpressibleByArgument, CaseIterable {
-        case err, out, start
+        case err, out, start, auto
     }
 
-    @Option(help: "Which log: err | out (launchd) | start.")
-    var source: Source = .err
+    @Option(help: "Which log: auto (default) | err | out (launchd) | start.")
+    var source: Source = .auto
     @Option(
         name: [.customShort("n"), .long],
         help: "Lines to show (default 50).")
@@ -33,17 +33,17 @@ struct Logs: AsyncParsableCommand {
     func run() async throws {
         let url: URL
         switch source {
+        case .auto:
+            // M43.4 #6 — pick the first log that actually exists so an
+            // operator who started the daemon via `athena start`
+            // (user-context, writes to <data-dir>/athena.log) doesn't
+            // hit `is the daemon installed?` because we hard-coded the
+            // launchd-managed `.err` path. Order: launchd err → launchd
+            // out → user-context start. Dead end names every candidate.
+            url = try Self.firstExistingLogURL(
+                config: config, dataDir: dataDir)
         case .start:
-            let dir =
-                dataDir.map {
-                    URL(
-                        fileURLWithPath:
-                            ($0 as NSString).expandingTildeInPath,
-                        isDirectory: true)
-                }
-                ?? AthenaEnv.userHome()
-                    .appendingPathComponent(
-                        ".athena", isDirectory: true)
+            let dir = Self.startLogDir(dataDir: dataDir)
             url = dir.appendingPathComponent("athena.log")
         case .err, .out:
             let cfgURL = ConfigEditor.resolvePath(config)
@@ -76,5 +76,51 @@ struct Logs: AsyncParsableCommand {
         if p.terminationStatus != 0 {
             throw ExitCode(p.terminationStatus)
         }
+    }
+
+    private static func startLogDir(dataDir: String?) -> URL {
+        dataDir.map {
+            URL(
+                fileURLWithPath:
+                    ($0 as NSString).expandingTildeInPath,
+                isDirectory: true)
+        } ?? AthenaEnv.userHome()
+            .appendingPathComponent(".athena", isDirectory: true)
+    }
+
+    /// M43.4 #6 — auto-detect routing: try the launchd-managed paths
+    /// first (every installed daemon has `log_dir` in its TOML), then
+    /// the user-context `<data-dir>/athena.log` from `athena start`.
+    /// Returns the URL of the first one that exists on disk; throws a
+    /// dead-end error that NAMES every candidate so the operator
+    /// doesn't have to guess.
+    private static func firstExistingLogURL(
+        config: String?, dataDir: String?
+    ) throws -> URL {
+        var candidates: [URL] = []
+        let cfgURL = ConfigEditor.resolvePath(config)
+        if let cfg = try? AthenaConfig.parse(file: cfgURL) {
+            let logDir = URL(
+                fileURLWithPath: cfg.logDir, isDirectory: true)
+            candidates.append(
+                logDir.appendingPathComponent("athena.err.log"))
+            candidates.append(
+                logDir.appendingPathComponent("athena.out.log"))
+        }
+        let startURL =
+            startLogDir(dataDir: dataDir)
+            .appendingPathComponent("athena.log")
+        candidates.append(startURL)
+        if let live = candidates.first(where: {
+            FileManager.default.fileExists(atPath: $0.path)
+        }) {
+            return live
+        }
+        let list = candidates.map { "    " + $0.path }
+            .joined(separator: "\n")
+        FailableExit.die(
+            "error: no athena log found at any known path. Tried:\n"
+                + list + "\n  Is the daemon running? "
+                + "`athena status` reports its lifecycle.")
     }
 }

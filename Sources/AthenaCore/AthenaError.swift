@@ -98,6 +98,16 @@ public enum AthenaError: Error, Sendable, Equatable {
             return "Inference exceeded the \(seconds)s request timeout "
                 + "and was cancelled."
         case let .modelNotAvailable(requested, available):
+            if available.isEmpty {
+                // M43.4 #2 — the most common cause is a fresh install
+                // with no LLM in the store. Point the operator at the
+                // remediation directly instead of the empty list.
+                return "Model '\(requested)' is not available — the "
+                    + "model store has no entries for this module. "
+                    + "Run `athena pull <id>` to fetch one, then "
+                    + "`athena allowlist add --module <m> --id <id>` "
+                    + "(or set `athena default <id>` for the LLM)."
+            }
             return "Model '\(requested)' is not available. Configured "
                 + "models: \(available.joined(separator: ", "))."
         }

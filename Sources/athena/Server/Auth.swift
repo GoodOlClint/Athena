@@ -389,12 +389,22 @@ struct AuthMiddleware<Context: RequestContext>: RouterMiddleware {
             }
             return Self.deny(
                 .unauthorized, "missing or invalid bearer token",
-                "unauthorized")
+                "unauthorized",
+                hint:
+                    "Set ATHENA_KEY, pass --key <secret>, or sign in "
+                    + "at /ui/login. Mint a token with `athena auth "
+                    + "token add --user <name>` (admin) or offline "
+                    + "via `--data-dir`.")
         }
         guard subject.permissions.contains(required) else {
             if isUI { return Self.redirect("/ui/login") }
             return Self.deny(
-                .forbidden, "insufficient permissions", "forbidden")
+                .forbidden, "insufficient permissions", "forbidden",
+                hint:
+                    "This token's role lacks the permission this route "
+                    + "requires. Use a higher-privilege token, or "
+                    + "grant the role via `athena auth role grant "
+                    + "<user> <role>`.")
         }
         return try await next(request, context)
     }
@@ -406,20 +416,27 @@ struct AuthMiddleware<Context: RequestContext>: RouterMiddleware {
     }
 
     private static func deny(
-        _ status: HTTPResponse.Status, _ msg: String, _ code: String
+        _ status: HTTPResponse.Status, _ msg: String, _ code: String,
+        hint: String? = nil
     ) -> Response {
         // JSON-encoded so the message + code can carry any character
         // safely. The hand-formatted predecessor concatenated two raw
         // string literals around a `","` seam, which produced
         // `"type":"auth_error",""code":` — three quotes — and broke
         // JSON parsing for clients that strict-parse the error body.
-        let envelope: [String: Any] = [
-            "error": [
-                "message": msg,
-                "type": "auth_error",
-                "code": code,
-            ]
+        // M43.4 #5 — `hint` is the operator-facing remediation
+        // (`ATHENA_KEY`, `athena auth login`, role-grant guidance).
+        // Clients render it via the CLI fail() helper; non-CLI
+        // consumers ignore the field.
+        var err: [String: Any] = [
+            "message": msg,
+            "type": "auth_error",
+            "code": code,
         ]
+        if let hint, !hint.isEmpty {
+            err["hint"] = hint
+        }
+        let envelope: [String: Any] = ["error": err]
         let bodyData =
             (try? JSONSerialization.data(withJSONObject: envelope))
             ?? Data(#"{"error":{"message":"auth error"}}"#.utf8)

@@ -607,6 +607,21 @@ struct Load: AsyncParsableCommand {
         for row in rows where row.id != def.id {
             ordered.append(row.id)
         }
+        // M43.4 fragility #6 — the DB-wins contract is otherwise
+        // silent: after seeding once, a later CLI edit to athena.toml's
+        // `--*-model` flag has no effect on restart because the table
+        // already has rows. Log a notice when the DB and the just-passed
+        // seed disagree, so the operator stops re-editing the TOML and
+        // reaches for `athena allowlist` instead.
+        if !seedClean.isEmpty, Set(ordered) != Set(seedClean) {
+            Logger(label: AthenaLogLabel.daemon).notice(
+                """
+                model_allowlist DB differs from `--*-model` seed for \
+                \(module.rawValue): DB=\(ordered) seed=\(seedClean). \
+                The DB wins (M42); edit via `athena allowlist {add|rm|\
+                default}` instead of the CLI flags / TOML.
+                """)
+        }
         return ordered
     }
 
