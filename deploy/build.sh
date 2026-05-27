@@ -47,16 +47,23 @@ if [ -z "${DEVELOPER_DIR:-}" ]; then
   esac
 fi
 
-# The `athena-Package` aggregate scheme builds EVERY product —
-# `athena` AND the `athenad` daemon launcher (M14.2d) — into the same
-# Products/<config> dir. `athena install` copies both (InstallPlan
-# .artifactNames); building only `-scheme athena` leaves `athenad`
-# missing, so install fails ("file 'athenad' couldn't be opened").
+# The `athena-Package` aggregate scheme builds the `athena` binary
+# plus every `*.bundle` resource Products/<config>/ ends up holding.
+# `athena install` copies all of them (InstallPlan.artifactNames).
+# M43.3 removed the M14.2d `athenad` launcher (its bare argv[0] execv
+# broke MLX's metallib-bundle lookup under hardened-runtime spawn —
+# `athena start` and the LaunchDaemon now point at `athena` directly).
+# `CLANG_ENABLE_CODE_COVERAGE=NO` suppresses C-side coverage
+# instrumentation. The Swift-side `-profile-generate
+# -profile-coverage-mapping` flags come from the SwiftPM-generated
+# scheme's `codeCoverageEnabled=YES` and can only be overridden by
+# committing an explicit xcscheme — deferred (M43 fragility #5).
 xcodebuild -scheme athena-Package -configuration "$CONFIG" \
   -destination 'platform=macOS' -derivedDataPath .build/xcode \
+  CLANG_ENABLE_CODE_COVERAGE=NO \
   -skipMacroValidation -skipPackagePluginValidation build
 
 echo
-echo "built: .build/xcode/Build/Products/${CONFIG}/athena (+ athenad)"
+echo "built: .build/xcode/Build/Products/${CONFIG}/athena"
 echo "install: sudo .build/xcode/Build/Products/${CONFIG}/athena install \\"
 echo "           --config deploy/athena.toml"

@@ -17,9 +17,11 @@ let package = Package(
         // Linux/Windows `athena` is the same command built from the
         // AthenaClient subset via a standalone package (M14.4).
         .executable(name: "athena", targets: ["athena"]),
-        // The daemon process (macOS-only; spawned by `athena
-        // start`/launchd, never user-typed). M14.2d.
-        .executable(name: "athenad", targets: ["athenad"]),
+        // (M14.2d's `athenad` launcher was removed in M43.3 — the
+        // bare argv[0] it execv'd broke MLX's metallib-bundle lookup
+        // under hardened-runtime spawn; `athena start` and the
+        // LaunchDaemon now invoke `athena load` directly with the
+        // resolved executable path.)
         .library(name: "AthenaCore", targets: ["AthenaCore"]),
         .library(name: "AthenaClient", targets: ["AthenaClient"]),
     ],
@@ -276,12 +278,6 @@ let package = Package(
                     "-L\(Context.packageDirectory)/rust-shim/target/release"
                 ])
             ]),
-
-        // Thin daemon launcher (macOS-only): execs `athena load`,
-        // preserving PID for launchd. No deps beyond Foundation. M14.2d.
-        .executableTarget(
-            name: "athenad",
-            path: "Sources/athenad"),
 
         .testTarget(
             name: "AthenaCoreTests",
