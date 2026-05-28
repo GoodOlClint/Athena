@@ -7,9 +7,22 @@ when ready to ship.
 
 ## Status
 
-Not started. M46 is fully shipped (10 tags, v0.10.57 → v0.10.66) and
-the consuming application is iterating on 8-bit. M47 is the next high-leverage
-improvement — a real perf fix worth its own milestone.
+In progress. M46 fully shipped (10 tags, v0.10.57 → v0.10.66).
+
+| Slice | Tag | Date |
+|---|---|---|
+| M47.1 — bit-identical-greedy regression gate | v0.10.67 | 2026-05-27 |
+
+- ✅ **M47.1** — v0.10.67 — `StructuredSpeculativeParityTests`
+  (gated on `ATHENA_RUN_MODEL_TESTS=1`) drives a real MLX MTP model
+  through both branches of `runSpeculative` under a tight enum
+  schema (`speculative: true` then `false`), asserts the decoded
+  strings match byte-for-byte. Pre-flight read of
+  `GuidedDecoder.pick(_:)` confirmed it is non-state-advancing
+  (only `commit(_:)` advances the Guide; `mutating` is solely for
+  the reused `maskBuf`), so the M47.2 fix shape (use
+  `decoder.pick` for the draft at the same Guide state the verify
+  will use) is sound.
 
 ## Trigger
 
@@ -260,8 +273,14 @@ from a v0.10.66 measurement so future regressions are caught.
 
 ## Open question (pre-flight for the new session)
 
-**Where exactly does `GuidedDecoder.pick(_:)` advance state?** If
-calling `pick` advances the Guide's internal cursor, then using it
-for BOTH draft and verify on the same logical position would
-double-advance. The fix shape would need to peek-without-commit
-semantics. Read this first thing in the new session.
+**Where exactly does `GuidedDecoder.pick(_:)` advance state?** —
+RESOLVED (M47.1, 2026-05-27): `pick` is non-state-advancing. Only
+`commit(_:)` calls `guide.advance(...)` / `advanceOpenerTolerant(...)`;
+`pick` reads the current `(guide, enforcing)` state and returns the
+Guide-masked argmax (or plain argmax when not enforcing). The
+`mutating` keyword on `pick` is solely because it reuses the
+`maskBuf` byte buffer between calls — no Guide-state mutation. So
+calling `decoder.pick(...)` for the draft at the same logical
+position the verify will use is safe and produces the same token
+deterministically. The M47.2 fix shape (replace `argmaxLast(...)`
+with `decoder.pick(... [0..., -1, 0...])`) is the drop-in.

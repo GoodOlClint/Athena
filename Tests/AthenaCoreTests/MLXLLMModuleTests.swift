@@ -281,3 +281,101 @@ final class MLXLLMGenerationIntegrationTests: XCTestCase {
             "model loaded via a symlinked store entry must generate")
     }
 }
+
+/// M47.1 — bit-identical-greedy regression gate for structured speculative.
+/// The M2-era correctness contract: temperature-0 MTP speculative decoding
+/// MUST emit the same token sequence as non-speculative greedy of the same
+/// model + prompt + Guide state. The contract holds today (the verify gate
+/// commits the Guide-masked backbone argmax on every reject); M47.2 changes
+/// the *draft* selection from unmasked to Guide-masked argmax, which is
+/// supposed to leave commits unchanged. This test exists to catch any
+/// regression in either direction.
+///
+/// Heavy: drives a real MLX model with an MTP head through both branches
+/// of `MLXLLMModule.runSpeculative` (the `greedyEligible && hasMTPHead`
+/// branch with `speculative: true`, then the `guide != nil` GuidedGreedy
+/// branch with `speculative: false`). Same prompt, same schema, same
+/// maxTokens, same temperature 0 — only the per-request `speculative`
+/// flag toggles. Gated on ATHENA_RUN_MODEL_TESTS=1.
+final class StructuredSpeculativeParityTests: XCTestCase {
+
+    private func skipUnlessEnabled() throws -> URL {
+        let env = ProcessInfo.processInfo.environment
+        guard env["ATHENA_RUN_MODEL_TESTS"] == "1" else {
+            throw XCTSkip("set ATHENA_RUN_MODEL_TESTS=1 to run (heavy)")
+        }
+        let modelURL = ModelStore().resolve(env["ATHENA_TEST_MODEL"])
+        guard
+            FileManager.default.fileExists(
+                atPath: modelURL.appendingPathComponent("config.json").path)
+        else {
+            throw XCTSkip("model not present at \(modelURL.path)")
+        }
+        return modelURL
+    }
+
+    /// Same chat turn, same JSON schema, same maxTokens, temperature 0 —
+    /// only `speculative` toggles. The two decoded strings must match
+    /// byte-for-byte. If they diverge, MTP speculative is breaking the
+    /// bit-identical-greedy contract (e.g. the GDN/Mamba recurrent
+    /// restore on reject is wrong, or the verify mask is mis-stated).
+    func testStructuredGreedyParityAcrossSpeculative() async throws {
+        let modelURL = try skipUnlessEnabled()
+        // Tight schema: an enum with two short string values. Most token
+        // positions have ≤2 allowed continuations, so the unmasked MTP
+        // draft (pre-M47.2) almost never matches the Guide-masked verify
+        // — exactly the failure mode under which the contract must still
+        // hold token-for-token.
+        let schema = """
+            {"type":"object",
+             "properties":{
+               "answer":{"type":"string","enum":["yes","no"]}
+             },
+             "required":["answer"]}
+            """
+        let messages = [
+            ChatTurn(
+                role: "user",
+                content:
+                    "Is the sky generally blue on a clear day? "
+                    + "Answer in JSON.")
+        ]
+        let speculativeText = try await runOnce(
+            modelURL: modelURL, messages: messages,
+            schemaJSON: schema, speculative: true)
+        let greedyText = try await runOnce(
+            modelURL: modelURL, messages: messages,
+            schemaJSON: schema, speculative: false)
+        XCTAssertFalse(
+            speculativeText.isEmpty, "speculative branch produced empty")
+        XCTAssertFalse(
+            greedyText.isEmpty, "greedy branch produced empty")
+        XCTAssertEqual(
+            speculativeText, greedyText,
+            "structured speculative (true) and structured greedy (false) "
+                + "must emit byte-identical strings under temp==0 — the "
+                + "M2-era bit-identical-greedy contract")
+    }
+
+    private func runOnce(
+        modelURL: URL, messages: [ChatTurn],
+        schemaJSON: String, speculative: Bool
+    ) async throws -> String {
+        let llm = MLXLLMModule(
+            modelDirectory: modelURL,
+            parameters: .init(
+                maxTokens: 64, temperature: 0, speculative: speculative))
+        let gov = MemoryGovernor(totalBudgetBytes: Int(96) << 30)
+        await gov.register(llm, evictable: false)
+        try await gov.ensureLoaded(.llm)
+        var out = ""
+        let stream = llm.generateMetered(
+            messages: messages, schemaJSON: schemaJSON, tools: nil,
+            maxTokens: nil, temperature: 0, topP: nil, seed: nil,
+            speculative: speculative, chatTemplateKwargs: nil)
+        for await chunk in stream {
+            if case .text(let s) = chunk { out += s }
+        }
+        return out
+    }
+}
