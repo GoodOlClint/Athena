@@ -892,7 +892,7 @@ struct AthenaServer {
             let deadlineSecs =
                 body.timeout.map { $0 > 0 ? $0 : 0 }
                 ?? requestTimeoutSecs
-            collected = try await collectMetered(
+            collected = try await collectMetered(seconds: deadlineSecs) {
                 llm.generateMetered(
                     messages: turns, schemaJSON: schemaJSON,
                     tools: toolSpecs, maxTokens: body.max_tokens,
@@ -900,8 +900,8 @@ struct AthenaServer {
                     topP: body.top_p, seed: body.seed,
                     speculative: body.speculative,
                     chatTemplateKwargs:
-                        body.chatTemplateKwargsContext()),
-                seconds: deadlineSecs)
+                        body.chatTemplateKwargsContext())
+            }
         } catch let e as AthenaError {
             // M33.1: the only AthenaError collectMetered raises is the
             // per-request timeout → classified 504.
@@ -1086,8 +1086,22 @@ struct AthenaServer {
     /// per-request `timeout` field on ChatCompletionRequest overrides
     /// the daemon-wide `request_timeout_secs` when present. Callers
     /// resolve this; `collectMetered` just honors what it's given.
+    ///
+    /// M48.1 — `eventsBuilder` is a thunk that constructs the metered
+    /// `AsyncStream` (typically `llm.generateMetered(...)`). It MUST
+    /// be called from inside the `DecodeProgress.$counter.withValue(...)`
+    /// scope so the decode Task spawned inside the AsyncStream's
+    /// initializer inherits the TaskLocal binding. The original M46.8
+    /// shape (events constructed BEFORE the withValue) silently broke
+    /// every structured-path heartbeat — the decode Task captured an
+    /// empty TaskLocal table and `incrementToken()` was a no-op, so
+    /// `tokens=0 tokens_per_sec=0.0` showed up forever even on a
+    /// progressing decode. Diagnosed via process sample of a wedged
+    /// daemon: worker thread was actively iterating in
+    /// `GuidedGreedy.generate` while the heartbeat reported nothing.
     private func collectMetered(
-        _ events: AsyncStream<GenChunk>, seconds: Int
+        seconds: Int,
+        _ eventsBuilder: @escaping @Sendable () -> AsyncStream<GenChunk>
     ) async throws -> GenCollected {
         try await withInferenceDeadline(seconds: seconds) {
             let started = Date()
@@ -1130,18 +1144,21 @@ struct AthenaServer {
             }
             defer { heartbeatTask.cancel() }
             var c = GenCollected()
-            // M46.8 — bind the heartbeat counter on a TaskLocal so the
-            // synchronous decode loops (GuidedGreedy / GuidedSubstrate /
-            // SpeculativeGeneration / SpeculativeSampling) can increment
-            // it per internal commit. TaskLocal propagates across
-            // `await` and into `container.perform { ... }` actor calls,
-            // so the structured paths' deep-stack `commit()` functions
-            // pick up the counter without signature plumbing. The
-            // event-drain increment below is still the source of truth
+            // M46.8 / M48.1 — bind the heartbeat counter on a TaskLocal
+            // so the synchronous decode loops (GuidedGreedy /
+            // GuidedSubstrate / SpeculativeGeneration /
+            // SpeculativeSampling) can increment it per internal commit.
+            // The events thunk is invoked INSIDE this scope so the Task
+            // it spawns (inside `AsyncStream { continuation in Task {} }`)
+            // inherits the TaskLocal binding — without that, the
+            // structured paths' `incrementToken()` calls hit a nil
+            // counter and the heartbeat reports `tokens=0` forever. The
+            // event-drain increment below remains the source of truth
             // for the substrate-streamed (non-Guide) path, which emits
             // per-token `.text` events; those paths leave the TaskLocal
             // untouched so no double-counting happens.
             await DecodeProgress.$counter.withValue(counter) {
+                let events = eventsBuilder()
                 for await event in events {
                     switch event {
                     case .text(let chunk):
@@ -2450,7 +2467,7 @@ struct AthenaServer {
                 let deadlineSecs =
                     req.timeout.map { $0 > 0 ? $0 : 0 }
                     ?? requestTimeoutSecs
-                collected = try await collectMetered(
+                collected = try await collectMetered(seconds: deadlineSecs) {
                     llm.generateMetered(
                         messages: turns, schemaJSON: effective?.json,
                         tools: req.toolSpecs(), maxTokens: req.max_tokens,
@@ -2458,8 +2475,8 @@ struct AthenaServer {
                         topP: req.top_p, seed: req.seed,
                         speculative: req.speculative,
                         chatTemplateKwargs:
-                            req.chatTemplateKwargsContext()),
-                    seconds: deadlineSecs)
+                            req.chatTemplateKwargsContext())
+                }
             } catch let e as AthenaError {
                 return (nil, e.message)  // M33.1: timeout → job error
             } catch {
