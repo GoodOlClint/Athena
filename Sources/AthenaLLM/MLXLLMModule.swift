@@ -101,6 +101,21 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     private var cachedVocabTokens:
         (tokens: [VocabToken], eos: UInt32, opener: [UInt32: UInt32])?
 
+    /// M49.1 — cached compiled `StructuredIndex` keyed by schema-JSON
+    /// string. outlines-core's `oc_index_from_schema` DFA compile is a
+    /// pure function of `(schemaJSON, vocabulary)`; both are stable
+    /// across requests when the loaded model is fixed and the consumer
+    /// reuses the same schema. Compile time scales with schema
+    /// complexity — a `maxItems`-constrained 11 KB extraction schema
+    /// can take ~60 s, paid once instead of every request.
+    /// Invalidated wherever `cachedVocabTokens` is — rebind changes
+    /// the vocabulary, which invalidates the cached DFA.
+    /// Single-entry (last schema wins); a schema-switching consumer
+    /// pays the recompile on every switch but never accumulates more
+    /// than one cached DFA.
+    private var cachedStructuredIndex:
+        (schemaJSON: String, index: StructuredIndex)?
+
     /// Governor-owned prompt-cache cap in bytes (0 ⇒ disabled). The
     /// per-token KV figure is derived from the model's own config.json so
     /// the cap is sized for THIS architecture; the cap errs toward
@@ -230,6 +245,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         container = nil
         residentName = nil
         cachedVocabTokens = nil
+        cachedStructuredIndex = nil  // M49.1 — mirror vocabTokens lifecycle
     }
 
     /// M41.2 — load `name`'s directory into `container` and (re)seed the
@@ -278,6 +294,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             container = nil
             residentName = nil
             cachedVocabTokens = nil
+        cachedStructuredIndex = nil  // M49.1 — mirror vocabTokens lifecycle
             throw error
         }
         // Refresh per-model geometry: vocab size + KV per-token bound
@@ -293,6 +310,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         // Different model ⇒ a fresh structured-vocab cache; the old
         // tokens belong to the previous tokenizer.
         cachedVocabTokens = nil
+        cachedStructuredIndex = nil  // M49.1 — mirror vocabTokens lifecycle
         container = loaded
         residentName = name
     }
@@ -327,6 +345,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         container = nil
         residentName = nil
         cachedVocabTokens = nil
+        cachedStructuredIndex = nil  // M49.1 — mirror vocabTokens lifecycle
         try await loadModel(name: target)
     }
 
@@ -351,6 +370,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             container = nil
             residentName = nil
             cachedVocabTokens = nil
+        cachedStructuredIndex = nil  // M49.1 — mirror vocabTokens lifecycle
         }
     }
 
@@ -572,6 +592,47 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         }
         let vocabTokens = cachedVocabTokens
 
+        // M49.1 — compile (or reuse) the schema's DFA outside the main
+        // `container.perform { ... }` block so the cached
+        // `StructuredIndex` is captured as an immutable `let` into the
+        // worker closure (StructuredIndex is `@unchecked Sendable`
+        // post-construction; the DFA is read-only). the consuming application's
+        // workload sends the same extraction schema for every email,
+        // so this collapses the per-request ~60 s outlines-core
+        // recompile down to a single one-time compile per
+        // (schema, model) pair. Pure CPU work, no model context
+        // required for the compile itself.
+        let structuredIndex: StructuredIndex? = try {
+            guard let schemaJSON, let vt = vocabTokens else {
+                return nil
+            }
+            if let hit = cachedStructuredIndex,
+                hit.schemaJSON == schemaJSON
+            {
+                Self.log.debug(
+                    """
+                    structured-index cache hit \
+                    schema_bytes=\(schemaJSON.utf8.count)
+                    """,
+                    metadata: ["function": "runSpeculative"])
+                return hit.index
+            }
+            Self.log.notice(
+                """
+                structured-index cache miss; compiling DFA \
+                schema_bytes=\(schemaJSON.utf8.count) — first request \
+                with this schema pays the compile, subsequent requests \
+                reuse the cached index
+                """,
+                metadata: ["function": "runSpeculative"])
+            let vocab = try StructuredVocabulary(
+                tokens: vt.tokens, eosTokenId: vt.eos)
+            let index = try StructuredIndex(
+                jsonSchema: schemaJSON, vocabulary: vocab)
+            cachedStructuredIndex = (schemaJSON, index)
+            return index
+        }()
+
         let cfgVocab = configVocabSize
         // Resolve sampling knobs for the M40.2 sampling-mode branch
         // outside the (non-isolated) closure: same positive-wins
@@ -599,15 +660,16 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             // Schema-enforced output that ALSO permits a thinking prefix
             // (deferred enforcement, Patch 6) is tracked in
             // GoodOlClint/athena#2.
+            // M49.1 — `structuredIndex` is the cached/compiled DFA
+            // captured from the outer scope. `StructuredGuide` wraps
+            // it with per-request walker state (advance / rollback /
+            // mask buffer). The DFA itself is reused; only the
+            // stateful walker is fresh per request.
             func makeGuide() throws -> StructuredGuide? {
-                guard let schemaJSON, let vt = vocabTokens else {
-                    return nil
-                }
-                let g = try StructuredGuide(
-                    index: StructuredIndex(
-                        jsonSchema: schemaJSON,
-                        vocabulary: StructuredVocabulary(
-                            tokens: vt.tokens, eosTokenId: vt.eos)))
+                guard let index = structuredIndex,
+                    let vt = vocabTokens
+                else { return nil }
+                let g = try StructuredGuide(index: index)
                 g.openerAlias = vt.opener
                 return g
             }

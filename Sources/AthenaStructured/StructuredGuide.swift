@@ -96,7 +96,17 @@ public final class StructuredVocabulary {
 }
 
 /// Owned compiled DFA index (from a regex or a JSON schema).
-public final class StructuredIndex {
+///
+/// `@unchecked Sendable` because the compiled DFA is immutable
+/// post-construction — `oc_index_from_schema` / `oc_index_from_regex`
+/// produce a read-only structure that the per-request `StructuredGuide`
+/// walks with its own state. No method on `StructuredIndex` mutates
+/// the underlying outlines-core data; the only operation is
+/// `oc_guide_new(index.ptr)` which copies the relevant DFA edges into
+/// a fresh walker. Safe to share across isolation domains — and M49.1
+/// requires it so the compiled DFA can be cached on `MLXLLMModule`
+/// and reused across requests without recompiling on every call.
+public final class StructuredIndex: @unchecked Sendable {
     let ptr: OpaquePointer
     let vocab: StructuredVocabulary  // keep alive
 

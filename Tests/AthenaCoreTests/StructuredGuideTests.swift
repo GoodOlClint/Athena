@@ -119,4 +119,78 @@ final class StructuredGuideTests: XCTestCase {
         XCTAssertTrue(guide.advanceOpenerTolerant(3))
         XCTAssertEqual(guide.allowedRollback, 1)
     }
+
+    // MARK: - M49.1 — shared-index, independent-walker contract
+    //
+    // The M49.1 cache reuses one compiled `StructuredIndex` across many
+    // requests. Correctness depends on the contract that each
+    // `StructuredGuide(index:)` instance has its OWN walker state —
+    // advance/rollback on one walker MUST NOT affect another walker
+    // built from the same index. These tests pin that contract.
+
+    func testSharedIndexProducesIndependentWalkers() throws {
+        let index = try StructuredIndex(
+            regex: "[0-9][0-9]", vocabulary: digitVocab())
+        let a = try StructuredGuide(index: index)
+        let b = try StructuredGuide(index: index)
+
+        // Drive guide A forward; guide B must stay at the start.
+        XCTAssertTrue(a.advance(3))
+        XCTAssertEqual(a.allowedRollback, 1)
+        XCTAssertEqual(
+            b.allowedRollback, 0,
+            "advancing one walker must NOT mutate the shared index in a "
+                + "way that affects sibling walkers built from it")
+
+        // Drive A to the final state — B is still at start.
+        XCTAssertTrue(a.advance(7))
+        XCTAssertTrue(a.isFinal)
+        XCTAssertFalse(b.isFinal)
+
+        // B can independently walk its own path.
+        XCTAssertTrue(b.advance(5))
+        XCTAssertTrue(b.advance(9))
+        XCTAssertTrue(b.isFinal)
+        XCTAssertEqual(b.allowedRollback, 2)
+    }
+
+    func testSharedIndexSurvivesWalkerDeinit() throws {
+        // Build the index, then build and drop multiple walkers off
+        // it. The DFA must remain valid for the next walker — i.e.
+        // walker deinit must NOT invalidate the shared compiled index.
+        let index = try StructuredIndex(
+            regex: "[0-9]", vocabulary: digitVocab())
+        for _ in 0..<8 {
+            let g = try StructuredGuide(index: index)
+            XCTAssertTrue(g.advance(5))
+            XCTAssertTrue(g.isFinal)
+            // g drops at end of scope
+        }
+        // After many walker deinits, a fresh walker on the same index
+        // must still work — this is the M49.1 hot path.
+        let g = try StructuredGuide(index: index)
+        XCTAssertTrue(g.advance(0))
+        XCTAssertTrue(g.isFinal)
+    }
+
+    // Compile-time check: M49.1 requires `StructuredIndex` to cross
+    // actor boundaries (the cached DFA is captured into a
+    // `container.perform` Sendable closure). If this stops compiling,
+    // someone removed the @unchecked Sendable annotation and the
+    // cache will stop working.
+    func testStructuredIndexIsSendableForCrossActorCapture() async throws {
+        let index = try StructuredIndex(
+            regex: "[0-9]", vocabulary: digitVocab())
+        let isSendable: @Sendable () -> StructuredIndex = { index }
+        // If StructuredIndex weren't Sendable, the closure capture
+        // above would fail at compile time. Smoke-test the captured
+        // value still works after crossing into a Task.
+        let detached = Task {
+            isSendable()
+        }
+        let recovered = await detached.value
+        let g = try StructuredGuide(index: recovered)
+        XCTAssertTrue(g.advance(3))
+        XCTAssertTrue(g.isFinal)
+    }
 }
