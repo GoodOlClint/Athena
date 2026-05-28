@@ -13,6 +13,7 @@ In progress. M46 fully shipped (10 tags, v0.10.57 → v0.10.66).
 |---|---|---|
 | M47.1 — bit-identical-greedy regression gate | v0.10.67 | 2026-05-27 |
 | M47.2 — Guide-masked MTP drafts + acceptance-rate counter | v0.10.68 | 2026-05-27 |
+| M47.4 — host-bound wall-time validation (the consuming application LLM call) | — | 2026-05-27 |
 
 - ✅ **M47.1** — v0.10.67 — `StructuredSpeculativeParityTests`
   (gated on `ATHENA_RUN_MODEL_TESTS=1`) drives a real MLX MTP model
@@ -24,6 +25,20 @@ In progress. M46 fully shipped (10 tags, v0.10.57 → v0.10.66).
   the reused `maskBuf`), so the M47.2 fix shape (use
   `decoder.pick` for the draft at the same Guide state the verify
   will use) is sound.
+- ✅ **M47.4** — 2026-05-27 — host-bound wall-time validation on
+  the consuming application structured-extraction workload (single-file probe,
+  LLM call only; full e2e number pending operator). v0.10.62 vs
+  v0.10.68: GUIDE 140.6 s → 54.3 s (**2.6× faster**), 1.6 → 9.1 tok/s
+  (**5.7×**). Guide tax (GUIDE/PLAIN tok/s ratio) dropped from 8%
+  → 67% (the "Guide tax" is now -33%, was -92%). The
+  `deploy/integration/e2e-extraction-perf.sh` script the original
+  plan sketched was not authored — the operator measured directly
+  against the real the consuming application workload, which is the truer
+  signal. Secondary observation NOT from M47: PLAIN went 12,310 tok
+  (hit `max_tokens`) → 747 tok (natural EOS); PLAIN doesn't touch
+  `SpeculativeGeneration`, so this is M46-era (likely M46.3b
+  `chat_template_kwargs` or M46.4 allowlist resolution). Worth
+  a separate dig if curious.
 - ✅ **M47.2** — v0.10.68 — `SpeculativeGeneration.generate` now
   Guide-masks the MTP draft at all 3 callsites by routing it
   through `decoder.pick(...)` instead of the unmasked `argmaxLast`
