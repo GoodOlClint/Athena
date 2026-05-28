@@ -300,11 +300,17 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         container == nil ? nil : residentName
     }
     public func rebind(to id: String?) async throws {
-        let target = id ?? defaultName
+        let requested = id ?? defaultName
         let allowed = modelDirectories.map { $0.name }
-        guard allowed.contains(target) else {
+        // M46.4 — case-insensitive lookup so a request asking for
+        // `foo-4b` against an allowlist storing `foo-4B` doesn't
+        // 400. The CANONICAL id from storage drives every downstream
+        // step so the persisted casing stays the source of truth.
+        guard let target =
+            allowed.canonicalCaseInsensitive(requested)
+        else {
             throw AthenaError.modelNotAvailable(
-                requested: target, available: allowed)
+                requested: requested, available: allowed)
         }
         if residentName == target, container != nil { return }
         // Drop the current container (and its caches) before swapping

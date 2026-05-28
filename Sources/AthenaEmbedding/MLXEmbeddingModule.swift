@@ -88,10 +88,14 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
     /// in place. If the slot is unloaded the call only stages the target
     /// id by triggering a fresh load — same fixed governor reservation.
     public func rebind(to id: String?) async throws {
-        let target = id ?? defaultId
-        guard allowedIds.contains(target) else {
+        let requested = id ?? defaultId
+        // M46.4 — case-insensitive lookup; canonical id from storage
+        // drives the load so persisted casing stays the source of truth.
+        guard let target =
+            allowedIds.canonicalCaseInsensitive(requested)
+        else {
             throw AthenaError.modelNotAvailable(
-                requested: target, available: allowedIds)
+                requested: requested, available: allowedIds)
         }
         if residentId == target, container != nil { return }
         container = nil
@@ -157,10 +161,13 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
     public func embed(_ texts: [String], model: String? = nil) async throws
         -> EmbeddingBatch
     {
-        let target = model ?? defaultId
-        guard allowedIds.contains(target) else {
+        let requested = model ?? defaultId
+        // M46.4 — case-insensitive lookup; canonical id from storage.
+        guard let target =
+            allowedIds.canonicalCaseInsensitive(requested)
+        else {
             throw AthenaError.modelNotAvailable(
-                requested: target, available: allowedIds)
+                requested: requested, available: allowedIds)
         }
         if residentId != target || container == nil {
             container = nil

@@ -76,10 +76,13 @@ public actor StubEmbeddingModule: EmbeddingModule, ModelSelectable {
     public func defaultModelId() -> String { defaultId }
     public func residentModelId() -> String? { residentId }
     public func rebind(to id: String?) async throws {
-        let target = id ?? defaultId
-        guard allowedIds.contains(target) else {
+        let requested = id ?? defaultId
+        // M46.4 — case-insensitive lookup; canonical id from storage.
+        guard let target =
+            allowedIds.canonicalCaseInsensitive(requested)
+        else {
             throw AthenaError.modelNotAvailable(
-                requested: target, available: allowedIds)
+                requested: requested, available: allowedIds)
         }
         residentId = target
     }
@@ -103,10 +106,13 @@ public actor StubEmbeddingModule: EmbeddingModule, ModelSelectable {
     public func embed(_ texts: [String], model: String? = nil) async throws
         -> EmbeddingBatch
     {
-        let served = model ?? defaultId
-        guard allowedIds.contains(served) else {
+        let requested = model ?? defaultId
+        // M46.4 — case-insensitive lookup; canonical id from storage.
+        guard let served =
+            allowedIds.canonicalCaseInsensitive(requested)
+        else {
             throw AthenaError.modelNotAvailable(
-                requested: served, available: allowedIds)
+                requested: requested, available: allowedIds)
         }
         // M41: per-request selection rebinds the slot's "resident" id in the
         // stub too, so /api/models/resident reflects what an embed call

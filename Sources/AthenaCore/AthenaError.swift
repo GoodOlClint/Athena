@@ -108,8 +108,15 @@ public enum AthenaError: Error, Sendable, Equatable {
                     + "`athena allowlist add --module <m> --id <id>` "
                     + "(or set `athena default <id>` for the LLM)."
             }
+            // M46.4 — dedupe case-divergent rows at display time so a
+            // 400 doesn't list `foo-4b` AND `foo-4B` as two separate
+            // "Configured models" when the new case-insensitive lookup
+            // treats them as the same model anyway. Historical
+            // duplicate ROWS in the SQLite table aren't removed here;
+            // both casings still match the lookup either way.
             return "Model '\(requested)' is not available. Configured "
-                + "models: \(available.joined(separator: ", "))."
+                + "models: "
+                + "\(available.dedupedCaseInsensitive().joined(separator: ", "))."
         }
     }
 

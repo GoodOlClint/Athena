@@ -70,10 +70,13 @@ public actor StubDiarizationModule: DiarizationModule, ModelSelectable {
     public func defaultModelId() -> String { defaultId }
     public func residentModelId() -> String? { residentId }
     public func rebind(to id: String?) async throws {
-        let target = id ?? defaultId
-        guard modelIds.contains(target) else {
+        let requested = id ?? defaultId
+        // M46.4 — case-insensitive lookup; canonical id from storage.
+        guard let target =
+            modelIds.canonicalCaseInsensitive(requested)
+        else {
             throw AthenaError.modelNotAvailable(
-                requested: target, available: modelIds)
+                requested: requested, available: modelIds)
         }
         residentId = target
     }

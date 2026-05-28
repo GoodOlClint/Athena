@@ -63,7 +63,11 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
     }
 
     private func loadModel(id: String) async throws {
-        guard allowedIds.contains(id) else {
+        // M46.4 — case-insensitive lookup; canonical id from storage
+        // drives the download path so persisted casing wins.
+        guard let canonical =
+            allowedIds.canonicalCaseInsensitive(id)
+        else {
             throw AthenaError.modelNotAvailable(
                 requested: id, available: allowedIds)
         }
@@ -71,9 +75,9 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
             // WhisperLoader.load also seeds the alignment_heads needed
             // for M26 word timestamps; an unload+load on rebind picks
             // up the new model's heads (not just the base weights).
-            model = try await WhisperLoader.load(modelId: id)
+            model = try await WhisperLoader.load(modelId: canonical)
             tokenizer = try await WhisperLoader.loadTokenizer()
-            residentId = id
+            residentId = canonical
         } catch {
             model = nil
             tokenizer = nil
@@ -97,10 +101,13 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
     public func defaultModelId() -> String { defaultId }
     public func residentModelId() -> String? { residentId }
     public func rebind(to id: String?) async throws {
-        let target = id ?? defaultId
-        guard allowedIds.contains(target) else {
+        let requested = id ?? defaultId
+        // M46.4 — case-insensitive lookup; canonical id from storage.
+        guard let target =
+            allowedIds.canonicalCaseInsensitive(requested)
+        else {
             throw AthenaError.modelNotAvailable(
-                requested: target, available: allowedIds)
+                requested: requested, available: allowedIds)
         }
         if residentId == target, model != nil { return }
         model = nil

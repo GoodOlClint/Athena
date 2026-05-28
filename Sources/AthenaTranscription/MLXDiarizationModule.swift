@@ -64,18 +64,21 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
     }
 
     private func loadModel(id: String) async throws {
-        guard allowedIds.contains(id) else {
+        // M46.4 — case-insensitive lookup; canonical id from storage.
+        guard let canonical =
+            allowedIds.canonicalCaseInsensitive(id)
+        else {
             throw AthenaError.modelNotAvailable(
                 requested: id, available: allowedIds)
         }
         do {
-            model = try await SortformerModel.fromPretrained(id)
-            residentId = id
+            model = try await SortformerModel.fromPretrained(canonical)
+            residentId = canonical
         } catch {
             model = nil
             residentId = nil
             throw AthenaError.moduleLoadFailed(
-                .diarization, reason: "sortformer \(id): \(error)")
+                .diarization, reason: "sortformer \(canonical): \(error)")
         }
     }
 
@@ -90,10 +93,13 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
     public func defaultModelId() -> String { defaultId }
     public func residentModelId() -> String? { residentId }
     public func rebind(to id: String?) async throws {
-        let target = id ?? defaultId
-        guard allowedIds.contains(target) else {
+        let requested = id ?? defaultId
+        // M46.4 — case-insensitive lookup; canonical id from storage.
+        guard let target =
+            allowedIds.canonicalCaseInsensitive(requested)
+        else {
             throw AthenaError.modelNotAvailable(
-                requested: target, available: allowedIds)
+                requested: requested, available: allowedIds)
         }
         if residentId == target, model != nil { return }
         model = nil

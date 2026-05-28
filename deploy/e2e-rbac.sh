@@ -294,6 +294,21 @@ code 400 POST /v1/chat/completions "$ALICE_TOK" \
 # n:1 is the supported single-decode case ⇒ 200.
 code 200 POST /v1/chat/completions "$ALICE_TOK" \
   '{"model":"Qwen3.5-27B-4bit-mtp","messages":[{"role":"user","content":"hi"}],"n":1}'
+# M46.4 — case-insensitive model resolution. The allowlist stores the
+# canonical id `Qwen3.5-27B-4bit-mtp` (mixed case); requesting it
+# fully lowercased must still resolve and serve. The truthful served-
+# model field on the response must echo the CANONICAL stored id, not
+# the request's spelling.
+CI="$(curl -s -H "Authorization: Bearer $ALICE_TOK" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"qwen3.5-27b-4bit-mtp","messages":[{"role":"user","content":"hi"}]}' \
+  "http://127.0.0.1:$PORT/v1/chat/completions")"
+echo "$CI" | grep -q '"finish_reason":"stop"' \
+  && ok "lowercased model resolves ⇒ 200/stop" \
+  || bad "lowercased model rejected ($CI)"
+echo "$CI" | grep -q '"model":"Qwen3.5-27B-4bit-mtp"' \
+  && ok "response echoes canonical id (not the request casing)" \
+  || bad "response did not canonicalize served model ($CI)"
 # top_p/seed are accepted (inert on the stub's model-less path) ⇒ 200.
 TPS="$(curl -s -H "Authorization: Bearer $ALICE_TOK" \
   -H 'Content-Type: application/json' \

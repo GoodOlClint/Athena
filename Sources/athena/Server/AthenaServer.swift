@@ -3131,18 +3131,22 @@ struct AthenaServer {
         let sel = selectable(moduleId)
         let allowed = await sel.allowedModelIds()
         let def = await sel.defaultModelId()
-        let target = body.id ?? def
-        guard allowed.contains(target) else {
+        let requested = body.id ?? def
+        // M46.4 — case-insensitive lookup; the canonical id from
+        // storage drives the load so persisted casing wins.
+        guard let target =
+            allowed.canonicalCaseInsensitive(requested)
+        else {
             await audit(
                 request, action: "model.load",
-                target: "\(moduleId.rawValue):\(target)",
+                target: "\(moduleId.rawValue):\(requested)",
                 result: "denied", detail: "id outside allowlist")
             return Self.error(
                 status: .badRequest,
                 message:
-                    "Model '\(target)' is not available. Configured "
+                    "Model '\(requested)' is not available. Configured "
                     + "models for \(moduleId.rawValue): "
-                    + "\(allowed.joined(separator: ", ")).",
+                    + "\(allowed.dedupedCaseInsensitive().joined(separator: ", ")).",
                 type: "invalid_request_error",
                 code: "model_not_available")
         }
