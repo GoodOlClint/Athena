@@ -91,6 +91,70 @@ final class DecodeProgressTaskLocalTests: XCTestCase {
     }
 }
 
+/// M49.2 — phase classification for the heartbeat. Pins the three
+/// state transitions an operator reads:
+///   request entry → setup (no prefill data, no commits)
+///                 → prefill (chunks submitted, none committed)
+///                 → decode (any token committed, or prefill complete)
+final class DecodePhaseTests: XCTestCase {
+
+    func testNoSignalIsSetup() {
+        XCTAssertEqual(
+            DecodePhase.from(tokens: 0, prefillCompleted: 0, prefillTotal: 0),
+            .setup,
+            "Fresh request before any progress publishes ⇒ setup.")
+    }
+
+    func testPrefillInProgress() {
+        XCTAssertEqual(
+            DecodePhase.from(tokens: 0, prefillCompleted: 1, prefillTotal: 22),
+            .prefill)
+        XCTAssertEqual(
+            DecodePhase.from(tokens: 0, prefillCompleted: 13, prefillTotal: 22),
+            .prefill)
+        XCTAssertEqual(
+            DecodePhase.from(tokens: 0, prefillCompleted: 21, prefillTotal: 22),
+            .prefill,
+            "Anything strictly less than total ⇒ still prefill.")
+    }
+
+    func testPrefillCompleteWithoutTokensIsDecode() {
+        XCTAssertEqual(
+            DecodePhase.from(tokens: 0, prefillCompleted: 22, prefillTotal: 22),
+            .decode,
+            "Prefill done + no commit yet is the transient between "
+                + "prefill and first decoded token — classify as decode "
+                + "because we're past the prefill workload.")
+    }
+
+    func testAnyTokenIsDecode() {
+        XCTAssertEqual(
+            DecodePhase.from(tokens: 1, prefillCompleted: 22, prefillTotal: 22),
+            .decode)
+        XCTAssertEqual(
+            DecodePhase.from(tokens: 1000, prefillCompleted: 22, prefillTotal: 22),
+            .decode)
+    }
+
+    func testTokensWithoutPrefillStateIsDecode() {
+        // Substrate-streamed (non-Guide) path doesn't publish prefill
+        // chunks — it goes straight to incrementing tokens. Phase
+        // must still resolve as decode.
+        XCTAssertEqual(
+            DecodePhase.from(tokens: 5, prefillCompleted: 0, prefillTotal: 0),
+            .decode)
+    }
+
+    func testRawValuesMatchLogFieldConvention() {
+        // Heartbeat log line embeds `.rawValue` directly. If these
+        // change, operator dashboards/greps that key off
+        // `phase=setup|prefill|decode` will silently break.
+        XCTAssertEqual(DecodePhase.setup.rawValue, "setup")
+        XCTAssertEqual(DecodePhase.prefill.rawValue, "prefill")
+        XCTAssertEqual(DecodePhase.decode.rawValue, "decode")
+    }
+}
+
 /// NSLock-isolated counter that satisfies `DecodeProgressCounter`.
 /// Tests assert against `tokens` after draining the stream.
 private final class TestCounter: @unchecked Sendable, DecodeProgressCounter {

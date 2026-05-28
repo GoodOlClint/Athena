@@ -1161,9 +1161,19 @@ struct AthenaServer {
                     } else {
                         prefillField = ""
                     }
+                    // M49.2 — phase label (setup / prefill / decode)
+                    // derived from the counter snapshot. Lets the
+                    // operator read the heartbeat line and answer
+                    // "is it hung in setup or just running long?"
+                    // without inferring from missing prefill fields.
+                    let phase = DecodePhase.from(
+                        tokens: snap.tokens,
+                        prefillCompleted: snap.prefillCompleted,
+                        prefillTotal: snap.prefillTotal)
                     Self.log.notice(
                         """
-                        decode heartbeat elapsed=\(Int(elapsed))s\
+                        decode heartbeat elapsed=\(Int(elapsed))s \
+                        phase=\(phase.rawValue)\
                         \(prefillField) tokens=\(snap.tokens) \
                         tokens_per_sec=\
                         \(String(format: "%.1f", tps))

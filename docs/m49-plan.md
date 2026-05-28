@@ -10,6 +10,7 @@ compiling the JSON-schema DFA inside `StructuredIndex`.
 | Slice | Tag | Date |
 |---|---|---|
 | M49.1 — StructuredIndex cache | v0.10.73 | 2026-05-28 |
+| M49.2 — phase-aware heartbeat | v0.10.74 | 2026-05-28 |
 
 - ✅ **M49.1** — v0.10.73 — `cachedStructuredIndex` field on
   `MLXLLMModule` keyed by schema-JSON, lookup+build hoisted outside
@@ -23,10 +24,21 @@ compiling the JSON-schema DFA inside `StructuredIndex`.
   `testSharedIndexProducesIndependentWalkers`,
   `testSharedIndexSurvivesWalkerDeinit`,
   `testStructuredIndexIsSendableForCrossActorCapture`.
-- ⏸ **M49.2** — deferred. Phase-aware heartbeat (`phase=setup|
-  prefill|decode`). Would have made the setup-gap diagnosis
-  self-evident, but with M49.1 the gap is gone; hold unless another
-  setup-class surprise lands.
+- ✅ **M49.2** — v0.10.74 — phase-aware heartbeat. New
+  `DecodePhase` enum in `AthenaCore` (`setup | prefill | decode`)
+  derived from the counter snapshot at every heartbeat tick. The
+  log line now reads:
+  ```
+  decode heartbeat elapsed=15s phase=setup tokens=0 tokens_per_sec=0.0
+  decode heartbeat elapsed=68s phase=prefill prefill=4/22 tokens=0
+  decode heartbeat elapsed=83s phase=decode prefill=22/22 tokens=109
+  ```
+  Operators can `grep 'phase=setup'` to find pre-prefill stalls
+  (which M49.1 already eliminated for the steady-state case, but
+  remains useful for first-request-per-schema or schema-mismatch
+  cases). 6 new unit tests pin the phase transitions, including the
+  transient prefill-complete-no-tokens window and the
+  substrate-streamed-no-prefill case.
 
 Diagnosed from a live `/usr/bin/log stream` capture of two
 consecutive structured requests on v0.10.72:

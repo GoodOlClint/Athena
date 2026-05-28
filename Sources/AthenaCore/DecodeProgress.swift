@@ -57,3 +57,43 @@ public enum DecodeProgress {
     /// already incrementing via `.text` events).
     @TaskLocal public static var counter: (any DecodeProgressCounter)?
 }
+
+/// M49.2 — coarse phase of a metered generation as observed by the
+/// heartbeat. Distinguishes the three operationally-interesting
+/// states: setup (waiting on request prep / DFA compile / vocab
+/// build), prefill (CPU+GPU on the prompt chunks), and decode
+/// (committing tokens). Lets `athena logs` answer "is it hung in
+/// setup or just running long?" at a glance, without inferring from
+/// "no prefill field yet."
+///
+/// Derived from the counter snapshot (tokens + prefill completion);
+/// no separate state needed. Raw values match the log field
+/// convention (lowercase enum case).
+public enum DecodePhase: String, Sendable {
+    case setup
+    case prefill
+    case decode
+
+    /// Compute the current phase from a counter snapshot.
+    ///
+    /// - `tokens > 0` ⇒ `.decode` (at least one token has been
+    ///   committed; we're past prefill regardless of whether prefill
+    ///   was tracked).
+    /// - `prefillTotal > 0 && prefillCompleted < prefillTotal` ⇒
+    ///   `.prefill` (chunks submitted but not all done).
+    /// - `prefillTotal > 0 && prefillCompleted == prefillTotal` ⇒
+    ///   `.decode` (prefill done; decode loop about to commit or
+    ///   already between iterations — the transient window is
+    ///   sub-second in practice).
+    /// - everything else ⇒ `.setup`.
+    public static func from(
+        tokens: Int, prefillCompleted: Int, prefillTotal: Int
+    ) -> DecodePhase {
+        if tokens > 0 { return .decode }
+        if prefillTotal > 0 {
+            return prefillCompleted < prefillTotal
+                ? .prefill : .decode
+        }
+        return .setup
+    }
+}
