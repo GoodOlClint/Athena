@@ -30,6 +30,22 @@ public protocol DecodeProgressCounter: AnyObject, Sendable {
     /// shape — the heartbeat reader pays for the lock, not the
     /// per-token writer).
     func incrementToken()
+
+    /// M48.4 — publish prefill chunk progress so the heartbeat can
+    /// distinguish "stuck in prefill" from "stuck just-after-prefill"
+    /// from "decoding slowly." Decode loops should call this after
+    /// each prefill chunk has been submitted (not awaited — MLX's
+    /// asyncEval queues the work; this counts "submitted to the
+    /// scheduler"). `total` is the total chunk count for THIS
+    /// prefill; `completed` is how many have been submitted so far
+    /// (1-indexed at first call, equal to `total` at the last call).
+    /// Default: no-op so conformers that don't care about prefill
+    /// granularity stay valid.
+    func recordPrefillChunk(completed: Int, total: Int)
+}
+
+extension DecodeProgressCounter {
+    public func recordPrefillChunk(completed: Int, total: Int) {}
 }
 
 public enum DecodeProgress {

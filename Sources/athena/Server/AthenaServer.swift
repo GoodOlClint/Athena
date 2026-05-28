@@ -1026,16 +1026,31 @@ struct AthenaServer {
             let tokens: Int
             let lastLoggedTokens: Int
             let lastLoggedAt: TimeInterval
+            /// M48.4 — last-submitted prefill chunk index (1-based).
+            /// 0 ⇒ prefill not started (or 1-token prompt — no chunks).
+            let prefillCompleted: Int
+            /// M48.4 — total prefill chunks for THIS request, or 0 if
+            /// the decode loop never published a prefill state.
+            let prefillTotal: Int
         }
         private let lock = NSLock()
         private var tokens = 0
         private var lastLoggedTokens = 0
         private var lastLoggedAt: TimeInterval = 0
+        private var prefillCompleted = 0
+        private var prefillTotal = 0
 
         func incrementToken() {
             lock.lock()
             defer { lock.unlock() }
             tokens += 1
+        }
+
+        func recordPrefillChunk(completed: Int, total: Int) {
+            lock.lock()
+            defer { lock.unlock() }
+            self.prefillCompleted = completed
+            self.prefillTotal = total
         }
 
         func snapshot() -> Snapshot {
@@ -1044,7 +1059,9 @@ struct AthenaServer {
             return Snapshot(
                 tokens: tokens,
                 lastLoggedTokens: lastLoggedTokens,
-                lastLoggedAt: lastLoggedAt)
+                lastLoggedAt: lastLoggedAt,
+                prefillCompleted: prefillCompleted,
+                prefillTotal: prefillTotal)
         }
 
         func markLogged(elapsedAt: TimeInterval, tokens: Int) {
@@ -1129,10 +1146,25 @@ struct AthenaServer {
                     let tps =
                         Double(snap.tokens - snap.lastLoggedTokens)
                         / dt
+                    // M48.4 — include prefill state when known so the
+                    // operator can tell "stuck in prefill" (e.g.
+                    // prefill=14/38 tokens=0) apart from "decoding"
+                    // (e.g. prefill=38/38 tokens=124). The field is
+                    // dropped entirely when the decode path doesn't
+                    // publish prefill state (substrate-streamed
+                    // unstructured requests).
+                    let prefillField: String
+                    if snap.prefillTotal > 0 {
+                        prefillField =
+                            " prefill=\(snap.prefillCompleted)/"
+                            + "\(snap.prefillTotal)"
+                    } else {
+                        prefillField = ""
+                    }
                     Self.log.notice(
                         """
-                        decode heartbeat elapsed=\(Int(elapsed))s \
-                        tokens=\(snap.tokens) \
+                        decode heartbeat elapsed=\(Int(elapsed))s\
+                        \(prefillField) tokens=\(snap.tokens) \
                         tokens_per_sec=\
                         \(String(format: "%.1f", tps))
                         """)

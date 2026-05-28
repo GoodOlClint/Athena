@@ -69,16 +69,26 @@ extension SpeculativeSampling {
         // path's — only the per-step sampling differs.
         var hidden: MLXArray
         var logits: MLXArray
+        // M48.4 — publish per-chunk prefill progress to the heartbeat,
+        // matching GuidedGreedy / SpeculativeGeneration.
         if promptTokens.count > 1 {
             let head = Array(promptTokens.dropLast())
+            let chunkSize = 512
+            let totalChunks =
+                (head.count + chunkSize - 1) / chunkSize
             var i = 0
+            var done = 0
             while i < head.count {
-                let chunk = Array(head[i ..< min(i + 512, head.count)])
+                let chunk = Array(
+                    head[i ..< min(i + chunkSize, head.count)])
                 _ = model(
                     MLXArray(chunk.map { Int32($0) }, [1, chunk.count]),
                     cache: backbone)
                 asyncEval(backbone)
-                i += 512
+                i += chunkSize
+                done += 1
+                DecodeProgress.counter?.recordPrefillChunk(
+                    completed: done, total: totalChunks)
             }
         }
         (logits, hidden) = model.logitsAndHidden(

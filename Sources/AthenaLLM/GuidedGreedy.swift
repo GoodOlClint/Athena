@@ -22,17 +22,27 @@ enum GuidedGreedy {
         let vocab = model.vocabularySize
         let backbone = model.newCache(parameters: nil)
 
-        // Prefill all but the last prompt token.
+        // Prefill all but the last prompt token. M48.4 publishes
+        // per-chunk progress to the heartbeat so an operator can tell
+        // "stuck in prefill at chunk N" apart from "decoding slowly."
         if promptTokens.count > 1 {
             let head = Array(promptTokens.dropLast())
+            let chunkSize = 512
+            let totalChunks =
+                (head.count + chunkSize - 1) / chunkSize
             var i = 0
+            var done = 0
             while i < head.count {
-                let chunk = Array(head[i ..< min(i + 512, head.count)])
+                let chunk = Array(
+                    head[i ..< min(i + chunkSize, head.count)])
                 _ = model(
                     MLXArray(chunk.map { Int32($0) }, [1, chunk.count]),
                     cache: backbone)
                 asyncEval(backbone)
-                i += 512
+                i += chunkSize
+                done += 1
+                DecodeProgress.counter?.recordPrefillChunk(
+                    completed: done, total: totalChunks)
             }
         }
         var (logits, _) = model.logitsAndHidden(

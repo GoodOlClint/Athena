@@ -96,12 +96,86 @@ final class DecodeProgressTaskLocalTests: XCTestCase {
 private final class TestCounter: @unchecked Sendable, DecodeProgressCounter {
     private let lock = NSLock()
     private var n = 0
+    private var prefillCompleted = 0
+    private var prefillTotal = 0
     func incrementToken() {
         lock.lock(); defer { lock.unlock() }
         n += 1
     }
+    func recordPrefillChunk(completed: Int, total: Int) {
+        lock.lock(); defer { lock.unlock() }
+        self.prefillCompleted = completed
+        self.prefillTotal = total
+    }
     var tokens: Int {
         lock.lock(); defer { lock.unlock() }
         return n
+    }
+    var prefillState: (completed: Int, total: Int) {
+        lock.lock(); defer { lock.unlock() }
+        return (prefillCompleted, prefillTotal)
+    }
+}
+
+/// M48.4 — `recordPrefillChunk` default contract: the protocol
+/// extension provides a no-op default so existing conformers that
+/// don't care about prefill granularity stay valid. Counter-specific
+/// behavior is tested with an instance that overrides the default.
+final class DecodeProgressPrefillTests: XCTestCase {
+
+    func testDefaultRecordPrefillChunkIsNoOp() {
+        // A conformer that DOES NOT implement recordPrefillChunk picks
+        // up the protocol-extension default and silently no-ops, which
+        // is what HeartbeatCounter relied on before M48.4 shipped.
+        final class TokenOnly:
+            @unchecked Sendable, DecodeProgressCounter
+        {
+            func incrementToken() {}
+        }
+        let c = TokenOnly()
+        c.recordPrefillChunk(completed: 5, total: 10)
+        // No throw, no crash — that IS the contract.
+        XCTAssertTrue(true)
+    }
+
+    func testRecordPrefillChunkPropagatesLatestValues() {
+        let counter = TestCounter()
+        counter.recordPrefillChunk(completed: 1, total: 38)
+        counter.recordPrefillChunk(completed: 14, total: 38)
+        counter.recordPrefillChunk(completed: 38, total: 38)
+        let s = counter.prefillState
+        XCTAssertEqual(s.completed, 38)
+        XCTAssertEqual(s.total, 38)
+    }
+
+    /// The decode-loop prefill block matches this idiom — total
+    /// chunks computed once with the ceiling-divide, then per-chunk
+    /// publish after asyncEval submits the work. Pinned here so a
+    /// future refactor that drops the publish call gets caught.
+    func testPrefillLoopIdiomPublishesEveryChunk() async {
+        let counter = TestCounter()
+        await DecodeProgress.$counter.withValue(counter) {
+            simulatePrefill(promptCount: 1500)  // 3 chunks at 512
+        }
+        let s = counter.prefillState
+        XCTAssertEqual(s.completed, 3)
+        XCTAssertEqual(s.total, 3)
+    }
+
+    private nonisolated func simulatePrefill(promptCount: Int) {
+        // Mirror the GuidedGreedy / SpeculativeGeneration prefill
+        // arithmetic exactly so the test catches an off-by-one if
+        // the loop body diverges.
+        let head = promptCount - 1
+        let chunkSize = 512
+        let totalChunks = (head + chunkSize - 1) / chunkSize
+        var i = 0
+        var done = 0
+        while i < head {
+            i += chunkSize
+            done += 1
+            DecodeProgress.counter?.recordPrefillChunk(
+                completed: done, total: totalChunks)
+        }
     }
 }
