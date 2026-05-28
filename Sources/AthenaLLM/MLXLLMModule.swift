@@ -3,6 +3,7 @@ import AthenaModels
 import AthenaStructured
 import Foundation
 import HuggingFace
+import Logging
 import MLX
 import MLXHuggingFace
 import MLXLLM
@@ -63,6 +64,13 @@ public struct LLMGenerationParameters: Sendable {
 public actor MLXLLMModule: LLMModule, ModelSelectable {
     public nonisolated let id: ModuleID = .llm
     public nonisolated var moduleID: ModuleID { .llm }
+
+    /// M48.2 — daemon-side logger for the dispatch decision (which
+    /// internal generate path each request takes). `.debug` so
+    /// production stays quiet by default; flip per-subsystem via
+    /// `sudo log config --mode "level:debug" --subsystem athena` when
+    /// diagnosing a specific request shape.
+    nonisolated static let log = Logger(label: "athena.llm")
 
     /// M41.2: operator-declared allowlist as store-name → directory URL.
     /// First-declared = the default (loaded when the slot first comes up
@@ -481,8 +489,35 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         let samplingEligible =
             effectiveSpec && effectiveTemp > 0 && schemaJSON == nil
         if schemaJSON == nil && !greedyEligible && !samplingEligible {
+            Self.log.debug(
+                """
+                dispatch path=substrate-stream spec=\(effectiveSpec) \
+                temp=\(effectiveTemp) schema=false
+                """,
+                metadata: ["function": "runSpeculative"])
             return nil
         }
+        // M48.2 — declare which internal generate path this request
+        // will take, BEFORE any model work begins. Lets operators
+        // (and the consuming application) see at a glance whether a structured
+        // request engaged the speculative loop or fell to the
+        // non-speculative GuidedGreedy/GuidedSubstrate path. The
+        // final architecture-dispatched branch (Qwen3.5 vendored vs
+        // any-other) is resolved inside container.perform; the
+        // selected path identity is correct either way because the
+        // any-other branch always lands at GuidedSubstrate when a
+        // schema is present.
+        let dispatchPath: String = {
+            if greedyEligible { return "speculative-greedy" }
+            if samplingEligible { return "speculative-sampling" }
+            return "guided-greedy-or-substrate"
+        }()
+        Self.log.debug(
+            """
+            dispatch path=\(dispatchPath) spec=\(effectiveSpec) \
+            temp=\(effectiveTemp) schema=\(schemaJSON != nil)
+            """,
+            metadata: ["function": "runSpeculative"])
 
         let lmInput = try await container.prepare(
             input: UserInput(

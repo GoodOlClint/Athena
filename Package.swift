@@ -145,6 +145,7 @@ let package = Package(
                 .product(name: "MLXHuggingFace", package: "mlx-swift-lm"),
                 .product(name: "Tokenizers", package: "swift-transformers"),
                 .product(name: "HuggingFace", package: "swift-huggingface"),
+                .product(name: "Logging", package: "swift-log"),
             ],
             path: "Sources/AthenaLLM"),
         .target(
