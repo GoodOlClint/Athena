@@ -26,19 +26,22 @@ In progress. M46 fully shipped (10 tags, v0.10.57 → v0.10.66).
   `decoder.pick` for the draft at the same Guide state the verify
   will use) is sound.
 - ✅ **M47.4** — 2026-05-27 — host-bound wall-time validation on
-  the consuming application structured-extraction workload (single-file probe,
-  LLM call only; full e2e number pending operator). v0.10.62 vs
-  v0.10.68: GUIDE 140.6 s → 54.3 s (**2.6× faster**), 1.6 → 9.1 tok/s
-  (**5.7×**). Guide tax (GUIDE/PLAIN tok/s ratio) dropped from 8%
-  → 67% (the "Guide tax" is now -33%, was -92%). The
-  `deploy/integration/e2e-extraction-perf.sh` script the original
-  plan sketched was not authored — the operator measured directly
-  against the real the consuming application workload, which is the truer
-  signal. Secondary observation NOT from M47: PLAIN went 12,310 tok
-  (hit `max_tokens`) → 747 tok (natural EOS); PLAIN doesn't touch
-  `SpeculativeGeneration`, so this is M46-era (likely M46.3b
-  `chat_template_kwargs` or M46.4 allowlist resolution). Worth
-  a separate dig if curious.
+  a consumer-side structured-extraction workload.
+  - **LLM-call probe** (v0.10.62 vs v0.10.68): GUIDE 140.6 s → 54.3 s
+    (**2.6× faster**), 1.6 → 9.1 tok/s (**5.7×**). Guide/Plain tok/s
+    ratio 8% → 67% (the "Guide tax" is now -33%, was -92%).
+  - **Single-file end-to-end** (LLM + ingest pipeline + scrub + DB
+    writes): >10 min (killed) → **88 s, full green**, 0 evictions,
+    0 503s, byte-comparable output (3,602 → 3,627 bytes). Broker
+    call 375.5 s → 63.1 s (6×). The `deploy/integration/e2e-extraction-perf.sh`
+    script the original plan sketched was not authored — direct
+    measurement via the real consumer workload was the truer
+    signal.
+  - Secondary observation NOT from M47: PLAIN went 12,310 tok (hit
+    `max_tokens`) → 747 tok (natural EOS); PLAIN doesn't touch
+    `SpeculativeGeneration`, so this is M46-era (likely M46.3b
+    `chat_template_kwargs` or M46.4 allowlist resolution). Worth
+    a separate dig if curious.
 - ✅ **M47.2** — v0.10.68 — `SpeculativeGeneration.generate` now
   Guide-masks the MTP draft at all 3 callsites by routing it
   through `decoder.pick(...)` instead of the unmasked `argmaxLast`
