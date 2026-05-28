@@ -12,6 +12,7 @@ In progress. M46 fully shipped (10 tags, v0.10.57 → v0.10.66).
 | Slice | Tag | Date |
 |---|---|---|
 | M47.1 — bit-identical-greedy regression gate | v0.10.67 | 2026-05-27 |
+| M47.2 — Guide-masked MTP drafts + acceptance-rate counter | v0.10.68 | 2026-05-27 |
 
 - ✅ **M47.1** — v0.10.67 — `StructuredSpeculativeParityTests`
   (gated on `ATHENA_RUN_MODEL_TESTS=1`) drives a real MLX MTP model
@@ -23,6 +24,18 @@ In progress. M46 fully shipped (10 tags, v0.10.57 → v0.10.66).
   the reused `maskBuf`), so the M47.2 fix shape (use
   `decoder.pick` for the draft at the same Guide state the verify
   will use) is sound.
+- ✅ **M47.2** — v0.10.68 — `SpeculativeGeneration.generate` now
+  Guide-masks the MTP draft at all 3 callsites by routing it
+  through `decoder.pick(...)` instead of the unmasked `argmaxLast`
+  (deleted, no remaining callers). Adds `SpeculativeStats.observer`
+  TaskLocal + `SpeculativeAcceptanceObserver` protocol in
+  AthenaCore so an opt-in counter can observe per-iteration
+  accept/reject. A second `StructuredSpeculativeParityTests` case
+  (`testStructuredSpeculativeAcceptanceRate`) asserts the
+  acceptance rate ≥ 30% under the tight enum schema (pre-fix it
+  was effectively 0%). The bit-identical-greedy parity test from
+  M47.1 still passes — the verify gate, not the draft, decides
+  what gets committed.
 
 ## Trigger
 

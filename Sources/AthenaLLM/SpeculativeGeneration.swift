@@ -17,12 +17,6 @@ import MLXLMCommon
 /// cache state on draft rejection — done with an exact deep-copy snapshot.
 enum SpeculativeGeneration {
 
-    private static func argmaxLast(_ logits: MLXArray) -> Int {
-        // logits: (1, S, vocab) → last position → argmax token id.
-        let last = logits[0..., -1, 0...]
-        return argMax(last, axis: -1).item(Int.self)
-    }
-
     /// Argmax of `slice` (shape (1, vocab)) under the structured Guide:
     /// add −inf to every token the Guide disallows in its current state,
     /// so the greedy pick is always schema-valid. No guide ⇒ plain argmax.
@@ -142,12 +136,24 @@ enum SpeculativeGeneration {
         if commit(prev0) { return result() }
         var prev = prev0
 
-        // MTP drafts are NOT masked; a guide-invalid draft simply fails
-        // the masked verify and is rejected.
-        var draft = argmaxLast(
-            model.mtpForward(
+        // M47.2 — MTP drafts are Guide-masked at the SAME Guide state the
+        // upcoming verify will use, so the draft is drawn from the
+        // schema-allowed set instead of the full vocabulary. Under tight
+        // schemas (~150k vocab, ≤10 valid tokens per position) the
+        // unmasked draft almost never matched the masked verify ⇒ ~100%
+        // reject, every iteration paid an MTP forward + KV trim + Mamba
+        // rollback for nothing. Bit-identical-greedy contract is
+        // unchanged: the verify gate (`commit(draft)` only runs when
+        // `draft == verifyPred`, AND `verifyPred` is the masked argmax
+        // of the backbone) still decides what gets committed; the draft
+        // mask only changes WHICH token is proposed for verification.
+        // `decoder.pick(_:)` is non-state-advancing (only `commit(_:)`
+        // advances the Guide), so calling it for draft and verify at
+        // the same logical position is safe.
+        var draft = decoder.pick(
+            (model.mtpForward(
                 hidden: hidden, nextTokenIds: tokenArray(prev),
-                mtpCache: mtpCache) ?? logits)
+                mtpCache: mtpCache) ?? logits)[0..., -1, 0...])
 
         // --- Greedy draft/verify/accept (single-pass verify) ---------
         // ONE backbone forward over [confirmed, draft] with nConfirmed=1;
@@ -165,16 +171,24 @@ enum SpeculativeGeneration {
             let hiddenD = hidden2[0..., 1 ..< 2, 0...]
             asyncEval(backbone)
 
+            // M47.2 — publish accept/reject so the test (and any future
+            // perf-observability surface) can read the acceptance rate
+            // via the SpeculativeStats TaskLocal.
+            SpeculativeStats.observer?
+                .recordIteration(accepted: draft == verifyPred)
+
             if draft == verifyPred {
                 if commit(draft) { break }  // advances the Guide
                 // bonus under the Guide state AFTER committing draft.
                 let bonus = decoder.pick(logits2[0..., 1, 0...])
                 if commit(bonus) { break }
                 prev = bonus
-                draft = argmaxLast(
-                    model.mtpForward(
+                // M47.2 — draft masked under the post-bonus Guide state
+                // (same state the next iteration's verify will use).
+                draft = decoder.pick(
+                    (model.mtpForward(
                         hidden: hiddenD, nextTokenIds: tokenArray(bonus),
-                        mtpCache: mtpCache) ?? logits2)
+                        mtpCache: mtpCache) ?? logits2)[0..., -1, 0...])
             } else {
                 // Reject: drop the draft position — KV trim(1), Mamba
                 // restore to the post-confirmed snapshot.
@@ -182,10 +196,12 @@ enum SpeculativeGeneration {
                 restoreMambaFromRollback()
                 if commit(verifyPred) { break }
                 prev = verifyPred
-                draft = argmaxLast(
-                    model.mtpForward(
+                // M47.2 — draft masked under the post-verifyPred Guide
+                // state (same state the next iteration's verify will use).
+                draft = decoder.pick(
+                    (model.mtpForward(
                         hidden: hiddenC, nextTokenIds: tokenArray(verifyPred),
-                        mtpCache: mtpCache) ?? logits2)
+                        mtpCache: mtpCache) ?? logits2)[0..., -1, 0...])
             }
 
             if out.count % 256 == 0 { MLX.Memory.clearCache() }

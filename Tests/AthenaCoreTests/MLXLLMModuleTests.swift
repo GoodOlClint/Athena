@@ -357,6 +357,47 @@ final class StructuredSpeculativeParityTests: XCTestCase {
                 + "M2-era bit-identical-greedy contract")
     }
 
+    /// M47.2 acceptance-rate gate. Under the same tight enum schema, the
+    /// MTP speculative loop must accept its own draft at a non-trivial
+    /// rate — pre-M47.2 the unmasked argmax draft almost never matched
+    /// the Guide-masked verify so acceptance was ~0% and speculation
+    /// actively cost more than non-speculative greedy. The test sets a
+    /// 30% floor: realistic for a tight schema where the valid set is
+    /// small but MTP/backbone agreement within that set is high.
+    func testStructuredSpeculativeAcceptanceRate() async throws {
+        let modelURL = try skipUnlessEnabled()
+        let schema = """
+            {"type":"object",
+             "properties":{
+               "answer":{"type":"string","enum":["yes","no"]}
+             },
+             "required":["answer"]}
+            """
+        let messages = [
+            ChatTurn(
+                role: "user",
+                content:
+                    "Is the sky generally blue on a clear day? "
+                    + "Answer in JSON.")
+        ]
+        let counter = AcceptCounter()
+        try await SpeculativeStats.$observer.withValue(counter) {
+            _ = try await self.runOnce(
+                modelURL: modelURL, messages: messages,
+                schemaJSON: schema, speculative: true)
+        }
+        let stats = counter.stats
+        XCTAssertGreaterThan(
+            stats.total, 0,
+            "speculative loop must have run ≥1 iteration to be measurable")
+        let rate = Double(stats.accepts) / Double(stats.total)
+        XCTAssertGreaterThanOrEqual(
+            rate, 0.30,
+            "MTP-draft acceptance rate \(stats.accepts)/\(stats.total) = "
+                + "\(rate) — M47.2 Guide-masked drafts should keep this ≥30% "
+                + "under a realistic schema (pre-fix it was effectively 0%)")
+    }
+
     private func runOnce(
         modelURL: URL, messages: [ChatTurn],
         schemaJSON: String, speculative: Bool
@@ -377,5 +418,26 @@ final class StructuredSpeculativeParityTests: XCTestCase {
             if case .text(let s) = chunk { out += s }
         }
         return out
+    }
+}
+
+/// NSLock-isolated accept/total counter for the M47.2 acceptance-rate
+/// test. The publish call (`recordIteration`) is on the synchronous
+/// decode loop — the reader (test assertion) runs after the stream
+/// completes, so the lock is uncontended in practice.
+private final class AcceptCounter:
+    @unchecked Sendable, SpeculativeAcceptanceObserver
+{
+    private let lock = NSLock()
+    private var accepts = 0
+    private var total = 0
+    func recordIteration(accepted: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        total += 1
+        if accepted { accepts += 1 }
+    }
+    var stats: (accepts: Int, total: Int) {
+        lock.lock(); defer { lock.unlock() }
+        return (accepts, total)
     }
 }
