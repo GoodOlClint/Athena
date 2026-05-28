@@ -210,10 +210,19 @@ Items surfaced in the audit that aren't worth folding in:
 
 ## Status
 
-Saved 2026-05-27. Not started. Plan locked pending:
-- Operator decision on whether to swap M46.2/M46.3 ordering.
-- Resolution of Decision #4 during M46.3 execution.
-- M46.6 diagnostic reads to land before M46.1 starts — outcome determines whether M46.6 is a code fix, governor refactor, or doc-only.
+Saved 2026-05-27. **5 of 8 sub-slices shipped 2026-05-27**, paused for the consuming application re-run validation against v0.10.61.
+
+Shipped:
+- ✅ **M45.7** — v0.10.57 — hotfix: 5xx-response legibility log, dev-toml opt-in alignment, --speculative help.
+- ✅ **M46.6** — v0.10.58 — embedder per-call buffer leak fix (per-bucket `MLX.Memory.clearCache()`).
+- ✅ **M46.1** — v0.10.59 — legibility II: stream-truncation log + signal-shutdown log + decode heartbeat. AthenaDeployTests drift cleared as drive-by.
+- ✅ **M46.2** — v0.10.60 — preload-all configured modules (every module class with an `is_default=1` allowlist row warms concurrently at startup).
+- ✅ **M46.3a** — v0.10.61 — per-request `timeout` override on ChatCompletionRequest. (M46.3 split into a/b mid-execution because the chat_template_kwargs half needed protocol changes.)
+
+Pending:
+- ⏸️ **M46.3b** — `chat_template_kwargs` (enable_thinking) plumbing through the LLMModule protocol + UserInput.additionalContext. Substrate API confirmed (`UserInput.additionalContext: [String: any Sendable]?` flows directly into `tokenizer.applyChatTemplate(additionalContext:)`, no fallback rendering needed). Touches the LLMModule protocol, Stub + MLX impls, and three UserInput callsites in MLXLLMModule.swift.
+- ⏸️ **M46.4** — case-insensitive model resolution + dedupe migration.
+- ⏸️ **M46.5** — /healthz polish (residentBytes rename, unloaded_reason) + slow-vs-hung signals (inflightRequests, generationTokensPerSec).
 
 **Late-arriving findings (post-initial plan):**
 - 2026-05-27 — the consuming application agent reported embedder `reservedBytes` = 37.9 GiB after warm calls (≈4-5× the 4B model's bf16 weight footprint). Folded in as M46.6.
