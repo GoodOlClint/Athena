@@ -230,3 +230,25 @@ Pending:
 - 2026-05-27 (follow-up data) — the consuming application confirmed the 157 MiB → 37.9 GiB transition is per-call (not initial-load measurement noise). Promotes M46.6 candidate #1 from "investigative" to "confirmed root cause." Re-sequenced M46.6 ahead of M46.1 since it's the actual quality unblock for the consuming application's slow extraction.
 - 2026-05-27 (same follow-up) — Athena's syslog was silent during a 10-min generation. Added long-generation heartbeat to M46.1 (periodic notice every K seconds or M tokens during a long decode) so consumers can tell "actively decoding" from "process hung."
 - 2026-05-27 (same follow-up) — `Qwen3.5-27b-mlx` model-store name doesn't encode quantization tier; the consuming application ran it expecting 4-bit and got bf16 (50.3 GiB resident matches bf16 weight footprint). Logged as a follow-up UX wart, not folded into M46.
+- 2026-05-27 — live freeze diagnosis: heartbeat was event-driven (only fired when a `.text` event arrived, so a stalled decode emitted no heartbeats); preload-all was parallel (the governor's RSS reconcile probes raced, double-counting reservations and triggering spurious evictions that peaked at 97.9 GB / 103 GB budget). Both fixed in M46.7 (added mid-execution, ahead of M46.3b/4/5).
+- 2026-05-27 — heartbeat shows `tokens=0` for entire structured decodes because `GuidedGreedy.generate` is fully synchronous and emits one `.text` event at completion. Added as M46.8 (a TaskLocal `DecodeProgressCounter` the decode loops increment per internal commit).
+- 2026-05-27 — the consuming application sample analysis on 8-bit revealed speculative is net-negative under the Guide (5× fewer GPU dispatches under GUIDE vs PLAIN; the MTP draft is unmasked while verify is Guide-masked, so drafts almost always get rejected). Promoted to its own milestone: see [m47-plan.md](m47-plan.md).
+
+## Final ship summary
+
+| Tag | Slice | Date |
+|---|---|---|
+| v0.10.57 | M45.7 | 2026-05-27 |
+| v0.10.58 | M46.6 | 2026-05-27 |
+| v0.10.59 | M46.1 | 2026-05-27 |
+| v0.10.60 | M46.2 | 2026-05-27 |
+| v0.10.61 | M46.3a | 2026-05-27 |
+| v0.10.62 | M46.7 | 2026-05-27 (corrective fix mid-program) |
+| v0.10.63 | M46.8 | 2026-05-27 |
+| v0.10.64 | M46.3b | 2026-05-27 |
+| v0.10.65 | M46.4 | 2026-05-27 |
+| v0.10.66 | M46.5 | 2026-05-27 |
+
+**M46 program complete.** e2e: 481/0 → 494/0 (+13 new assertions
+across the program). Next: M47 (Guide-aware MTP drafts — see
+[m47-plan.md](m47-plan.md)).
