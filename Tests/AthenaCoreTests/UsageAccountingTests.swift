@@ -26,7 +26,8 @@ final class UsageAccountingTests: XCTestCase {
         for await event in llm.generateMetered(
             messages: [ChatTurn(role: "user", content: "hello there")],
             schemaJSON: nil, tools: nil, maxTokens: nil, temperature: nil,
-            topP: nil, seed: nil, speculative: nil)
+            topP: nil, seed: nil, speculative: nil,
+            chatTemplateKwargs: nil)
         {
             switch event {
             case .text(let t): text += t
@@ -59,7 +60,8 @@ final class UsageAccountingTests: XCTestCase {
             for await event in llm.generateMetered(
                 messages: turns, schemaJSON: nil, tools: nil,
                 maxTokens: maxTokens, temperature: nil,
-                topP: nil, seed: nil, speculative: nil)
+                topP: nil, seed: nil, speculative: nil,
+                chatTemplateKwargs: nil)
             {
                 switch event {
                 case .text(let t): text += t
@@ -90,7 +92,7 @@ final class UsageAccountingTests: XCTestCase {
         for await e in llm.generateMetered(
             messages: turns, schemaJSON: nil, tools: nil,
             maxTokens: nil, temperature: nil, topP: nil, seed: nil,
-            speculative: nil)
+            speculative: nil, chatTemplateKwargs: nil)
         {
             if case .text(let t) = e { metered += t }
         }

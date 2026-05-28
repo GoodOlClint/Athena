@@ -38,12 +38,17 @@ public protocol LLMModule: InferenceModule {
     /// String override-aware variant. `topP`/`seed` (M31.3) override the
     /// loaded sampling defaults on the substrate sampling path only —
     /// inert on the greedy/MTP/structured (argmax) paths.
+    /// `chatTemplateKwargs` (M46.3b) are passed through to the model's
+    /// chat template at rendering time (e.g.
+    /// `{"enable_thinking": false}` on Qwen3-class models); nil ⇒ run
+    /// the template with its built-in defaults.
     nonisolated func generateMetered(
         messages: [ChatTurn], schemaJSON: String?,
         tools: [[String: any Sendable]]?,
         maxTokens: Int?, temperature: Double?,
         topP: Double?, seed: Int?,
-        speculative: Bool?
+        speculative: Bool?,
+        chatTemplateKwargs: [String: any Sendable]?
     ) -> AsyncStream<GenChunk>
 
     /// Override-aware String variant (M24.3). `maxTokens`/`temperature`,
@@ -93,11 +98,15 @@ extension LLMModule {
         speculative: Bool?
     ) -> AsyncStream<String> {
         // Single source of truth: stream the metered events and forward
-        // only the text chunks (drop the terminal usage).
+        // only the text chunks (drop the terminal usage). M46.3b's
+        // chat-template-kwargs default to nil here — the String variant
+        // is convenience-only; if a caller needs template kwargs they
+        // use generateMetered directly.
         let events = generateMetered(
             messages: messages, schemaJSON: schemaJSON, tools: tools,
             maxTokens: maxTokens, temperature: temperature,
-            topP: nil, seed: nil, speculative: speculative)
+            topP: nil, seed: nil, speculative: speculative,
+            chatTemplateKwargs: nil)
         return AsyncStream { continuation in
             let task = Task {
                 for await event in events {
@@ -120,13 +129,18 @@ extension LLMModule {
         tools: [[String: any Sendable]]?,
         maxTokens: Int?, temperature: Double?,
         topP: Double?, seed: Int?,
-        speculative: Bool?
+        speculative: Bool?,
+        chatTemplateKwargs: [String: any Sendable]?
     ) -> AsyncStream<GenChunk> {
         // The model-free stub has no sampler, so topP/seed/speculative
         // are accepted and ignored; the e2e gate exercises the sampling
         // knobs via stop/max_tokens, and the speculative flag itself is
         // exercised end-to-end against the real MLX module on the
-        // manual host-bound tier.
+        // manual host-bound tier. M46.3b's `chatTemplateKwargs` is
+        // accepted and ignored here for the same reason: the stub has
+        // no tokenizer/chat template, so the kwarg is exercised
+        // end-to-end against the real MLX module + a real tokenizer
+        // on the manual host-bound tier.
         let prompt = messages.flattenedPrompt()
         let chunks = generate(
             prompt: prompt, schemaJSON: schemaJSON, tools: tools)

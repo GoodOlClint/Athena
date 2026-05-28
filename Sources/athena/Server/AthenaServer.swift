@@ -868,7 +868,9 @@ struct AthenaServer {
                         tools: toolSpecs, maxTokens: body.max_tokens,
                         temperature: body.temperature,
                         topP: body.top_p, seed: body.seed,
-                        speculative: body.speculative),
+                        speculative: body.speculative,
+                        chatTemplateKwargs:
+                            body.chatTemplateKwargsContext()),
                     onTimerFired: {
                         Self.log.warning(
                             """
@@ -896,7 +898,9 @@ struct AthenaServer {
                     tools: toolSpecs, maxTokens: body.max_tokens,
                     temperature: body.temperature,
                     topP: body.top_p, seed: body.seed,
-                    speculative: body.speculative),
+                    speculative: body.speculative,
+                    chatTemplateKwargs:
+                        body.chatTemplateKwargsContext()),
                 seconds: deadlineSecs)
         } catch let e as AthenaError {
             // M33.1: the only AthenaError collectMetered raises is the
@@ -2452,7 +2456,9 @@ struct AthenaServer {
                         tools: req.toolSpecs(), maxTokens: req.max_tokens,
                         temperature: req.temperature,
                         topP: req.top_p, seed: req.seed,
-                        speculative: req.speculative),
+                        speculative: req.speculative,
+                        chatTemplateKwargs:
+                            req.chatTemplateKwargsContext()),
                     seconds: deadlineSecs)
             } catch let e as AthenaError {
                 return (nil, e.message)  // M33.1: timeout → job error

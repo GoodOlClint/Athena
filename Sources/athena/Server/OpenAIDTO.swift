@@ -104,6 +104,40 @@ struct ChatCompletionRequest: Codable {
     /// generous daemon cap. Honored on the sync, streamed, and queued
     /// `conversation` paths.
     let timeout: Int?
+    /// OpenAI-compat extension (M46.3b) — opaque kwargs passed through
+    /// to the model's chat template at rendering time. Maps to
+    /// HuggingFace `tokenizer.apply_chat_template(..., **kwargs)` and
+    /// reaches mlx-swift's `UserInput.additionalContext`. The canonical
+    /// use is `{"enable_thinking": false}` on Qwen3-class models to
+    /// suppress the `<think>…</think>` reasoning prefix on plain (no
+    /// `response_format`) chat. Structured/tool-aware calls are
+    /// no-think by construction anyway (the Guide masks from token 0),
+    /// so the kwargs only matter on unstructured chat. nil ⇒ template
+    /// runs with its built-in defaults.
+    let chat_template_kwargs: [String: JSONValue]?
+
+    /// M46.3b — lower the OpenAI-style `chat_template_kwargs` dict into
+    /// the `[String: any Sendable]` shape mlx-swift's UserInput wants.
+    /// Empty → nil so a missing field and an `{}` field both desugar
+    /// to "use the template defaults," matching downstream
+    /// expectations. nil/unknown variants drop their values (the kwarg
+    /// dict is opaque to Athena; an unrecognized key reaches the
+    /// template, which is responsible for ignoring or erroring on it).
+    func chatTemplateKwargsContext() -> [String: any Sendable]? {
+        guard let raw = chat_template_kwargs, !raw.isEmpty else {
+            return nil
+        }
+        var out: [String: any Sendable] = [:]
+        for (k, v) in raw {
+            switch v {
+            case .string(let s): out[k] = s
+            case .number(let n): out[k] = n
+            case .bool(let b): out[k] = b
+            case .null, .array, .object: continue
+            }
+        }
+        return out.isEmpty ? nil : out
+    }
 
     /// Normalized stop sequences: OpenAI accepts a string or an array of
     /// strings (commonly ≤4). Empty/whitespace and non-string array

@@ -359,7 +359,8 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         tools: [[String: any Sendable]]?,
         maxTokens: Int?, temperature: Double?,
         topP: Double?, seed: Int?,
-        speculative: Bool?
+        speculative: Bool?,
+        chatTemplateKwargs: [String: any Sendable]?
     ) -> AsyncStream<GenChunk> {
         // `messages` ([ChatTurn]) is Sendable and crosses into the actor;
         // the non-Sendable `Chat.Message` mapping happens INSIDE the actor
@@ -378,7 +379,8 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                         tools: tools, maxTokens: maxTokens,
                         requestSpeculative: speculative,
                         requestTemperature: temperature,
-                        requestTopP: topP, requestSeed: seed)
+                        requestTopP: topP, requestSeed: seed,
+                        chatTemplateKwargs: chatTemplateKwargs)
                     {
                         usage = speculative.usage
                         continuation.yield(.text(speculative.text))
@@ -392,7 +394,8 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                         let stream = try await self.beginGeneration(
                             messages: messages, tools: tools,
                             maxTokens: maxTokens, temperature: temperature,
-                            topP: topP, seed: seed)
+                            topP: topP, seed: seed,
+                            chatTemplateKwargs: chatTemplateKwargs)
                         for await event in stream {
                             switch event {
                             case .chunk(let text):
@@ -447,7 +450,8 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         requestSpeculative: Bool?,
         requestTemperature: Double?,
         requestTopP: Double?,
-        requestSeed: Int?
+        requestSeed: Int?,
+        chatTemplateKwargs: [String: any Sendable]?
     ) async throws -> (text: String, usage: TokenUsage)? {
         guard let container else { return nil }
         // Per-request override (the consuming application intent): if the caller
@@ -476,7 +480,8 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
 
         let lmInput = try await container.prepare(
             input: UserInput(
-                chat: Self.chatMessages(messages), tools: tools))
+                chat: Self.chatMessages(messages), tools: tools,
+                additionalContext: chatTemplateKwargs))
         let promptTokens = lmInput.text.tokens.asArray(Int.self)
         // M24.3: a positive per-request override wins over the loaded
         // default; the greedy/MTP paths are length-only (temperature is
@@ -614,14 +619,16 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     private func beginGeneration(
         messages: [ChatTurn], tools: [[String: any Sendable]]?,
         maxTokens: Int?, temperature: Double?,
-        topP: Double?, seed: Int?
+        topP: Double?, seed: Int?,
+        chatTemplateKwargs: [String: any Sendable]?
     ) async throws -> AsyncStream<Generation> {
         guard let container else {
             throw AthenaError.moduleLoadFailed(
                 .llm, reason: "generate called before load")
         }
         let userInput = UserInput(
-            chat: Self.chatMessages(messages), tools: tools)
+            chat: Self.chatMessages(messages), tools: tools,
+            additionalContext: chatTemplateKwargs)
         let lmInput = try await container.prepare(input: userInput)
         // The standard attention path is the ONLY place TriAttention
         // eviction applies. Set it on the model so the substrate's

@@ -325,6 +325,19 @@ echo "$SSES" | grep -q '"finish_reason":"stop"' \
 echo "$SSES" | grep -q 'governed' \
   && bad "SSE stop did not truncate the stream ($SSES)" \
   || ok "SSE stop suppressed text from the sequence on"
+# M46.3b — `chat_template_kwargs` is accepted on the request shape and
+# does not break decoding. The stub engine has no tokenizer/chat
+# template, so the actual `enable_thinking=false` behaviour is exercised
+# end-to-end against the real MLX module on the manual host-bound tier;
+# this assertion confirms the DTO decodes the field and the daemon
+# returns a normal 200 (not a 400/500 from a JSON mismatch).
+CTK="$(curl -s -H "Authorization: Bearer $ALICE_TOK" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"Qwen3.5-27B-4bit-mtp","messages":[{"role":"user","content":"hi"}],"chat_template_kwargs":{"enable_thinking":false,"foo":"bar"}}' \
+  "http://127.0.0.1:$PORT/v1/chat/completions")"
+echo "$CTK" | grep -q '"finish_reason":"stop"' \
+  && ok "chat_template_kwargs accepted ⇒ 200/stop" \
+  || bad "chat_template_kwargs request rejected ($CTK)"
 
 echo
 echo "== phase 2.5: WebUI session cookie + RBAC nav + CSRF (M18.1) =="
