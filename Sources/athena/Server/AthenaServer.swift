@@ -1007,7 +1007,17 @@ struct AthenaServer {
     /// line". Cross-task touch ⇒ the lock makes the read-modify-write
     /// sound; `@unchecked Sendable` because all access is lock-mediated.
     /// Snapshot avoids holding the lock across the Logger call.
-    final class HeartbeatCounter: @unchecked Sendable {
+    ///
+    /// M46.8 — also conforms to `AthenaCore.DecodeProgressCounter`, so
+    /// the synchronous decode loops (GuidedGreedy / GuidedSubstrate /
+    /// SpeculativeGeneration / SpeculativeSampling) can increment the
+    /// same counter via the `DecodeProgress.counter` TaskLocal. That
+    /// gets a structured-output decode's per-iteration progress into
+    /// the heartbeat without threading a callback through 5 layers of
+    /// protocol/signature; without it the heartbeat sees `tokens=0`
+    /// for the entire structured decode (the Guide path emits one
+    /// `.text` event at completion, not per-token).
+    final class HeartbeatCounter: @unchecked Sendable, DecodeProgressCounter {
         struct Snapshot {
             let tokens: Int
             let lastLoggedTokens: Int
@@ -1116,13 +1126,26 @@ struct AthenaServer {
             }
             defer { heartbeatTask.cancel() }
             var c = GenCollected()
-            for await event in events {
-                switch event {
-                case .text(let chunk):
-                    c.text += chunk
-                    counter.incrementToken()
-                case .usage(let u): c.usage = u
-                case .finish(let r): c.finish = r
+            // M46.8 — bind the heartbeat counter on a TaskLocal so the
+            // synchronous decode loops (GuidedGreedy / GuidedSubstrate /
+            // SpeculativeGeneration / SpeculativeSampling) can increment
+            // it per internal commit. TaskLocal propagates across
+            // `await` and into `container.perform { ... }` actor calls,
+            // so the structured paths' deep-stack `commit()` functions
+            // pick up the counter without signature plumbing. The
+            // event-drain increment below is still the source of truth
+            // for the substrate-streamed (non-Guide) path, which emits
+            // per-token `.text` events; those paths leave the TaskLocal
+            // untouched so no double-counting happens.
+            await DecodeProgress.$counter.withValue(counter) {
+                for await event in events {
+                    switch event {
+                    case .text(let chunk):
+                        c.text += chunk
+                        counter.incrementToken()
+                    case .usage(let u): c.usage = u
+                    case .finish(let r): c.finish = r
+                    }
                 }
             }
             return c

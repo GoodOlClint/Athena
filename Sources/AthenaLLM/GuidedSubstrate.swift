@@ -1,3 +1,4 @@
+import AthenaCore
 import AthenaStructured
 import Foundation
 import MLX
@@ -73,6 +74,11 @@ enum GuidedSubstrate {
         while let token = iterator.next() {
             if let eosTokenId, token == eosTokenId { break }
             out.append(token)
+            // M46.8 — per-iteration progress for the heartbeat. See the
+            // matching note in GuidedGreedy.generate: the substrate
+            // path here is also fully synchronous and only surfaces
+            // one `.text` event at completion.
+            DecodeProgress.counter?.incrementToken()
             if out.count % 256 == 0 { MLX.Memory.clearCache() }
         }
         return out

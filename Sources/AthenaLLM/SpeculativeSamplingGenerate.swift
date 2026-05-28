@@ -1,3 +1,4 @@
+import AthenaCore
 import AthenaModels
 import Foundation
 import MLX
@@ -89,6 +90,11 @@ extension SpeculativeSampling {
         func commit(_ t: Int) -> Bool {
             if t == eosTokenId { return true }
             out.append(t)
+            // M46.8 — per-token progress for the heartbeat. Sampling-
+            // speculative is unstructured-only (precondition), so the
+            // caller would otherwise see no heartbeat progress during
+            // a long sampling-speculative decode either.
+            DecodeProgress.counter?.incrementToken()
             return out.count >= maxTokens
         }
 

@@ -1,3 +1,4 @@
+import AthenaCore
 import AthenaModels
 import AthenaStructured
 import Foundation
@@ -65,6 +66,15 @@ enum GuidedGreedy {
         while out.count < maxTokens {
             let t = decoder.pick(logits[0..., -1, 0...])
             if commit(t) { break }
+            // M46.8 — per-iteration progress for the heartbeat. The
+            // Guide path is fully synchronous and only emits one `.text`
+            // event at completion, so without this increment the
+            // heartbeat sees `tokens=0` and reports `tokens_per_sec=0.0`
+            // for the entire decode. `DecodeProgress.counter` is set by
+            // the serve path's collectMetered via TaskLocal and is nil
+            // outside that context (so the call is a cheap no-op for
+            // direct unit-test invocation).
+            DecodeProgress.counter?.incrementToken()
             (logits, _) = model.logitsAndHidden(
                 SpeculativeGeneration.tokenArray(t), cache: backbone)
             asyncEval(backbone)

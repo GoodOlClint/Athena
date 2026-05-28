@@ -1,3 +1,4 @@
+import AthenaCore
 import AthenaModels
 import AthenaStructured
 import Foundation
@@ -121,6 +122,12 @@ enum SpeculativeGeneration {
                 return true
             }
             out.append(t)
+            // M46.8 — per-token progress for the heartbeat. Speculative
+            // can commit 0, 1, or 2 tokens per iteration (reject /
+            // accept-no-bonus / accept-with-bonus); incrementing inside
+            // `commit()` captures every committed token exactly once,
+            // matching the heartbeat's "tokens emitted" semantics.
+            DecodeProgress.counter?.incrementToken()
             if case .jsonStart = decoder.commit(t) {
                 jsonStart = out.count - 1
             }
