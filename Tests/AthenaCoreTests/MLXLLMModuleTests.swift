@@ -357,6 +357,60 @@ final class StructuredSpeculativeParityTests: XCTestCase {
                 + "M2-era bit-identical-greedy contract")
     }
 
+    /// M48.3 — under a Guide, the temperature parameter is INERT
+    /// (the schema mask collapses each position's distribution to its
+    /// allowed set, and the greedy speculative loop picks the masked
+    /// argmax regardless of temp). So a structured request with
+    /// `speculative: true` and ANY temperature must produce the same
+    /// token sequence as `speculative: false` at temperature 0 — both
+    /// resolve to masked-argmax greedy under the same Guide.
+    ///
+    /// Pre-M48.3 the dispatch gate `greedyEligible = spec && temp == 0`
+    /// silently routed `spec=true temp=0.1 schema=true` to the
+    /// non-speculative GuidedGreedy path, throwing away M47.2's
+    /// speculative win on every structured request that didn't
+    /// explicitly pass `temperature: 0`.
+    func testStructuredGreedyParityTempIneretUnderGuide() async throws {
+        let modelURL = try skipUnlessEnabled()
+        let schema = """
+            {"type":"object",
+             "properties":{
+               "answer":{"type":"string","enum":["yes","no"]}
+             },
+             "required":["answer"]}
+            """
+        let messages = [
+            ChatTurn(
+                role: "user",
+                content:
+                    "Is the sky generally blue on a clear day? "
+                    + "Answer in JSON.")
+        ]
+        // spec=true + temp>0 + schema — pre-M48.3 fell to GuidedGreedy;
+        // post-M48.3 engages SpeculativeGeneration.
+        let speculativeAtTemp = try await runOnce(
+            modelURL: modelURL, messages: messages,
+            schemaJSON: schema, speculative: true,
+            temperature: 0.1)
+        // spec=false — always GuidedGreedy (masked-argmax baseline).
+        let greedyBaseline = try await runOnce(
+            modelURL: modelURL, messages: messages,
+            schemaJSON: schema, speculative: false,
+            temperature: 0)
+        XCTAssertFalse(
+            speculativeAtTemp.isEmpty,
+            "speculative+temp>0 branch produced empty")
+        XCTAssertFalse(
+            greedyBaseline.isEmpty,
+            "greedy baseline branch produced empty")
+        XCTAssertEqual(
+            speculativeAtTemp, greedyBaseline,
+            "structured speculative at temp>0 must emit the same "
+                + "byte-identical sequence as structured greedy at "
+                + "temp=0 — the Guide collapses both to masked-argmax, "
+                + "so temp is inert. (M48.3 contract.)")
+    }
+
     /// M47.2 acceptance-rate gate. Under the same tight enum schema, the
     /// MTP speculative loop must accept its own draft at a non-trivial
     /// rate — pre-M47.2 the unmasked argmax draft almost never matched
@@ -400,19 +454,22 @@ final class StructuredSpeculativeParityTests: XCTestCase {
 
     private func runOnce(
         modelURL: URL, messages: [ChatTurn],
-        schemaJSON: String, speculative: Bool
+        schemaJSON: String, speculative: Bool,
+        temperature: Double = 0
     ) async throws -> String {
         let llm = MLXLLMModule(
             modelDirectory: modelURL,
             parameters: .init(
-                maxTokens: 64, temperature: 0, speculative: speculative))
+                maxTokens: 64, temperature: Float(temperature),
+                speculative: speculative))
         let gov = MemoryGovernor(totalBudgetBytes: Int(96) << 30)
         await gov.register(llm, evictable: false)
         try await gov.ensureLoaded(.llm)
         var out = ""
         let stream = llm.generateMetered(
             messages: messages, schemaJSON: schemaJSON, tools: nil,
-            maxTokens: nil, temperature: 0, topP: nil, seed: nil,
+            maxTokens: nil, temperature: temperature,
+            topP: nil, seed: nil,
             speculative: speculative, chatTemplateKwargs: nil)
         for await chunk in stream {
             if case .text(let s) = chunk { out += s }

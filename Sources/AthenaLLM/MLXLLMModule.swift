@@ -480,7 +480,23 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         let effectiveTemp: Double =
             requestTemperature
             ?? (requestSpeculative == true ? 0.0 : Double(params.temperature))
-        let greedyEligible = effectiveSpec && effectiveTemp == 0
+        // M48.3 — temperature is INERT under a Guide: the schema mask
+        // collapses every position's distribution to its allowed set,
+        // and the greedy speculative loop (SpeculativeGeneration) picks
+        // the masked argmax regardless of the temp the caller asked for.
+        // So a structured request with `speculative: true` should engage
+        // the speculative loop whatever the temperature, not be forced
+        // into the non-speculative GuidedGreedy path just because the
+        // caller passed `temperature: 0.1`. Pre-M48.3 the gate was
+        // `effectiveSpec && effectiveTemp == 0`, which silently dropped
+        // every the consuming application-style request (`spec=true temp=0.1
+        // schema=true`) to GuidedGreedy and gave up M47.2's speculative
+        // win. The bit-identical-greedy contract is preserved — both
+        // paths produce the same masked-argmax sequence; only the speed
+        // changes.
+        let greedyEligible =
+            effectiveSpec
+            && (effectiveTemp == 0 || schemaJSON != nil)
         // Sampling-mode speculative covers temp > 0 unstructured requests.
         // Structured/guided is out of scope (the Guide masks to one valid
         // token; sampling has no meaning), so `schemaJSON == nil` is the

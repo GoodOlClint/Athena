@@ -14,7 +14,7 @@ confirmation before the fourth (behavior-changing) slice.
 | M48.1 — heartbeat TaskLocal binding fix | v0.10.69 | 2026-05-28 |
 | M48.2 — dispatch-decision debug log | v0.10.70 | 2026-05-28 |
 | M48.4 — prefill chunk granularity in heartbeat | v0.10.71 | 2026-05-28 |
-| M48.3 — widen speculative to engage under temp>0+schema | — | PAUSED |
+| M48.3 — widen speculative to engage under temp>0+schema | v0.10.72 | 2026-05-28 |
 
 - ✅ **M48.1** — v0.10.69 — `collectMetered` refactored to take a
   builder thunk so the AsyncStream's internal Task spawns inside
@@ -38,14 +38,22 @@ confirmation before the fourth (behavior-changing) slice.
   path doesn't expose per-chunk callbacks so its heartbeat omits
   the field (correctly says "don't know").
 
-**PAUSED before M48.3**: behavior-changing slice. Awaiting operator
-confirmation from a v0.10.71 rerun of the the consuming application mini-corpus
-so we can see (via the new dispatch log) which path the transcript
-request actually takes, and (via the now-honest heartbeat) whether
-it was decoding slowly all along or genuinely wedged. The right
-M48.3 shape depends on what we see — possibly the simpler answer is
-the consuming application sets `speculative: true` per request rather than
-Athena widening the eligibility gate.
+- ✅ **M48.3** — v0.10.72 — `greedyEligible` relaxed so a request
+  with `speculative: true` AND a schema engages the speculative
+  greedy loop at ANY temperature. Pre-fix gate was
+  `effectiveSpec && effectiveTemp == 0`; the rerun on v0.10.71
+  confirmed the consuming application sends `spec=true temp=0.1 schema=true`,
+  which fell to `GuidedGreedy` and silently dropped M47.2's win on
+  every structured request that wasn't explicitly temp=0. Under a
+  Guide the temperature is inert (the schema mask collapses
+  sampling to argmax), so both paths produce the same byte-identical
+  sequence — only the speed changes. New parity test
+  (`testStructuredGreedyParityTempIneretUnderGuide`) asserts the
+  contract: `spec=true temp=0.1` ≡ `spec=false temp=0` byte-for-byte.
+  Operator rerun on v0.10.71 also confirmed the M48.1+M48.4
+  observability wins: `prefill=22/22 tokens=571 tokens_per_sec=16.8`
+  showed sustained ~16.5 tok/s on the same workload that v0.10.68
+  reported as `tokens=0 tokens_per_sec=0.0` for 900s.
 
 ## Trigger
 
