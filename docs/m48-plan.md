@@ -6,11 +6,46 @@ wedged >15 min, daemon process alive on PID 69798).
 
 ## Status
 
-Not started. Evidence captured from a live wedged daemon at
-v0.10.68 — sample profile at `/tmp/m48-evidence-sample.txt` (567 KB),
-`athena status` snapshot taken at the same moment, `athena logs -f`
-heartbeat lines covering `elapsed=889s..915s tokens=0 tokens_per_sec=0.0`.
-Three findings, three slices.
+In progress. Three of four slices shipped, paused for operator
+confirmation before the fourth (behavior-changing) slice.
+
+| Slice | Tag | Date |
+|---|---|---|
+| M48.1 — heartbeat TaskLocal binding fix | v0.10.69 | 2026-05-28 |
+| M48.2 — dispatch-decision debug log | v0.10.70 | 2026-05-28 |
+| M48.4 — prefill chunk granularity in heartbeat | v0.10.71 | 2026-05-28 |
+| M48.3 — widen speculative to engage under temp>0+schema | — | PAUSED |
+
+- ✅ **M48.1** — v0.10.69 — `collectMetered` refactored to take a
+  builder thunk so the AsyncStream's internal Task spawns inside
+  `DecodeProgress.$counter.withValue(...)`. Pre-fix, every
+  structured-path `incrementToken()` was a no-op because the
+  TaskLocal binding was established AFTER the Task spawn. New
+  `DecodeProgressTaskLocalTests` pins both sides of the contract.
+- ✅ **M48.2** — v0.10.70 — One `.debug` log line emitted at the
+  start of every `MLXLLMModule.runSpeculative` declaring the chosen
+  internal path (`speculative-greedy | speculative-sampling |
+  guided-greedy-or-substrate | substrate-stream`). Operator surfaces
+  via `sudo log config --mode "level:debug" --subsystem athena` +
+  `athena logs -f`. AthenaLLM picks up swift-log directly (was
+  already transitive via Hummingbird/NIO).
+- ✅ **M48.4** — v0.10.71 — `DecodeProgressCounter` extended with
+  `recordPrefillChunk(completed:total:)` (default no-op).
+  `HeartbeatCounter` records it; the heartbeat log line includes
+  `prefill=N/M` when present. Three native prefill loops
+  (`GuidedGreedy`, `SpeculativeGeneration`,
+  `SpeculativeSamplingGenerate`) publish per chunk. The substrate
+  path doesn't expose per-chunk callbacks so its heartbeat omits
+  the field (correctly says "don't know").
+
+**PAUSED before M48.3**: behavior-changing slice. Awaiting operator
+confirmation from a v0.10.71 rerun of the the consuming application mini-corpus
+so we can see (via the new dispatch log) which path the transcript
+request actually takes, and (via the now-honest heartbeat) whether
+it was decoding slowly all along or genuinely wedged. The right
+M48.3 shape depends on what we see — possibly the simpler answer is
+the consuming application sets `speculative: true` per request rather than
+Athena widening the eligibility gate.
 
 ## Trigger
 
