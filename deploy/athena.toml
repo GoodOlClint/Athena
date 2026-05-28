@@ -221,12 +221,16 @@ engine = "mlx"
 # extraction-shape decodes on 27B-class models routinely need 300-600 s.
 # request_timeout_secs = 600
 
-# Preload (warm) the LLM at startup instead of lazily on the first
-# request. With it off (default) the model loads on first inference, so
-# that request pays the load latency; with it on, the daemon warms the
-# model right as it starts serving (the HTTP surface still comes up
-# immediately — the warm runs in the background). Best-effort: a failed
-# warm is logged and the model falls back to lazy loading. Bare boolean.
+# Preload (warm) every module that has a configured default model at
+# startup, instead of lazily on the first request. With it off (default)
+# each module loads on its first inference call, so that request pays
+# the load latency AND sees a 503 module_loading retry-after dance; with
+# it on, the daemon warms every module-class-with-a-default concurrently
+# right as it starts serving (the HTTP surface still comes up immediately
+# — warms run in the background). Best-effort and per-module: a failure
+# for any one module is logged and that module falls back to lazy
+# loading; the others still warm. Modules without a configured default
+# (no allowlist rows for that class) stay lazy. Bare boolean.
 # preload = true
 
 

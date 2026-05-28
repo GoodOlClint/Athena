@@ -649,23 +649,74 @@ struct AthenaServer {
             ttlSecs: queueResultTtlSecs, maxRows: queueMaxRows,
             dropRequestContent: dropRequestContent)
 
-        // M33.3: optionally warm the LLM at startup so the first request
-        // doesn't pay the load latency. Best-effort and concurrent — the
-        // HTTP surface (below) still comes up immediately; a failed warm
-        // logs and leaves the lazy path intact. `governor.ensureLoaded`
-        // is idempotent, so a request racing the warm is safe.
+        // M33.3 / M46.2: optionally warm every module that has a
+        // configured default model at startup so the first request to
+        // that module doesn't pay the cold-load latency.
+        //
+        // Pre-M46.2 this only warmed `.llm`, which left every other
+        // module class (textEmbedding, transcription, diarization,
+        // speakerEmbedding) lazy — each consumer ate a 503
+        // `module_loading` retry dance on its first call. M46.2 widens
+        // the warmup to ANY module with an `is_default=1` row in the
+        // persisted allowlist (M42). Modules without a configured
+        // default stay lazy: they have no model to load, so issuing a
+        // warm would just spam a `moduleLoadFailed` warning.
+        //
+        // Best-effort and concurrent — the HTTP surface (below) still
+        // comes up immediately; each module's warm runs in its own
+        // child task, a failure logs and leaves that module's lazy
+        // path intact. `governor.ensureLoaded` is idempotent, so a
+        // request racing a warm is safe.
         if preload {
             let governor = self.governor
+            let store = self.store
             Task {
                 let log = Logger(label: AthenaLogLabel.daemon)
-                log.notice("preload: warming LLM at startup")
-                do {
-                    try await governor.ensureLoaded(.llm)
-                    log.notice("preload: LLM warm")
-                } catch {
-                    log.warning(
-                        "preload: LLM warm failed, will load lazily: \(error)"
+                let allowlist = await store.listModelAllowlist(
+                    module: nil)
+                // Each module has at most one `is_default=1` row;
+                // dedupe to a sorted ModuleID list for deterministic
+                // log ordering.
+                let configured: [ModuleID] =
+                    Set(
+                        allowlist.filter { $0.isDefault }
+                            .compactMap {
+                                ModuleID(rawValue: $0.module)
+                            }
                     )
+                    .sorted { $0.rawValue < $1.rawValue }
+                guard !configured.isEmpty else {
+                    log.notice(
+                        """
+                        preload: no module has a configured default; \
+                        skipping warm (every module stays lazy)
+                        """)
+                    return
+                }
+                let names = configured.map { $0.rawValue }
+                    .joined(separator: ",")
+                log.notice(
+                    """
+                    preload: warming \(configured.count) module(s) \
+                    at startup: \(names)
+                    """)
+                await withTaskGroup(of: Void.self) { group in
+                    for id in configured {
+                        group.addTask {
+                            do {
+                                try await governor.ensureLoaded(id)
+                                log.notice(
+                                    "preload: \(id.rawValue) warm")
+                            } catch {
+                                log.warning(
+                                    """
+                                    preload: \(id.rawValue) warm \
+                                    failed, will load lazily: \
+                                    \(error)
+                                    """)
+                            }
+                        }
+                    }
                 }
             }
         }

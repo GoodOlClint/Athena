@@ -218,7 +218,7 @@ struct Load: AsyncParsableCommand {
 
     @Flag(
         help:
-            "Warm the LLM at startup instead of lazily on first request. The HTTP surface still comes up immediately; the warm runs in the background (best-effort — a failure falls back to lazy load)."
+            "Warm every module that has a configured default model (one per LLM/embedding/transcription/diarization/speaker-embedding class with an `is_default=1` allowlist row) at startup, instead of lazily on first request. The HTTP surface still comes up immediately; warms run concurrently in the background (best-effort — a per-module failure falls back to lazy load for that module). Modules without a configured default stay lazy."
     )
     var preload = false
 

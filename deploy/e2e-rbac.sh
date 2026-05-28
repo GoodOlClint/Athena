@@ -2357,6 +2357,7 @@ echo "== phase 19: per-principal rate limiting — 429 + Retry-After (M29.1) =="
 # loopback, ephemeral data dir, port 17447.
 stop_daemon
 start_daemon "$D" 127.0.0.1 --rate-limit 1 --rate-burst 1 --preload \
+  --llm-model athena-stub \
   || { echo "rate-limited daemon failed"; cat "$D/daemon.log"; exit 1; }
 grep -q "auth: enabled (RBAC" "$D/daemon.log" \
   && ok "rate-limited daemon still enforces auth" \
@@ -2411,7 +2412,7 @@ hold() { # BEARER  → backgrounds a ~150 ms in-flight chat, sets $HPID
 # while a DIFFERENT principal (bob) is unaffected.
 stop_daemon
 start_daemon "$D" 127.0.0.1 --max-concurrency-per-principal 1 \
-  --preload \
+  --preload --llm-model athena-stub \
   || { echo "concurrency daemon failed"; cat "$D/daemon.log"; exit 1; }
 hold "$ALICE_TOK"
 probe 429 "$ALICE_TOK" \
@@ -2436,6 +2437,7 @@ stop_daemon
 # fills the whole daemon, so a DIFFERENT principal is rejected — proving
 # the cap is global, not per-caller.
 start_daemon "$D" 127.0.0.1 --max-concurrency 1 --preload \
+  --llm-model athena-stub \
   || { echo "global-concurrency daemon failed"; cat "$D/daemon.log"; \
        exit 1; }
 hold "$ALICE_TOK"
@@ -2505,6 +2507,7 @@ echo "== phase 22: per-request inference timeout — 504 + truncate (M33.1) =="
 stop_daemon
 export ATHENA_STUB_DELAY_MS=200
 start_daemon "$D" 127.0.0.1 --request-timeout-secs 1 --preload \
+  --llm-model athena-stub \
   || { echo "timeout daemon failed"; cat "$D/daemon.log"; exit 1; }
 # 22a: a sync chat that overruns the 1 s deadline → classified 504.
 TO="$(curl -s -i -H "Authorization: Bearer $ALICE_TOK" \
@@ -2529,6 +2532,7 @@ stop_daemon
 # 22c: the SAME slow generation under a generous timeout is NOT killed —
 # proves the deadline doesn't false-fire on legitimate work.
 start_daemon "$D" 127.0.0.1 --request-timeout-secs 30 --preload \
+  --llm-model athena-stub \
   || { echo "generous-timeout daemon failed"; cat "$D/daemon.log"; exit 1; }
 code 200 POST /v1/chat/completions "$ALICE_TOK" "$CHAT"
 stop_daemon
@@ -2543,7 +2547,7 @@ echo "== phase 23: graceful shutdown — drain in-flight on SIGTERM (M33.2) =="
 # the request is reliably mid-generation when the signal lands.
 stop_daemon
 export ATHENA_STUB_DELAY_MS=300
-start_daemon "$D" 127.0.0.1 --preload \
+start_daemon "$D" 127.0.0.1 --preload --llm-model athena-stub \
   || { echo "graceful-shutdown daemon failed"; cat "$D/daemon.log"; exit 1; }
 GDPID="$DPID"
 INFLIGHT="$(mktemp)"
@@ -2573,25 +2577,59 @@ DPID=""                        # already gone; don't let cleanup re-kill
 unset ATHENA_STUB_DELAY_MS
 
 echo
-echo "== phase 24: preload — warm the LLM at startup (M33.3) =="
-# With --preload the daemon warms the LLM as it starts serving (the HTTP
-# surface still comes up immediately — start_daemon's healthz wait proves
-# that). Without it, loading is lazy (no preload log lines). --engine stub,
-# loopback, ephemeral data dir.
+echo "== phase 24: preload — warm every module with a configured default (M33.3 + M46.2) =="
+# M46.2 — `--preload` warms every module class whose persisted
+# allowlist has an `is_default=1` row, not only `.llm`. The daemon
+# serves immediately (HTTP surface up — start_daemon's healthz wait
+# proves that). Without `--preload`, loading is lazy (no preload log
+# lines). --engine stub, loopback, ephemeral data dir. Seed the LLM
+# allowlist via the --llm-model first-boot merge so there is at least
+# one configured-default module for the preload pass to warm.
 stop_daemon
-start_daemon "$D" 127.0.0.1 --preload \
+# M46.2 — fresh data dir for phase 24 so prior phases' /api/models/allow
+# CRUD doesn't leave textEmbedding's allowlist in a state that confuses
+# the warm-line assertions. Daemon log path stays $D/daemon.log per the
+# start_daemon helper, so the existing greps work unchanged.
+D24="$(mktemp -d)"
+start_daemon "$D24" 127.0.0.1 --preload --llm-model athena-stub \
   || { echo "preload daemon failed"; cat "$D/daemon.log"; exit 1; }
 ok "daemon serves immediately (healthz up) with --preload"
 WARM=0
 for _ in $(seq 1 20); do
-  if grep -q "preload: LLM warm" "$D/daemon.log"; then WARM=1; break; fi
+  if grep -q "preload: llm warm" "$D/daemon.log"; then WARM=1; break; fi
   sleep 0.25
 done
 [ "$WARM" = "1" ] \
-  && ok "LLM warmed at startup (preload log line present)" \
-  || { bad "no 'preload: LLM warm' line"; grep -i preload "$D/daemon.log"; }
+  && ok "llm warmed at startup (preload log line present)" \
+  || { bad "no 'preload: llm warm' line"; grep -i preload "$D/daemon.log"; }
+# M46.2 — also asserts the new "warming N modules" summary line so
+# changes to the multi-module shape are surfaced if it ever drops back
+# to the LLM-only path.
+grep -qE "preload: warming [0-9]+ module" "$D/daemon.log" \
+  && ok "preload summary line names module count" \
+  || bad "no 'preload: warming N module(s)' summary line"
+# M46.2 — assert preload-all warms EVERY registered module class.
+# Load.swift's @Option arrays carry a non-empty fallback default per
+# module class, which resolveAllowlist merges into the DB on every
+# boot, so an empty allowlist never survives one start; warming
+# everything is the new contract. Assert BEFORE the next start_daemon
+# (which would truncate $D/daemon.log and lose these lines).
+for mod in textEmbedding transcription diarization speakerEmbedding; do
+  WARM_M=0
+  for _ in $(seq 1 20); do
+    if grep -q "preload: $mod warm" "$D/daemon.log"; then
+      WARM_M=1; break
+    fi
+    sleep 0.25
+  done
+  [ "$WARM_M" = "1" ] \
+    && ok "preload warmed $mod alongside llm" \
+    || { bad "no 'preload: $mod warm' line"; \
+         grep -i preload "$D/daemon.log" | head -10; }
+done
 code 200 GET /healthz ""
 stop_daemon
+rm -rf "$D24"
 # Opt-in: a default start does NOT preload (lazy load, no preload lines).
 start_daemon "$D" 127.0.0.1 \
   || { echo "lazy daemon failed"; cat "$D/daemon.log"; exit 1; }
