@@ -2,19 +2,54 @@ import Foundation
 
 /// Point-in-time view of the global budget, exposed by the health endpoint
 /// and the `athena ps` CLI.
+///
+/// M46.5 renamed the bytes-resident counter on both `ModuleSnapshot`
+/// and `GovernorSnapshot` from its pre-M46.7 admission-bookkeeping name
+/// (the value once reflected reservations issued at admission, not
+/// observed residency). After M46.7's serial preload fix the reconciled
+/// value tracks real process RSS within the reconcile's RSS-delta probe
+/// accuracy, so `residentBytes` is the honest name for what the field
+/// actually reports. No compat shim — no in-tree consumer reads the
+/// old field.
+///
+/// `unloadedReason` (M46.5) records WHY a module's slot is in
+/// `.unloaded` state — a fresh boot vs. an idle eviction vs.
+/// memory-pressure relief vs. an explicit operator unload — so an
+/// operator looking at `/healthz` after the fact can tell whether
+/// the governor moved a module or someone did. nil while loaded
+/// (or in the initial post-boot pre-load window).
 public struct ModuleSnapshot: Sendable, Codable {
     public let id: ModuleID
     public let state: ModuleState
-    public let reservedBytes: Int
+    public let residentBytes: Int
     public let evictable: Bool
+    public let unloadedReason: UnloadedReason?
 }
 
 public struct GovernorSnapshot: Sendable, Codable {
     public let totalBudgetBytes: Int
-    public let reservedBytes: Int
+    public let residentBytes: Int
     public let freeBytes: Int
     public let promptCacheCapBytes: Int
     public let modules: [ModuleSnapshot]
+}
+
+/// M46.5 — last-known reason a module's slot is `.unloaded`. nil ⇒
+/// module is currently loaded (or has never been touched). The serve
+/// path emits an audit-log row on every transition so an operator who
+/// needs the timing as well as the cause can cross-reference.
+public enum UnloadedReason: String, Sendable, Codable {
+    /// Pressure-relief eviction by the governor — another module's
+    /// load (or reconcile) pushed the budget over and this slot was
+    /// the LRU victim.
+    case memoryPressure = "memory_pressure"
+    /// Explicit unload via `/api/models/unload` or `athena models
+    /// unload` — operator-initiated.
+    case operatorUnload = "operator_unload"
+    /// Load attempted but the module threw (HF download failed,
+    /// disk write failed, etc.). Distinct from a clean unload so
+    /// the operator knows the module wasn't deliberately removed.
+    case loadFailed = "load_failed"
 }
 
 /// The single Metal/MLX memory governor. Every inference module shares one
@@ -32,6 +67,13 @@ public actor MemoryGovernor {
         var reservation: MemoryReservation?
         let evictable: Bool
         var lastUsed: Date
+        /// M46.5 — last-known reason this slot transitioned to
+        /// `.unloaded`. Set at each unload site; cleared back to nil
+        /// when a successful load returns. Surfaced in
+        /// `/healthz.modules[*].unloadedReason` so an operator can
+        /// tell why a slot is empty (idle eviction vs. operator
+        /// unload vs. load failure) without grepping the audit log.
+        var unloadedReason: UnloadedReason? = nil
     }
 
     /// Reads process-global Metal/MLX active bytes. Injected so
@@ -53,7 +95,7 @@ public actor MemoryGovernor {
     /// module reads this to refuse over-cap prompts.
     public let promptCacheCapBytes: Int
     private var entries: [ModuleID: Entry] = [:]
-    private var reservedBytes: Int = 0
+    private var residentBytes: Int = 0
     /// Coalesces concurrent `ensureLoaded` callers onto one load.
     private var inFlight: [ModuleID: Task<Void, Error>] = [:]
     private let memoryProbe: MemoryProbe?
@@ -204,7 +246,7 @@ public actor MemoryGovernor {
         try makeRoom(for: estimate, requestedBy: id)
 
         let reservation = MemoryReservation(module: id, bytes: estimate)
-        reservedBytes += estimate
+        residentBytes += estimate
         entries[id]?.state = .loading
         entries[id]?.reservation = reservation
 
@@ -213,9 +255,10 @@ public actor MemoryGovernor {
         do {
             try await entry.module.load(reservation: reservation)
         } catch {
-            reservedBytes -= estimate
+            residentBytes -= estimate
             entries[id]?.state = .unloaded
             entries[id]?.reservation = nil
+            entries[id]?.unloadedReason = .loadFailed
             onEvent?(id, "load failed: \(error)")
             // A Metal/MLX OOM during load is classified to 503, not a
             // bare 500 (brief item 4a).
@@ -223,6 +266,9 @@ public actor MemoryGovernor {
         }
         entries[id]?.state = .loaded
         entries[id]?.lastUsed = Date()
+        // M46.5 — clear the reason once a load succeeds; nil while
+        // loaded is the documented "currently resident" signal.
+        entries[id]?.unloadedReason = nil
         onEvent?(id, "loaded")
         // M5.1: reconcile the static estimate to the real Metal/MLX
         // footprint this load actually consumed. Best-effort
@@ -245,11 +291,11 @@ public actor MemoryGovernor {
             entries[id]?.state == .loaded,
             entries[id]?.reservation != nil
         else { return }
-        reservedBytes += observed - estimate
+        residentBytes += observed - estimate
         entries[id]?.reservation = MemoryReservation(
             module: id, bytes: observed)
         learnedFootprint[id] = observed  // M5.4
-        guard reservedBytes > totalBudgetBytes else { return }
+        guard residentBytes > totalBudgetBytes else { return }
         let victims = entries
             .filter {
                 $0.key != id && $0.value.evictable
@@ -257,7 +303,7 @@ public actor MemoryGovernor {
             }
             .sorted { $0.value.lastUsed < $1.value.lastUsed }
         for (victimID, _) in victims {
-            if reservedBytes <= totalBudgetBytes { break }
+            if residentBytes <= totalBudgetBytes { break }
             evictSync(victimID)
         }
     }
@@ -265,21 +311,21 @@ public actor MemoryGovernor {
     /// Free budget for `estimate` bytes, evicting evictable loaded modules
     /// LRU-first. Throws if it still cannot fit after exhausting eviction.
     private func makeRoom(for estimate: Int, requestedBy id: ModuleID) throws {
-        if reservedBytes + estimate <= totalBudgetBytes { return }
+        if residentBytes + estimate <= totalBudgetBytes { return }
 
         let candidates = entries
             .filter { $0.key != id && $0.value.evictable && $0.value.state == .loaded }
             .sorted { $0.value.lastUsed < $1.value.lastUsed }
 
         for (victimID, _) in candidates {
-            if reservedBytes + estimate <= totalBudgetBytes { break }
+            if residentBytes + estimate <= totalBudgetBytes { break }
             evictSync(victimID)
         }
 
-        if reservedBytes + estimate > totalBudgetBytes {
+        if residentBytes + estimate > totalBudgetBytes {
             throw AthenaError.memoryBudgetExceeded(
                 requested: estimate,
-                available: totalBudgetBytes - reservedBytes,
+                available: totalBudgetBytes - residentBytes,
                 module: id
             )
         }
@@ -291,9 +337,15 @@ public actor MemoryGovernor {
     private func evictSync(_ id: ModuleID) {
         guard let entry = entries[id], let reservation = entry.reservation
         else { return }
-        reservedBytes -= reservation.bytes
+        residentBytes -= reservation.bytes
         entries[id]?.state = .unloading
         entries[id]?.reservation = nil
+        // M46.5 — eviction is always memory-pressure-driven (this
+        // function is reached from `makeRoom`/`reconcile`/
+        // `relievePressure`); operator-initiated unloads go through
+        // `unload(_:)`, allowlist-drop reclaims go through
+        // `releaseSlot(_:)`. Each setter records its own reason.
+        entries[id]?.unloadedReason = .memoryPressure
         onEvent?(id, "evicted (budget pressure)")
         let module = entry.module
         let hook = onUnloaded
@@ -320,10 +372,14 @@ public actor MemoryGovernor {
     public func releaseSlot(_ id: ModuleID) {
         guard let entry = entries[id] else { return }
         if let reservation = entry.reservation {
-            reservedBytes -= reservation.bytes
+            residentBytes -= reservation.bytes
         }
         entries[id]?.reservation = nil
         entries[id]?.state = .unloaded
+        // M46.5 — allowlist-drop is operator intent (they changed the
+        // allowlist; the module is reacting). Classifying it as
+        // `.operatorUnload` matches `/api/models/unload` behaviour.
+        entries[id]?.unloadedReason = .operatorUnload
         onEvent?(id, "evicted (allowlist drop)")
     }
 
@@ -331,7 +387,7 @@ public actor MemoryGovernor {
     public func unload(_ id: ModuleID) async {
         guard let entry = entries[id] else { return }
         if let reservation = entry.reservation {
-            reservedBytes -= reservation.bytes
+            residentBytes -= reservation.bytes
         }
         entries[id]?.state = .unloading
         entries[id]?.reservation = nil
@@ -339,6 +395,9 @@ public actor MemoryGovernor {
         onUnloaded?()
         onEvent?(id, "unloaded")
         entries[id]?.state = .unloaded
+        // M46.5 — `unload(_:)` is reached only from operator paths
+        // (`/api/models/unload` + the `athena models unload` CLI).
+        entries[id]?.unloadedReason = .operatorUnload
     }
 
     public func snapshot() -> GovernorSnapshot {
@@ -346,15 +405,17 @@ public actor MemoryGovernor {
             ModuleSnapshot(
                 id: $0.module.id,
                 state: $0.state,
-                reservedBytes: $0.reservation?.bytes ?? 0,
-                evictable: $0.evictable
+                residentBytes: $0.reservation?.bytes ?? 0,
+                evictable: $0.evictable,
+                unloadedReason:
+                    $0.state == .loaded ? nil : $0.unloadedReason
             )
         }
         .sorted { $0.id.rawValue < $1.id.rawValue }
         return GovernorSnapshot(
             totalBudgetBytes: totalBudgetBytes,
-            reservedBytes: reservedBytes,
-            freeBytes: totalBudgetBytes - reservedBytes,
+            residentBytes: residentBytes,
+            freeBytes: totalBudgetBytes - residentBytes,
             promptCacheCapBytes: promptCacheCapBytes,
             modules: mods
         )

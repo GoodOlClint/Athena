@@ -15,7 +15,7 @@ final class MemoryGovernorTests: XCTestCase {
         try await gov.ensureLoaded(.llm)
 
         let s = await gov.snapshot()
-        XCTAssertEqual(s.reservedBytes, 400)
+        XCTAssertEqual(s.residentBytes, 400)
         XCTAssertEqual(s.freeBytes, 600)
         XCTAssertEqual(s.modules.first { $0.id == .llm }?.state, .loaded)
     }
@@ -38,7 +38,7 @@ final class MemoryGovernorTests: XCTestCase {
         }
 
         let s = await gov.snapshot()
-        XCTAssertEqual(s.reservedBytes, 0)
+        XCTAssertEqual(s.residentBytes, 0)
         XCTAssertEqual(s.modules.first { $0.id == .llm }?.state, .unloaded)
     }
 
@@ -53,7 +53,7 @@ final class MemoryGovernorTests: XCTestCase {
         try await gov.ensureLoaded(.textEmbedding)  // forces eviction
 
         let s = await gov.snapshot()
-        XCTAssertEqual(s.reservedBytes, 60)
+        XCTAssertEqual(s.residentBytes, 60)
         XCTAssertEqual(
             s.modules.first { $0.id == .textEmbedding }?.state, .loaded)
         let victim = s.modules.first { $0.id == .transcription }?.state
@@ -75,7 +75,7 @@ final class MemoryGovernorTests: XCTestCase {
             // expected
         }
         let s = await gov.snapshot()
-        XCTAssertEqual(s.reservedBytes, 80)
+        XCTAssertEqual(s.residentBytes, 80)
         XCTAssertEqual(s.modules.first { $0.id == .llm }?.state, .loaded)
     }
 
@@ -84,12 +84,12 @@ final class MemoryGovernorTests: XCTestCase {
         await gov.register(StubLLMModule(reserveBytes: 400), evictable: false)
 
         try await gov.ensureLoaded(.llm)
-        let reserved = await gov.snapshot().reservedBytes
+        let reserved = await gov.snapshot().residentBytes
         XCTAssertEqual(reserved, 400)
 
         await gov.unload(.llm)
         let s = await gov.snapshot()
-        XCTAssertEqual(s.reservedBytes, 0)
+        XCTAssertEqual(s.residentBytes, 0)
         XCTAssertEqual(s.freeBytes, 1_000)
         XCTAssertEqual(s.modules.first { $0.id == .llm }?.state, .unloaded)
     }
@@ -104,7 +104,7 @@ final class MemoryGovernorTests: XCTestCase {
             }
         }
 
-        let reserved = await gov.snapshot().reservedBytes
+        let reserved = await gov.snapshot().residentBytes
         XCTAssertEqual(reserved, 400)
     }
 
@@ -148,10 +148,10 @@ final class MemoryGovernorTests: XCTestCase {
 
         let s = await gov.snapshot()
         // Estimate was 400; real footprint 600 ⇒ reservation reconciled.
-        XCTAssertEqual(s.reservedBytes, 600)
+        XCTAssertEqual(s.residentBytes, 600)
         XCTAssertEqual(s.freeBytes, 400)
         XCTAssertEqual(
-            s.modules.first { $0.id == .llm }?.reservedBytes, 600)
+            s.modules.first { $0.id == .llm }?.residentBytes, 600)
     }
 
     func testOverBudgetReconciliationEvictsEvictable() async throws {
@@ -170,7 +170,7 @@ final class MemoryGovernorTests: XCTestCase {
         try await gov.ensureLoaded(.llm)
 
         let s = await gov.snapshot()
-        XCTAssertEqual(s.reservedBytes, 90)
+        XCTAssertEqual(s.residentBytes, 90)
         XCTAssertEqual(
             s.modules.first { $0.id == .llm }?.state, .loaded)
         let v = s.modules.first { $0.id == .transcription }?.state
@@ -290,7 +290,7 @@ final class MemoryGovernorTests: XCTestCase {
             evictable: false)
 
         try await gov.ensureLoaded(.transcription)  // observes 600
-        let reserved1 = await gov.snapshot().reservedBytes
+        let reserved1 = await gov.snapshot().residentBytes
         XCTAssertEqual(reserved1, 600)
         await gov.unload(.transcription)  // learned[.transcription]=600
         try await gov.ensureLoaded(.llm)  // reserves 500

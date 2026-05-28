@@ -337,20 +337,21 @@ extension AthenaServer {
           catch(e){$("sub").textContent="daemon unreachable";return;}
           $("sub").textContent=s.model+"  ·  "+
             new Date().toLocaleTimeString();
-          const g=s.governor, used=g.reservedBytes,
+          const g=s.governor, used=g.residentBytes,
             tot=g.totalBudgetBytes;
           $("membar").style.width=
             (tot?100*used/tot:0).toFixed(1)+"%";
           $("mem").innerHTML="<table>"+
-            row("reserved",mb(used))+row("free",mb(g.freeBytes))+
+            row("resident",mb(used))+row("free",mb(g.freeBytes))+
             row("budget",mb(tot))+
             row("prompt-cache cap",mb(g.promptCacheCapBytes))+
             "</table>";
           $("mods").innerHTML="<tr><th>module</th><th>state</th>"+
             "<th>resident</th></tr>"+g.modules.map(m=>
             `<tr><td>${m.id}</td><td class=${
-              m.state=="loaded"?"ok":"k"}>${m.state}</td>
-             <td>${mb(m.reservedBytes)}</td></tr>`).join("");
+              m.state=="loaded"?"ok":"k"}>${m.state}${
+              m.unloadedReason?" ("+m.unloadedReason+")":""}</td>
+             <td>${mb(m.residentBytes)}</td></tr>`).join("");
           const m=s.metrics;
           $("met").innerHTML="<table>"+
             row("requests",m.totalRequests)+

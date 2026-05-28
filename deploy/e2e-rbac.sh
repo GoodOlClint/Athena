@@ -1157,10 +1157,10 @@ echo "== phase 3.686: governor truth + /healthz signals (M43.1) =="
 #   1. /healthz carries inflight, queueDepth, lastRequestAt (new fields).
 #   2. After serving a request, lastRequestAt > 0.
 #   3. Removing the resident id from the allowlist used to leave the
-#      governor at state=loaded with stale reservedBytes (the lying-
+#      governor at state=loaded with stale residentBytes (the lying-
 #      /healthz symptom). Post-M43.1 refreshAllowlist reconciles the
 #      governor when the module drops its container, so state goes to
-#      unloaded and reservedBytes goes to 0.
+#      unloaded and residentBytes goes to 0.
 # Force the textEmbedding slot loaded so the post-drop assertion is
 # meaningful.
 curl -s -X POST -H "Authorization: Bearer $ALICE_TOK" \
@@ -1177,7 +1177,7 @@ for k in ("inflight", "queueDepth", "lastRequestAt"):
 if h["lastRequestAt"] <= 0:
     sys.exit("lastRequestAt=0")
 te = [m for m in h["modules"] if m["id"] == "textEmbedding"][0]
-if te["state"] != "loaded" or te["reservedBytes"] <= 0:
+if te["state"] != "loaded" or te["residentBytes"] <= 0:
     sys.exit("textEmbedding not loaded:" + json.dumps(te))
 ' >/dev/null \
   && ok "/healthz adds inflight/queueDepth/lastRequestAt + loaded state" \
@@ -1203,11 +1203,24 @@ echo "$HZ2" | python3 -c '
 import json, sys
 h = json.loads(sys.stdin.read())
 te = [m for m in h["modules"] if m["id"] == "textEmbedding"][0]
-if te["state"] != "unloaded" or te["reservedBytes"] != 0:
+if te["state"] != "unloaded" or te["residentBytes"] != 0:
     sys.exit("textEmbedding lies post-drop:" + json.dumps(te))
 ' >/dev/null \
-  && ok "governor reconciled on allowlist drop (state=unloaded, reservedBytes=0)" \
+  && ok "governor reconciled on allowlist drop (state=unloaded, residentBytes=0)" \
   || bad "governor lies after allowlist drop ($HZ2)"
+# M46.5 — the unload path that fired here was an allowlist drop,
+# classified as `operator_unload`; the post-drop snapshot must
+# expose that reason on the textEmbedding slot.
+echo "$HZ2" | python3 -c '
+import json, sys
+h = json.loads(sys.stdin.read())
+te = [m for m in h["modules"] if m["id"] == "textEmbedding"][0]
+r = te.get("unloadedReason")
+if r != "operator_unload":
+    sys.exit("expected operator_unload, got " + repr(r))
+' >/dev/null \
+  && ok "unloadedReason=operator_unload exposed for allowlist drop" \
+  || bad "unloadedReason missing/wrong after allowlist drop ($HZ2)"
 
 echo
 echo "== phase 3.687: cold-load 503 Retry-After + allowlist warn + init (M43.2) =="

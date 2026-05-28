@@ -229,7 +229,7 @@ final class MLXLLMGenerationIntegrationTests: XCTestCase {
         await gov.register(llm, evictable: false)
 
         try await gov.ensureLoaded(.llm)
-        let reserved = await gov.snapshot().reservedBytes
+        let reserved = await gov.snapshot().residentBytes
         XCTAssertGreaterThan(reserved, 0)
 
         var out = ""

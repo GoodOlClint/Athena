@@ -4626,14 +4626,22 @@ struct AthenaServer {
 }
 
 /// M43.1 — /healthz response, flattening `GovernorSnapshot` for
-/// backwards compat with consumers that read top-level `reservedBytes`
-/// etc., plus three new live signals so a hung daemon is legible
-/// without scraping /metrics: `inflight` (active request count),
-/// `queueDepth` (jobs in `queued` status), `lastRequestAt` (epoch
-/// seconds; 0 ⇒ none since boot).
+/// consumers that read top-level `residentBytes` etc., plus three
+/// live signals so a hung daemon is legible without scraping
+/// /metrics: `inflight` (active request count), `queueDepth` (jobs
+/// in `queued` status), `lastRequestAt` (epoch seconds; 0 ⇒ none
+/// since boot).
+///
+/// M46.5 renamed the bytes field from `reservedBytes` to
+/// `residentBytes` (the governor's reconciled value tracks real
+/// process RSS post-M46.7, so the honest name applies); the
+/// per-module entries now also carry `unloadedReason` (nil while
+/// loaded, otherwise idle_evict / memory_pressure / operator_unload
+/// / load_failed) so an operator can tell why a slot is empty
+/// without reaching for `athena audit`.
 struct HealthResponse: Encodable {
     let totalBudgetBytes: Int
-    let reservedBytes: Int
+    let residentBytes: Int
     let freeBytes: Int
     let promptCacheCapBytes: Int
     let modules: [ModuleSnapshot]
@@ -4646,7 +4654,7 @@ struct HealthResponse: Encodable {
         queueDepth: Int, lastRequestAt: Double
     ) {
         self.totalBudgetBytes = snapshot.totalBudgetBytes
-        self.reservedBytes = snapshot.reservedBytes
+        self.residentBytes = snapshot.residentBytes
         self.freeBytes = snapshot.freeBytes
         self.promptCacheCapBytes = snapshot.promptCacheCapBytes
         self.modules = snapshot.modules

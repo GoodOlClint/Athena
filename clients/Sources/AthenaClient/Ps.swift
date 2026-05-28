@@ -28,11 +28,11 @@ public struct Ps: AsyncParsableCommand {
         struct Module: Decodable {
             let id: String
             let state: String
-            let reservedBytes: Int
+            let residentBytes: Int
             let evictable: Bool
         }
         let totalBudgetBytes: Int
-        let reservedBytes: Int
+        let residentBytes: Int
         let freeBytes: Int
         let promptCacheCapBytes: Int
         let modules: [Module]
@@ -55,7 +55,7 @@ public struct Ps: AsyncParsableCommand {
 
         print(
             "budget \(humanBytes(snap.totalBudgetBytes)) | "
-                + "reserved \(humanBytes(snap.reservedBytes)) | "
+                + "resident \(humanBytes(snap.residentBytes)) | "
                 + "free \(humanBytes(snap.freeBytes)) | "
                 + "prompt-cache cap "
                 + "\(humanBytes(snap.promptCacheCapBytes))")
@@ -64,7 +64,7 @@ public struct Ps: AsyncParsableCommand {
                 toLength: 16, withPad: " ", startingAt: 0)
                 + "STATE".padding(
                     toLength: 12, withPad: " ", startingAt: 0)
-                + "RESERVED".padding(
+                + "RESIDENT".padding(
                     toLength: 12, withPad: " ", startingAt: 0)
                 + "EVICTABLE")
         for m in snap.modules.sorted(by: { $0.id < $1.id }) {
@@ -73,7 +73,7 @@ public struct Ps: AsyncParsableCommand {
                     toLength: 16, withPad: " ", startingAt: 0)
                     + m.state.padding(
                         toLength: 12, withPad: " ", startingAt: 0)
-                    + humanBytes(m.reservedBytes).padding(
+                    + humanBytes(m.residentBytes).padding(
                         toLength: 12, withPad: " ", startingAt: 0)
                     + (m.evictable ? "yes" : "no"))
         }
