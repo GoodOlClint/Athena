@@ -2528,6 +2528,26 @@ SR="$(curl -s -N -H "Authorization: Bearer $ALICE_TOK" \
 echo "$SR" | grep -q "data: \[DONE\]" \
   && ok "streamed generation truncates but closes with [DONE]" \
   || bad "streamed timeout did not close cleanly"
+# 22b2 (M46.3a): the SAME slow generation under the 1 s daemon deadline,
+# but with a per-request `timeout: 30` override on the request body, must
+# NOT 504 — the override widens the deadline for THIS call only.
+RELAX="$(curl -s -i -H "Authorization: Bearer $ALICE_TOK" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"athena-stub","timeout":30,"messages":[{"role":"user","content":"hi"}]}' \
+  "http://127.0.0.1:$PORT/v1/chat/completions")"
+echo "$RELAX" | head -1 | grep -q " 200" \
+  && ok "per-request timeout=30 widens past daemon's 1 s cap → 200" \
+  || bad "per-request timeout override didn't take effect ($(echo "$RELAX" | head -1))"
+# 22b3 (M46.3a): timeout=0 (or negative) disables the deadline for this
+# call, same outcome as the relaxed-override case above. Belt-and-braces
+# guard so the "0 ⇒ disable" branch stays alive across refactors.
+OFF="$(curl -s -i -H "Authorization: Bearer $ALICE_TOK" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"athena-stub","timeout":0,"messages":[{"role":"user","content":"hi"}]}' \
+  "http://127.0.0.1:$PORT/v1/chat/completions")"
+echo "$OFF" | head -1 | grep -q " 200" \
+  && ok "per-request timeout=0 disables deadline → 200" \
+  || bad "per-request timeout=0 didn't disable deadline ($(echo "$OFF" | head -1))"
 stop_daemon
 # 22c: the SAME slow generation under a generous timeout is NOT killed —
 # proves the deadline doesn't false-fire on legitimate work.
@@ -2535,6 +2555,19 @@ start_daemon "$D" 127.0.0.1 --request-timeout-secs 30 --preload \
   --llm-model athena-stub \
   || { echo "generous-timeout daemon failed"; cat "$D/daemon.log"; exit 1; }
 code 200 POST /v1/chat/completions "$ALICE_TOK" "$CHAT"
+# 22c2 (M46.3a): per-request `timeout: 1` override TIGHTENS the deadline
+# below the daemon's generous 30 s cap — the same body that just passed
+# at 200 must now 504 with the per-call cap.
+TIGHT="$(curl -s -i -H "Authorization: Bearer $ALICE_TOK" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"athena-stub","timeout":1,"messages":[{"role":"user","content":"hi"}]}' \
+  "http://127.0.0.1:$PORT/v1/chat/completions")"
+echo "$TIGHT" | head -1 | grep -q " 504" \
+  && ok "per-request timeout=1 tightens below daemon's 30 s cap → 504" \
+  || bad "per-request timeout override didn't tighten ($(echo "$TIGHT" | head -1))"
+echo "$TIGHT" | grep -q '"code":"inference_timeout"' \
+  && ok "per-call 504 body uses code inference_timeout" \
+  || bad "504 body code unexpected ($(echo "$TIGHT" | tail -1))"
 stop_daemon
 unset ATHENA_STUB_DELAY_MS
 

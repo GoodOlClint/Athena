@@ -840,7 +840,12 @@ struct AthenaServer {
             // usage chunk when the client opted in via stream_options.
             let principal = await usagePrincipal(request)
             let includeUsage = body.stream_options?.include_usage == true
-            let deadlineSecs = requestTimeoutSecs
+            // M46.3 — per-request `timeout` overrides the daemon-wide
+            // `request_timeout_secs`. nil ⇒ inherit; 0/negative ⇒
+            // disable the deadline for this call only.
+            let deadlineSecs =
+                body.timeout.map { $0 > 0 ? $0 : 0 }
+                ?? requestTimeoutSecs
             return Self.streamSSE(
                 id: id, model: model, created: created,
                 events: deadlineBounded(
@@ -867,13 +872,19 @@ struct AthenaServer {
 
         let collected: GenCollected
         do {
+            // M46.3 — per-request `timeout` overrides the daemon-wide
+            // `request_timeout_secs` for this single call.
+            let deadlineSecs =
+                body.timeout.map { $0 > 0 ? $0 : 0 }
+                ?? requestTimeoutSecs
             collected = try await collectMetered(
                 llm.generateMetered(
                     messages: turns, schemaJSON: schemaJSON,
                     tools: toolSpecs, maxTokens: body.max_tokens,
                     temperature: body.temperature,
                     topP: body.top_p, seed: body.seed,
-                    speculative: body.speculative))
+                    speculative: body.speculative),
+                seconds: deadlineSecs)
         } catch let e as AthenaError {
             // M33.1: the only AthenaError collectMetered raises is the
             // per-request timeout → classified 504.
@@ -977,12 +988,12 @@ struct AthenaServer {
     }
 
     /// Drain a metered generation under the per-request deadline (M33.1)
-    /// and return its text + usage + finish reason. `requestTimeoutSecs`
-    /// = 0 ⇒ unbounded. On overrun it throws
-    /// `AthenaError.requestTimedOut` (the caller maps it to a 504) and the
-    /// generation is cancelled so it stops consuming the worker/budget.
-    /// Shared by the sync `/v1/chat/completions`, native `/api/chat`, and
-    /// queued `conversation` paths so all three honor the same timeout.
+    /// and return its text + usage + finish reason. `seconds` = 0 ⇒
+    /// unbounded. On overrun it throws `AthenaError.requestTimedOut`
+    /// (the caller maps it to a 504) and the generation is cancelled
+    /// so it stops consuming the worker/budget. Shared by the sync
+    /// `/v1/chat/completions`, native `/api/chat`, and queued
+    /// `conversation` paths so all three honor the same timeout.
     ///
     /// M46.1 — long-generation heartbeat. A sync decode that runs past
     /// the `heartbeatAfter` threshold emits a `.notice`-level progress
@@ -993,10 +1004,15 @@ struct AthenaServer {
     /// making "actively decoding" look identical to "process hung."
     /// Notice-level so it persists to `log show` per the unified-log
     /// retention rules.
+    ///
+    /// M46.3 — `seconds` is the EFFECTIVE deadline for THIS call: the
+    /// per-request `timeout` field on ChatCompletionRequest overrides
+    /// the daemon-wide `request_timeout_secs` when present. Callers
+    /// resolve this; `collectMetered` just honors what it's given.
     private func collectMetered(
-        _ events: AsyncStream<GenChunk>
+        _ events: AsyncStream<GenChunk>, seconds: Int
     ) async throws -> GenCollected {
-        try await withInferenceDeadline(seconds: requestTimeoutSecs) {
+        try await withInferenceDeadline(seconds: seconds) {
             var c = GenCollected()
             let started = Date()
             var lastHeartbeat = started
@@ -2329,13 +2345,21 @@ struct AthenaServer {
             let effective = req.effectiveSchema()
             let collected: GenCollected
             do {
+                // M46.3 — per-request `timeout` overrides the
+                // daemon-wide `request_timeout_secs` for queued
+                // conversation jobs the same way it does for sync
+                // /v1/chat/completions.
+                let deadlineSecs =
+                    req.timeout.map { $0 > 0 ? $0 : 0 }
+                    ?? requestTimeoutSecs
                 collected = try await collectMetered(
                     llm.generateMetered(
                         messages: turns, schemaJSON: effective?.json,
                         tools: req.toolSpecs(), maxTokens: req.max_tokens,
                         temperature: req.temperature,
                         topP: req.top_p, seed: req.seed,
-                        speculative: req.speculative))
+                        speculative: req.speculative),
+                    seconds: deadlineSecs)
             } catch let e as AthenaError {
                 return (nil, e.message)  // M33.1: timeout → job error
             } catch {

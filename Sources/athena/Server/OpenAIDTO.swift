@@ -96,6 +96,14 @@ struct ChatCompletionRequest: Codable {
     /// head. `false` forces the standard non-speculative path even
     /// when the daemon was loaded with `--speculative`.
     let speculative: Bool?
+    /// Athena extension (M46.3) — per-request inference deadline override
+    /// in seconds. Overrides the daemon-wide `request_timeout_secs` for
+    /// this single call. `nil` ⇒ inherit the daemon default. `0` (or
+    /// negative) ⇒ disable the deadline for this call only — useful for
+    /// long extraction-shape decodes that legitimately exceed a
+    /// generous daemon cap. Honored on the sync, streamed, and queued
+    /// `conversation` paths.
+    let timeout: Int?
 
     /// Normalized stop sequences: OpenAI accepts a string or an array of
     /// strings (commonly ≤4). Empty/whitespace and non-string array
