@@ -700,22 +700,35 @@ struct AthenaServer {
                     preload: warming \(configured.count) module(s) \
                     at startup: \(names)
                     """)
-                await withTaskGroup(of: Void.self) { group in
-                    for id in configured {
-                        group.addTask {
-                            do {
-                                try await governor.ensureLoaded(id)
-                                log.notice(
-                                    "preload: \(id.rawValue) warm")
-                            } catch {
-                                log.warning(
-                                    """
-                                    preload: \(id.rawValue) warm \
-                                    failed, will load lazily: \
-                                    \(error)
-                                    """)
-                            }
-                        }
+                // M46.7 — serialize module warms. The original M46.2
+                // used `withTaskGroup` to load in parallel; that broke
+                // the governor's RSS reconciliation: each module's
+                // `before` probe in `performLoad` was captured before
+                // ANY of them had grown memory, and the `after` probe
+                // saw the cumulative growth from everyone, so each
+                // module's reconciled `reservedBytes` over-counted by
+                // the sum of every later-completing module. Across 5
+                // modules at startup the over-count compounded to
+                // peaks near the budget cap (97.9 GB observed on a
+                // 103 GB budget) and triggered spurious governor
+                // evictions of modules that had genuinely fit. Serial
+                // warms cost more wall time at startup, but each
+                // `before`/`after` pair sees only its own module's
+                // RSS delta — the reconciled `reservedBytes` matches
+                // the real process footprint and no spurious eviction
+                // fires. Each per-module warm is still best-effort: a
+                // failure logs and leaves the lazy path intact for
+                // that module.
+                for id in configured {
+                    do {
+                        try await governor.ensureLoaded(id)
+                        log.notice("preload: \(id.rawValue) warm")
+                    } catch {
+                        log.warning(
+                            """
+                            preload: \(id.rawValue) warm failed, \
+                            will load lazily: \(error)
+                            """)
                     }
                 }
             }
@@ -987,6 +1000,47 @@ struct AthenaServer {
         var finish: FinishReason = .stop
     }
 
+    /// NSLock-isolated state for the M46.7 heartbeat: the event-drain
+    /// loop increments `tokens` as text chunks arrive, while the
+    /// detached heartbeat timer reads (tokens, lastLoggedTokens,
+    /// lastLoggedAt) to compute "tokens/sec since the last heartbeat
+    /// line". Cross-task touch ⇒ the lock makes the read-modify-write
+    /// sound; `@unchecked Sendable` because all access is lock-mediated.
+    /// Snapshot avoids holding the lock across the Logger call.
+    final class HeartbeatCounter: @unchecked Sendable {
+        struct Snapshot {
+            let tokens: Int
+            let lastLoggedTokens: Int
+            let lastLoggedAt: TimeInterval
+        }
+        private let lock = NSLock()
+        private var tokens = 0
+        private var lastLoggedTokens = 0
+        private var lastLoggedAt: TimeInterval = 0
+
+        func incrementToken() {
+            lock.lock()
+            defer { lock.unlock() }
+            tokens += 1
+        }
+
+        func snapshot() -> Snapshot {
+            lock.lock()
+            defer { lock.unlock() }
+            return Snapshot(
+                tokens: tokens,
+                lastLoggedTokens: lastLoggedTokens,
+                lastLoggedAt: lastLoggedAt)
+        }
+
+        func markLogged(elapsedAt: TimeInterval, tokens: Int) {
+            lock.lock()
+            defer { lock.unlock() }
+            self.lastLoggedAt = elapsedAt
+            self.lastLoggedTokens = tokens
+        }
+    }
+
     /// Drain a metered generation under the per-request deadline (M33.1)
     /// and return its text + usage + finish reason. `seconds` = 0 ⇒
     /// unbounded. On overrun it throws `AthenaError.requestTimedOut`
@@ -995,15 +1049,24 @@ struct AthenaServer {
     /// `/v1/chat/completions`, native `/api/chat`, and queued
     /// `conversation` paths so all three honor the same timeout.
     ///
-    /// M46.1 — long-generation heartbeat. A sync decode that runs past
-    /// the `heartbeatAfter` threshold emits a `.notice`-level progress
-    /// log every `heartbeatEverySec` seconds OR every `heartbeatEveryTok`
-    /// text chunks, whichever comes first. Closes the silent-while-
+    /// M46.1 / M46.7 — long-generation heartbeat. A sync decode that
+    /// runs past `heartbeatAfter` emits a `.notice`-level progress log
+    /// every `heartbeatEverySec` seconds with elapsed time, tokens
+    /// emitted, and current tokens/sec. Closes the silent-while-
     /// decoding gap: a 10-minute extraction-shape call previously left
     /// nothing in `log show` between request-start and request-complete,
     /// making "actively decoding" look identical to "process hung."
-    /// Notice-level so it persists to `log show` per the unified-log
-    /// retention rules.
+    ///
+    /// M46.7 fix: the heartbeat now runs on an INDEPENDENT timer task,
+    /// not piggy-backed on the event for-await. The original
+    /// M46.1 implementation only fired when a token event arrived —
+    /// so a stalled decode (model spinning on prompt-processing, KV
+    /// warm-up, or genuinely hung) suspended the for-await on `await`,
+    /// emitted no events, and emitted no heartbeats either, defeating
+    /// the whole point. The timer task fires regardless of event
+    /// throughput; "no events for >K seconds while elapsed > threshold"
+    /// is exactly the alive-but-slow signal an operator needs to see.
+    /// Notice-level so it persists to `log show`.
     ///
     /// M46.3 — `seconds` is the EFFECTIVE deadline for THIS call: the
     /// per-request `timeout` field on ChatCompletionRequest overrides
@@ -1013,51 +1076,59 @@ struct AthenaServer {
         _ events: AsyncStream<GenChunk>, seconds: Int
     ) async throws -> GenCollected {
         try await withInferenceDeadline(seconds: seconds) {
-            var c = GenCollected()
             let started = Date()
-            var lastHeartbeat = started
-            var tokensAtLastHeartbeat = 0
-            var tokensSeen = 0
-            // Locked defaults; small enough to be cheap on a healthy
-            // workload (no log emission at all until 10 s in), large
-            // enough that a multi-minute decode emits a handful of
-            // progress lines rather than a flood.
-            let heartbeatAfter: TimeInterval = 10
-            let heartbeatEverySec: TimeInterval = 5
-            let heartbeatEveryTok = 64
+            // Shared counter the timer task reads + the for-await loop
+            // writes. NSLock-isolated so the cross-task touch is sound.
+            let counter = HeartbeatCounter()
+            // Locked defaults — quiet on a healthy short workload (no
+            // log emission until 10 s in), informative on a long one
+            // (one line every 5 s tells "alive, N tok/s" vs "alive,
+            // 0 tok/s in the last 5 s ⇒ stalled / hung").
+            let heartbeatAfterNanos: UInt64 = 10_000_000_000
+            let heartbeatIntervalNanos: UInt64 = 5_000_000_000
+            let heartbeatTask = Task.detached(
+                priority: .utility
+            ) { [counter] in
+                // Wait out the silent threshold; if the whole call
+                // finished before then, the outer defer cancels us
+                // and Task.sleep throws — try? swallows it.
+                try? await Task.sleep(
+                    nanoseconds: heartbeatAfterNanos)
+                while !Task.isCancelled {
+                    let snap = counter.snapshot()
+                    let elapsed = Date().timeIntervalSince(started)
+                    let dt = max(elapsed - snap.lastLoggedAt, 0.001)
+                    let tps =
+                        Double(snap.tokens - snap.lastLoggedTokens)
+                        / dt
+                    Self.log.notice(
+                        """
+                        decode heartbeat elapsed=\(Int(elapsed))s \
+                        tokens=\(snap.tokens) \
+                        tokens_per_sec=\
+                        \(String(format: "%.1f", tps))
+                        """)
+                    counter.markLogged(
+                        elapsedAt: elapsed, tokens: snap.tokens)
+                    try? await Task.sleep(
+                        nanoseconds: heartbeatIntervalNanos)
+                }
+            }
+            defer { heartbeatTask.cancel() }
+            var c = GenCollected()
             for await event in events {
                 switch event {
                 case .text(let chunk):
                     c.text += chunk
-                    tokensSeen += 1
+                    counter.incrementToken()
                 case .usage(let u): c.usage = u
                 case .finish(let r): c.finish = r
                 }
-                let now = Date()
-                let elapsed = now.timeIntervalSince(started)
-                guard elapsed >= heartbeatAfter else { continue }
-                let sinceLast = now.timeIntervalSince(lastHeartbeat)
-                let toksSinceLast = tokensSeen - tokensAtLastHeartbeat
-                guard
-                    sinceLast >= heartbeatEverySec
-                        || toksSinceLast >= heartbeatEveryTok
-                else { continue }
-                let tps =
-                    sinceLast > 0
-                    ? Double(toksSinceLast) / sinceLast : 0
-                Self.log.notice(
-                    """
-                    decode heartbeat elapsed=\(Int(elapsed))s \
-                    tokens=\(tokensSeen) \
-                    tokens_per_sec=\
-                    \(String(format: "%.1f", tps))
-                    """)
-                lastHeartbeat = now
-                tokensAtLastHeartbeat = tokensSeen
             }
             return c
         }
     }
+
 
     private func handleEmbeddings(_ request: Request) async -> Response {
         let body: EmbeddingRequest
