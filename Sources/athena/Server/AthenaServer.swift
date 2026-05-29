@@ -8,6 +8,7 @@ import AthenaTranscription
 import Foundation
 import HTTPTypes
 import Hummingbird
+import MLX
 import HummingbirdCore
 import HummingbirdTLS
 import Logging
@@ -1036,6 +1037,29 @@ struct AthenaServer {
         return parts.isEmpty ? "" : " modules=" + parts.joined(separator: ",")
     }
 
+    /// M49.4 — process RSS via Mach `task_info`. Duplicates the probe
+    /// `Load.processResidentBytes` injects into the governor; lifting
+    /// it onto AthenaServer avoids a cross-command dependency from the
+    /// heartbeat path. Returns 0 on Mach failure (matches the existing
+    /// degrade-gracefully contract).
+    fileprivate static func processRSS() -> Int {
+        var info = mach_task_basic_info_data_t()
+        var count = mach_msg_type_number_t(
+            MemoryLayout<mach_task_basic_info_data_t>.stride
+                / MemoryLayout<natural_t>.stride)
+        let kerr = withUnsafeMutablePointer(to: &info) { infoPtr in
+            infoPtr.withMemoryRebound(
+                to: integer_t.self, capacity: Int(count)
+            ) { intPtr in
+                task_info(
+                    mach_task_self_,
+                    task_flavor_t(MACH_TASK_BASIC_INFO),
+                    intPtr, &count)
+            }
+        }
+        return kerr == KERN_SUCCESS ? Int(info.resident_size) : 0
+    }
+
     /// M46.8 — also conforms to `AthenaCore.DecodeProgressCounter`, so
     /// the synchronous decode loops (GuidedGreedy / GuidedSubstrate /
     /// SpeculativeGeneration / SpeculativeSampling) can increment the
@@ -1229,6 +1253,19 @@ struct AthenaServer {
                     let modulesField = AthenaServer.formatModuleMemory(gov)
                     let residentField = AthenaServer.formatBytes(
                         gov.residentBytes)
+                    // M49.4 — also emit the OS-level process RSS plus
+                    // MLX's own active/cache memory. The 0.10.81
+                    // operator report showed Activity Monitor at 142 GB
+                    // while the heartbeat's per-module sum was 62 GB —
+                    // an 80 GB gap that lives OUTSIDE the governor's
+                    // per-module accounting (rust-shim DFA hashbrowns,
+                    // unattributed Metal/heap allocations, etc.).
+                    // Exposing `rss` and `mlx_active`+`mlx_cache`
+                    // separately lets an operator localize that gap
+                    // from one heartbeat line.
+                    let rss = AthenaServer.processRSS()
+                    let mlxActive = MLX.Memory.activeMemory
+                    let mlxCache = MLX.Memory.cacheMemory
                     Self.log.notice(
                         """
                         decode heartbeat elapsed=\(Int(elapsed))s \
@@ -1236,7 +1273,10 @@ struct AthenaServer {
                         \(prefillField) tokens=\(snap.tokens) \
                         tokens_per_sec=\
                         \(String(format: "%.1f", tps)) \
-                        resident=\(residentField)\
+                        resident=\(residentField) \
+                        rss=\(AthenaServer.formatBytes(rss)) \
+                        mlx_active=\(AthenaServer.formatBytes(mlxActive)) \
+                        mlx_cache=\(AthenaServer.formatBytes(mlxCache))\
                         \(modulesField)
                         """)
                     counter.markLogged(
