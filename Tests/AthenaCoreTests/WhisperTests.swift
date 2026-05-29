@@ -161,6 +161,55 @@ final class WhisperWordTimestampIntegrationTests: XCTestCase {
     }
 }
 
+/// M50.1 — regression for the allocator-pool leak class M46.6 caught
+/// in the embedder. Drives many short transcription calls back-to-back
+/// and asserts MLX's pool stays bounded — without the per-window /
+/// per-token clears, the pool grows N-proportionally with call count
+/// and the test fails by a comfortable margin. Gated + heavy.
+final class WhisperMemoryRegressionTests: XCTestCase {
+
+    func testTranscribePoolStaysBoundedAcrossManyCalls() async throws {
+        guard
+            ProcessInfo.processInfo.environment["ATHENA_RUN_MODEL_TESTS"]
+                == "1"
+        else { throw XCTSkip("set ATHENA_RUN_MODEL_TESTS=1 (heavy)") }
+
+        let model = try await WhisperLoader.load()
+        let tokenizer = try await WhisperLoader.loadTokenizer()
+        // 1 s silence padded to 30 s by `logMel`. Silence exercises the
+        // encoder + KV-cache decode + clearCache paths without needing
+        // real audio; the leak class is allocator-pool growth from the
+        // forward pass, independent of decoded content.
+        let pcm = [Float](repeating: 0, count: LogMel.sampleRate)
+
+        // Warmup so first-call lazy allocations settle, then clear the
+        // pool so the baseline reflects steady-state.
+        _ = WhisperDecode.transcribe(
+            model: model, mel: LogMel.logMel(pcm),
+            tokenizer: tokenizer, language: "en")
+        MLX.Memory.clearCache()
+        let baseline = MLX.Memory.cacheMemory
+
+        for _ in 0..<22 {
+            _ = WhisperDecode.transcribe(
+                model: model, mel: LogMel.logMel(pcm),
+                tokenizer: tokenizer, language: "en")
+        }
+
+        let after = MLX.Memory.cacheMemory
+        // Without M50.1's clears, `after` scales with the per-call
+        // encoder pool delta × 22 (hundreds of MB → several GB).
+        // The pool's allowed to hold one in-flight transient; the
+        // generous 512 MB ceiling catches an N-proportional leak by
+        // a wide margin while tolerating a single residual.
+        let ceiling = 512 * 1024 * 1024
+        XCTAssertLessThan(
+            after - baseline, ceiling,
+            "MLX cache pool drifted \(after - baseline) bytes "
+            + "above baseline after 22 transcribes (M50.1 leak)")
+    }
+}
+
 final class WhisperLoadIntegrationTests: XCTestCase {
 
     func testLoadsAndRunsEncoderDecoder() async throws {

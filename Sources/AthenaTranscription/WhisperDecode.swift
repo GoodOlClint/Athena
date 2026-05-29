@@ -162,6 +162,11 @@ public enum WhisperDecode {
             produced += 1
             if produced >= limit { break }
             next = step([next.token], produced - 1)
+            // Periodic allocator-pool flush — mirrors the LLM decode
+            // loops (SpeculativeGeneration.swift:217). Without it, the
+            // per-step `cache.evalStep()` activations accumulate in
+            // MLX's pool across long transcriptions (M50.1).
+            if generated.count % 256 == 0 { MLX.Memory.clearCache() }
         }
 
         let parsed = parseSegments(
@@ -265,6 +270,13 @@ public enum WhisperDecode {
                 }
             }
             if !text.isEmpty { parts.append(text) }
+            // End-of-window allocator-pool flush: the per-window encoder
+            // `audio.eval()` above plus the KV-cache and DTW work done
+            // for this window leave behind buffers the next window's
+            // encode/decode doesn't need. Mirrors the embedder's per-
+            // bucket clearCache (M46.6). Safe — the next window builds
+            // a fresh `audio` from a fresh `embedAudio` call.
+            MLX.Memory.clearCache()
         }
         let finalSegments =
             wordTimestamps
@@ -303,9 +315,12 @@ public enum WhisperDecode {
         let audio = model.embedAudio(mel)
         audio.eval()
         let langTok = resolveLang(language, model: model, audio: audio)
-        return decodeWindow(
+        let text = decodeWindow(
             model: model, audio: audio, tokenizer: tokenizer,
             langTok: langTok, maxTokens: maxTokens
         ).text
+        // End-of-call clear for the one-shot path (M50.1).
+        MLX.Memory.clearCache()
+        return text
     }
 }

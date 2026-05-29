@@ -107,6 +107,11 @@ public enum WhisperWordAlign {
                     word: text, start: start, end: max(start, end),
                     probability: prob), w.range))
         }
+        // End-of-align allocator-pool flush (M50.1). The non-cached
+        // decoder pass + crossQK.evalAll() above leave behind per-layer
+        // attention buffers; `out` is already Swift-side WordTiming
+        // values, so nothing downstream needs the MLXArrays.
+        MLX.Memory.clearCache()
         return out
     }
 

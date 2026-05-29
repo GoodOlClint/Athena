@@ -120,6 +120,10 @@ public enum LogMel {
         mel = MLX.maximum(mel, mel.max() - 8.0)
         mel = (mel + 4.0) / 4.0
         mel.eval()
+        // End-of-call allocator-pool flush (M50.1). The intermediate
+        // `frameArr`, `spec`, `power`, `filters` arrays go out of
+        // scope here; `mel` is still referenced so it isn't reclaimed.
+        MLX.Memory.clearCache()
         return mel
     }
 }
