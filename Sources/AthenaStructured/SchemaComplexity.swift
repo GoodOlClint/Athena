@@ -171,11 +171,16 @@ public enum SchemaComplexity {
         }
     }
 
-    /// The default unbounded-inner-arrays ceiling. Picked to be one
-    /// step below the smallest known pathological schema (the consuming application's
-    /// extraction schema at 13). An operator who needs to lift the
+    /// The default unbounded-inner-arrays ceiling. The empirical
+    /// reference point is the consuming application's extraction schema: 5
+    /// unbounded inner arrays under one `events.maxItems=30` outer
+    /// compiled to ~60 GB of rust-shim heap on a 128 GB box (caught
+    /// 2026-05-29 — the daemon either OOMed or timed out at the M33.1
+    /// 540 s request deadline). 3 is the largest count we believe
+    /// stays within ~tens of GB; an operator who needs to lift the
     /// ceiling can set `structured_max_unbounded_subarrays` in TOML.
-    public static let defaultMaxUnboundedInnerArrays = 5
+    /// 0 disables the gate (legacy behaviour).
+    public static let defaultMaxUnboundedInnerArrays = 3
 
     /// Build an actionable error message for a schema that exceeds
     /// `max`. Lists the offending paths so the caller knows WHERE to
