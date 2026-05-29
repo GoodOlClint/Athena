@@ -148,3 +148,50 @@ final class SortformerIntegrationTests: XCTestCase {
         }
     }
 }
+
+/// M50.3 — regression for the allocator-pool leak class M46.6 caught
+/// in the embedder. Drives many short diarize calls back-to-back and
+/// asserts MLX's pool stays bounded — without the end-of-call clear in
+/// `Sortformer.generate`, per-call encoder + STFT buffers accumulate.
+/// Gated + heavy.
+final class SortformerMemoryRegressionTests: XCTestCase {
+
+    func testGeneratePoolStaysBoundedAcrossManyCalls() async throws {
+        guard
+            ProcessInfo.processInfo.environment["ATHENA_RUN_MODEL_TESTS"]
+                == "1"
+        else { throw XCTSkip("set ATHENA_RUN_MODEL_TESTS=1 (heavy)") }
+
+        // 2 s of synthetic noise — enough audio for the transformer
+        // encoder to engage without exceeding maxSourcePositions. The
+        // leak is allocator-pool growth from the forward pass, not
+        // content-dependent.
+        var pcm = [Float](repeating: 0, count: 2 * 16_000)
+        var rng = SystemRandomNumberGenerator()
+        for i in 0..<pcm.count {
+            pcm[i] = Float(Int(rng.next() % 1000)) / 1000.0 - 0.5
+        }
+        let audio = MLXArray(pcm).asType(.float32)
+
+        let model = try await SortformerModel.fromPretrained(
+            "mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16")
+
+        // Warmup so first-call lazy allocations settle.
+        _ = try await model.generate(audio: audio, sampleRate: 16_000)
+        MLX.Memory.clearCache()
+        let baseline = MLX.Memory.cacheMemory
+
+        for _ in 0..<22 {
+            _ = try await model.generate(audio: audio, sampleRate: 16_000)
+        }
+
+        let after = MLX.Memory.cacheMemory
+        // Without M50.3's clear, the pool scales linearly with the
+        // per-call encoder/STFT footprint × 22.
+        let ceiling = 512 * 1024 * 1024
+        XCTAssertLessThan(
+            after - baseline, ceiling,
+            "MLX cache pool drifted \(after - baseline) bytes "
+            + "above baseline after 22 diarize calls (M50.3 leak)")
+    }
+}

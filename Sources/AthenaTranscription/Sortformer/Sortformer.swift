@@ -669,6 +669,15 @@ public class SortformerModel: Module {
                 sortformerLog.debug(
                     "offline: segments=\(segments.count) speakers=\(activeSpeakers.count) elapsed=\(elapsed, format: .fixed(precision: 2))s")
 
+                // End-of-call allocator-pool flush (M50.3). The forward
+                // pass + mel-feature pipeline accumulate intermediates
+                // (encoder activations, STFT buffers) that aren't
+                // referenced once `preds` and the Swift-side `segments`
+                // are realized; without this clear the pool grows
+                // across calls the way the embedder did pre-M46.6.
+                // `preds[0]` is held by the returned DiarizationOutput
+                // so it isn't reclaimed.
+                MLX.Memory.clearCache()
                 continuation.resume(returning: DiarizationOutput(
                     segments: segments,
                     speakerProbs: preds[0],
@@ -1006,6 +1015,13 @@ public class SortformerModel: Module {
                     )
 
                     offsetMel = endMel
+                    // Per-chunk allocator-pool flush (M50.3). Mirrors
+                    // the embedder's per-bucket clearCache (M46.6) and
+                    // the LLM decode loops' per-N-token clear. `state`
+                    // and the just-yielded `chunkPreds` are referenced
+                    // so this only releases the chunk's transient
+                    // encoder/FFT buffers.
+                    MLX.Memory.clearCache()
                 }
 
                 continuation.finish()
