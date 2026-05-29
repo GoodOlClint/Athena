@@ -568,8 +568,13 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         // Build (or reuse) the structured vocabulary tokens once per
         // model. The ~150k tokenizer.decode calls are the dominant
         // structured-request cost and are schema-independent.
+        // M49.3: annotate the setup stage so the heartbeat reports
+        // `phase=setup:build-vocab` while this runs — first-of-model
+        // requests can sit here for tens of seconds.
         if schemaJSON != nil, cachedVocabTokens == nil {
             let cfgVocab = configVocabSize
+            DecodeProgress.counter?.setSetupStage("build-vocab")
+            let vocabT0 = Date()
             let built = try await container.perform {
                 (ctx: ModelContext) -> ([VocabToken], UInt32)? in
                 // Qwen3.5 exposes vocabularySize directly; any other
@@ -589,6 +594,14 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                     built.0, built.1,
                     StructuredVocabulary.openerAliases(tokens: built.0))
             }
+            DecodeProgress.counter?.setSetupStage(nil)
+            Self.log.notice(
+                """
+                structured-vocab built elapsed=\
+                \(String(format: "%.1f", Date().timeIntervalSince(vocabT0)))s \
+                tokens=\(built?.0.count ?? 0)
+                """,
+                metadata: ["function": "runSpeculative"])
         }
         let vocabTokens = cachedVocabTokens
 
@@ -625,11 +638,29 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                 reuse the cached index
                 """,
                 metadata: ["function": "runSpeculative"])
+            // M49.3: annotate the heartbeat phase as
+            // `setup:compile-dfa` for the duration of the outlines-core
+            // compile, and log the elapsed time at completion. The
+            // compile can take 60+ s for an 11 KB schema with
+            // maxItems-constrained arrays; without these the heartbeat
+            // just says `phase=setup tokens=0` for the full duration
+            // and the operator can't tell legitimate compile from a
+            // wedge.
+            DecodeProgress.counter?.setSetupStage("compile-dfa")
+            defer { DecodeProgress.counter?.setSetupStage(nil) }
+            let compileT0 = Date()
             let vocab = try StructuredVocabulary(
                 tokens: vt.tokens, eosTokenId: vt.eos)
             let index = try StructuredIndex(
                 jsonSchema: schemaJSON, vocabulary: vocab)
             cachedStructuredIndex = (schemaJSON, index)
+            Self.log.notice(
+                """
+                structured-index compiled elapsed=\
+                \(String(format: "%.1f", Date().timeIntervalSince(compileT0)))s \
+                schema_bytes=\(schemaJSON.utf8.count)
+                """,
+                metadata: ["function": "runSpeculative"])
             return index
         }()
 

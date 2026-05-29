@@ -1012,6 +1012,30 @@ struct AthenaServer {
     /// sound; `@unchecked Sendable` because all access is lock-mediated.
     /// Snapshot avoids holding the lock across the Logger call.
     ///
+    /// M49.3 — heartbeat helpers: compact byte formatter + per-module
+    /// memory tail. Free functions so the `Task.detached` closure can
+    /// call them without capturing `self`.
+    fileprivate static func formatBytes(_ n: Int) -> String {
+        let gb = Double(n) / (1024.0 * 1024.0 * 1024.0)
+        if gb >= 1.0 {
+            return String(format: "%.1fGB", gb)
+        }
+        let mb = Double(n) / (1024.0 * 1024.0)
+        return String(format: "%.0fMB", mb)
+    }
+    fileprivate static func formatModuleMemory(
+        _ snap: GovernorSnapshot
+    ) -> String {
+        // Compact `id:GB` tail, only including loaded modules. Order
+        // follows the snapshot's natural order so it stays stable
+        // across heartbeats.
+        let parts = snap.modules.compactMap { m -> String? in
+            guard m.state == .loaded else { return nil }
+            return "\(m.id.rawValue):\(formatBytes(m.residentBytes))"
+        }
+        return parts.isEmpty ? "" : " modules=" + parts.joined(separator: ",")
+    }
+
     /// M46.8 — also conforms to `AthenaCore.DecodeProgressCounter`, so
     /// the synchronous decode loops (GuidedGreedy / GuidedSubstrate /
     /// SpeculativeGeneration / SpeculativeSampling) can increment the
@@ -1032,6 +1056,10 @@ struct AthenaServer {
             /// M48.4 — total prefill chunks for THIS request, or 0 if
             /// the decode loop never published a prefill state.
             let prefillTotal: Int
+            /// M49.3 — current setup sub-stage (e.g. "compile-dfa",
+            /// "build-vocab"). nil ⇒ either not in setup OR setup
+            /// stage not annotated by the decode path.
+            let setupStage: String?
         }
         private let lock = NSLock()
         private var tokens = 0
@@ -1039,6 +1067,7 @@ struct AthenaServer {
         private var lastLoggedAt: TimeInterval = 0
         private var prefillCompleted = 0
         private var prefillTotal = 0
+        private var setupStage: String? = nil
 
         func incrementToken() {
             lock.lock()
@@ -1053,6 +1082,12 @@ struct AthenaServer {
             self.prefillTotal = total
         }
 
+        func setSetupStage(_ stage: String?) {
+            lock.lock()
+            defer { lock.unlock() }
+            self.setupStage = stage
+        }
+
         func snapshot() -> Snapshot {
             lock.lock()
             defer { lock.unlock() }
@@ -1061,7 +1096,8 @@ struct AthenaServer {
                 lastLoggedTokens: lastLoggedTokens,
                 lastLoggedAt: lastLoggedAt,
                 prefillCompleted: prefillCompleted,
-                prefillTotal: prefillTotal)
+                prefillTotal: prefillTotal,
+                setupStage: setupStage)
         }
 
         func markLogged(elapsedAt: TimeInterval, tokens: Int) {
@@ -1131,6 +1167,7 @@ struct AthenaServer {
             // 0 tok/s in the last 5 s ⇒ stalled / hung").
             let heartbeatAfterNanos: UInt64 = 10_000_000_000
             let heartbeatIntervalNanos: UInt64 = 5_000_000_000
+            let governor = self.governor
             let heartbeatTask = Task.detached(
                 priority: .utility
             ) { [counter] in
@@ -1166,17 +1203,41 @@ struct AthenaServer {
                     // operator read the heartbeat line and answer
                     // "is it hung in setup or just running long?"
                     // without inferring from missing prefill fields.
+                    // M49.3 — append the setup sub-stage when set so
+                    // a setup-bound heartbeat says e.g.
+                    // `phase=setup:compile-dfa` instead of bare
+                    // `phase=setup`. Decode paths annotate via
+                    // `DecodeProgress.counter?.setSetupStage(...)`.
                     let phase = DecodePhase.from(
                         tokens: snap.tokens,
                         prefillCompleted: snap.prefillCompleted,
                         prefillTotal: snap.prefillTotal)
+                    let phaseField: String
+                    if phase == .setup, let stage = snap.setupStage {
+                        phaseField = "setup:\(stage)"
+                    } else {
+                        phaseField = phase.rawValue
+                    }
+                    // M49.3 — per-module residentBytes appended so a
+                    // memory-pressure regression is visible at-a-glance
+                    // in the heartbeat instead of needing an out-of-band
+                    // /healthz scrape during the wedge. Only modules in
+                    // the .loaded state contribute (an evicted slot is
+                    // 0 anyway). Compact `id:GB` form keeps the line
+                    // ≤ ~200 chars even with all five modules loaded.
+                    let gov = await governor.snapshot()
+                    let modulesField = AthenaServer.formatModuleMemory(gov)
+                    let residentField = AthenaServer.formatBytes(
+                        gov.residentBytes)
                     Self.log.notice(
                         """
                         decode heartbeat elapsed=\(Int(elapsed))s \
-                        phase=\(phase.rawValue)\
+                        phase=\(phaseField)\
                         \(prefillField) tokens=\(snap.tokens) \
                         tokens_per_sec=\
-                        \(String(format: "%.1f", tps))
+                        \(String(format: "%.1f", tps)) \
+                        resident=\(residentField)\
+                        \(modulesField)
                         """)
                     counter.markLogged(
                         elapsedAt: elapsed, tokens: snap.tokens)

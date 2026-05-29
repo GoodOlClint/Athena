@@ -42,10 +42,24 @@ public protocol DecodeProgressCounter: AnyObject, Sendable {
     /// Default: no-op so conformers that don't care about prefill
     /// granularity stay valid.
     func recordPrefillChunk(completed: Int, total: Int)
+
+    /// M49.3 — annotate the current setup sub-stage so the heartbeat
+    /// reports `phase=setup:<stage>` (e.g. `setup:compile-dfa`,
+    /// `setup:build-vocab`) instead of just `phase=setup`. The setup
+    /// phase covers everything before the first prefill chunk lands:
+    /// chat prep, prompt tokenization, vocab-token build,
+    /// structured-index DFA compile, KV-cache init. A "stuck-in-setup"
+    /// heartbeat is unactionable without knowing which sub-step is
+    /// running — the DFA compile in particular can take minutes for a
+    /// large schema on a cache miss. Pass nil to clear the annotation
+    /// (typically via `defer`). Default: no-op so conformers that
+    /// don't care about setup granularity stay valid.
+    func setSetupStage(_ stage: String?)
 }
 
 extension DecodeProgressCounter {
     public func recordPrefillChunk(completed: Int, total: Int) {}
+    public func setSetupStage(_ stage: String?) {}
 }
 
 public enum DecodeProgress {
