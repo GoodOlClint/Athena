@@ -69,6 +69,13 @@ final class WeSpeakerModel {
         let input = mel.reshaped(1, mel.dim(0), mel.dim(1), 1)  // [1,T,80,1]
         let emb = network(input)
         eval(emb)
-        return emb[0].asArray(Float.self)
+        let out = emb[0].asArray(Float.self)
+        // End-of-call allocator-pool flush (M50.2). The wrapper module
+        // calls `embed` once per audio segment in a loop; without this,
+        // per-call ResNet activations accumulate in MLX's pool exactly
+        // like the embedder did pre-M46.6. `out` is already a Swift
+        // [Float] copy so nothing downstream needs the MLXArray.
+        MLX.Memory.clearCache()
+        return out
     }
 }

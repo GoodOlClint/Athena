@@ -210,3 +210,46 @@ final class WeSpeakerIntegrationTests: XCTestCase {
         }
     }
 }
+
+/// M50.2 — regression for the allocator-pool leak class M46.6 caught
+/// in the embedder. Drives many short speaker-embedding calls back-to-
+/// back and asserts MLX's pool stays bounded — without the per-call
+/// clear in `WeSpeakerModel.embed`, the pool grows N-proportionally
+/// with call count. Gated + heavy.
+final class WeSpeakerMemoryRegressionTests: XCTestCase {
+
+    func testEmbedPoolStaysBoundedAcrossManyCalls() async throws {
+        guard
+            ProcessInfo.processInfo.environment["ATHENA_RUN_MODEL_TESTS"]
+                == "1"
+        else { throw XCTSkip("set ATHENA_RUN_MODEL_TESTS=1 (heavy)") }
+
+        let model = try await WeSpeakerModel.fromPretrained(
+            "aufklarer/WeSpeaker-ResNet34-LM-MLX")
+        // 3 s of synthetic noise so the ResNet sees a full mel matrix
+        // (silence sometimes short-circuits the feature extractor). The
+        // leak is allocator-pool growth from the forward pass, not
+        // anything content-dependent — values don't matter.
+        var pcm = [Float](repeating: 0, count: 3 * 16_000)
+        var rng = SystemRandomNumberGenerator()
+        for i in 0..<pcm.count {
+            pcm[i] = Float(Int(rng.next() % 1000)) / 1000.0 - 0.5
+        }
+
+        // Warmup so first-call lazy allocations settle.
+        _ = model.embed(pcm)
+        MLX.Memory.clearCache()
+        let baseline = MLX.Memory.cacheMemory
+
+        for _ in 0..<22 { _ = model.embed(pcm) }
+
+        let after = MLX.Memory.cacheMemory
+        // Without M50.2's clear, the pool scales linearly with the
+        // ResNet per-call activations × 22.
+        let ceiling = 256 * 1024 * 1024
+        XCTAssertLessThan(
+            after - baseline, ceiling,
+            "MLX cache pool drifted \(after - baseline) bytes "
+            + "above baseline after 22 WeSpeaker embeds (M50.2 leak)")
+    }
+}
