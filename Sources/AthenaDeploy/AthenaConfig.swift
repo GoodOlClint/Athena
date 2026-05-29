@@ -110,15 +110,6 @@ public struct AthenaConfig: Sendable, Equatable {
     public var allProxy: String?
     public var noProxy: String?
     public var logDir: String
-    /// M49.5 — pre-compile ceiling on the number of unbounded inner
-    /// arrays a structured-output JSON schema may contain inside a
-    /// `maxItems`-bounded outer array. Above this, requests are
-    /// refused with a classified 400 `schema_too_complex` BEFORE the
-    /// outlines-core DFA compile begins (which can otherwise use
-    /// tens of GB of rust-shim heap on a pathological shape, OOMing
-    /// the box). Optional — absent ⇒ ships with the in-code default
-    /// (5); 0 disables the gate.
-    public var structuredMaxUnboundedSubarrays: Int?
 
     public init(
         listenHost: String, listenPort: Int, budgetBytes: Int?,
@@ -144,8 +135,7 @@ public struct AthenaConfig: Sendable, Equatable {
         encryptStore: Bool? = nil,
         httpsProxy: String? = nil, httpProxy: String? = nil,
         allProxy: String? = nil, noProxy: String? = nil,
-        logDir: String,
-        structuredMaxUnboundedSubarrays: Int? = nil
+        logDir: String
     ) {
         self.listenHost = listenHost
         self.listenPort = listenPort
@@ -181,8 +171,6 @@ public struct AthenaConfig: Sendable, Equatable {
         self.allProxy = allProxy
         self.noProxy = noProxy
         self.logDir = logDir
-        self.structuredMaxUnboundedSubarrays =
-            structuredMaxUnboundedSubarrays
     }
 
     public enum ParseError: Error, Equatable {
@@ -282,13 +270,6 @@ public struct AthenaConfig: Sendable, Equatable {
         if let vt = scalar("vector_ttl_secs", in: toml) {
             vectorTtl = try int("vector_ttl_secs", vt)
         }
-        var structMaxUnbounded: Int?
-        if let s = scalar(
-            "structured_max_unbounded_subarrays", in: toml)
-        {
-            structMaxUnbounded = try int(
-                "structured_max_unbounded_subarrays", s)
-        }
         let spec = scalar("speculative", in: toml).map { $0 == "true" }
         let preload = scalar("preload", in: toml).map { $0 == "true" }
         let dropReq = scalar("drop_request_content", in: toml).map {
@@ -332,8 +313,7 @@ public struct AthenaConfig: Sendable, Equatable {
             httpProxy: scalar("http_proxy", in: toml),
             allProxy: scalar("all_proxy", in: toml),
             noProxy: scalar("no_proxy", in: toml),
-            logDir: logDir,
-            structuredMaxUnboundedSubarrays: structMaxUnbounded)
+            logDir: logDir)
     }
 
     public static func parse(file url: URL) throws -> AthenaConfig {

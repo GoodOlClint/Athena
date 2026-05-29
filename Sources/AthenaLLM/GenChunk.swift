@@ -41,7 +41,7 @@ public enum FinishReason: String, Sendable {
 /// M49.5.2, a thrown classified error inside `generateMetered`'s catch
 /// became a fake `.text("[athena: generation failed: ...]")` event and
 /// the request returned 200 with the error stringified into the chat
-/// content — caught when v0.10.84's `schemaTooComplex` 400 came back
+/// content — caught when v0.10.84 classified schema-complexity 400 (removed in M53) came back
 /// as a 200 with the error message in `choices[0].message.content`.
 public enum GenChunk: Sendable {
     case text(String)

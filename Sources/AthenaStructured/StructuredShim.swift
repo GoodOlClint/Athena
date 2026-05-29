@@ -1,12 +1,14 @@
 import CAthenaStructured
 import Foundation
 
-/// Thin Swift surface over the Rust `outlines-core` structured-output
-/// shim. M3.1 is FFI bring-up only (version + last-error); the safe
-/// `StructuredGuide` (vocab/index/guide lifecycle, allowed-token mask,
-/// advance/rollback) lands in M3.2.
+/// Thin Swift surface over the Rust `llguidance` structured-output shim
+/// (M53 — replaced the `outlines-core` engine; same C ABI). Exposes the
+/// engine version + last-error; the safe `StructuredGuide`
+/// (vocab/index/guide lifecycle, allowed-token mask, advance) wraps the
+/// rest.
 public enum StructuredShim {
-    /// The pinned outlines-core version the shim is built against.
+    /// The pinned structured-output engine version the shim is built
+    /// against (e.g. `llguidance-1.7.5`).
     public static var version: String {
         guard let c = oc_version() else { return "" }
         return String(cString: c)

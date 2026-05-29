@@ -9,7 +9,7 @@ import MLXLMCommon
 /// …). M23 fork A: structured output / tool calls used to silently drop
 /// the schema for non-Qwen models (the `AthenaQwen35Model` vocab/guide
 /// casts returned nil → unconstrained text). This makes them honor the
-/// schema by masking logits to the outlines-core Guide.
+/// schema by masking logits to the structured-output Guide.
 ///
 /// Enforcement is from token 0 (matches the "structured ⇒ NO-THINK"
 /// operator decision): the mask forces a schema-valid opener (`{`/`[`)

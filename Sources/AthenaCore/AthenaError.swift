@@ -39,16 +39,6 @@ public enum AthenaError: Error, Sendable, Equatable {
     /// for embeddings would return wrong-dimension vectors, and never an
     /// arbitrary on-request download.
     case modelNotAvailable(requested: String, available: [String])
-    /// M49.5 — the structured-output JSON schema's shape would exceed the
-    /// operator-configured complexity ceiling for outlines-core's DFA
-    /// compile. Outlines-core's FSM state space scales combinatorially in
-    /// nested unbounded arrays under a bounded outer, so a schema with
-    /// (e.g.) `events.maxItems=30` containing 13 inner arrays without
-    /// `maxItems` can use tens of GB of rust-shim heap to compile. A
-    /// pre-compile gate refuses the request with an actionable 400 so the
-    /// daemon doesn't OOM. Operator override via
-    /// `structured_max_unbounded_subarrays` TOML key.
-    case schemaTooComplex(reason: String)
 
     /// HTTP status the serve path should return for this error.
     public var httpStatus: Int {
@@ -62,7 +52,6 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .audioSegmentInvalid: return 400
         case .requestTimedOut: return 504
         case .modelNotAvailable: return 400
-        case .schemaTooComplex: return 400
         }
     }
 
@@ -78,7 +67,6 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .audioSegmentInvalid: return "audio_segment_invalid"
         case .requestTimedOut: return "inference_timeout"
         case .modelNotAvailable: return "model_not_available"
-        case .schemaTooComplex: return "schema_too_complex"
         }
     }
 
@@ -129,8 +117,6 @@ public enum AthenaError: Error, Sendable, Equatable {
             return "Model '\(requested)' is not available. Configured "
                 + "models: "
                 + "\(available.dedupedCaseInsensitive().joined(separator: ", "))."
-        case let .schemaTooComplex(reason):
-            return reason
         }
     }
 

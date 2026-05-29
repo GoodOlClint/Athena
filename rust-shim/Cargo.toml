@@ -1,16 +1,22 @@
 # Athena structured-output shim — a thin C-ABI staticlib over
-# `outlines-core` (JSON-schema/regex/choice → DFA `Index`) plus a ported
-# Guide walker (the outlines-core Guide + 32-entry rollback ring lives
-# only behind its pyo3 feature, so it is reimplemented here from the
-# public `Index` primitives — NO pyo3, NO regex→DFA reimplementation).
+# `llguidance` (guidance-ai), a lazy/incremental grammar-constrained
+# decoding engine. It replaces the previous `outlines-core` full-DFA
+# precompile (M53): outlines materialised the entire schema→regex→DFA
+# over the full vocabulary before the first token, so a `maxItems`-bounded
+# outer array over a large item subschema unrolled into a state×vocab
+# cross-product (~150 GB of rust-shim heap on a 128 GB box). llguidance
+# parses incrementally — bounded repetition is a counter in the parser,
+# not unrolled states — so the same schema constructs in <0.3 s at <0.1 GB.
+#
+# Same C ABI as before (oc_vocab_* / oc_index_* / oc_guide_*) so the Swift
+# `AthenaStructured` surface is unchanged; only the engine behind it moves.
 #
 # host == target == arm64 macOS, so a plain `cargo build --release` .a +
-# a hand-written C header consumed by a SwiftPM target is sufficient
-# (no xcframework / lipo needed). `lib` crate-type kept so `cargo test`
-# can exercise the walker without FFI.
+# the hand-written C header consumed by a SwiftPM target is sufficient.
+# `lib` crate-type kept so `cargo test` can exercise the walker without FFI.
 [package]
 name = "athena-structured-shim"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 publish = false
 
@@ -19,7 +25,9 @@ name = "athena_structured_shim"
 crate-type = ["staticlib", "lib"]
 
 [dependencies]
-outlines-core = { version = "0.2.14", default-features = false }
+llguidance = "1.7.5"
+toktrie = "1.7.5"
+serde_json = "1.0"
 
 [profile.release]
 opt-level = 3

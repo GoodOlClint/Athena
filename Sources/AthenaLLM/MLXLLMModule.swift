@@ -101,20 +101,17 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     private var cachedVocabTokens:
         (tokens: [VocabToken], eos: UInt32, opener: [UInt32: UInt32])?
 
-    /// M49.1 — cached compiled `StructuredIndex` keyed by schema-JSON
-    /// string. outlines-core's `oc_index_from_schema` DFA compile is a
-    /// pure function of `(schemaJSON, vocabulary)`; both are stable
-    /// across requests when the loaded model is fixed and the consumer
-    /// reuses the same schema. Compile time scales with schema
-    /// complexity — a `maxItems`-constrained 11 KB extraction schema
-    /// can take ~60 s, paid once instead of every request.
-    /// Invalidated wherever `cachedVocabTokens` is — rebind changes
-    /// the vocabulary, which invalidates the cached DFA.
-    /// Single-entry (last schema wins); a schema-switching consumer
-    /// pays the recompile on every switch but never accumulates more
-    /// than one cached DFA.
-    private var cachedStructuredIndex:
-        (schemaJSON: String, index: StructuredIndex)?
+    /// M53 — cached per-model structured-output vocabulary + parser
+    /// factory (the llguidance token trie + vocab slicer). Building it
+    /// (~0.24 s) is the only non-trivial structured-output cost and is
+    /// schema-independent, so it is built once from `cachedVocabTokens`
+    /// and reused for every schema and every request. Invalidated
+    /// wherever `cachedVocabTokens` is — a rebind changes the vocabulary.
+    /// `@unchecked Sendable`, so it crosses into the `container.perform`
+    /// closure. The per-schema `StructuredIndex` is now ~1 ms (vs the old
+    /// ~60 s outlines DFA compile), so it is NOT cached — built fresh per
+    /// request from this factory.
+    private var cachedStructuredVocabulary: StructuredVocabulary?
 
     /// Governor-owned prompt-cache cap in bytes (0 ⇒ disabled). The
     /// per-token KV figure is derived from the model's own config.json so
@@ -122,16 +119,6 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     /// refusing early — the safe direction for an OOM guard. Brief 4b /
     /// M23 fork C.
     private let promptCacheCapBytes: Int
-    /// M49.5 — ceiling on the number of unbounded inner arrays a
-    /// structured-output JSON schema may contain inside a
-    /// `maxItems`-bounded outer array. Above this the request is
-    /// refused with `schema_too_complex` (400) BEFORE outlines-core
-    /// compiles, because the combinatorial DFA state space can use
-    /// tens of GB of rust-shim heap (caught on a 200 GB / 128 GB
-    /// runaway on 2026-05-29). Operator-tunable via
-    /// `structured_max_unbounded_subarrays` TOML key. 0 ⇒ no gate
-    /// (legacy behaviour).
-    private let structuredMaxUnboundedInnerArrays: Int
     /// Per-token KV upper bound fed to the governor's prompt-cache cap,
     /// derived from config.json (2·layers·kv_heads·head_dim·fp16) so it
     /// tracks the real KV geometry per arch; falls back to a conservative
@@ -152,17 +139,13 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     public init(
         modelDirectory: URL,
         parameters: LLMGenerationParameters = .init(),
-        promptCacheCapBytes: Int = 0,
-        structuredMaxUnboundedInnerArrays: Int =
-            SchemaComplexity.defaultMaxUnboundedInnerArrays
+        promptCacheCapBytes: Int = 0
     ) {
         self.init(
             modelDirectories: [modelDirectory],
             modelStoreRoot: modelDirectory.deletingLastPathComponent(),
             parameters: parameters,
-            promptCacheCapBytes: promptCacheCapBytes,
-            structuredMaxUnboundedInnerArrays:
-                structuredMaxUnboundedInnerArrays)
+            promptCacheCapBytes: promptCacheCapBytes)
     }
 
     /// M41.2: operator-declared list (first = default). Empty ⇒
@@ -174,9 +157,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         modelDirectories urls: [URL],
         modelStoreRoot: URL? = nil,
         parameters: LLMGenerationParameters = .init(),
-        promptCacheCapBytes: Int = 0,
-        structuredMaxUnboundedInnerArrays: Int =
-            SchemaComplexity.defaultMaxUnboundedInnerArrays
+        promptCacheCapBytes: Int = 0
     ) {
         precondition(
             !urls.isEmpty,
@@ -194,8 +175,6 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             .map { Self.estimateBytes(forModelAt: $0) }
             .max() ?? 0
         self.promptCacheCapBytes = promptCacheCapBytes
-        self.structuredMaxUnboundedInnerArrays =
-            structuredMaxUnboundedInnerArrays
 
         // Initial cap geometry seeded from the DEFAULT model; rebind
         // recomputes from the new model's config.
@@ -263,7 +242,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         container = nil
         residentName = nil
         cachedVocabTokens = nil
-        cachedStructuredIndex = nil  // M49.1 — mirror vocabTokens lifecycle
+        cachedStructuredVocabulary = nil  // M53 — mirror vocabTokens lifecycle
     }
 
     /// M41.2 — load `name`'s directory into `container` and (re)seed the
@@ -312,7 +291,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             container = nil
             residentName = nil
             cachedVocabTokens = nil
-        cachedStructuredIndex = nil  // M49.1 — mirror vocabTokens lifecycle
+        cachedStructuredVocabulary = nil  // M53 — mirror vocabTokens lifecycle
             throw error
         }
         // Refresh per-model geometry: vocab size + KV per-token bound
@@ -328,7 +307,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         // Different model ⇒ a fresh structured-vocab cache; the old
         // tokens belong to the previous tokenizer.
         cachedVocabTokens = nil
-        cachedStructuredIndex = nil  // M49.1 — mirror vocabTokens lifecycle
+        cachedStructuredVocabulary = nil  // M53 — mirror vocabTokens lifecycle
         container = loaded
         residentName = name
     }
@@ -363,7 +342,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         container = nil
         residentName = nil
         cachedVocabTokens = nil
-        cachedStructuredIndex = nil  // M49.1 — mirror vocabTokens lifecycle
+        cachedStructuredVocabulary = nil  // M53 — mirror vocabTokens lifecycle
         try await loadModel(name: target)
     }
 
@@ -388,7 +367,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             container = nil
             residentName = nil
             cachedVocabTokens = nil
-        cachedStructuredIndex = nil  // M49.1 — mirror vocabTokens lifecycle
+        cachedStructuredVocabulary = nil  // M53 — mirror vocabTokens lifecycle
         }
     }
 
@@ -476,13 +455,14 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                 } catch {
                     // M49.5.2 — classify and yield as a real .error event
                     // so the consumer can re-throw and the HTTP layer can
-                    // map to the right status (e.g. 400 schema_too_complex,
-                    // 503 metal_oom, 504 inference_timeout). Pre-M49.5.2
-                    // this swallowed the throw into a fake .text response
-                    // and the request returned 200 with the error
-                    // stringified into the chat content — confirmed when
-                    // v0.10.84's schemaTooComplex landed in the response
-                    // body instead of being a 400.
+                    // map to the right status (e.g. 503 metal_oom, 504
+                    // inference_timeout, 400 model_not_available). Pre-
+                    // M49.5.2 this swallowed the throw into a fake .text
+                    // response and the request returned 200 with the error
+                    // stringified into the chat content — confirmed when a
+                    // classified 400 (the v0.10.84 schema-complexity refusal,
+                    // since removed in M53) landed in the response body
+                    // instead of being a real 400.
                     let classified =
                         (error as? AthenaError)
                         ?? AthenaError.classify(error, module: .llm)
@@ -632,86 +612,44 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         }
         let vocabTokens = cachedVocabTokens
 
-        // M49.1 — compile (or reuse) the schema's DFA outside the main
-        // `container.perform { ... }` block so the cached
-        // `StructuredIndex` is captured as an immutable `let` into the
-        // worker closure (StructuredIndex is `@unchecked Sendable`
-        // post-construction; the DFA is read-only). the consuming application's
-        // workload sends the same extraction schema for every email,
-        // so this collapses the per-request ~60 s outlines-core
-        // recompile down to a single one-time compile per
-        // (schema, model) pair. Pure CPU work, no model context
-        // required for the compile itself.
+        // M53 — build (once per model) the structured vocabulary + parser
+        // factory, then a FRESH per-request `StructuredIndex` from it. The
+        // factory build (~0.24 s, the only non-trivial cost) is pure CPU
+        // and schema-independent, so it lives outside the main
+        // `container.perform { ... }` block and is cached across requests
+        // (`StructuredVocabulary` is `@unchecked Sendable` — its factory is
+        // immutable and internally `Arc`-shared, so guides can be spawned
+        // from it concurrently). The per-schema `StructuredIndex` is now
+        // ~1 ms (vs the old ~60 s outlines DFA compile), so it is built per
+        // request rather than cached — and llguidance parses incrementally,
+        // so a `maxItems`-bounded schema can no longer blow up memory (the
+        // old complexity gate is gone).
         let structuredIndex: StructuredIndex? = try {
             guard let schemaJSON, let vt = vocabTokens else {
                 return nil
             }
-            if let hit = cachedStructuredIndex,
-                hit.schemaJSON == schemaJSON
-            {
-                Self.log.debug(
+            let vocabulary: StructuredVocabulary
+            if let cached = cachedStructuredVocabulary {
+                vocabulary = cached
+            } else {
+                // M53: annotate the heartbeat as `setup:build-factory` for
+                // the one-time per-model vocab-slicer build.
+                DecodeProgress.counter?.setSetupStage("build-factory")
+                defer { DecodeProgress.counter?.setSetupStage(nil) }
+                let factoryT0 = Date()
+                vocabulary = try StructuredVocabulary(
+                    tokens: vt.tokens, eosTokenId: vt.eos)
+                cachedStructuredVocabulary = vocabulary
+                Self.log.notice(
                     """
-                    structured-index cache hit \
-                    schema_bytes=\(schemaJSON.utf8.count)
+                    structured factory built elapsed=\
+                    \(String(format: "%.2f", Date().timeIntervalSince(factoryT0)))s \
+                    vocab_tokens=\(vt.tokens.count)
                     """,
                     metadata: ["function": "runSpeculative"])
-                return hit.index
             }
-            // M49.5 — refuse pathological schemas BEFORE outlines-core
-            // sees them. The combinatorial blowup (bounded outer +
-            // many unbounded inner arrays) is invisible at the schema
-            // bytes level but well-defined structurally; the gate is
-            // tunable so an operator who wants to accept the memory
-            // risk can opt in via TOML. Threshold 0 ⇒ disabled.
-            if structuredMaxUnboundedInnerArrays > 0,
-                let analysis = SchemaComplexity.analyze(schemaJSON),
-                analysis.unboundedInnerArrays
-                    > structuredMaxUnboundedInnerArrays
-            {
-                let reason = SchemaComplexity.tooComplexReason(
-                    analysis, max: structuredMaxUnboundedInnerArrays)
-                Self.log.warning(
-                    """
-                    structured-index compile refused: \(reason) \
-                    schema_bytes=\(analysis.schemaBytes) \
-                    bounded=\(analysis.boundedArrays) \
-                    unbounded_inner=\(analysis.unboundedInnerArrays)
-                    """,
-                    metadata: ["function": "runSpeculative"])
-                throw AthenaError.schemaTooComplex(reason: reason)
-            }
-            Self.log.notice(
-                """
-                structured-index cache miss; compiling DFA \
-                schema_bytes=\(schemaJSON.utf8.count) — first request \
-                with this schema pays the compile, subsequent requests \
-                reuse the cached index
-                """,
-                metadata: ["function": "runSpeculative"])
-            // M49.3: annotate the heartbeat phase as
-            // `setup:compile-dfa` for the duration of the outlines-core
-            // compile, and log the elapsed time at completion. The
-            // compile can take 60+ s for an 11 KB schema with
-            // maxItems-constrained arrays; without these the heartbeat
-            // just says `phase=setup tokens=0` for the full duration
-            // and the operator can't tell legitimate compile from a
-            // wedge.
-            DecodeProgress.counter?.setSetupStage("compile-dfa")
-            defer { DecodeProgress.counter?.setSetupStage(nil) }
-            let compileT0 = Date()
-            let vocab = try StructuredVocabulary(
-                tokens: vt.tokens, eosTokenId: vt.eos)
-            let index = try StructuredIndex(
-                jsonSchema: schemaJSON, vocabulary: vocab)
-            cachedStructuredIndex = (schemaJSON, index)
-            Self.log.notice(
-                """
-                structured-index compiled elapsed=\
-                \(String(format: "%.1f", Date().timeIntervalSince(compileT0)))s \
-                schema_bytes=\(schemaJSON.utf8.count)
-                """,
-                metadata: ["function": "runSpeculative"])
-            return index
+            return try StructuredIndex(
+                jsonSchema: schemaJSON, vocabulary: vocabulary)
         }()
 
         let cfgVocab = configVocabSize

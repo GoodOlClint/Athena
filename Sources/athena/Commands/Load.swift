@@ -476,15 +476,10 @@ struct Load: AsyncParsableCommand {
         // `model_allowlist` table (seeded above from CLI flags on first
         // boot). The default is `llmIds[0]` / etc. — already
         // DB-default-first.
-        // M49.5: pre-compile schema-complexity ceiling for structured
-        // output (TOML key `structured_max_unbounded_subarrays`).
-        // Default = SchemaComplexity.defaultMaxUnboundedInnerArrays
-        // (currently 5); 0 disables the gate. Operator can lift to
-        // accept the rust-shim heap risk for known-pathological
-        // schemas. Resolved once at startup.
-        let structuredMaxUnboundedInnerArrays =
-            tomlCfg?.structuredMaxUnboundedSubarrays
-                ?? SchemaComplexity.defaultMaxUnboundedInnerArrays
+        // M53: the structured-output engine (llguidance) parses
+        // incrementally, so a `maxItems`-bounded schema can no longer blow
+        // up memory — the M49.5 pre-compile complexity gate and its
+        // `structured_max_unbounded_subarrays` TOML key are gone.
         let llm: any LLMModule
         switch engine {
         case .stub:
@@ -498,9 +493,7 @@ struct Load: AsyncParsableCommand {
                     temperature: Float(temperature ?? 0.7),
                     speculative: speculative,
                     kvCompression: kvCompression),
-                promptCacheCapBytes: config.promptCacheCapBytes,
-                structuredMaxUnboundedInnerArrays:
-                    structuredMaxUnboundedInnerArrays)
+                promptCacheCapBytes: config.promptCacheCapBytes)
         }
         let embedding: any EmbeddingModule
         switch engine {

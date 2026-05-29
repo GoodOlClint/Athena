@@ -27,7 +27,7 @@ public func withInferenceDeadline<T: Sendable>(
 /// a real one-second sleep.
 ///
 /// M49.5.2 — `body` is now throwing so the consumer can propagate
-/// classified errors (e.g. `schemaTooComplex`) without losing them
+/// classified errors (e.g. `requestTimedOut`) without losing them
 /// through a non-throwing wrapper. The timer task's own throw of
 /// `timeout` continues to race the body's completion exactly as before.
 func withDeadlineNanos<T: Sendable>(

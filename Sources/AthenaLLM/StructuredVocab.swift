@@ -2,11 +2,12 @@ import AthenaStructured
 import Foundation
 import MLXLMCommon
 
-/// Builds the outlines-core `VocabToken` set from the *model's own*
-/// tokenizer so the byte mapping matches exactly (a mismatch makes
-/// `Index::new` fail with `IncompatibleVocabulary`). Per-token bytes =
-/// the UTF-8 of decoding that single id (special tokens kept), mirroring
-/// the Python reference's `convert_tokens_to_string([token])`.
+/// Builds the structured-output `VocabToken` set from the *model's own*
+/// tokenizer so the byte mapping matches exactly (a mismatch would make
+/// the guide mask the wrong tokens). Per-token bytes = the UTF-8 of
+/// decoding that single id (special tokens kept), mirroring the Python
+/// reference's `convert_tokens_to_string([token])`. The shim builds the
+/// llguidance token trie from these (M53).
 enum StructuredVocab {
     static func tokens(
         tokenizer: any Tokenizer, vocabSize: Int

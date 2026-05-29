@@ -1,8 +1,8 @@
 import Foundation
 
 /// Type-erased JSON value — captures an arbitrary user-supplied schema
-/// object so it can be round-tripped and re-serialized to the string the
-/// outlines-core shim expects.
+/// object so it can be round-tripped and re-serialized to the JSON-schema
+/// string the structured-output shim compiles.
 public indirect enum JSONValue: Codable, Sendable, Equatable {
     case null
     case bool(Bool)

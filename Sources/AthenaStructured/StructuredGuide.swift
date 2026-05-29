@@ -12,7 +12,8 @@ public struct StructuredError: Error, CustomStringConvertible {
 
 /// A token's id and the decoded bytes the model emits for it. The caller
 /// builds these from the *model's own* tokenizer so the byte mapping
-/// matches exactly (mismatch ⇒ outlines-core `IncompatibleVocabulary`).
+/// matches exactly (a mismatch would make the guide mask the wrong
+/// tokens); the shim builds the llguidance token trie from these.
 public struct VocabToken: Sendable {
     public let id: UInt32
     public let bytes: [UInt8]
@@ -22,9 +23,14 @@ public struct VocabToken: Sendable {
     }
 }
 
-/// Owned outlines-core vocabulary. Reference type: frees the Rust handle
-/// on deinit. Not Sendable — confine to one isolation domain.
-public final class StructuredVocabulary {
+/// Owned per-model vocabulary + parser factory (the llguidance token trie
+/// + vocab slicer). Building it is the only non-trivial structured-output
+/// cost (~0.24 s) and is schema-independent, so cache one per loaded model
+/// rather than rebuilding per request. Reference type: frees the Rust
+/// handle on deinit. `@unchecked Sendable` so the cached factory can be
+/// held across the model actor's isolation domain — the underlying
+/// `ParserFactory` is immutable and internally `Arc`-shared (M53).
+public final class StructuredVocabulary: @unchecked Sendable {
     let ptr: OpaquePointer
 
     public init(tokens: [VocabToken], eosTokenId: UInt32) throws {
@@ -64,13 +70,15 @@ public final class StructuredVocabulary {
     /// Maps a whitespace-prefixed JSON-opener token id → the bare opener
     /// token id with the same bytes minus leading ASCII whitespace
     /// (` {` → `{`, ` {"` → `{"`). Schema-independent — depends only on
-    /// the model vocab, so build once per model. Lets deferred
-    /// enforcement honor the model's opener when it is emitted as a
-    /// single space-prefixed token: outlines-core anchors the JSON root
-    /// at `{`/`[` with no leading whitespace, so the raw token has no
-    /// start transition and the real opener would otherwise be dropped
-    /// (issue #2). Restricted to `{`/`[` openers so the result stays
-    /// tiny and the intent is unambiguous.
+    /// the model vocab, so build once per model. A defensive fallback for
+    /// the deferred-enforcement opener probe (issue #2): the old
+    /// outlines-core engine anchored the JSON root at `{`/`[` with no
+    /// leading whitespace, so a single space-prefixed opener token had no
+    /// start transition and was dropped. llguidance allows leading
+    /// whitespace in-grammar, so a ` {` token advances natively and this
+    /// alias is normally never consulted — kept (inert-but-safe) so the
+    /// IDLE→ENFORCING boundary still works if an engine is stricter.
+    /// Restricted to `{`/`[` openers so the result stays tiny.
     public static func openerAliases(
         tokens: [VocabToken]
     ) -> [UInt32: UInt32] {
@@ -95,21 +103,25 @@ public final class StructuredVocabulary {
     }
 }
 
-/// Owned compiled DFA index (from a regex or a JSON schema).
+/// A JSON schema bound to a model's parser factory (llguidance). Cheap to
+/// build (~1 ms): it parses the schema and shares a handle on the
+/// per-model factory held by `vocabulary`. A fresh per-request
+/// `StructuredGuide` (`oc_guide_new`) spawns a stateful parser from it.
 ///
-/// `@unchecked Sendable` because the compiled DFA is immutable
-/// post-construction — `oc_index_from_schema` / `oc_index_from_regex`
-/// produce a read-only structure that the per-request `StructuredGuide`
-/// walks with its own state. No method on `StructuredIndex` mutates
-/// the underlying outlines-core data; the only operation is
-/// `oc_guide_new(index.ptr)` which copies the relevant DFA edges into
-/// a fresh walker. Safe to share across isolation domains — and M49.1
-/// requires it so the compiled DFA can be cached on `MLXLLMModule`
-/// and reused across requests without recompiling on every call.
+/// `@unchecked Sendable` because the index is immutable post-construction
+/// and the shared factory is internally `Arc`-based and thread-safe (the
+/// shim asserts `ParserFactory: Send + Sync` at compile time), so
+/// `oc_guide_new` may be called concurrently. Since the per-schema build
+/// is now ~1 ms (vs the old ~60 s outlines DFA compile), the M49.1
+/// per-schema cache is no longer worth carrying — the per-model factory in
+/// `vocabulary` is the artifact worth caching (M53).
 public final class StructuredIndex: @unchecked Sendable {
     let ptr: OpaquePointer
     let vocab: StructuredVocabulary  // keep alive
 
+    /// Unused — llguidance is grammar-based and the shim does not expose a
+    /// raw-regex compile (`oc_index_from_regex` always fails). Retained for
+    /// ABI symmetry; throws if called.
     public init(regex: String, vocabulary: StructuredVocabulary) throws {
         guard let p = regex.withCString({ oc_index_from_regex($0, vocabulary.ptr) })
         else { throw StructuredError("index from regex") }
