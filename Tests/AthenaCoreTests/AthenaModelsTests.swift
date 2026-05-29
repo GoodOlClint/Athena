@@ -1,4 +1,5 @@
 import Foundation
+import MLX
 import XCTest
 
 @testable import AthenaModels
@@ -51,5 +52,52 @@ final class AthenaModelsConfigTests: XCTestCase {
         XCTAssertEqual(cfg.modelType, "qwen3_5")
         XCTAssertEqual(cfg.textConfig.hiddenSize, 2048)
         XCTAssertEqual(cfg.textConfig.fullAttentionInterval, 4)  // default
+    }
+}
+
+/// M50.4 — regression for the allocator-pool leak class M46.6 caught
+/// in the embedder. The TriAttention scorer fires per attention layer
+/// during eviction passes on long-context decode (every `divideLength`
+/// tokens past `kvBudget`); without the end-of-call clear, per-layer
+/// norm MLXArrays accumulate across the eviction batch. Pure-MLX
+/// synthetic inputs, no model load — gated only by MLX/Metal.
+final class TriAttentionScorerMemoryRegressionTests: XCTestCase {
+
+    func testScoreKeysPoolStaysBoundedAcrossManyCalls() throws {
+        guard
+            ProcessInfo.processInfo.environment["ATHENA_RUN_MODEL_TESTS"]
+                == "1"
+        else { throw XCTSkip("set ATHENA_RUN_MODEL_TESTS=1 (needs MLX/Metal)") }
+
+        // Representative shape: [B=1, kvHeads=8, seqLen=1024, headDim=128]
+        // — close to a real per-layer KV slice on a mid-sized model.
+        // Plain float fill avoids an MLXRandom dependency in the test
+        // target (mirrors WeSpeakerTests' approach).
+        let n = 1 * 8 * 1024 * 128
+        var rng = SystemRandomNumberGenerator()
+        var raw = [Float](repeating: 0, count: n)
+        for i in 0..<n {
+            raw[i] = Float(Int(rng.next() % 1000)) / 1000.0 - 0.5
+        }
+        let keys = MLXArray(raw, [1, 8, 1024, 128])
+
+        // Warmup so first-call lazy allocations settle.
+        _ = TriAttentionScorer.scoreKeys(keys, aggregation: .mean)
+        MLX.Memory.clearCache()
+        let baseline = MLX.Memory.cacheMemory
+
+        // 32 scorer calls = an eviction sweep over ~32 layers.
+        for _ in 0..<32 {
+            _ = TriAttentionScorer.scoreKeys(keys, aggregation: .mean)
+        }
+
+        let after = MLX.Memory.cacheMemory
+        // Without M50.4's clear, the pool scales with the per-layer
+        // norm-tensor footprint × 32.
+        let ceiling = 64 * 1024 * 1024
+        XCTAssertLessThan(
+            after - baseline, ceiling,
+            "MLX cache pool drifted \(after - baseline) bytes "
+            + "above baseline after 32 scoreKeys calls (M50.4 leak)")
     }
 }

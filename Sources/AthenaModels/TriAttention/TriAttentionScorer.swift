@@ -30,6 +30,14 @@ enum TriAttentionScorer {
         // Decode batch is 1; reduce any batch dim by mean defensively.
         let reduced = perPos.dim(0) == 1 ? perPos[0] : perPos.mean(axis: 0)
         reduced.eval()
-        return reduced.asArray(Float.self)
+        let scores = reduced.asArray(Float.self)
+        // End-of-call allocator-pool flush (M50.4). The scorer fires
+        // per attention layer during eviction passes on long-context
+        // decode (every `divideLength` tokens); without this clear the
+        // per-layer norms accumulate across the eviction batch. `scores`
+        // is already a Swift [Float] copy so nothing downstream needs
+        // the MLXArrays.
+        MLX.Memory.clearCache()
+        return scores
     }
 }
