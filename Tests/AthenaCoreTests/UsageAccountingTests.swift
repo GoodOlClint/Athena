@@ -33,6 +33,7 @@ final class UsageAccountingTests: XCTestCase {
             case .text(let t): text += t
             case .usage(let u): usages.append(u)
             case .finish: break
+            case .error(let e): XCTFail("stub should not error: \(e)")
             }
         }
         XCTAssertFalse(text.isEmpty, "stub still streams text")
@@ -67,6 +68,7 @@ final class UsageAccountingTests: XCTestCase {
                 case .text(let t): text += t
                 case .usage(let u): completion = u.completionTokens
                 case .finish(let r): finish = r
+                case .error(let e): XCTFail("stub should not error: \(e)")
                 }
             }
             return (text, completion, finish)

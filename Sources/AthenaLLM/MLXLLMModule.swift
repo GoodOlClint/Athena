@@ -474,10 +474,19 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                             usage.completionTokens >= cap
                                 ? .length : .stop))
                 } catch {
-                    continuation.yield(
-                        .text("[athena: generation failed: \(error)]"))
-                    continuation.yield(.usage(.zero))
-                    continuation.yield(.finish(.stop))
+                    // M49.5.2 — classify and yield as a real .error event
+                    // so the consumer can re-throw and the HTTP layer can
+                    // map to the right status (e.g. 400 schema_too_complex,
+                    // 503 metal_oom, 504 inference_timeout). Pre-M49.5.2
+                    // this swallowed the throw into a fake .text response
+                    // and the request returned 200 with the error
+                    // stringified into the chat content — confirmed when
+                    // v0.10.84's schemaTooComplex landed in the response
+                    // body instead of being a 400.
+                    let classified =
+                        (error as? AthenaError)
+                        ?? AthenaError.classify(error, module: .llm)
+                    continuation.yield(.error(classified))
                 }
                 continuation.finish()
             }

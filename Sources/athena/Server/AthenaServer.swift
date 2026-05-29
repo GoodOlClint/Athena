@@ -1300,7 +1300,7 @@ struct AthenaServer {
             // for the substrate-streamed (non-Guide) path, which emits
             // per-token `.text` events; those paths leave the TaskLocal
             // untouched so no double-counting happens.
-            await DecodeProgress.$counter.withValue(counter) {
+            try await DecodeProgress.$counter.withValue(counter) {
                 let events = eventsBuilder()
                 for await event in events {
                     switch event {
@@ -1309,6 +1309,12 @@ struct AthenaServer {
                         counter.incrementToken()
                     case .usage(let u): c.usage = u
                     case .finish(let r): c.finish = r
+                    case .error(let athenaErr):
+                        // M49.5.2 — re-throw the classified error so the
+                        // HTTP layer's `do { ... } catch let e as AthenaError`
+                        // returns the right status/code instead of a 200
+                        // with the error text in the chat content.
+                        throw athenaErr
                     }
                 }
             }
@@ -4631,6 +4637,28 @@ struct AthenaServer {
                         // A stop-sequence hit wins over the generator's
                         // own length/stop reason.
                         if !stopFilter.stopped { finish = r }
+                    case .error(let athenaErr):
+                        // M49.5.2 — streaming-mode error: the HTTP 200
+                        // + headers were already sent, so we can't
+                        // change the status. Emit an OpenAI-style error
+                        // SSE event then break to let the [DONE] tail
+                        // close the stream cleanly. The non-streaming
+                        // path (collectMetered) re-throws and the HTTP
+                        // layer maps to the right status code; only the
+                        // streaming path has to surface it inline.
+                        let body = APIErrorBody(
+                            error: .init(
+                                message: athenaErr.message,
+                                type: "server_error",
+                                code: athenaErr.code))
+                        if let data = try? JSONEncoder().encode(body) {
+                            var buf = ByteBuffer()
+                            buf.writeString("data: ")
+                            buf.writeBytes(data)
+                            buf.writeString("\n\n")
+                            continuation.yield(buf)
+                        }
+                        finish = .stop
                     }
                 }
                 if stopFilter.isActive && !stopFilter.stopped {

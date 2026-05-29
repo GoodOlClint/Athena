@@ -1,3 +1,5 @@
+import AthenaCore
+
 /// True per-request token accounting for a single generation (M27.1).
 /// `prompt` is the tokenized input length the model actually consumed;
 /// `completion` is the number of tokens it emitted. Carried out of the
@@ -31,8 +33,19 @@ public enum FinishReason: String, Sendable {
 /// single terminal `.finish` carrying the stop reason (M31.2), once the
 /// model has finished. Callers that don't need usage/finish consume the
 /// String `generate` overloads, which are thin filters over this.
+///
+/// M49.5.2 — `.error` is a terminal alternative to `.finish`: the
+/// generation aborted before producing a complete result, the carried
+/// `AthenaError` is already classified, and the consumer MUST re-throw
+/// it so the HTTP layer can return the right status / code. Before
+/// M49.5.2, a thrown classified error inside `generateMetered`'s catch
+/// became a fake `.text("[athena: generation failed: ...]")` event and
+/// the request returned 200 with the error stringified into the chat
+/// content — caught when v0.10.84's `schemaTooComplex` 400 came back
+/// as a 200 with the error message in `choices[0].message.content`.
 public enum GenChunk: Sendable {
     case text(String)
     case usage(TokenUsage)
     case finish(FinishReason)
+    case error(AthenaError)
 }

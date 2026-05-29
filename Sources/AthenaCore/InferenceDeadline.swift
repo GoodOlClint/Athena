@@ -14,9 +14,9 @@ import Foundation
 /// underlying model task, that cancellation propagates down to the decode.
 public func withInferenceDeadline<T: Sendable>(
     seconds: Int,
-    _ body: @Sendable @escaping () async -> T
+    _ body: @Sendable @escaping () async throws -> T
 ) async throws -> T {
-    guard seconds > 0 else { return await body() }
+    guard seconds > 0 else { return try await body() }
     return try await withDeadlineNanos(
         UInt64(seconds) * 1_000_000_000,
         timeout: .requestTimedOut(seconds: seconds), body)
@@ -25,19 +25,25 @@ public func withInferenceDeadline<T: Sendable>(
 /// Nanosecond core of ``withInferenceDeadline(seconds:_:)``. Internal so
 /// the deadline race can be unit-tested at sub-second granularity without
 /// a real one-second sleep.
+///
+/// M49.5.2 — `body` is now throwing so the consumer can propagate
+/// classified errors (e.g. `schemaTooComplex`) without losing them
+/// through a non-throwing wrapper. The timer task's own throw of
+/// `timeout` continues to race the body's completion exactly as before.
 func withDeadlineNanos<T: Sendable>(
     _ nanos: UInt64, timeout: AthenaError,
-    _ body: @Sendable @escaping () async -> T
+    _ body: @Sendable @escaping () async throws -> T
 ) async throws -> T {
     try await withThrowingTaskGroup(of: T.self) { group in
-        group.addTask { await body() }
+        group.addTask { try await body() }
         group.addTask {
             try await Task.sleep(nanoseconds: nanos)
             throw timeout
         }
         // First child to finish wins: the body's result, or the timer's
-        // throw. Cancelling the group tears down the loser — the body
-        // task on timeout (stopping generation), the timer on success.
+        // throw, or the body's own throw. Cancelling the group tears
+        // down the loser — the body task on timeout (stopping
+        // generation), the timer on success or body-throw.
         let result = try await group.next()!
         group.cancelAll()
         return result
