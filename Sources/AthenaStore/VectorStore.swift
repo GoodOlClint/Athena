@@ -108,6 +108,12 @@ public actor VectorStore {
         let scores = MLX.matmul(mNorm, qNorm).reshaped([n])
         scores.eval()
         let s = scores.asArray(Float.self)
+        // End-of-query allocator-pool flush (M50.5). Each query builds
+        // an N×dim resident matrix + norms + matmul intermediates; over
+        // sustained search load those accumulate in MLX's pool exactly
+        // like the embedder did pre-M46.6. `s` is already a Swift
+        // [Float] so the ranking below doesn't need the MLXArrays.
+        MLX.Memory.clearCache()
         return zip(cache, s)
             .map { Hit(id: $0.0.id, score: $0.1, metadata: $0.0.meta) }
             .sorted { $0.score > $1.score }
