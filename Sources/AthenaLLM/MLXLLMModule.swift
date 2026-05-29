@@ -122,6 +122,16 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     /// refusing early — the safe direction for an OOM guard. Brief 4b /
     /// M23 fork C.
     private let promptCacheCapBytes: Int
+    /// M49.5 — ceiling on the number of unbounded inner arrays a
+    /// structured-output JSON schema may contain inside a
+    /// `maxItems`-bounded outer array. Above this the request is
+    /// refused with `schema_too_complex` (400) BEFORE outlines-core
+    /// compiles, because the combinatorial DFA state space can use
+    /// tens of GB of rust-shim heap (caught on a 200 GB / 128 GB
+    /// runaway on 2026-05-29). Operator-tunable via
+    /// `structured_max_unbounded_subarrays` TOML key. 0 ⇒ no gate
+    /// (legacy behaviour).
+    private let structuredMaxUnboundedInnerArrays: Int
     /// Per-token KV upper bound fed to the governor's prompt-cache cap,
     /// derived from config.json (2·layers·kv_heads·head_dim·fp16) so it
     /// tracks the real KV geometry per arch; falls back to a conservative
@@ -142,13 +152,17 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     public init(
         modelDirectory: URL,
         parameters: LLMGenerationParameters = .init(),
-        promptCacheCapBytes: Int = 0
+        promptCacheCapBytes: Int = 0,
+        structuredMaxUnboundedInnerArrays: Int =
+            SchemaComplexity.defaultMaxUnboundedInnerArrays
     ) {
         self.init(
             modelDirectories: [modelDirectory],
             modelStoreRoot: modelDirectory.deletingLastPathComponent(),
             parameters: parameters,
-            promptCacheCapBytes: promptCacheCapBytes)
+            promptCacheCapBytes: promptCacheCapBytes,
+            structuredMaxUnboundedInnerArrays:
+                structuredMaxUnboundedInnerArrays)
     }
 
     /// M41.2: operator-declared list (first = default). Empty ⇒
@@ -160,7 +174,9 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         modelDirectories urls: [URL],
         modelStoreRoot: URL? = nil,
         parameters: LLMGenerationParameters = .init(),
-        promptCacheCapBytes: Int = 0
+        promptCacheCapBytes: Int = 0,
+        structuredMaxUnboundedInnerArrays: Int =
+            SchemaComplexity.defaultMaxUnboundedInnerArrays
     ) {
         precondition(
             !urls.isEmpty,
@@ -178,6 +194,8 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             .map { Self.estimateBytes(forModelAt: $0) }
             .max() ?? 0
         self.promptCacheCapBytes = promptCacheCapBytes
+        self.structuredMaxUnboundedInnerArrays =
+            structuredMaxUnboundedInnerArrays
 
         // Initial cap geometry seeded from the DEFAULT model; rebind
         // recomputes from the new model's config.
@@ -629,6 +647,29 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                     """,
                     metadata: ["function": "runSpeculative"])
                 return hit.index
+            }
+            // M49.5 — refuse pathological schemas BEFORE outlines-core
+            // sees them. The combinatorial blowup (bounded outer +
+            // many unbounded inner arrays) is invisible at the schema
+            // bytes level but well-defined structurally; the gate is
+            // tunable so an operator who wants to accept the memory
+            // risk can opt in via TOML. Threshold 0 ⇒ disabled.
+            if structuredMaxUnboundedInnerArrays > 0,
+                let analysis = SchemaComplexity.analyze(schemaJSON),
+                analysis.unboundedInnerArrays
+                    > structuredMaxUnboundedInnerArrays
+            {
+                let reason = SchemaComplexity.tooComplexReason(
+                    analysis, max: structuredMaxUnboundedInnerArrays)
+                Self.log.warning(
+                    """
+                    structured-index compile refused: \(reason) \
+                    schema_bytes=\(analysis.schemaBytes) \
+                    bounded=\(analysis.boundedArrays) \
+                    unbounded_inner=\(analysis.unboundedInnerArrays)
+                    """,
+                    metadata: ["function": "runSpeculative"])
+                throw AthenaError.schemaTooComplex(reason: reason)
             }
             Self.log.notice(
                 """

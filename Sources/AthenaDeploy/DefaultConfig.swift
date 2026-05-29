@@ -53,6 +53,12 @@ public enum DefaultConfig {
         # KV-cache compression: "none" | "turboquant" | "triattention".
         # kv_compression = "none"
         # vector_cap_bytes = 4294967296
+        # M49.5 — structured-output schema complexity gate. Refuses a
+        # JSON schema whose unbounded inner arrays nested inside a
+        # `maxItems`-bounded outer exceed this count (the shape that
+        # makes outlines-core's DFA compile explode into tens of GB of
+        # heap). 0 disables the gate; commented ⇒ default 5.
+        # structured_max_unbounded_subarrays = 5
 
 
         # ── Storage ──────────────────────────────────────────────────
