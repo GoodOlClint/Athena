@@ -19,6 +19,9 @@ public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule,
     private let estimatedBytes: Int
     private var model: WeSpeakerModel?
     private var residentId: String?
+    /// Model-store root (M54) — local-store-dir load when materialized,
+    /// so bare name or full HF id both work. nil ⇒ Hub-by-id fallback.
+    private let modelStoreRoot: URL?
 
     /// - Parameters:
     ///   - modelIds: HF id allowlist (first = default). Default
@@ -31,6 +34,7 @@ public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule,
     ///     M5 reconciles to the real footprint post-load.
     public init(
         modelIds: [String] = ["aufklarer/WeSpeaker-ResNet34-LM-MLX"],
+        modelStoreRoot: URL? = nil,
         estimatedBytes: Int = 512 * 1024 * 1024
     ) {
         precondition(
@@ -38,6 +42,7 @@ public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule,
             "MLXSpeakerEmbeddingModule needs at least one model id")
         self.allowedIds = modelIds
         self.defaultId = modelIds[0]
+        self.modelStoreRoot = modelStoreRoot
         self.estimatedBytes = estimatedBytes
     }
 
@@ -58,15 +63,23 @@ public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule,
     }
 
     private func loadModel(id: String) async throws {
-        // M46.4 — case-insensitive lookup; canonical id from storage.
+        // M54 — match by store-dir identity (bare name or full HF id).
         guard let canonical =
-            allowedIds.canonicalCaseInsensitive(id)
+            allowedIds.canonicalByStoreIdentity(id)
         else {
             throw AthenaError.modelNotAvailable(
                 requested: id, available: allowedIds)
         }
         do {
-            model = try await WeSpeakerModel.fromPretrained(canonical)
+            // M54 — local-store-dir load when materialized, else Hub.
+            if let dir = ModelStoreLayout.localDirectory(
+                for: canonical, storeRoot: modelStoreRoot)
+            {
+                model = try WeSpeakerModel.fromModelDirectory(
+                    dir.resolvingSymlinksInPath())
+            } else {
+                model = try await WeSpeakerModel.fromPretrained(canonical)
+            }
             residentId = canonical
         } catch {
             model = nil
@@ -89,9 +102,9 @@ public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule,
     public func residentModelId() -> String? { residentId }
     public func rebind(to id: String?) async throws {
         let requested = id ?? defaultId
-        // M46.4 — case-insensitive lookup; canonical id from storage.
+        // M54 — match by store-dir identity (bare name or full HF id).
         guard let target =
-            allowedIds.canonicalCaseInsensitive(requested)
+            allowedIds.canonicalByStoreIdentity(requested)
         else {
             throw AthenaError.modelNotAvailable(
                 requested: requested, available: allowedIds)

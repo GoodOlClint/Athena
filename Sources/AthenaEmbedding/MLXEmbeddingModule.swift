@@ -71,22 +71,11 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
         self.estimatedBytes = estimatedBytes
     }
 
-    /// Resolve a model id to a LOCAL store directory if it is materialized
-    /// there, so loading can go through `ModelConfiguration(directory:)`
-    /// (no Hub round-trip) — the same local-first resolution the LLM
-    /// module uses. Accepts the bare store-dir name OR the full HF id
-    /// (both share `modelStoreIdentity`), plus an absolute path. Returns
-    /// nil when nothing is present locally (caller falls back to the Hub
-    /// id; inference never auto-pulls).
+    /// Local store directory for `id` (bare name or full HF id) when
+    /// materialized — shared resolution (`ModelStoreLayout`) so every
+    /// module class loads the same way.
     private func localDirectory(for id: String) -> URL? {
-        if id.hasPrefix("/") {
-            let u = URL(fileURLWithPath: id, isDirectory: true)
-            return FileManager.default.fileExists(atPath: u.path) ? u : nil
-        }
-        guard let root = modelStoreRoot else { return nil }
-        let u = root.appendingPathComponent(
-            id.modelStoreIdentity, isDirectory: true)
-        return FileManager.default.fileExists(atPath: u.path) ? u : nil
+        ModelStoreLayout.localDirectory(for: id, storeRoot: modelStoreRoot)
     }
 
     public var residentBytes: Int {

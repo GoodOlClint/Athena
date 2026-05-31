@@ -25,6 +25,9 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
     private let estimatedBytes: Int
     private var model: SortformerModel?
     private var residentId: String?
+    /// Model-store root (M54) — local-store-dir load when materialized,
+    /// so bare name or full HF id both work. nil ⇒ Hub-by-id fallback.
+    private let modelStoreRoot: URL?
 
     /// - Parameters:
     ///   - modelIds: HF id allowlist (first = default). Default
@@ -37,6 +40,7 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
         modelIds: [String] = [
             "mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16"
         ],
+        modelStoreRoot: URL? = nil,
         estimatedBytes: Int = 1 * 1024 * 1024 * 1024
     ) {
         precondition(
@@ -44,6 +48,7 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
             "MLXDiarizationModule needs at least one model id")
         self.allowedIds = modelIds
         self.defaultId = modelIds[0]
+        self.modelStoreRoot = modelStoreRoot
         self.estimatedBytes = estimatedBytes
     }
 
@@ -64,15 +69,23 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
     }
 
     private func loadModel(id: String) async throws {
-        // M46.4 — case-insensitive lookup; canonical id from storage.
+        // M54 — match by store-dir identity (bare name or full HF id).
         guard let canonical =
-            allowedIds.canonicalCaseInsensitive(id)
+            allowedIds.canonicalByStoreIdentity(id)
         else {
             throw AthenaError.modelNotAvailable(
                 requested: id, available: allowedIds)
         }
         do {
-            model = try await SortformerModel.fromPretrained(canonical)
+            // M54 — local-store-dir load when materialized, else Hub.
+            if let dir = ModelStoreLayout.localDirectory(
+                for: canonical, storeRoot: modelStoreRoot)
+            {
+                model = try SortformerModel.fromModelDirectory(
+                    dir.resolvingSymlinksInPath())
+            } else {
+                model = try await SortformerModel.fromPretrained(canonical)
+            }
             residentId = canonical
         } catch {
             model = nil
@@ -94,9 +107,9 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
     public func residentModelId() -> String? { residentId }
     public func rebind(to id: String?) async throws {
         let requested = id ?? defaultId
-        // M46.4 — case-insensitive lookup; canonical id from storage.
+        // M54 — match by store-dir identity (bare name or full HF id).
         guard let target =
-            allowedIds.canonicalCaseInsensitive(requested)
+            allowedIds.canonicalByStoreIdentity(requested)
         else {
             throw AthenaError.modelNotAvailable(
                 requested: requested, available: allowedIds)

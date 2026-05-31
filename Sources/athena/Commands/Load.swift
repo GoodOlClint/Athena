@@ -511,14 +511,17 @@ struct Load: AsyncParsableCommand {
                 modelIds: transcriptionIds)
         case .mlx:
             transcription = MLXTranscriptionModule(
-                modelIds: transcriptionIds)
+                modelIds: transcriptionIds,
+                modelStoreRoot: store.rootDirectory)
         }
         let diarization: any DiarizationModule
         switch engine {
         case .stub:
             diarization = StubDiarizationModule(modelIds: diarizationIds)
         case .mlx:
-            diarization = MLXDiarizationModule(modelIds: diarizationIds)
+            diarization = MLXDiarizationModule(
+                modelIds: diarizationIds,
+                modelStoreRoot: store.rootDirectory)
         }
         let speakerEmbedding: any SpeakerEmbeddingModule
         switch engine {
@@ -527,7 +530,8 @@ struct Load: AsyncParsableCommand {
                 modelIds: speakerEmbeddingIds)
         case .mlx:
             speakerEmbedding = MLXSpeakerEmbeddingModule(
-                modelIds: speakerEmbeddingIds)
+                modelIds: speakerEmbeddingIds,
+                modelStoreRoot: store.rootDirectory)
         }
         await governor.register(llm, evictable: false)
         await governor.register(transcription, evictable: true)
@@ -642,6 +646,26 @@ struct Load: AsyncParsableCommand {
         var ordered = [def.id]
         for row in rows where row.id != def.id {
             ordered.append(row.id)
+        }
+        // M54 — store-identity collision guard. Two configured ids that
+        // share a store-dir basename (e.g. `a/m` and `b/m`) both resolve
+        // to the same store directory, so a request for either silently
+        // loads whichever is first. The store keys by basename, so it
+        // can't even hold both — warn loudly rather than alias quietly.
+        let identities = ordered.map { $0.modelStoreIdentity }
+        let collided = Set(
+            identities.filter { id in
+                identities.filter { $0.caseInsensitiveCompare(id)
+                    == .orderedSame }.count > 1
+            })
+        if !collided.isEmpty {
+            Logger(label: AthenaLogLabel.daemon).warning(
+                """
+                \(module.rawValue) allowlist has ids sharing a store-dir \
+                name \(collided.sorted()) — they resolve to the same local \
+                directory; requests will load whichever is declared first. \
+                Use distinct model names or remove the duplicate.
+                """)
         }
         return ordered
     }

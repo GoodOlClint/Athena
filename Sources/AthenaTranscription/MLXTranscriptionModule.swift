@@ -25,6 +25,10 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
     private var tokenizer: (any MLXLMCommon.Tokenizer)?
     /// nil ⇒ unloaded; otherwise the id resident in `model`.
     private var residentId: String?
+    /// Model-store root (M54) — load from the local store dir when the
+    /// model is materialized there, so a bare store-dir name or full HF
+    /// id both work, like the LLM loader. nil ⇒ Hub-by-id fallback.
+    private let modelStoreRoot: URL?
 
     /// - Parameters:
     ///   - modelIds: HF id allowlist (first = default). Default
@@ -35,6 +39,7 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
     ///     resident at a time, so the fixed estimate bounds the slot.
     public init(
         modelIds: [String] = ["mlx-community/whisper-large-v3-turbo"],
+        modelStoreRoot: URL? = nil,
         estimatedBytes: Int = 3 * 1024 * 1024 * 1024
     ) {
         precondition(
@@ -42,6 +47,7 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
             "MLXTranscriptionModule needs at least one model id")
         self.allowedIds = modelIds
         self.defaultId = modelIds[0]
+        self.modelStoreRoot = modelStoreRoot
         self.estimatedBytes = estimatedBytes
     }
 
@@ -63,19 +69,27 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
     }
 
     private func loadModel(id: String) async throws {
-        // M46.4 — case-insensitive lookup; canonical id from storage
-        // drives the download path so persisted casing wins.
+        // M54 — match by store-dir identity (bare name or full HF id).
         guard let canonical =
-            allowedIds.canonicalCaseInsensitive(id)
+            allowedIds.canonicalByStoreIdentity(id)
         else {
             throw AthenaError.modelNotAvailable(
                 requested: id, available: allowedIds)
         }
         do {
-            // WhisperLoader.load also seeds the alignment_heads needed
-            // for M26 word timestamps; an unload+load on rebind picks
-            // up the new model's heads (not just the base weights).
-            model = try await WhisperLoader.load(modelId: canonical)
+            // M54 — load from the local store dir when materialized
+            // (skips the Hub), else download by HF id. WhisperLoader
+            // also seeds the alignment_heads needed for M26 word
+            // timestamps; an unload+load on rebind picks up the new
+            // model's heads (not just the base weights).
+            if let dir = ModelStoreLayout.localDirectory(
+                for: canonical, storeRoot: modelStoreRoot)
+            {
+                model = try WhisperLoader.load(
+                    directory: dir.resolvingSymlinksInPath())
+            } else {
+                model = try await WhisperLoader.load(modelId: canonical)
+            }
             tokenizer = try await WhisperLoader.loadTokenizer()
             residentId = canonical
         } catch {
@@ -102,9 +116,9 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
     public func residentModelId() -> String? { residentId }
     public func rebind(to id: String?) async throws {
         let requested = id ?? defaultId
-        // M46.4 — case-insensitive lookup; canonical id from storage.
+        // M54 — match by store-dir identity (bare name or full HF id).
         guard let target =
-            allowedIds.canonicalCaseInsensitive(requested)
+            allowedIds.canonicalByStoreIdentity(requested)
         else {
             throw AthenaError.modelNotAvailable(
                 requested: requested, available: allowedIds)

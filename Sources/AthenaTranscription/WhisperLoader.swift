@@ -37,7 +37,13 @@ public enum WhisperLoader {
             id: modelId, revision: nil,
             matching: ["*.json", "*.safetensors"],
             useLatest: false, progressHandler: { _ in })
+        return try load(directory: dir)
+    }
 
+    /// M54 — load directly from a local model directory (the form a
+    /// store-dir entry resolves to), skipping the Hub. Mirrors the LLM /
+    /// embedding local-first resolution so a bare store-dir name loads.
+    public static func load(directory dir: URL) throws -> WhisperModel {
         let configURL = dir.appending(component: "config.json")
         guard let configData = try? Data(contentsOf: configURL) else {
             throw LoadError.missingFile("config.json")
