@@ -31,6 +31,12 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
     private var allowedIds: [String]
     private var defaultId: String
     private let estimatedBytes: Int
+    /// Model-store root, so a configured id resolves to its local store
+    /// directory and loads from there (like the LLM loader) — which lets
+    /// a request name the model by either its full HF id or its bare
+    /// store-dir name. nil ⇒ pre-store-root callers; falls back to
+    /// loading by HF id via the Hub.
+    private let modelStoreRoot: URL?
     private var container: EmbedderModelContainer?
     /// The id currently resident in `container` (nil ⇒ nothing loaded).
     private var residentId: String?
@@ -53,6 +59,7 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
     ///     a larger member (e.g. bge-large) exceeds bge-small's weights.
     public init(
         modelIds: [String] = ["BAAI/bge-small-en-v1.5"],
+        modelStoreRoot: URL? = nil,
         estimatedBytes: Int = 512 * 1024 * 1024
     ) {
         precondition(
@@ -60,7 +67,26 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
             "MLXEmbeddingModule needs at least one model id")
         self.allowedIds = modelIds
         self.defaultId = modelIds[0]
+        self.modelStoreRoot = modelStoreRoot
         self.estimatedBytes = estimatedBytes
+    }
+
+    /// Resolve a model id to a LOCAL store directory if it is materialized
+    /// there, so loading can go through `ModelConfiguration(directory:)`
+    /// (no Hub round-trip) — the same local-first resolution the LLM
+    /// module uses. Accepts the bare store-dir name OR the full HF id
+    /// (both share `modelStoreIdentity`), plus an absolute path. Returns
+    /// nil when nothing is present locally (caller falls back to the Hub
+    /// id; inference never auto-pulls).
+    private func localDirectory(for id: String) -> URL? {
+        if id.hasPrefix("/") {
+            let u = URL(fileURLWithPath: id, isDirectory: true)
+            return FileManager.default.fileExists(atPath: u.path) ? u : nil
+        }
+        guard let root = modelStoreRoot else { return nil }
+        let u = root.appendingPathComponent(
+            id.modelStoreIdentity, isDirectory: true)
+        return FileManager.default.fileExists(atPath: u.path) ? u : nil
     }
 
     public var residentBytes: Int {
@@ -89,10 +115,12 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
     /// id by triggering a fresh load — same fixed governor reservation.
     public func rebind(to id: String?) async throws {
         let requested = id ?? defaultId
-        // M46.4 — case-insensitive lookup; canonical id from storage
-        // drives the load so persisted casing stays the source of truth.
+        // M54 — match by store-dir identity so a request naming the model
+        // by either its full HF id or its bare store-dir name resolves the
+        // same allowlist row (like the LLM loader). Canonical id from
+        // storage drives the load.
         guard let target =
-            allowedIds.canonicalCaseInsensitive(requested)
+            allowedIds.canonicalByStoreIdentity(requested)
         else {
             throw AthenaError.modelNotAvailable(
                 requested: requested, available: allowedIds)
@@ -119,13 +147,27 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
     /// nil) so the next request re-attempts rather than wedging.
     private func loadContainer(_ id: String) async throws {
         do {
+            // M54 — load from the local store directory when present (like
+            // the LLM loader): works for a bare store-dir name AND a full
+            // HF id, and skips any Hub round-trip (the substrate uses the
+            // directory directly for a `.directory` configuration). The
+            // `pull`-created entry is a symlink into the HF cache, so
+            // resolve it to the real snapshot dir. Falls back to the Hub
+            // id only when nothing is materialized locally.
+            let configuration: ModelConfiguration
+            if let dir = localDirectory(for: id) {
+                configuration = ModelConfiguration(
+                    directory: dir.resolvingSymlinksInPath())
+            } else {
+                configuration = ModelConfiguration(id: id)
+            }
             let loaded =
                 try await EmbedderModelFactory.shared.loadContainer(
                     from: #hubDownloader(
                         HuggingFace.HubClient(
                             session: AthenaProxy.proxiedURLSession())),
                     using: #huggingFaceTokenizerLoader(),
-                    configuration: ModelConfiguration(id: id))
+                    configuration: configuration)
             container = loaded
             residentId = id
             // Sum `nbytes` over every parameter array — the substrate's
@@ -162,9 +204,9 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
         -> EmbeddingBatch
     {
         let requested = model ?? defaultId
-        // M46.4 — case-insensitive lookup; canonical id from storage.
+        // M54 — match by store-dir identity (bare name or full HF id).
         guard let target =
-            allowedIds.canonicalCaseInsensitive(requested)
+            allowedIds.canonicalByStoreIdentity(requested)
         else {
             throw AthenaError.modelNotAvailable(
                 requested: requested, available: allowedIds)

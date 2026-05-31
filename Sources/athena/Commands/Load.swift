@@ -500,7 +500,9 @@ struct Load: AsyncParsableCommand {
         case .stub:
             embedding = StubEmbeddingModule(modelIds: embeddingIds)
         case .mlx:
-            embedding = MLXEmbeddingModule(modelIds: embeddingIds)
+            embedding = MLXEmbeddingModule(
+                modelIds: embeddingIds,
+                modelStoreRoot: store.rootDirectory)
         }
         let transcription: any TranscriptionModule
         switch engine {

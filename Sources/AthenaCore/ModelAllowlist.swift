@@ -30,6 +30,18 @@ import Foundation
 /// the error-response builder deduplicates the displayed
 /// "Configured models" list at the wire so an operator sees a clean
 /// allowlist.
+extension String {
+    /// The store-dir identity of a model id: the basename after the last
+    /// `/` (an HF `org/name` id → `name`; an absolute path → its last
+    /// component; an already-bare name → itself). This is the directory
+    /// name `athena pull` creates under the model store, so it is the
+    /// common key by which a model can be named in either its full HF
+    /// form or its bare store-dir form.
+    public var modelStoreIdentity: String {
+        String(split(separator: "/").last ?? Substring(self))
+    }
+}
+
 extension Array where Element == String {
     /// Returns the canonical (stored) id from `self` that matches
     /// `requested` case-insensitively, or nil if none match. Use this
@@ -39,6 +51,28 @@ extension Array where Element == String {
     /// case-consistent.
     public func canonicalCaseInsensitive(_ requested: String) -> String? {
         first { $0.caseInsensitiveCompare(requested) == .orderedSame }
+    }
+
+    /// Match `requested` against `self` by STORE-DIR IDENTITY
+    /// (`modelStoreIdentity`, case-insensitive), returning the canonical
+    /// stored id. This lets a request name a model by either its full
+    /// HuggingFace id (`Qwen/Qwen3-Embedding-4B`) or its bare store-dir
+    /// name (`Qwen3-Embedding-4B`, the form `athena pull` creates) and
+    /// resolve the same allowlist row — mirroring how the LLM module
+    /// already accepts bare store-dir names. The returned canonical id is
+    /// the stored spelling (used for served-model echo + local-dir
+    /// resolution). Falls back to nothing if no entry shares the identity.
+    ///
+    /// NOTE collision: two configured ids with the same basename but
+    /// different orgs (`a/m` vs `b/m`) collapse to one identity; the model
+    /// store already keys by basename (`athena pull`), so the store can
+    /// hold only one — callers should guard/declare-time reject such a
+    /// clash rather than silently alias.
+    public func canonicalByStoreIdentity(_ requested: String) -> String? {
+        let key = requested.modelStoreIdentity
+        return first {
+            $0.modelStoreIdentity.caseInsensitiveCompare(key) == .orderedSame
+        }
     }
 
     /// Returns `self` with case-insensitive duplicates removed,
