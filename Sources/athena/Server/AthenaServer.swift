@@ -1037,29 +1037,6 @@ struct AthenaServer {
         return parts.isEmpty ? "" : " modules=" + parts.joined(separator: ",")
     }
 
-    /// M49.4 — process RSS via Mach `task_info`. Duplicates the probe
-    /// `Load.processResidentBytes` injects into the governor; lifting
-    /// it onto AthenaServer avoids a cross-command dependency from the
-    /// heartbeat path. Returns 0 on Mach failure (matches the existing
-    /// degrade-gracefully contract).
-    fileprivate static func processRSS() -> Int {
-        var info = mach_task_basic_info_data_t()
-        var count = mach_msg_type_number_t(
-            MemoryLayout<mach_task_basic_info_data_t>.stride
-                / MemoryLayout<natural_t>.stride)
-        let kerr = withUnsafeMutablePointer(to: &info) { infoPtr in
-            infoPtr.withMemoryRebound(
-                to: integer_t.self, capacity: Int(count)
-            ) { intPtr in
-                task_info(
-                    mach_task_self_,
-                    task_flavor_t(MACH_TASK_BASIC_INFO),
-                    intPtr, &count)
-            }
-        }
-        return kerr == KERN_SUCCESS ? Int(info.resident_size) : 0
-    }
-
     /// M46.8 — also conforms to `AthenaCore.DecodeProgressCounter`, so
     /// the synchronous decode loops (GuidedGreedy / GuidedSubstrate /
     /// SpeculativeGeneration / SpeculativeSampling) can increment the
@@ -1263,7 +1240,14 @@ struct AthenaServer {
                     // Exposing `rss` and `mlx_active`+`mlx_cache`
                     // separately lets an operator localize that gap
                     // from one heartbeat line.
-                    let rss = AthenaServer.processRSS()
+                    // M55 — `phys_footprint` (the Activity Monitor "Memory"
+                    // number) counts the Metal/GPU KV-cache + prompt-cache
+                    // + activation buffers that `rss` misses, so the gap
+                    // (e.g. a long-context prompt cache) is now explicit on
+                    // one line instead of only visible in Activity Monitor.
+                    let mem = ProcessMemory.sample()
+                    let rss = mem.resident
+                    let physFootprint = mem.physFootprint
                     let mlxActive = MLX.Memory.activeMemory
                     let mlxCache = MLX.Memory.cacheMemory
                     Self.log.notice(
@@ -1275,6 +1259,8 @@ struct AthenaServer {
                         \(String(format: "%.1f", tps)) \
                         resident=\(residentField) \
                         rss=\(AthenaServer.formatBytes(rss)) \
+                        phys_footprint=\
+                        \(AthenaServer.formatBytes(physFootprint)) \
                         mlx_active=\(AthenaServer.formatBytes(mlxActive)) \
                         mlx_cache=\(AthenaServer.formatBytes(mlxCache))\
                         \(modulesField)
@@ -4832,6 +4818,13 @@ struct HealthResponse: Encodable {
     let residentBytes: Int
     let freeBytes: Int
     let promptCacheCapBytes: Int
+    /// M55 — live process `phys_footprint` (the Activity Monitor "Memory"
+    /// number): counts the Metal/GPU KV/prompt-cache/activation buffers
+    /// that the governor's per-module `residentBytes` (a reconciled
+    /// reservation against mmap'd weights) and `residentBytes` (RSS) do
+    /// not. Surfaced so an operator can see the true footprint — and the
+    /// GPU-transient gap above it — without scraping Activity Monitor.
+    let physFootprintBytes: Int
     let modules: [ModuleSnapshot]
     let inflight: Int
     let queueDepth: Int
@@ -4845,6 +4838,7 @@ struct HealthResponse: Encodable {
         self.residentBytes = snapshot.residentBytes
         self.freeBytes = snapshot.freeBytes
         self.promptCacheCapBytes = snapshot.promptCacheCapBytes
+        self.physFootprintBytes = ProcessMemory.sample().physFootprint
         self.modules = snapshot.modules
         self.inflight = inflight
         self.queueDepth = queueDepth

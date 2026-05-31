@@ -670,30 +670,19 @@ struct Load: AsyncParsableCommand {
         return ordered
     }
 
-    /// Process resident-set bytes via Mach `task_info`. Includes
-    /// file-backed mmaps (the HF hub cache), MLX allocator pages, the
-    /// heap, and stack — i.e., "what this process is actually holding".
-    /// The governor's M5 reconcile uses this so its admission math
-    /// honestly accounts for mmap-loaded weights (the previous
-    /// `MLX.Memory.activeMemory` probe under-counted those by an order
-    /// of magnitude). Returns 0 on a Mach call failure — the governor
-    /// degrades to the pre-load estimate, which was the prior
-    /// behaviour anyway.
+    /// Process resident-set bytes (RSS) for the governor's M5 reconcile.
+    /// Includes the file-backed mmaps (the HF hub cache / model weights),
+    /// MLX allocator pages, heap, and stack — "what this process holds"
+    /// in its address space. The reconcile reserves against the steady
+    /// post-load weight footprint, so RSS (not `phys_footprint`) is the
+    /// right gauge here: it excludes the transient Metal/GPU KV/prompt-
+    /// cache buffers that come and go per request and would otherwise
+    /// inflate a module's reservation. (M55 routed this through the
+    /// shared `ProcessMemory` probe; `phys_footprint` — which DOES count
+    /// those GPU buffers — is surfaced in the heartbeat + /healthz for
+    /// observability.) Returns 0 on a Mach failure (governor then
+    /// degrades to the pre-load estimate, the prior behaviour).
     static func processResidentBytes() -> Int {
-        var info = mach_task_basic_info_data_t()
-        var count = mach_msg_type_number_t(
-            MemoryLayout<mach_task_basic_info_data_t>.stride
-                / MemoryLayout<natural_t>.stride)
-        let kerr = withUnsafeMutablePointer(to: &info) { infoPtr in
-            infoPtr.withMemoryRebound(
-                to: integer_t.self, capacity: Int(count)
-            ) { intPtr in
-                task_info(
-                    mach_task_self_,
-                    task_flavor_t(MACH_TASK_BASIC_INFO),
-                    intPtr, &count)
-            }
-        }
-        return kerr == KERN_SUCCESS ? Int(info.resident_size) : 0
+        ProcessMemory.residentBytes()
     }
 }

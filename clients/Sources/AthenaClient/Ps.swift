@@ -35,6 +35,10 @@ public struct Ps: AsyncParsableCommand {
         let residentBytes: Int
         let freeBytes: Int
         let promptCacheCapBytes: Int
+        /// M55 — live phys_footprint (Activity Monitor "Memory"; counts
+        /// GPU/Metal buffers RSS misses). Optional so the portable client
+        /// still renders against a daemon that predates the field.
+        let physFootprintBytes: Int?
         let modules: [Module]
     }
 
@@ -53,9 +57,11 @@ public struct Ps: AsyncParsableCommand {
             throw ExitCode.failure
         }
 
+        let physFootprint = snap.physFootprintBytes.map(humanBytes) ?? "n/a"
         print(
             "budget \(humanBytes(snap.totalBudgetBytes)) | "
                 + "resident \(humanBytes(snap.residentBytes)) | "
+                + "phys-footprint \(physFootprint) | "
                 + "free \(humanBytes(snap.freeBytes)) | "
                 + "prompt-cache cap "
                 + "\(humanBytes(snap.promptCacheCapBytes))")
