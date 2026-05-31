@@ -602,7 +602,64 @@ struct Load: AsyncParsableCommand {
             queueMaxRows: queueMaxRows ?? 0,
             vectorTtlSecs: vectorTtlSecs ?? 0,
             dropRequestContent: dropRequestContent)
+        // M54.3 — operator-action pull: at startup, fetch any configured
+        // model that has an HF-style id and isn't in the store, in the
+        // BACKGROUND. The HTTP surface comes up immediately (server.run
+        // below); an inference request for a not-yet-present model gets
+        // 503 via the governor's `pulling` flag until the pull lands.
+        // Bare store-dir ids (the LLM convention) aren't Hub-pullable and
+        // are skipped — they're provisioned via `athena pull`/`convert`.
+        let configuredForPull: [(ModuleID, [String])] = [
+            (.llm, llmIds), (.textEmbedding, embeddingIds),
+            (.transcription, transcriptionIds),
+            (.diarization, diarizationIds),
+            (.speakerEmbedding, speakerEmbeddingIds),
+        ]
+        let pullStoreRoot = store.rootDirectory
+        Task.detached {
+            await Self.pullMissingConfigured(
+                configuredForPull, storeRoot: pullStoreRoot,
+                governor: governor)
+        }
         try await server.run()
+    }
+
+    /// M54.3 — pull each configured model that is HF-pullable (id contains
+    /// `/`) and not yet materialized in the store, marking the governor
+    /// `pulling` for that module while its fetch is in flight (so inference
+    /// 503s rather than auto-downloading). Best-effort + sequential (avoid
+    /// concurrent multi-GB fetches); a per-model failure is logged and
+    /// skipped (the model stays absent → its requests keep 503ing).
+    static func pullMissingConfigured(
+        _ configured: [(ModuleID, [String])], storeRoot: URL,
+        governor: MemoryGovernor
+    ) async {
+        let log = Logger(label: AthenaLogLabel.daemon)
+        for (module, ids) in configured {
+            for id in ids
+            where id.contains("/")
+                && ModelStoreLayout.localDirectory(
+                    for: id, storeRoot: storeRoot) == nil
+            {
+                await governor.setPulling(module, true)
+                log.notice(
+                    """
+                    operator-pull: fetching \(id) for \
+                    \(module.rawValue) (not in store)
+                    """)
+                do {
+                    _ = try await ModelPull.pull(id: id, into: storeRoot)
+                    log.notice("operator-pull: \(id) ready")
+                } catch {
+                    log.warning(
+                        """
+                        operator-pull: \(id) failed: \
+                        \(ModelPull.friendlyError(error))
+                        """)
+                }
+                await governor.setPulling(module, false)
+            }
+        }
     }
 
     /// Resolve a module's effective allowlist from the persisted

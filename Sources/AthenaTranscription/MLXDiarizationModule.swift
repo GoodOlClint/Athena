@@ -76,16 +76,20 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
             throw AthenaError.modelNotAvailable(
                 requested: id, available: allowedIds)
         }
+        // M54.3 — local-store-dir load only; inference never auto-downloads
+        // (operator pulls a missing model at startup / allowlist-add).
+        guard let dir = ModelStoreLayout.localDirectory(
+            for: canonical, storeRoot: modelStoreRoot)
+        else {
+            throw AthenaError.moduleLoadFailed(
+                .diarization,
+                reason: "model '\(canonical)' is not in the model store "
+                    + "— pull it first (operator action); inference does "
+                    + "not auto-download")
+        }
         do {
-            // M54 — local-store-dir load when materialized, else Hub.
-            if let dir = ModelStoreLayout.localDirectory(
-                for: canonical, storeRoot: modelStoreRoot)
-            {
-                model = try SortformerModel.fromModelDirectory(
-                    dir.resolvingSymlinksInPath())
-            } else {
-                model = try await SortformerModel.fromPretrained(canonical)
-            }
+            model = try SortformerModel.fromModelDirectory(
+                dir.resolvingSymlinksInPath())
             residentId = canonical
         } catch {
             model = nil

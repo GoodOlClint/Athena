@@ -3501,6 +3501,39 @@ struct AthenaServer {
             target: moduleId.rawValue + ":" + body.id,
             result: "ok",
             detail: (body.default ?? false) ? "default=true" : nil)
+        // M54.3 — operator added a model: pull it in the BACKGROUND if it
+        // has an HF-style id and isn't materialized yet (responds 'added'
+        // immediately; inference 503s via the governor `pulling` flag
+        // until the fetch lands — never an inference-time download).
+        if body.id.contains("/"),
+            ModelStoreLayout.localDirectory(
+                for: body.id, storeRoot: modelStoreRoot) == nil
+        {
+            let root = modelStoreRoot
+            let gov = governor
+            let mod = moduleId
+            let mid = body.id
+            Task.detached {
+                let log = Logger(label: AthenaLogLabel.daemon)
+                await gov.setPulling(mod, true)
+                log.notice(
+                    """
+                    operator-pull: fetching \(mid) for \(mod.rawValue) \
+                    (allowlist add)
+                    """)
+                do {
+                    _ = try await ModelPull.pull(id: mid, into: root)
+                    log.notice("operator-pull: \(mid) ready")
+                } catch {
+                    log.warning(
+                        """
+                        operator-pull: \(mid) failed: \
+                        \(ModelPull.friendlyError(error))
+                        """)
+                }
+                await gov.setPulling(mod, false)
+            }
+        }
         return Self.json(
             AllowlistMutationResponse(
                 module: moduleId.rawValue, id: body.id,

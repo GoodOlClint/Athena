@@ -135,28 +135,27 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
     /// there. On failure the slot is left empty (container + residentId
     /// nil) so the next request re-attempts rather than wedging.
     private func loadContainer(_ id: String) async throws {
+        // M54 — load from the LOCAL store directory (like the LLM loader):
+        // works for a bare store-dir name AND a full HF id, resolving the
+        // `pull`-created symlink to the real HF-cache snapshot. M54.3 —
+        // inference NEVER auto-downloads: a model absent from the store is
+        // a hard error (operator pulls it at startup / allowlist-add).
+        guard let dir = localDirectory(for: id) else {
+            throw AthenaError.moduleLoadFailed(
+                .textEmbedding,
+                reason: "model '\(id)' is not in the model store — pull "
+                    + "it first (operator action); inference does not "
+                    + "auto-download")
+        }
         do {
-            // M54 — load from the local store directory when present (like
-            // the LLM loader): works for a bare store-dir name AND a full
-            // HF id, and skips any Hub round-trip (the substrate uses the
-            // directory directly for a `.directory` configuration). The
-            // `pull`-created entry is a symlink into the HF cache, so
-            // resolve it to the real snapshot dir. Falls back to the Hub
-            // id only when nothing is materialized locally.
-            let configuration: ModelConfiguration
-            if let dir = localDirectory(for: id) {
-                configuration = ModelConfiguration(
-                    directory: dir.resolvingSymlinksInPath())
-            } else {
-                configuration = ModelConfiguration(id: id)
-            }
             let loaded =
                 try await EmbedderModelFactory.shared.loadContainer(
                     from: #hubDownloader(
                         HuggingFace.HubClient(
                             session: AthenaProxy.proxiedURLSession())),
                     using: #huggingFaceTokenizerLoader(),
-                    configuration: configuration)
+                    configuration: ModelConfiguration(
+                        directory: dir.resolvingSymlinksInPath()))
             container = loaded
             residentId = id
             // Sum `nbytes` over every parameter array — the substrate's

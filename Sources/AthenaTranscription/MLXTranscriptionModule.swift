@@ -76,20 +76,23 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
             throw AthenaError.modelNotAvailable(
                 requested: id, available: allowedIds)
         }
+        // M54.3 — load from the local store dir; inference never
+        // auto-downloads (operator pulls a missing model at startup /
+        // allowlist-add). WhisperLoader also seeds the alignment_heads
+        // for M26 word timestamps; an unload+load on rebind picks up the
+        // new model's heads.
+        guard let dir = ModelStoreLayout.localDirectory(
+            for: canonical, storeRoot: modelStoreRoot)
+        else {
+            throw AthenaError.moduleLoadFailed(
+                .transcription,
+                reason: "model '\(canonical)' is not in the model store "
+                    + "— pull it first (operator action); inference does "
+                    + "not auto-download")
+        }
         do {
-            // M54 — load from the local store dir when materialized
-            // (skips the Hub), else download by HF id. WhisperLoader
-            // also seeds the alignment_heads needed for M26 word
-            // timestamps; an unload+load on rebind picks up the new
-            // model's heads (not just the base weights).
-            if let dir = ModelStoreLayout.localDirectory(
-                for: canonical, storeRoot: modelStoreRoot)
-            {
-                model = try WhisperLoader.load(
-                    directory: dir.resolvingSymlinksInPath())
-            } else {
-                model = try await WhisperLoader.load(modelId: canonical)
-            }
+            model = try WhisperLoader.load(
+                directory: dir.resolvingSymlinksInPath())
             tokenizer = try await WhisperLoader.loadTokenizer()
             residentId = canonical
         } catch {

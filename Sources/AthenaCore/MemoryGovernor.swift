@@ -98,6 +98,12 @@ public actor MemoryGovernor {
     private var residentBytes: Int = 0
     /// Coalesces concurrent `ensureLoaded` callers onto one load.
     private var inFlight: [ModuleID: Task<Void, Error>] = [:]
+    /// M54.3 — modules with an operator-action model pull in flight
+    /// (startup / allowlist-add). While set, `beginLoadIfNeeded` returns
+    /// `.loading` (→ 503) WITHOUT attempting a load, so an inference
+    /// request waits for the pull to materialize the weights instead of
+    /// triggering a Hub download or churning eviction on a fail-fast load.
+    private var pulling: Set<ModuleID> = []
     private let memoryProbe: MemoryProbe?
     private let onUnloaded: UnloadHook?
     private let onEvent: EventHook?
@@ -172,6 +178,9 @@ public actor MemoryGovernor {
             entries[id]?.lastUsed = Date()
             return .loaded
         }
+        // M54.3 — an operator-action pull is materializing the weights;
+        // 503 until it lands rather than attempt a (doomed, churning) load.
+        if pulling.contains(id) { return .loading }
         if inFlight[id] != nil { return .loading }
         let task = Task<Void, Error> { try await self.performLoad(id) }
         inFlight[id] = task
@@ -184,6 +193,12 @@ public actor MemoryGovernor {
 
     private func clearInFlight(_ id: ModuleID) {
         inFlight[id] = nil
+    }
+
+    /// M54.3 — mark/clear an operator-action pull in flight for `id`. While
+    /// marked, `beginLoadIfNeeded` 503s (the weights aren't local yet).
+    public func setPulling(_ id: ModuleID, _ inFlight: Bool) {
+        if inFlight { pulling.insert(id) } else { pulling.remove(id) }
     }
 
     /// Ensure the module is loaded and bill its memory. Concurrent callers
