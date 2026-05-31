@@ -1024,6 +1024,10 @@ struct AthenaServer {
         let mb = Double(n) / (1024.0 * 1024.0)
         return String(format: "%.0fMB", mb)
     }
+    /// M56 — whole-ms elapsed since `start`, for per-request summary lines.
+    fileprivate static func elapsedMs(_ start: Date) -> Int {
+        Int(Date().timeIntervalSince(start) * 1000)
+    }
     fileprivate static func formatModuleMemory(
         _ snap: GovernorSnapshot
     ) -> String {
@@ -1310,6 +1314,7 @@ struct AthenaServer {
 
 
     private func handleEmbeddings(_ request: Request) async -> Response {
+        let t0 = Date()
         let body: EmbeddingRequest
         do {
             let buffer = try await request.body.collect(upTo: 4 * 1024 * 1024)
@@ -1382,11 +1387,22 @@ struct AthenaServer {
             usage: Usage(
                 prompt_tokens: batch.promptTokens, completion_tokens: 0,
                 total_tokens: batch.promptTokens))
+        // M56 — per-request summary (req/principal tags auto-attach via the
+        // M45 LogScope) so an operator can see embedding traffic, latency,
+        // and the model actually served — the non-LLM paths logged nothing.
+        Logger(label: AthenaLogLabel.model(.textEmbedding)).notice(
+            """
+            embeddings done model=\(batch.model) \
+            inputs=\(body.input.count) vectors=\(batch.vectors.count) \
+            prompt_tokens=\(batch.promptTokens) \
+            elapsed_ms=\(Self.elapsedMs(t0))
+            """)
         return Self.json(response)
     }
 
     private func handleTranscriptions(_ request: Request) async -> Response
     {
+        let t0 = Date()
         guard
             let ct = request.headers[.contentType],
             let boundary = MultipartForm.boundary(fromContentType: ct)
@@ -1460,6 +1476,15 @@ struct AthenaServer {
         } catch {
             return Self.classified(error, module: .transcription)
         }
+        // M56 — per-request summary (the format serialization below is
+        // cheap; this captures the transcription work).
+        Logger(label: AthenaLogLabel.model(.transcription)).notice(
+            """
+            transcription done segments=\(result.segments.count) \
+            audio_secs=\(String(format: "%.1f", result.duration)) \
+            lang=\(result.language ?? "auto") words=\(wantWords) \
+            elapsed_ms=\(Self.elapsedMs(t0))
+            """)
 
         func plain(_ s: String, _ type: String) -> Response {
             var headers = HTTPFields()
@@ -1547,6 +1572,7 @@ struct AthenaServer {
 
     private func handleDiarizations(_ request: Request) async -> Response
     {
+        let t0 = Date()
         guard
             let ct = request.headers[.contentType],
             let boundary = MultipartForm.boundary(fromContentType: ct)
@@ -1616,6 +1642,13 @@ struct AthenaServer {
         } catch {
             return Self.classified(error, module: .diarization)
         }
+        // M56 — per-request summary.
+        Logger(label: AthenaLogLabel.model(.diarization)).notice(
+            """
+            diarization done method=sortformer \
+            speakers=\(r.numSpeakers) turns=\(r.turns.count) \
+            elapsed_ms=\(Self.elapsedMs(t0))
+            """)
         return Self.json(
             DiarizationResponse(
                 num_speakers: r.numSpeakers,
@@ -1632,6 +1665,7 @@ struct AthenaServer {
     private func handleClusterDiarization(
         file: MultipartForm.Part, form: MultipartForm
     ) async -> Response {
+        let t0 = Date()
         let numSpeakers = form.text("num_speakers").flatMap(Int.init)
         let maxSpeakers = form.text("max_speakers").flatMap(Int.init)
         let threshold = form.text("threshold").flatMap(Float.init) ?? 0.75
@@ -1667,6 +1701,13 @@ struct AthenaServer {
             numClusters: numSpeakers, threshold: threshold,
             maxClusters: maxSpeakers)
         let turns = Self.turnsFromWindows(we.segments, labels: labels)
+        // M56 — per-request summary.
+        Logger(label: AthenaLogLabel.model(.speakerEmbedding)).notice(
+            """
+            diarization done method=cluster \
+            speakers=\(Set(labels).count) windows=\(we.segments.count) \
+            turns=\(turns.count) elapsed_ms=\(Self.elapsedMs(t0))
+            """)
         return Self.json(
             DiarizationResponse(
                 num_speakers: Set(labels).count,
@@ -1711,6 +1752,7 @@ struct AthenaServer {
     private func handleSpeakerEmbeddings(_ request: Request) async
         -> Response
     {
+        let t0 = Date()
         guard
             let ct = request.headers[.contentType],
             let boundary = MultipartForm.boundary(fromContentType: ct)
@@ -1800,6 +1842,13 @@ struct AthenaServer {
         let resSpeaker = await selSpeaker.residentModelId()
         let defSpeaker = await selSpeaker.defaultModelId()
         let servedSpeaker = resSpeaker ?? defSpeaker
+        // M56 — per-request summary.
+        Logger(label: AthenaLogLabel.model(.speakerEmbedding)).notice(
+            """
+            speaker-embeddings done model=\(servedSpeaker) \
+            segments=\(result.segments.count) \
+            elapsed_ms=\(Self.elapsedMs(t0))
+            """)
         return Self.json(
             SpeakerEmbeddingResponse(
                 object: "list",

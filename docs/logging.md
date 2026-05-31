@@ -94,6 +94,32 @@ athena logs --since 1h | grep 'function=handleChatCompletions'
 
 The `function=` field is present on every line.
 
+## Key lines to look for
+
+Every request and model load now leaves a one-line, `key=value` trail
+(all carry `req=`/`function=`, and `principal=` when auth is on):
+
+- **Model load** (category `model.<class>`): names the model, its real
+  footprint, and load time —
+  `model llm loaded Qwen3.5-27b-4bit (15.55GB) in 1.2s`
+  (a failed load reports `load failed after <t>: <reason>`). The bytes
+  are the reconciled real footprint, which can differ sharply from the
+  `loading (estimate …)` line that precedes it.
+- **LLM decode** (category `daemon`): the periodic
+  `decode heartbeat … tokens_per_sec=… rss=… phys_footprint=…
+  mlx_active=… mlx_cache=…` while a generation is in flight.
+  `phys_footprint` is the Activity-Monitor "Memory" number (counts the
+  GPU KV/prompt-cache buffers `rss` misses).
+- **Per-request summaries** (category `model.<class>`), one per request:
+  `embeddings done model=… inputs=… vectors=… prompt_tokens=… elapsed_ms=…`,
+  `transcription done segments=… audio_secs=… lang=… elapsed_ms=…`,
+  `diarization done method=… speakers=… turns=… elapsed_ms=…`,
+  `speaker-embeddings done model=… segments=… elapsed_ms=…`.
+
+So `athena logs --since 1h | grep ' done '` is a quick per-request
+latency/throughput view across the non-LLM surfaces, and
+`grep 'loaded '` shows what loaded, how big, and how long it took.
+
 ## Live verbosity (without a restart)
 
 The OS, not the daemon, gates how much detail `log show` captures.

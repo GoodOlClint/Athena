@@ -251,7 +251,8 @@ public actor MemoryGovernor {
         entries[id]?.reservation = reservation
 
         let before = memoryProbe?()
-        onEvent?(id, "loading (estimate \(estimate)B)")
+        let started = Date()
+        onEvent?(id, "loading (estimate \(Self.fmtBytes(estimate)))")
         do {
             try await entry.module.load(reservation: reservation)
         } catch {
@@ -259,7 +260,7 @@ public actor MemoryGovernor {
             entries[id]?.state = .unloaded
             entries[id]?.reservation = nil
             entries[id]?.unloadedReason = .loadFailed
-            onEvent?(id, "load failed: \(error)")
+            onEvent?(id, "load failed after \(Self.ms(since: started)): \(error)")
             // A Metal/MLX OOM during load is classified to 503, not a
             // bare 500 (brief item 4a).
             throw AthenaError.classify(error, module: id)
@@ -269,16 +270,44 @@ public actor MemoryGovernor {
         // M46.5 — clear the reason once a load succeeds; nil while
         // loaded is the documented "currently resident" signal.
         entries[id]?.unloadedReason = nil
-        onEvent?(id, "loaded")
+        // M56 — name WHICH model loaded, its real footprint, and how long
+        // it took, so a sysadmin sees "loaded <id> (<bytes>) in <ms>"
+        // instead of a bare "loaded". The specific model id comes from the
+        // module (the governor keys by module class); bytes from the same
+        // probe the reconcile uses.
+        let after = memoryProbe?()
+        let observed: Int =
+            (before != nil && after != nil) ? max(after! - before!, 0) : 0
+        let modelId =
+            await (entry.module as? any ModelSelectable)?.residentModelId()
+        onEvent?(
+            id,
+            "loaded \(modelId ?? id.rawValue) "
+                + "(\(Self.fmtBytes(observed > 0 ? observed : estimate))) "
+                + "in \(Self.ms(since: started))")
         // M5.1: reconcile the static estimate to the real Metal/MLX
         // footprint this load actually consumed. Best-effort
         // attribution (the probe is process-global; the actor +
         // inFlight coalescing serialise loads). Honest accounting here
         // makes the NEXT admission correctly 503/evict; an over-budget
         // reconciliation also sheds other evictable modules now.
-        if let before, let after = memoryProbe?() {
-            reconcile(id, estimate: estimate, observed: max(after - before, 0))
+        if observed > 0 {
+            reconcile(id, estimate: estimate, observed: observed)
         }
+    }
+
+    /// Human bytes for log events (GB ≥ 1 GB, else MB).
+    private static func fmtBytes(_ b: Int) -> String {
+        b >= 1_000_000_000
+            ? String(format: "%.2fGB", Double(b) / 1e9)
+            : String(format: "%.0fMB", Double(b) / 1e6)
+    }
+    /// Elapsed since `start` as a `<n>ms` / `<n.n>s` string.
+    private static func ms(since start: Date) -> String {
+        let s = Date().timeIntervalSince(start)
+        return s >= 1
+            ? String(format: "%.1fs", s)
+            : String(format: "%.0fms", s * 1000)
     }
 
     /// Replace `id`'s estimate-based reservation with the observed
