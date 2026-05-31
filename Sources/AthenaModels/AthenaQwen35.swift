@@ -7,11 +7,41 @@
 //  Port of https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/models/qwen3_5.py
 //
 
+import Dispatch
 import Foundation
 import MLX
 import MLXLLM
 import MLXLMCommon
 import MLXNN
+
+/// Env-gated (`ATHENA_FWD_PROFILE=1`) per-block forward profiler. Splits the
+/// decoder-layer wall time into token-mixing (GDN / attention) vs MLP by
+/// forcing `eval()` at the block boundary. Perturbs absolute timing (it
+/// serializes the lazy graph), so read the RATIOS. Zero cost when unset.
+public enum ForwardProfile {
+    public nonisolated(unsafe) static var enabled =
+        ProcessInfo.processInfo.environment["ATHENA_FWD_PROFILE"] == "1"
+    public nonisolated(unsafe) static var tGDN = 0.0
+    public nonisolated(unsafe) static var tAttn = 0.0
+    public nonisolated(unsafe) static var tMLP = 0.0
+    public nonisolated(unsafe) static var nGDN = 0
+    public nonisolated(unsafe) static var nAttn = 0
+    public static func reset() { tGDN = 0; tAttn = 0; tMLP = 0; nGDN = 0; nAttn = 0 }
+    public static func summary() -> String {
+        let tot = tGDN + tAttn + tMLP
+        func p(_ x: Double) -> String {
+            tot > 0 ? String(format: "%.1f%%", x / tot * 100) : "0%"
+        }
+        return String(
+            format:
+                "fwd profile: total=%.3fs gdn=%.3fs(%@) attn=%.3fs(%@) "
+                + "mlp=%.3fs(%@) gdnLayers=%d attnLayers=%d",
+            tot, tGDN, p(tGDN), tAttn, p(tAttn), tMLP, p(tMLP), nGDN, nAttn)
+    }
+    @inline(__always) static func clk() -> UInt64 {
+        DispatchTime.now().uptimeNanoseconds
+    }
+}
 
 // MARK: - Configuration
 
@@ -536,6 +566,8 @@ final class AthenaQwen35DecoderLayer: Module {
         nConfirmed: Int = 0,
         rollback: GDNRollback? = nil
     ) -> MLXArray {
+        let prof = ForwardProfile.enabled
+        var t0 = prof ? ForwardProfile.clk() : 0
         let r: MLXArray
         if isLinear {
             r = linearAttn!(
@@ -547,9 +579,18 @@ final class AthenaQwen35DecoderLayer: Module {
             // (the speedup); KV reject is a trim(1) in the loop.
             r = selfAttn!(inputLayerNorm(x), mask: attentionMask, cache: cache)
         }
+        if prof {
+            eval(r)
+            let dt = Double(ForwardProfile.clk() - t0) / 1e9
+            if isLinear { ForwardProfile.tGDN += dt; ForwardProfile.nGDN += 1 }
+            else { ForwardProfile.tAttn += dt; ForwardProfile.nAttn += 1 }
+            t0 = ForwardProfile.clk()
+        }
 
         let h = x + r
-        return h + (mlp as! UnaryLayer)(postAttentionLayerNorm(h))
+        let out = h + (mlp as! UnaryLayer)(postAttentionLayerNorm(h))
+        if prof { eval(out); ForwardProfile.tMLP += Double(ForwardProfile.clk() - t0) / 1e9 }
+        return out
     }
 }
 
