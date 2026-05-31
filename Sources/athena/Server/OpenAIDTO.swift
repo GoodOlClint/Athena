@@ -67,7 +67,19 @@ struct ChatCompletionRequest: Codable {
     let tool_choice: JSONValue?
     /// Per-request generation overrides (M24.3). Absent ⇒ the daemon's
     /// loaded defaults. Honored on the sync, native, and queued paths.
+    ///
+    /// `max_completion_tokens` is OpenAI's CURRENT field for the chat
+    /// completions output cap; `max_tokens` is its deprecated predecessor.
+    /// Current SDKs send `max_completion_tokens`, so a client setting only
+    /// that previously had its cap SILENTLY DROPPED — the generation then
+    /// ran to the daemon's (large) default, blowing past the requested
+    /// limit. Both are parsed; `tokenCap` prefers the current field.
     let max_tokens: Int?
+    let max_completion_tokens: Int?
+    /// The effective output-token cap: the current `max_completion_tokens`
+    /// when present, else the deprecated `max_tokens`. (Computed ⇒ not
+    /// part of the Codable surface.)
+    var tokenCap: Int? { max_completion_tokens ?? max_tokens }
     let temperature: Double?
     /// Sampling overrides (M31.3). `top_p`/`seed` reach the substrate
     /// sampling path; they are INERT on the greedy/MTP/structured paths

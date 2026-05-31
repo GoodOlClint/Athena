@@ -907,7 +907,8 @@ enum OpenAPISpec {
                   "response_format": { "type": "object", "description": "OpenAI response_format (text | json_object | json_schema)." },
                   "tools": { "type": "array", "items": { "type": "object" } },
                   "tool_choice": {},
-                  "max_tokens": { "type": "integer" },
+                  "max_tokens": { "type": "integer", "description": "Output-token cap (deprecated alias of max_completion_tokens; max_completion_tokens wins if both are sent)." },
+                  "max_completion_tokens": { "type": "integer", "description": "Output-token cap (OpenAI's current field). Absent ⇒ the daemon default." },
                   "temperature": { "type": "number" },
                   "top_p": { "type": "number", "description": "Honored only on the sampling path; inert under greedy/MTP/structured decoding." },
                   "seed": { "type": "integer", "description": "Honored only on the sampling path." },
@@ -1046,7 +1047,8 @@ enum OpenAPISpec {
                   "model": { "type": "string", "description": "Same semantics as ChatCompletionRequest.model — selects among the operator-declared LLM allowlist (M41.2)." },
                   "messages": { "type": "array", "items": { "type": "object", "properties": { "role": { "type": "string" }, "content": { "type": "string" } } } },
                   "stream": { "type": "boolean" },
-                  "max_tokens": { "type": "integer" },
+                  "max_tokens": { "type": "integer", "description": "Output-token cap (deprecated alias of max_completion_tokens; max_completion_tokens wins if both are sent)." },
+                  "max_completion_tokens": { "type": "integer", "description": "Output-token cap (OpenAI's current field). Absent ⇒ the daemon default." },
                   "temperature": { "type": "number" },
                   "speculative": { "type": "boolean", "description": "Per-request MTP speculative override (same semantics as on /v1/chat/completions; greedy at temperature=0, sampling at temperature>0)." }
                 }

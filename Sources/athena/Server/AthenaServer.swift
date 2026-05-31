@@ -866,7 +866,7 @@ struct AthenaServer {
                     seconds: deadlineSecs,
                     llm.generateMetered(
                         messages: turns, schemaJSON: schemaJSON,
-                        tools: toolSpecs, maxTokens: body.max_tokens,
+                        tools: toolSpecs, maxTokens: body.tokenCap,
                         temperature: body.temperature,
                         topP: body.top_p, seed: body.seed,
                         speculative: body.speculative,
@@ -896,7 +896,7 @@ struct AthenaServer {
             collected = try await collectMetered(seconds: deadlineSecs) {
                 llm.generateMetered(
                     messages: turns, schemaJSON: schemaJSON,
-                    tools: toolSpecs, maxTokens: body.max_tokens,
+                    tools: toolSpecs, maxTokens: body.tokenCap,
                     temperature: body.temperature,
                     topP: body.top_p, seed: body.seed,
                     speculative: body.speculative,
@@ -2654,7 +2654,7 @@ struct AthenaServer {
                 collected = try await collectMetered(seconds: deadlineSecs) {
                     llm.generateMetered(
                         messages: turns, schemaJSON: effective?.json,
-                        tools: req.toolSpecs(), maxTokens: req.max_tokens,
+                        tools: req.toolSpecs(), maxTokens: req.tokenCap,
                         temperature: req.temperature,
                         topP: req.top_p, seed: req.seed,
                         speculative: req.speculative,
