@@ -54,6 +54,16 @@ public enum DefaultConfig {
         # kv_compression = "none"
         # vector_cap_bytes = 4294967296
 
+        # ── [prompt_cache] cross-request prompt-prefix KV reuse (M59) ──
+        # Transparent reuse of a previously-computed KV prefix across chat
+        # completions that share a leading token run (e.g. a static system
+        # prompt + verbatim document, varying only in the trailing
+        # instruction). MTP/speculative path only; bit-identical to a cold
+        # prefill. Default OFF. The ATHENA_PROMPT_CACHE env var
+        # (1/true/0/false) overrides prompt_cache_enabled at startup.
+        # prompt_cache_enabled = false
+        # prompt_cache_max_entries = 4
+
 
         # ── Storage ──────────────────────────────────────────────────
         # Embedded SQLite store (vectors + queue). Commented ⇒ "~/.athena"

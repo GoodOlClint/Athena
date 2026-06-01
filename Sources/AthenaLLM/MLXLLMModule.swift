@@ -46,6 +46,20 @@ public struct LLMGenerationParameters: Sendable {
     public var speculativeEligible: Bool { speculative }
 }
 
+/// M59.1 — cross-request prompt-prefix KV cache config (`[prompt_cache]`).
+/// Disabled by default; flip `enabled` to true once the bit-identical gate
+/// passes on the real MTP model. `maxEntries` bounds the in-memory LRU by
+/// count in this slice (byte/idle-TTL governor eviction is M59.2).
+public struct PrefixCacheConfig: Sendable {
+    public var enabled: Bool
+    public var maxEntries: Int
+
+    public init(enabled: Bool = false, maxEntries: Int = 4) {
+        self.enabled = enabled
+        self.maxEntries = maxEntries
+    }
+}
+
 /// The real MLX-backed LLM module (M1). Loads a model from a local
 /// directory — no download, no HF hub round-trip — and streams native
 /// `TokenIterator` generation via the substrate's `ModelContainer`.
@@ -131,6 +145,11 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     /// fork A; M41.2 makes it per-rebind.
     private var configVocabSize: Int?
 
+    /// M59.1 — cross-request prompt-prefix KV cache. `nil` unless the
+    /// operator enabled `[prompt_cache]`. Held for the module's lifetime;
+    /// entries are keyed by resident model id (M59.1 scope).
+    private let prefixCache: PrefixKVCache?
+
     /// Single-model convenience init kept for source-compat with M27/M40
     /// call sites; forwards to the M41.2 list form with a 1-entry
     /// allowlist. The store root is inferred from the directory's
@@ -139,13 +158,15 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     public init(
         modelDirectory: URL,
         parameters: LLMGenerationParameters = .init(),
-        promptCacheCapBytes: Int = 0
+        promptCacheCapBytes: Int = 0,
+        prefixCacheConfig: PrefixCacheConfig = .init()
     ) {
         self.init(
             modelDirectories: [modelDirectory],
             modelStoreRoot: modelDirectory.deletingLastPathComponent(),
             parameters: parameters,
-            promptCacheCapBytes: promptCacheCapBytes)
+            promptCacheCapBytes: promptCacheCapBytes,
+            prefixCacheConfig: prefixCacheConfig)
     }
 
     /// M41.2: operator-declared list (first = default). Empty ⇒
@@ -157,11 +178,15 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         modelDirectories urls: [URL],
         modelStoreRoot: URL? = nil,
         parameters: LLMGenerationParameters = .init(),
-        promptCacheCapBytes: Int = 0
+        promptCacheCapBytes: Int = 0,
+        prefixCacheConfig: PrefixCacheConfig = .init()
     ) {
         precondition(
             !urls.isEmpty,
             "MLXLLMModule needs at least one model directory")
+        self.prefixCache =
+            prefixCacheConfig.enabled
+            ? PrefixKVCache(maxEntries: prefixCacheConfig.maxEntries) : nil
         self.modelDirectories = urls.map {
             (name: $0.lastPathComponent, url: $0)
         }
@@ -666,6 +691,14 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         }()
         let samplingSeed: Int? =
             requestSeed.flatMap { $0 >= 0 ? $0 : nil }
+        // M59.1 — prefix-cache handle + scope captured for the closure.
+        // `prefixCache` is nil unless the operator enabled `[prompt_cache]`;
+        // the scope keys entries by resident model id so a rebind can't serve
+        // one model's KV prefix to another. (Per-principal / prompt_cache_key
+        // scoping is M59.3.)
+        let prefixCache = self.prefixCache
+        let cacheScope: String? =
+            prefixCache != nil ? (residentName ?? defaultName) : nil
         // The closure returns the decoded text plus the completion token
         // count (`ids.count`); the prompt count is `promptTokens.count`
         // from the outer scope. nil ⇒ fall back to the substrate stream.
@@ -709,7 +742,8 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                     ids = SpeculativeGeneration.generate(
                         model: model, promptTokens: promptTokens,
                         maxTokens: maxTokens,
-                        eosTokenId: ctx.tokenizer.eosTokenId, guide: guide)
+                        eosTokenId: ctx.tokenizer.eosTokenId, guide: guide,
+                        prefixCache: prefixCache, cacheScope: cacheScope)
                 } else if samplingEligible && model.hasMTPHead {
                     // M40.2 sampling-mode (internal). The Guide is nil
                     // here by construction — `samplingEligible` requires

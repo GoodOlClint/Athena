@@ -36,6 +36,12 @@ public struct AthenaConfig: Sendable, Equatable {
     /// `triattention`. Optional — daemon defaults to `none` when absent.
     /// The `ATHENA_KV_COMPRESSION` env var overrides this at startup.
     public var kvCompression: String?
+    /// `[prompt_cache]` — cross-request prompt-prefix KV reuse (M59).
+    /// `prompt_cache_enabled` (default false) is the master switch;
+    /// `prompt_cache_max_entries` (default 4) bounds the in-memory LRU by
+    /// count. Absent ⇒ disabled.
+    public var promptCacheEnabled: Bool?
+    public var promptCacheMaxEntries: Int?
     /// Bearer-auth keys file. Optional — no keys + loopback = open;
     /// no keys + non-loopback = the daemon refuses to start.
     public var authKeysFile: String?
@@ -119,6 +125,8 @@ public struct AthenaConfig: Sendable, Equatable {
         maxTokens: Int? = nil, temperature: String? = nil,
         speculative: Bool? = nil, vectorCapBytes: Int? = nil,
         kvCompression: String? = nil,
+        promptCacheEnabled: Bool? = nil,
+        promptCacheMaxEntries: Int? = nil,
         authKeysFile: String? = nil,
         tlsCert: String? = nil, tlsKey: String? = nil,
         rateLimit: String? = nil, rateBurst: Int? = nil,
@@ -150,6 +158,8 @@ public struct AthenaConfig: Sendable, Equatable {
         self.speculative = speculative
         self.vectorCapBytes = vectorCapBytes
         self.kvCompression = kvCompression
+        self.promptCacheEnabled = promptCacheEnabled
+        self.promptCacheMaxEntries = promptCacheMaxEntries
         self.authKeysFile = authKeysFile
         self.tlsCert = tlsCert
         self.tlsKey = tlsKey
@@ -271,6 +281,13 @@ public struct AthenaConfig: Sendable, Equatable {
             vectorTtl = try int("vector_ttl_secs", vt)
         }
         let spec = scalar("speculative", in: toml).map { $0 == "true" }
+        let pcEnabled = scalar("prompt_cache_enabled", in: toml).map {
+            $0 == "true"
+        }
+        var pcMaxEntries: Int?
+        if let pm = scalar("prompt_cache_max_entries", in: toml) {
+            pcMaxEntries = try int("prompt_cache_max_entries", pm)
+        }
         let preload = scalar("preload", in: toml).map { $0 == "true" }
         let dropReq = scalar("drop_request_content", in: toml).map {
             $0 == "true"
@@ -293,6 +310,8 @@ public struct AthenaConfig: Sendable, Equatable {
             speculative: spec,
             vectorCapBytes: vecCap,
             kvCompression: scalar("kv_compression", in: toml),
+            promptCacheEnabled: pcEnabled,
+            promptCacheMaxEntries: pcMaxEntries,
             authKeysFile: scalar("auth_keys_file", in: toml),
             tlsCert: scalar("tls_cert", in: toml),
             tlsKey: scalar("tls_key", in: toml),

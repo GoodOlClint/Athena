@@ -353,6 +353,17 @@ struct Load: AsyncParsableCommand {
             file: ConfigEditor.resolvePath(nil))
         let kvCompression = try KVCompression.resolve(
             config: tomlCfg?.kvCompression)
+        // M59.1 — cross-request prompt-prefix KV cache (`[prompt_cache]`),
+        // default OFF. Bit-identical greedy reuse on the MTP path; bound by
+        // entry count in this slice (governor accounting is M59.2).
+        // Precedence mirrors kv_compression: env ATHENA_PROMPT_CACHE
+        // (1/true/0/false) > TOML prompt_cache_enabled > built-in false.
+        let prefixEnvEnabled = ProcessInfo.processInfo
+            .environment["ATHENA_PROMPT_CACHE"]
+            .map { $0 == "1" || $0.lowercased() == "true" }
+        let prefixCacheConfig = PrefixCacheConfig(
+            enabled: prefixEnvEnabled ?? tomlCfg?.promptCacheEnabled ?? false,
+            maxEntries: tomlCfg?.promptCacheMaxEntries ?? 4)
 
         let config = GovernorConfig(
             totalBudgetBytes: budgetBytes,
@@ -493,7 +504,8 @@ struct Load: AsyncParsableCommand {
                     temperature: Float(temperature ?? 0.7),
                     speculative: speculative,
                     kvCompression: kvCompression),
-                promptCacheCapBytes: config.promptCacheCapBytes)
+                promptCacheCapBytes: config.promptCacheCapBytes,
+                prefixCacheConfig: prefixCacheConfig)
         }
         let embedding: any EmbeddingModule
         switch engine {

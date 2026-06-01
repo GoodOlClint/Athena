@@ -50,7 +50,9 @@ enum SpeculativeGeneration {
         promptTokens: [Int],
         maxTokens: Int,
         eosTokenId: Int?,
-        guide: StructuredGuide? = nil
+        guide: StructuredGuide? = nil,
+        prefixCache: PrefixKVCache? = nil,
+        cacheScope: String? = nil
     ) -> [Int] {
         let vocab = model.vocabularySize
         // M53 diag — speculative acceptance + throughput summary.
@@ -68,7 +70,42 @@ enum SpeculativeGeneration {
         var tDraftPick = 0.0, tRollback = 0.0, tPrefill = 0.0
         @inline(__always) func now() -> UInt64 { DispatchTime.now().uptimeNanoseconds }
         @inline(__always) func dt(_ t0: UInt64) -> Double { Double(now() - t0) / 1e9 }
-        let backbone = model.newCache(parameters: nil)
+        // M59.1 — try to resume from a cached shared prefix. `prefixHit` is
+        // non-nil only when caching is enabled AND a prior request in this
+        // scope shares a prefix spanning ≥1 full 512-chunk. The returned
+        // caches are cloned and already restored to boundary `B`; the entry
+        // is refcounted until `release` (the `defer` below). On a miss with
+        // caching enabled, `recorder` collects recurrent checkpoints during
+        // prefill so the entry can be stored at the prefill→decode seam.
+        let backbone: [KVCache]
+        let prefillStart: Int
+        var prefixHit: PrefixKVCache.Hit?
+        var recorder: PrefixKVCache.Recorder?
+        if let prefixCache, let cacheScope,
+            let hit = prefixCache.acquire(
+                scope: cacheScope, promptTokens: promptTokens, model: model)
+        {
+            backbone = hit.caches
+            prefillStart = hit.startOffset
+            prefixHit = hit
+            MLXLLMModule.log.notice(
+                """
+                prefix-cache HIT prompt=\(promptTokens.count) \
+                L=\(hit.commonPrefix) B=\(hit.startOffset) \
+                suffix=\(promptTokens.count - hit.startOffset)
+                """,
+                metadata: ["function": "SpeculativeGeneration.generate"])
+        } else {
+            backbone = model.newCache(parameters: nil)
+            prefillStart = 0
+            if let prefixCache, cacheScope != nil {
+                recorder = prefixCache.makeRecorder()
+                MLXLLMModule.log.notice(
+                    "prefix-cache MISS prompt=\(promptTokens.count)",
+                    metadata: ["function": "SpeculativeGeneration.generate"])
+            }
+        }
+        defer { if let prefixHit { prefixCache?.release(prefixHit) } }
         let mtpCacheArr = model.makeMTPCache()
         let mtpCache: [KVCache?] = mtpCacheArr.map { $0 }
 
@@ -98,10 +135,14 @@ enum SpeculativeGeneration {
         let tPrefill0 = trace ? now() : 0
         if promptTokens.count > 1 {
             let head = Array(promptTokens.dropLast())
-            let chunkSize = 512
-            let totalChunks =
-                (head.count + chunkSize - 1) / chunkSize
-            var i = 0
+            let chunkSize = PrefixKVCache.chunkSize
+            // M59.1 — resume the chunk loop at `prefillStart` (the restored
+            // 512-boundary B on a warm hit, else 0). Starting at a 512-multiple
+            // keeps the absolute chunk grid identical to a cold prefill, which
+            // is what makes prefix reuse bit-identical.
+            let remaining = max(0, head.count - prefillStart)
+            let totalChunks = (remaining + chunkSize - 1) / chunkSize
+            var i = prefillStart
             var done = 0
             while i < head.count {
                 let chunk = Array(
@@ -112,6 +153,11 @@ enum SpeculativeGeneration {
                 asyncEval(backbone)
                 i += chunkSize
                 done += 1
+                // Snapshot recurrent state at this absolute boundary (only
+                // 512-multiples are kept; the snapshot guards that). nil on a
+                // warm hit (we don't re-store).
+                recorder?.snapshot(
+                    offset: min(i, head.count), backbone: backbone)
                 DecodeProgress.counter?.recordPrefillChunk(
                     completed: done, total: totalChunks)
             }
@@ -120,6 +166,16 @@ enum SpeculativeGeneration {
             tokenArray(promptTokens.last!), cache: backbone)
         asyncEval(backbone)
         if trace { eval(logits, hidden); tPrefill = dt(tPrefill0) }
+
+        // M59.1 — store the post-prefill backbone NOW, before the decode loop
+        // below trims/appends to it. The attention caches are at full prompt
+        // length here; `store` clones them so this request's decode never
+        // corrupts the cached entry.
+        if let recorder, let prefixCache, let cacheScope {
+            prefixCache.store(
+                scope: cacheScope, promptTokens: promptTokens,
+                backbone: backbone, recorder: recorder)
+        }
 
         var out: [Int] = []
         // Deferred-enforcement phase machine (IDLE→ENFORCING). The Guide
