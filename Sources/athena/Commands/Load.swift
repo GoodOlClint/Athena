@@ -641,6 +641,7 @@ struct Load: AsyncParsableCommand {
             auditRetentionDays: auditRetentionDays ?? 0,
             requestTimeoutSecs: requestTimeoutSecs ?? 0,
             preload: preload,
+            prefixCache: prefixCache,
             queueResultTtlSecs: queueResultTtlSecs ?? 0,
             queueMaxRows: queueMaxRows ?? 0,
             vectorTtlSecs: vectorTtlSecs ?? 0,

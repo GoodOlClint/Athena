@@ -56,6 +56,28 @@ struct AthenaChatChunk: Codable {
     let done: Bool
 }
 
+/// `GET /api/cache/prompt` (M59.4) — prompt-prefix KV pool stats.
+struct PromptCacheStatsResponse: Codable {
+    let enabled: Bool
+    let entries: Int
+    let bytes: Int
+    let hits: Int
+    let misses: Int
+    let evictions: Int
+    let max_entries: Int
+    let max_bytes: Int
+    static let disabled = PromptCacheStatsResponse(
+        enabled: false, entries: 0, bytes: 0, hits: 0, misses: 0,
+        evictions: 0, max_entries: 0, max_bytes: 0)
+}
+
+/// `DELETE /api/cache/prompt` (M59.4) — flush result.
+struct PromptCacheFlushResponse: Codable {
+    let flushed: Int
+    let entries: Int
+    let bytes: Int
+}
+
 /// `/api/embed` — `input` is a string or an array of strings.
 struct AthenaEmbedRequest: Codable {
     let model: String?

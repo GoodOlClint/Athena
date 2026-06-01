@@ -345,6 +345,8 @@ extension AthenaServer {
             row("resident",mb(used))+row("free",mb(g.freeBytes))+
             row("budget",mb(tot))+
             row("prompt-cache cap",mb(g.promptCacheCapBytes))+
+            (g.promptCachePoolEntries>0?row("prompt-cache pool",
+              g.promptCachePoolEntries+" ent · "+mb(g.promptCachePoolBytes)):"")+
             "</table>";
           $("mods").innerHTML="<tr><th>module</th><th>state</th>"+
             "<th>resident</th></tr>"+g.modules.map(m=>

@@ -22,6 +22,6 @@ struct Athena: AsyncParsableCommand {
             DefaultCmd.self, PullCmd.self, ConvertCmd.self,
             PruneCmd.self,
             Queue.self, Vectors.self, Store.self, AuthClient.self,
-            UsageCmd.self, AuditCmd.self,
+            UsageCmd.self, AuditCmd.self, CacheCmd.self,
         ])
 }

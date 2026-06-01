@@ -81,6 +81,12 @@ struct AthenaServer {
     /// effort: the warm runs concurrently with serving (the HTTP surface
     /// is up immediately) and a failure falls back to the lazy path.
     var preload: Bool = false
+    /// M59.4 — the shared cross-request prompt-prefix KV pool (or nil when
+    /// `[prompt_cache]` is disabled). The SAME lock-guarded instance the LLM
+    /// module and governor hold; the operator surface (`GET/DELETE
+    /// /api/cache/prompt`) reads its stats and flushes it. `var = nil` so it's
+    /// a memberwise-init param.
+    var prefixCache: PrefixKVCache? = nil
     /// Queue-result retention (M34.1). `queueResultTtlSecs` > 0 ⇒ prune
     /// terminal (done/error/canceled) results older than that window;
     /// `queueMaxRows` > 0 ⇒ cap total job rows (oldest terminal first).
@@ -495,6 +501,16 @@ struct AthenaServer {
         }
         router.get("/api/logs/stream") { request, _ -> Response in
             await handleLogsStream(request)
+        }
+
+        // M59.4 — prompt-prefix cache operator surface. Admin-only
+        // (AuthPolicy → daemon.admin). GET = pool stats; DELETE = flush the
+        // pool (entries not in use), audited at the shared chokepoint.
+        router.get("/api/cache/prompt") { _, _ -> Response in
+            handlePromptCacheStats()
+        }
+        router.delete("/api/cache/prompt") { request, _ -> Response in
+            await handlePromptCacheFlush(request)
         }
 
         // Model store (M16.2). Literal sub-paths are registered
@@ -2162,6 +2178,44 @@ struct AthenaServer {
                         target: $0.target, result: $0.result,
                         detail: $0.detail)
                 }))
+    }
+
+    /// `GET /api/cache/prompt` (M59.4). Admin-only stats for the
+    /// cross-request prompt-prefix KV pool: whether it's enabled, the live
+    /// entry/byte occupancy + caps, and cumulative hit/miss/eviction
+    /// counters. Read-only ⇒ not audited (mirrors `/api/audit` itself).
+    private func handlePromptCacheStats() -> Response {
+        guard let prefixCache else {
+            return Self.json(PromptCacheStatsResponse.disabled)
+        }
+        let s = prefixCache.stats()
+        return Self.json(
+            PromptCacheStatsResponse(
+                enabled: true, entries: s.entries, bytes: s.bytes,
+                hits: s.hits, misses: s.misses, evictions: s.evictions,
+                max_entries: s.maxEntries, max_bytes: s.maxBytes))
+    }
+
+    /// `DELETE /api/cache/prompt` (M59.4). Admin-only flush of the pool —
+    /// drops every entry NOT currently held by an in-flight generation
+    /// (those are freed when their request releases them). Audited at the
+    /// shared chokepoint (M30). Returns how many entries were freed plus the
+    /// post-flush occupancy.
+    private func handlePromptCacheFlush(_ request: Request) async -> Response {
+        guard let prefixCache else {
+            await audit(
+                request, action: "prompt_cache.flush", target: nil,
+                result: "ok", detail: "disabled")
+            return Self.json(PromptCacheFlushResponse(flushed: 0, entries: 0, bytes: 0))
+        }
+        let freed = prefixCache.flushIdle()
+        let s = prefixCache.stats()
+        await audit(
+            request, action: "prompt_cache.flush", target: nil,
+            result: "ok", detail: "freed=\(freed) remaining=\(s.entries)")
+        return Self.json(
+            PromptCacheFlushResponse(
+                flushed: freed, entries: s.entries, bytes: s.bytes))
     }
 
     /// `GET /api/logs` (M45.5). Admin-only daemon-log oversight,

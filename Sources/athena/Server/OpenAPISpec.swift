@@ -498,6 +498,28 @@ enum OpenAPISpec {
                 }
               }
             },
+            "/api/cache/prompt": {
+              "get": {
+                "tags": ["Prompt cache"],
+                "summary": "Cross-request prompt-prefix KV pool stats.",
+                "description": "Admin-only. Reports whether the pool is enabled, its live entry/byte occupancy and caps, and cumulative hit/miss/eviction counters. Requires `daemon.admin`.",
+                "responses": {
+                  "200": { "description": "Pool stats.", "content": { "application/json": { "schema": { "type": "object", "properties": { "enabled": { "type": "boolean" }, "entries": { "type": "integer" }, "bytes": { "type": "integer" }, "hits": { "type": "integer" }, "misses": { "type": "integer" }, "evictions": { "type": "integer" }, "max_entries": { "type": "integer" }, "max_bytes": { "type": "integer" } } } } } },
+                  "401": { "$ref": "#/components/responses/Unauthorized" },
+                  "403": { "$ref": "#/components/responses/Forbidden" }
+                }
+              },
+              "delete": {
+                "tags": ["Prompt cache"],
+                "summary": "Flush the prompt-prefix KV pool.",
+                "description": "Admin-only. Drops every cached prefix not currently held by an in-flight generation (those are freed when their request completes). Audited. Requires `daemon.admin`.",
+                "responses": {
+                  "200": { "description": "Flush result.", "content": { "application/json": { "schema": { "type": "object", "properties": { "flushed": { "type": "integer" }, "entries": { "type": "integer" }, "bytes": { "type": "integer" } } } } } },
+                  "401": { "$ref": "#/components/responses/Unauthorized" },
+                  "403": { "$ref": "#/components/responses/Forbidden" }
+                }
+              }
+            },
             "/api/models": {
               "get": {
                 "tags": ["Model store"],

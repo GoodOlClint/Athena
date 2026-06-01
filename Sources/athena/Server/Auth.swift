@@ -320,6 +320,10 @@ enum AuthPolicy {
         if path == "/api/logs" || path == "/api/logs/stream" {
             return .daemonAdmin
         }
+        // M59.4 — prompt-prefix cache operator surface (stats + flush) is a
+        // privileged management view over a process-global pool; admin-only
+        // (daemon.admin), matching /api/audit's sensitivity profile.
+        if path == "/api/cache/prompt" { return .daemonAdmin }
         // Usage is inference-tier: any authenticated caller sees its OWN
         // counters (handler owner-scopes); an admin sees all. Billing-
         // sensitive, so NOT exposed to the read-only role (M27.3).
