@@ -14,11 +14,13 @@ enum ConfigEditor {
         "audit_retention_days", "token_max_age_days",
         "request_timeout_secs",
         "queue_result_ttl_secs", "queue_max_rows", "vector_ttl_secs",
+        "prompt_cache_max_entries", "prompt_cache_max_bytes",
+        "prompt_cache_idle_ttl_secs",
     ]
     /// Written bare (unquoted), like ints: floats and bools.
     static let rawKeys: Set<String> = [
         "temperature", "speculative", "rate_limit", "preload",
-        "drop_request_content", "encrypt_store",
+        "drop_request_content", "encrypt_store", "prompt_cache_enabled",
     ]
     static let knownKeys: Set<String> = [
         "listen_host", "listen_port", "budget_bytes", "engine",
@@ -33,6 +35,9 @@ enum ConfigEditor {
         "drop_request_content", "encrypt_store",
         "https_proxy", "http_proxy", "all_proxy", "no_proxy",
         "kv_compression",
+        "prompt_cache_enabled", "prompt_cache_max_entries",
+        "prompt_cache_max_bytes", "prompt_cache_idle_ttl_secs",
+        "prompt_cache_scope",
     ]
 
     /// `--config` wins; else the installed file if present; else the
@@ -110,6 +115,15 @@ enum ConfigEditor {
         case "all_proxy": return cfg.allProxy
         case "no_proxy": return cfg.noProxy
         case "kv_compression": return cfg.kvCompression
+        case "prompt_cache_enabled":
+            return cfg.promptCacheEnabled.map { $0 ? "true" : "false" }
+        case "prompt_cache_max_entries":
+            return cfg.promptCacheMaxEntries.map(String.init)
+        case "prompt_cache_max_bytes":
+            return cfg.promptCacheMaxBytes.map(String.init)
+        case "prompt_cache_idle_ttl_secs":
+            return cfg.promptCacheIdleTtlSecs.map(String.init)
+        case "prompt_cache_scope": return cfg.promptCacheScope
         default: FailableExit.die("error: unknown key '\(key)'")
         }
     }
@@ -199,6 +213,10 @@ enum ConfigEditor {
                 throw Failure.badValue(key, "true or false")
             }
             if key == "encrypt_store",
+                value != "true", value != "false" {
+                throw Failure.badValue(key, "true or false")
+            }
+            if key == "prompt_cache_enabled",
                 value != "true", value != "false" {
                 throw Failure.badValue(key, "true or false")
             }
