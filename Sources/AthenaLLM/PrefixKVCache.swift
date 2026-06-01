@@ -60,6 +60,38 @@ public final class PrefixKVCache: @unchecked Sendable {
     /// bit-identical.
     public static let chunkSize = 512
 
+    /// M59.3 — how an entry's scope is keyed. The resident model id is
+    /// ALWAYS part of the key (a rebind must never serve one model's KV to
+    /// another); this selects what else joins it.
+    ///   - `.principal`  (default): isolate by authenticated principal —
+    ///     one caller's prefix is never reused for another (the security
+    ///     default).
+    ///   - `.cacheKey`: key by the OpenAI `prompt_cache_key` hint (falling
+    ///     back to the principal when the request omits it).
+    ///   - `.both`: principal AND cache_key — the narrowest scope.
+    public enum ScopeMode: String, Sendable {
+        case principal
+        case cacheKey = "cache_key"
+        case both
+    }
+
+    /// Build the scope key for a request. The model id is always included;
+    /// `\u{1}` separates fields (it can't appear in a model id, principal,
+    /// or JSON-string cache key, so fields can't collide).
+    public func scopeKey(
+        model: String, principal: String?, cacheKey: String?
+    ) -> String {
+        let p = principal ?? "anon"
+        switch scopeMode {
+        case .principal:
+            return "\(model)\u{1}p:\(p)"
+        case .cacheKey:
+            return "\(model)\u{1}k:\(cacheKey ?? p)"
+        case .both:
+            return "\(model)\u{1}p:\(p)\u{1}k:\(cacheKey ?? "")"
+        }
+    }
+
     // MARK: - Stored entry
 
     private final class Entry {
@@ -141,6 +173,7 @@ public final class PrefixKVCache: @unchecked Sendable {
     /// Evict entries idle longer than this many seconds (M59.2, default 600,
     /// mirrors OpenAI's 5–10 min inactivity eviction). 0 ⇒ no idle expiry.
     private let idleTTL: TimeInterval
+    private let scopeMode: ScopeMode
     private var entries: [Entry] = []
     private var nextId = 0
     private var hits = 0
@@ -149,10 +182,14 @@ public final class PrefixKVCache: @unchecked Sendable {
     /// for operator legibility (M59.2 snapshot / M59.4 stats).
     private var evictions = 0
 
-    public init(maxEntries: Int, maxBytes: Int = 0, idleTTLSecs: Int = 600) {
+    public init(
+        maxEntries: Int, maxBytes: Int = 0, idleTTLSecs: Int = 600,
+        scope: ScopeMode = .principal
+    ) {
         self.maxEntries = max(1, maxEntries)
         self.maxBytes = max(0, maxBytes)
         self.idleTTL = TimeInterval(max(0, idleTTLSecs))
+        self.scopeMode = scope
     }
 
     // MARK: - Lookup / acquire

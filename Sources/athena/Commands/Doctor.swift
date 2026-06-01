@@ -357,6 +357,34 @@ struct Doctor: AsyncParsableCommand {
             }
         }
 
+        // 12b. Prompt-prefix cache posture (M59). Off by default; when on,
+        //      report the scope (the secure default is per-principal) and
+        //      warn if it is enabled on an auth-off, non-loopback bind where
+        //      every caller collapses to the "anon" principal and would
+        //      therefore share cached prefixes.
+        let promptCacheOn =
+            (ProcessInfo.processInfo.environment["ATHENA_PROMPT_CACHE"]
+                .map { $0 == "1" || $0.lowercased() == "true" })
+            ?? (parsed?.promptCacheEnabled ?? false)
+        if promptCacheOn {
+            let scope = parsed?.promptCacheScope ?? "principal"
+            let entries = parsed?.promptCacheMaxEntries ?? 4
+            say(
+                .ok,
+                "prompt cache: ON (scope=\(scope), max_entries=\(entries)) "
+                    + "— MTP path, bit-identical reuse")
+            if !anyCreds, !loopback.contains(host) {
+                say(
+                    .warn,
+                    "prompt cache is ON with auth disabled on non-loopback "
+                        + "\(host): every caller is the same 'anon' principal, "
+                        + "so cached prefixes are shared across callers. Enable "
+                        + "auth, or bind loopback / behind a proxy.")
+            }
+        } else {
+            say(.ok, "prompt cache: off")
+        }
+
         // 13. Data-at-rest posture (M34): SQLite store encryption (or the
         //     FileVault fallback) + retention bounds. Passwords (PBKDF2),
         //     token hashes (SHA-256) and outbound secrets (Keychain) are

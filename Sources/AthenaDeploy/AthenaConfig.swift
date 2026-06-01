@@ -46,6 +46,9 @@ public struct AthenaConfig: Sendable, Equatable {
     public var promptCacheMaxEntries: Int?
     public var promptCacheMaxBytes: Int?
     public var promptCacheIdleTtlSecs: Int?
+    /// Scope mode (M59.3): `principal` (default — never cross callers),
+    /// `cache_key` (key by the OpenAI prompt_cache_key hint), or `both`.
+    public var promptCacheScope: String?
     /// Bearer-auth keys file. Optional — no keys + loopback = open;
     /// no keys + non-loopback = the daemon refuses to start.
     public var authKeysFile: String?
@@ -133,6 +136,7 @@ public struct AthenaConfig: Sendable, Equatable {
         promptCacheMaxEntries: Int? = nil,
         promptCacheMaxBytes: Int? = nil,
         promptCacheIdleTtlSecs: Int? = nil,
+        promptCacheScope: String? = nil,
         authKeysFile: String? = nil,
         tlsCert: String? = nil, tlsKey: String? = nil,
         rateLimit: String? = nil, rateBurst: Int? = nil,
@@ -168,6 +172,7 @@ public struct AthenaConfig: Sendable, Equatable {
         self.promptCacheMaxEntries = promptCacheMaxEntries
         self.promptCacheMaxBytes = promptCacheMaxBytes
         self.promptCacheIdleTtlSecs = promptCacheIdleTtlSecs
+        self.promptCacheScope = promptCacheScope
         self.authKeysFile = authKeysFile
         self.tlsCert = tlsCert
         self.tlsKey = tlsKey
@@ -330,6 +335,7 @@ public struct AthenaConfig: Sendable, Equatable {
             promptCacheMaxEntries: pcMaxEntries,
             promptCacheMaxBytes: pcMaxBytes,
             promptCacheIdleTtlSecs: pcIdleTtl,
+            promptCacheScope: scalar("prompt_cache_scope", in: toml),
             authKeysFile: scalar("auth_keys_file", in: toml),
             tlsCert: scalar("tls_cert", in: toml),
             tlsKey: scalar("tls_key", in: toml),

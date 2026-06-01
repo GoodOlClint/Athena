@@ -25,14 +25,28 @@ struct AthenaChatRequest: Codable {
     /// (greedy at temp 0, sampling at temp > 0; requires an
     /// MTP-capable model), `false` forces the standard path.
     let speculative: Bool?
+    /// Prompt-prefix cache scoping hint (M59.3) — the native dialect's
+    /// equivalent of OpenAI `prompt_cache_key`. Absent ⇒ scope by the
+    /// authenticated principal alone.
+    let prompt_cache_key: String?
+}
+
+/// Compact token accounting on the native non-stream reply (M59.3).
+/// `cached_tokens` is the prompt-prefix-cache reuse count.
+struct AthenaUsage: Codable {
+    let prompt_tokens: Int
+    let completion_tokens: Int
+    let cached_tokens: Int
 }
 
 /// Non-streamed `/api/chat` reply. The full generation is in
-/// `content`; `done` is always true here (a single object).
+/// `content`; `done` is always true here (a single object). `usage`
+/// (M59.3) carries real token counts incl. `cached_tokens`.
 struct AthenaChatResponse: Codable {
     let model: String
     let content: String
     let done: Bool
+    let usage: AthenaUsage?
 }
 
 /// One NDJSON line of a streamed `/api/chat`: an incremental

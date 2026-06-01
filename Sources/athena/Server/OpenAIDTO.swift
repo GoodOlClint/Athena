@@ -127,6 +127,12 @@ struct ChatCompletionRequest: Codable {
     /// so the kwargs only matter on unstructured chat. nil ⇒ template
     /// runs with its built-in defaults.
     let chat_template_kwargs: [String: JSONValue]?
+    /// OpenAI-standard prompt-caching hint (M59.3). An opaque caller-chosen
+    /// string that scopes the cross-request prompt-prefix cache so requests
+    /// sharing a prefix also share a cache key, raising the hit rate. Absent
+    /// ⇒ the cache scopes by the authenticated principal alone. Honored on
+    /// the sync, streamed, and queued `conversation` paths.
+    let prompt_cache_key: String?
 
     /// M46.3b — lower the OpenAI-style `chat_template_kwargs` dict into
     /// the `[String: any Sendable]` shape mlx-swift's UserInput wants.
@@ -253,10 +259,29 @@ struct ChatChoice: Codable {
     let finish_reason: String
 }
 
+/// OpenAI `usage.prompt_tokens_details` (M59.3). Reports how many input
+/// tokens were served from the prompt-prefix cache. Omitted from JSON when
+/// nil (e.g. embeddings), present (possibly 0) on chat completions.
+struct PromptTokensDetails: Codable {
+    let cached_tokens: Int
+}
+
 struct Usage: Codable {
     let prompt_tokens: Int
     let completion_tokens: Int
     let total_tokens: Int
+    let prompt_tokens_details: PromptTokensDetails?
+
+    init(
+        prompt_tokens: Int, completion_tokens: Int, total_tokens: Int,
+        cachedTokens: Int? = nil
+    ) {
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+        self.total_tokens = total_tokens
+        self.prompt_tokens_details =
+            cachedTokens.map { PromptTokensDetails(cached_tokens: $0) }
+    }
 }
 
 struct ChatCompletionResponse: Codable {

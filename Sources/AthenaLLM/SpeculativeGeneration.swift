@@ -53,7 +53,7 @@ enum SpeculativeGeneration {
         guide: StructuredGuide? = nil,
         prefixCache: PrefixKVCache? = nil,
         cacheScope: String? = nil
-    ) -> [Int] {
+    ) -> (ids: [Int], cachedTokens: Int) {
         let vocab = model.vocabularySize
         // M53 diag — speculative acceptance + throughput summary.
         let genStart = Date()
@@ -106,6 +106,10 @@ enum SpeculativeGeneration {
             }
         }
         defer { if let prefixHit { prefixCache?.release(prefixHit) } }
+        // M59.3 — tokens served from the reused prefix = the boundary we
+        // resumed from (B). 0 on a cold prefill. Surfaced as OpenAI
+        // `cached_tokens`.
+        let cachedTokens = prefixHit?.startOffset ?? 0
         let mtpCacheArr = model.makeMTPCache()
         let mtpCache: [KVCache?] = mtpCacheArr.map { $0 }
 
@@ -218,7 +222,7 @@ enum SpeculativeGeneration {
 
         // First token — IDLE plain argmax until JSON starts.
         let prev0 = decoder.pick(logits[0..., -1, 0...])
-        if commit(prev0) { return result() }
+        if commit(prev0) { return (result(), cachedTokens) }
         var prev = prev0
 
         // M47.2 — MTP drafts are Guide-masked at the SAME Guide state the
@@ -336,6 +340,6 @@ enum SpeculativeGeneration {
                 "\(ForwardProfile.summary())",
                 metadata: ["function": "SpeculativeGeneration.generate"])
         }
-        return result()
+        return (result(), cachedTokens)
     }
 }

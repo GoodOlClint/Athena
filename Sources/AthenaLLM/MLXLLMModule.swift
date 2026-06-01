@@ -402,7 +402,9 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         maxTokens: Int?, temperature: Double?,
         topP: Double?, seed: Int?,
         speculative: Bool?,
-        chatTemplateKwargs: [String: any Sendable]?
+        chatTemplateKwargs: [String: any Sendable]?,
+        promptCacheKey: String? = nil,
+        principal: String? = nil
     ) -> AsyncStream<GenChunk> {
         // `messages` ([ChatTurn]) is Sendable and crosses into the actor;
         // the non-Sendable `Chat.Message` mapping happens INSIDE the actor
@@ -422,7 +424,8 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                         requestSpeculative: speculative,
                         requestTemperature: temperature,
                         requestTopP: topP, requestSeed: seed,
-                        chatTemplateKwargs: chatTemplateKwargs)
+                        chatTemplateKwargs: chatTemplateKwargs,
+                        promptCacheKey: promptCacheKey, principal: principal)
                     {
                         usage = speculative.usage
                         continuation.yield(.text(speculative.text))
@@ -503,7 +506,9 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         requestTemperature: Double?,
         requestTopP: Double?,
         requestSeed: Int?,
-        chatTemplateKwargs: [String: any Sendable]?
+        chatTemplateKwargs: [String: any Sendable]?,
+        promptCacheKey: String? = nil,
+        principal: String? = nil
     ) async throws -> (text: String, usage: TokenUsage)? {
         guard let container else { return nil }
         // Per-request override (the consuming application intent): if the caller
@@ -677,19 +682,24 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         }()
         let samplingSeed: Int? =
             requestSeed.flatMap { $0 >= 0 ? $0 : nil }
-        // M59.1 — prefix-cache handle + scope captured for the closure.
-        // `prefixCache` is nil unless the operator enabled `[prompt_cache]`;
-        // the scope keys entries by resident model id so a rebind can't serve
-        // one model's KV prefix to another. (Per-principal / prompt_cache_key
-        // scoping is M59.3.)
+        // M59.1/.3 — prefix-cache handle + scope captured for the closure.
+        // `prefixCache` is nil unless the operator enabled `[prompt_cache]`.
+        // The scope ALWAYS includes the resident model id (a rebind must not
+        // serve one model's KV to another) plus, per the configured scope
+        // mode, the authenticated principal (default — cross-principal reuse
+        // is never allowed) and/or the OpenAI `prompt_cache_key` hint.
         let prefixCache = self.prefixCache
-        let cacheScope: String? =
-            prefixCache != nil ? (residentName ?? defaultName) : nil
-        // The closure returns the decoded text plus the completion token
-        // count (`ids.count`); the prompt count is `promptTokens.count`
-        // from the outer scope. nil ⇒ fall back to the substrate stream.
+        let cacheScope: String? = prefixCache.map {
+            $0.scopeKey(
+                model: residentName ?? defaultName,
+                principal: principal, cacheKey: promptCacheKey)
+        }
+        // The closure returns the decoded text, the completion token count
+        // (`ids.count`), and the cached-prefix token count (M59.3); the
+        // prompt count is `promptTokens.count` from the outer scope. nil ⇒
+        // fall back to the substrate stream.
         let decoded = try await container.perform {
-            (ctx: ModelContext) -> (text: String, completion: Int)? in
+            (ctx: ModelContext) -> (text: String, completion: Int, cached: Int)? in
 
             // Structured ⇒ NO-THINK by construction: the Guide masks
             // from token 0, so the schema is enforced immediately and
@@ -724,12 +734,15 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                 model.triAttentionEviction = nil
 
                 let ids: [Int]
+                var cachedTokens = 0
                 if greedyEligible && model.hasMTPHead {
-                    ids = SpeculativeGeneration.generate(
+                    let r = SpeculativeGeneration.generate(
                         model: model, promptTokens: promptTokens,
                         maxTokens: maxTokens,
                         eosTokenId: ctx.tokenizer.eosTokenId, guide: guide,
                         prefixCache: prefixCache, cacheScope: cacheScope)
+                    ids = r.ids
+                    cachedTokens = r.cachedTokens
                 } else if samplingEligible && model.hasMTPHead {
                     // M40.2 sampling-mode (internal). The Guide is nil
                     // here by construction — `samplingEligible` requires
@@ -749,7 +762,9 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                 } else {
                     return nil  // unstructured + no MTP ⇒ substrate stream
                 }
-                return (ctx.tokenizer.decode(tokenIds: ids), ids.count)
+                return (
+                    ctx.tokenizer.decode(tokenIds: ids), ids.count,
+                    cachedTokens)
             }
 
             // Any other architecture: schema-guided decoding on the
@@ -764,14 +779,15 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                 model: ctx.model, promptTokens: promptTokens,
                 vocab: vocabSize, maxTokens: maxTokens,
                 eosTokenId: Int(vt.eos), guide: guide)
-            return (ctx.tokenizer.decode(tokenIds: ids), ids.count)
+            return (ctx.tokenizer.decode(tokenIds: ids), ids.count, 0)
         }
         guard let decoded else { return nil }
         return (
             decoded.text,
             TokenUsage(
                 promptTokens: promptTokens.count,
-                completionTokens: decoded.completion))
+                completionTokens: decoded.completion,
+                cachedTokens: decoded.cached))
     }
 
     private func beginGeneration(

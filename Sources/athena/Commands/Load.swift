@@ -385,12 +385,17 @@ struct Load: AsyncParsableCommand {
         let prefixCfgBytes = tomlCfg?.promptCacheMaxBytes ?? 0
         let prefixMaxBytes =
             prefixCfgBytes > 0 ? prefixCfgBytes : config.promptCacheCapBytes
+        let prefixScope =
+            PrefixKVCache.ScopeMode(
+                rawValue: tomlCfg?.promptCacheScope ?? "principal")
+            ?? .principal
         let prefixCache: PrefixKVCache? =
             prefixCacheEnabled
             ? PrefixKVCache(
                 maxEntries: prefixMaxEntries,
                 maxBytes: prefixMaxBytes,
-                idleTTLSecs: prefixIdleTTL)
+                idleTTLSecs: prefixIdleTTL,
+                scope: prefixScope)
             : nil
         var prefixPoolProbe: MemoryGovernor.PromptCachePoolProbe?
         var prefixPoolRelief: MemoryGovernor.PromptCacheReliefHook?

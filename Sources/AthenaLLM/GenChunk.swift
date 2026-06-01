@@ -8,9 +8,17 @@ import AthenaCore
 public struct TokenUsage: Sendable, Equatable {
     public var promptTokens: Int
     public var completionTokens: Int
-    public init(promptTokens: Int, completionTokens: Int) {
+    /// M59.3 — prompt tokens served from a reused KV prefix (the
+    /// cross-request prompt-prefix cache), surfaced as OpenAI
+    /// `usage.prompt_tokens_details.cached_tokens`. 0 ⇒ cold prefill / pool
+    /// disabled. Always ≤ `promptTokens`.
+    public var cachedTokens: Int
+    public init(
+        promptTokens: Int, completionTokens: Int, cachedTokens: Int = 0
+    ) {
         self.promptTokens = promptTokens
         self.completionTokens = completionTokens
+        self.cachedTokens = cachedTokens
     }
     public var totalTokens: Int { promptTokens + completionTokens }
     public static let zero = TokenUsage(promptTokens: 0, completionTokens: 0)

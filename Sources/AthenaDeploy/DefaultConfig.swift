@@ -68,6 +68,10 @@ public enum DefaultConfig {
         # prompt_cache_max_entries = 4
         # prompt_cache_max_bytes = 0          # 0 ⇒ governor-derived
         # prompt_cache_idle_ttl_secs = 600
+        # Scope: "principal" (never reuse across callers — the secure
+        # default), "cache_key" (key by the OpenAI prompt_cache_key hint),
+        # or "both". The resident model id is always part of the key.
+        # prompt_cache_scope = "principal"
 
 
         # ── Storage ──────────────────────────────────────────────────

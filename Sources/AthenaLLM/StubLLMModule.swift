@@ -42,13 +42,20 @@ public protocol LLMModule: InferenceModule {
     /// chat template at rendering time (e.g.
     /// `{"enable_thinking": false}` on Qwen3-class models); nil ⇒ run
     /// the template with its built-in defaults.
+    /// `promptCacheKey` (M59.3) is the OpenAI `prompt_cache_key` scoping
+    /// hint; `principal` is the authenticated caller. Both feed the
+    /// cross-request prompt-prefix cache's scope (a rebind never crosses
+    /// models; the default scope never crosses principals). Ignored by
+    /// conformers without the prefix cache (the stub).
     nonisolated func generateMetered(
         messages: [ChatTurn], schemaJSON: String?,
         tools: [[String: any Sendable]]?,
         maxTokens: Int?, temperature: Double?,
         topP: Double?, seed: Int?,
         speculative: Bool?,
-        chatTemplateKwargs: [String: any Sendable]?
+        chatTemplateKwargs: [String: any Sendable]?,
+        promptCacheKey: String?,
+        principal: String?
     ) -> AsyncStream<GenChunk>
 
     /// Override-aware String variant (M24.3). `maxTokens`/`temperature`,
@@ -106,7 +113,7 @@ extension LLMModule {
             messages: messages, schemaJSON: schemaJSON, tools: tools,
             maxTokens: maxTokens, temperature: temperature,
             topP: nil, seed: nil, speculative: speculative,
-            chatTemplateKwargs: nil)
+            chatTemplateKwargs: nil, promptCacheKey: nil, principal: nil)
         return AsyncStream { continuation in
             let task = Task {
                 for await event in events {
@@ -130,7 +137,9 @@ extension LLMModule {
         maxTokens: Int?, temperature: Double?,
         topP: Double?, seed: Int?,
         speculative: Bool?,
-        chatTemplateKwargs: [String: any Sendable]?
+        chatTemplateKwargs: [String: any Sendable]?,
+        promptCacheKey: String? = nil,
+        principal: String? = nil
     ) -> AsyncStream<GenChunk> {
         // The model-free stub has no sampler, so topP/seed/speculative
         // are accepted and ignored; the e2e gate exercises the sampling

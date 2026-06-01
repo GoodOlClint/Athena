@@ -848,11 +848,14 @@ struct AthenaServer {
         let toolSpecs = body.toolSpecs()
 
         let stops = body.stopSequences()
+        // M59.3 — resolve the principal once: it scopes the prompt-prefix
+        // cache (so reuse never crosses callers) on BOTH the streamed and
+        // non-streamed branches, and meters usage.
+        let principal = await usagePrincipal(request)
 
         if body.stream == true {
             // M27.4: meter streamed requests too, and emit a terminal
             // usage chunk when the client opted in via stream_options.
-            let principal = await usagePrincipal(request)
             let includeUsage = body.stream_options?.include_usage == true
             // M46.3 — per-request `timeout` overrides the daemon-wide
             // `request_timeout_secs`. nil ⇒ inherit; 0/negative ⇒
@@ -871,7 +874,9 @@ struct AthenaServer {
                         topP: body.top_p, seed: body.seed,
                         speculative: body.speculative,
                         chatTemplateKwargs:
-                            body.chatTemplateKwargsContext()),
+                            body.chatTemplateKwargsContext(),
+                        promptCacheKey: body.prompt_cache_key,
+                        principal: principal),
                     onTimerFired: {
                         Self.log.warning(
                             """
@@ -901,7 +906,9 @@ struct AthenaServer {
                     topP: body.top_p, seed: body.seed,
                     speculative: body.speculative,
                     chatTemplateKwargs:
-                        body.chatTemplateKwargsContext())
+                        body.chatTemplateKwargsContext(),
+                    promptCacheKey: body.prompt_cache_key,
+                    principal: principal)
             }
         } catch let e as AthenaError {
             // M33.1: the only AthenaError collectMetered raises is the
@@ -994,7 +1001,8 @@ struct AthenaServer {
             usage: Usage(
                 prompt_tokens: usage.promptTokens,
                 completion_tokens: usage.completionTokens,
-                total_tokens: usage.totalTokens))
+                total_tokens: usage.totalTokens,
+                cachedTokens: usage.cachedTokens))
     }
 
     /// Accumulated result of draining a metered generation: the full
@@ -2659,7 +2667,9 @@ struct AthenaServer {
                         topP: req.top_p, seed: req.seed,
                         speculative: req.speculative,
                         chatTemplateKwargs:
-                            req.chatTemplateKwargsContext())
+                            req.chatTemplateKwargsContext(),
+                        promptCacheKey: req.prompt_cache_key,
+                        principal: owner)
                 }
             } catch let e as AthenaError {
                 return (nil, e.message)  // M33.1: timeout → job error
@@ -2890,16 +2900,26 @@ struct AthenaServer {
             return err
         }
         let model = await servedLLMModel()
+        // M59.3 — route through `generateMetered` (not the String filter) so
+        // the prompt-prefix cache is scoped by the authenticated principal
+        // (never crossing callers) + the native `prompt_cache_key` hint, and
+        // so the non-stream reply can report real `cached_tokens`.
+        let principal = await usagePrincipal(request)
         if body.stream == true {
             let deadlineSecs = requestTimeoutSecs
             return Self.streamNDJSON(
                 tokens: deadlineBounded(
                     seconds: deadlineSecs,
-                    llm.generate(
-                        messages: turns, schemaJSON: nil, tools: nil,
-                        maxTokens: body.max_tokens,
-                        temperature: body.temperature,
-                        speculative: body.speculative),
+                    Self.textChunks(
+                        llm.generateMetered(
+                            messages: turns, schemaJSON: nil, tools: nil,
+                            maxTokens: body.max_tokens,
+                            temperature: body.temperature,
+                            topP: nil, seed: nil,
+                            speculative: body.speculative,
+                            chatTemplateKwargs: nil,
+                            promptCacheKey: body.prompt_cache_key,
+                            principal: principal)),
                     onTimerFired: {
                         Self.log.warning(
                             """
@@ -2914,18 +2934,16 @@ struct AthenaServer {
                         content: done ? "" : content, done: done))
             }
         }
-        let stream = llm.generate(
-            messages: turns, schemaJSON: nil, tools: nil,
-            maxTokens: body.max_tokens, temperature: body.temperature,
-            speculative: body.speculative)
-        let text: String
+        let collected: GenCollected
         do {
-            text = try await withInferenceDeadline(
-                seconds: requestTimeoutSecs
-            ) {
-                var acc = ""
-                for await c in stream { acc += c }
-                return acc
+            collected = try await collectMetered(seconds: requestTimeoutSecs) {
+                llm.generateMetered(
+                    messages: turns, schemaJSON: nil, tools: nil,
+                    maxTokens: body.max_tokens, temperature: body.temperature,
+                    topP: nil, seed: nil, speculative: body.speculative,
+                    chatTemplateKwargs: nil,
+                    promptCacheKey: body.prompt_cache_key,
+                    principal: principal)
             }
         } catch let e as AthenaError {
             return Self.error(
@@ -2934,9 +2952,31 @@ struct AthenaServer {
         } catch {
             return Self.classified(error, module: .llm)
         }
+        await meter(principal: principal, usage: collected.usage)
         return Self.json(
             AthenaChatResponse(
-                model: model, content: text, done: true))
+                model: model, content: collected.text, done: true,
+                usage: AthenaUsage(
+                    prompt_tokens: collected.usage.promptTokens,
+                    completion_tokens: collected.usage.completionTokens,
+                    cached_tokens: collected.usage.cachedTokens)))
+    }
+
+    /// Forward only the `.text` chunks of a metered stream as a plain
+    /// `AsyncStream<String>` (drops the terminal usage/finish) — used by the
+    /// native NDJSON `/api/chat` stream, which carries no usage object.
+    private static func textChunks(
+        _ events: AsyncStream<GenChunk>
+    ) -> AsyncStream<String> {
+        AsyncStream { continuation in
+            let task = Task {
+                for await event in events {
+                    if case .text(let t) = event { continuation.yield(t) }
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
     }
 
     /// Governed embedding helper shared by `/api/embed`, `/v1/vectors`
@@ -4755,7 +4795,8 @@ struct AthenaServer {
                             usage: Usage(
                                 prompt_tokens: usage.promptTokens,
                                 completion_tokens: usage.completionTokens,
-                                total_tokens: usage.totalTokens)))
+                                total_tokens: usage.totalTokens,
+                                cachedTokens: usage.cachedTokens)))
                 }
                 var done = ByteBuffer()
                 done.writeString("data: [DONE]\n\n")
