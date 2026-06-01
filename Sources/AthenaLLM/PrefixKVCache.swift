@@ -72,13 +72,15 @@ public final class PrefixKVCache: @unchecked Sendable {
         /// boundary offset (512-multiple) → layerIdx → cloned `[conv, ssm]`.
         let checkpoints: [Int: [Int: [MLXArray]]]
         let byteEstimate: Int
-        var lastUsed: Int
+        /// Wall-clock of last store/hit — drives both LRU ordering (oldest
+        /// evicted first) and idle-TTL expiry (M59.2).
+        var lastUsed: Date
         var refcount: Int
 
         init(
             id: Int, scope: String, tokens: [Int], attn: [KVCache?],
             checkpoints: [Int: [Int: [MLXArray]]], byteEstimate: Int,
-            lastUsed: Int
+            lastUsed: Date
         ) {
             self.id = id
             self.scope = scope
@@ -132,14 +134,25 @@ public final class PrefixKVCache: @unchecked Sendable {
 
     private let lock = NSLock()
     private let maxEntries: Int
+    /// Pool byte cap (M59.2). Default governor-derived (= promptCacheCapBytes)
+    /// so the persistent pool and the per-request admission guard share one
+    /// cap and can't starve each other. 0 ⇒ no byte cap (count-only, M59.1).
+    private let maxBytes: Int
+    /// Evict entries idle longer than this many seconds (M59.2, default 600,
+    /// mirrors OpenAI's 5–10 min inactivity eviction). 0 ⇒ no idle expiry.
+    private let idleTTL: TimeInterval
     private var entries: [Entry] = []
     private var nextId = 0
-    private var tick = 0
     private var hits = 0
     private var misses = 0
+    /// Cumulative count of entries evicted by the count/byte/idle policy,
+    /// for operator legibility (M59.2 snapshot / M59.4 stats).
+    private var evictions = 0
 
-    public init(maxEntries: Int) {
+    public init(maxEntries: Int, maxBytes: Int = 0, idleTTLSecs: Int = 600) {
         self.maxEntries = max(1, maxEntries)
+        self.maxBytes = max(0, maxBytes)
+        self.idleTTL = TimeInterval(max(0, idleTTLSecs))
     }
 
     // MARK: - Lookup / acquire
@@ -153,7 +166,8 @@ public final class PrefixKVCache: @unchecked Sendable {
     ) -> Hit? {
         lock.lock()
         defer { lock.unlock() }
-        tick += 1
+        let now = Date()
+        sweepIdle(now: now)
 
         var best: (entry: Entry, L: Int, B: Int)?
         // B must be a stored boundary, ≤ L (shared tokens), and
@@ -194,7 +208,7 @@ public final class PrefixKVCache: @unchecked Sendable {
             }
         }
         e.refcount += 1
-        e.lastUsed = tick
+        e.lastUsed = now
         hits += 1
         return Hit(
             caches: working, startOffset: b, commonPrefix: pick.L, entryId: e.id)
@@ -223,7 +237,8 @@ public final class PrefixKVCache: @unchecked Sendable {
         guard !recorder.checkpoints.isEmpty else { return }
         lock.lock()
         defer { lock.unlock() }
-        tick += 1
+        let now = Date()
+        sweepIdle(now: now)
 
         var attn = [KVCache?](repeating: nil, count: backbone.count)
         var bytes = 0
@@ -242,15 +257,37 @@ public final class PrefixKVCache: @unchecked Sendable {
         let entry = Entry(
             id: nextId, scope: scope, tokens: promptTokens, attn: attn,
             checkpoints: recorder.checkpoints, byteEstimate: bytes,
-            lastUsed: tick)
+            lastUsed: now)
         entries.append(entry)
         evictIfNeeded()
     }
 
-    /// Evict least-recently-used entries over the count cap, skipping any that
-    /// a live generation still holds (refcount > 0). M59.2 adds byte/TTL.
+    // MARK: - Eviction (count + bytes + idle-TTL, refcount-protected)
+
+    /// Drop entries idle longer than `idleTTL` (skipping in-use ones). Lazy:
+    /// driven from `acquire`/`store`/`stats`, so an idle pool drains without a
+    /// background timer. No-op when `idleTTL == 0`.
+    private func sweepIdle(now: Date) {
+        guard idleTTL > 0 else { return }
+        let before = entries.count
+        entries.removeAll {
+            $0.refcount == 0 && now.timeIntervalSince($0.lastUsed) > idleTTL
+        }
+        evictions += before - entries.count
+    }
+
+    /// Evict LRU entries until under BOTH the count cap and the byte cap,
+    /// skipping any a live generation still holds (refcount > 0). Bytes cap is
+    /// inert when `maxBytes == 0`.
     private func evictIfNeeded() {
-        while entries.count > maxEntries {
+        func overCap() -> Bool {
+            if entries.count > maxEntries { return true }
+            if maxBytes > 0 {
+                return entries.reduce(0) { $0 + $1.byteEstimate } > maxBytes
+            }
+            return false
+        }
+        while overCap() {
             guard
                 let victimIdx = entries.enumerated()
                     .filter({ $0.element.refcount == 0 })
@@ -258,7 +295,23 @@ public final class PrefixKVCache: @unchecked Sendable {
                     .offset
             else { break }  // all remaining entries are in use
             entries.remove(at: victimIdx)
+            evictions += 1
         }
+    }
+
+    /// Drop every entry not currently in use (refcount == 0). Returns the
+    /// count freed. Used by the governor's pressure relief (M59.2) and the
+    /// operator flush (M59.4). Entries held by an in-flight generation
+    /// survive — they're freed when that request releases them.
+    @discardableResult
+    public func flushIdle() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        let before = entries.count
+        entries.removeAll { $0.refcount == 0 }
+        let freed = before - entries.count
+        evictions += freed
+        return freed
     }
 
     // MARK: - Stats (M59.2/M59.4 surfaces)
@@ -268,15 +321,30 @@ public final class PrefixKVCache: @unchecked Sendable {
         public let bytes: Int
         public let hits: Int
         public let misses: Int
+        public let evictions: Int
+        public let maxEntries: Int
+        public let maxBytes: Int
     }
 
     public func stats() -> Stats {
         lock.lock()
         defer { lock.unlock() }
+        // Idle-sweep here too so a frequently-scraped /healthz keeps the
+        // reported pool honest without waiting for the next store/hit.
+        sweepIdle(now: Date())
         return Stats(
             entries: entries.count,
             bytes: entries.reduce(0) { $0 + $1.byteEstimate },
-            hits: hits, misses: misses)
+            hits: hits, misses: misses, evictions: evictions,
+            maxEntries: maxEntries, maxBytes: maxBytes)
+    }
+
+    /// Sync (bytes, entries) probe for the governor snapshot — cheap, takes
+    /// the lock, no idle-sweep (snapshot must not mutate timing semantics).
+    public func poolBytesAndEntries() -> (bytes: Int, entries: Int) {
+        lock.lock()
+        defer { lock.unlock() }
+        return (entries.reduce(0) { $0 + $1.byteEstimate }, entries.count)
     }
 
     // MARK: - Helpers

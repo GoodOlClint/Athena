@@ -4907,6 +4907,9 @@ struct HealthResponse: Encodable {
     /// not. Surfaced so an operator can see the true footprint — and the
     /// GPU-transient gap above it — without scraping Activity Monitor.
     let physFootprintBytes: Int
+    /// M59.2 — cross-request prompt-prefix KV reuse pool (0 when disabled).
+    let promptCachePoolBytes: Int
+    let promptCachePoolEntries: Int
     let modules: [ModuleSnapshot]
     let inflight: Int
     let queueDepth: Int
@@ -4921,6 +4924,8 @@ struct HealthResponse: Encodable {
         self.freeBytes = snapshot.freeBytes
         self.promptCacheCapBytes = snapshot.promptCacheCapBytes
         self.physFootprintBytes = ProcessMemory.sample().physFootprint
+        self.promptCachePoolBytes = snapshot.promptCachePoolBytes
+        self.promptCachePoolEntries = snapshot.promptCachePoolEntries
         self.modules = snapshot.modules
         self.inflight = inflight
         self.queueDepth = queueDepth

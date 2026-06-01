@@ -39,9 +39,13 @@ public struct AthenaConfig: Sendable, Equatable {
     /// `[prompt_cache]` — cross-request prompt-prefix KV reuse (M59).
     /// `prompt_cache_enabled` (default false) is the master switch;
     /// `prompt_cache_max_entries` (default 4) bounds the in-memory LRU by
-    /// count. Absent ⇒ disabled.
+    /// count; `prompt_cache_max_bytes` (default governor-derived =
+    /// promptCacheCapBytes) caps the pool's bytes; `prompt_cache_idle_ttl_secs`
+    /// (default 600) evicts entries idle longer than that. Absent ⇒ disabled.
     public var promptCacheEnabled: Bool?
     public var promptCacheMaxEntries: Int?
+    public var promptCacheMaxBytes: Int?
+    public var promptCacheIdleTtlSecs: Int?
     /// Bearer-auth keys file. Optional — no keys + loopback = open;
     /// no keys + non-loopback = the daemon refuses to start.
     public var authKeysFile: String?
@@ -127,6 +131,8 @@ public struct AthenaConfig: Sendable, Equatable {
         kvCompression: String? = nil,
         promptCacheEnabled: Bool? = nil,
         promptCacheMaxEntries: Int? = nil,
+        promptCacheMaxBytes: Int? = nil,
+        promptCacheIdleTtlSecs: Int? = nil,
         authKeysFile: String? = nil,
         tlsCert: String? = nil, tlsKey: String? = nil,
         rateLimit: String? = nil, rateBurst: Int? = nil,
@@ -160,6 +166,8 @@ public struct AthenaConfig: Sendable, Equatable {
         self.kvCompression = kvCompression
         self.promptCacheEnabled = promptCacheEnabled
         self.promptCacheMaxEntries = promptCacheMaxEntries
+        self.promptCacheMaxBytes = promptCacheMaxBytes
+        self.promptCacheIdleTtlSecs = promptCacheIdleTtlSecs
         self.authKeysFile = authKeysFile
         self.tlsCert = tlsCert
         self.tlsKey = tlsKey
@@ -288,6 +296,14 @@ public struct AthenaConfig: Sendable, Equatable {
         if let pm = scalar("prompt_cache_max_entries", in: toml) {
             pcMaxEntries = try int("prompt_cache_max_entries", pm)
         }
+        var pcMaxBytes: Int?
+        if let pb = scalar("prompt_cache_max_bytes", in: toml) {
+            pcMaxBytes = try int("prompt_cache_max_bytes", pb)
+        }
+        var pcIdleTtl: Int?
+        if let pt = scalar("prompt_cache_idle_ttl_secs", in: toml) {
+            pcIdleTtl = try int("prompt_cache_idle_ttl_secs", pt)
+        }
         let preload = scalar("preload", in: toml).map { $0 == "true" }
         let dropReq = scalar("drop_request_content", in: toml).map {
             $0 == "true"
@@ -312,6 +328,8 @@ public struct AthenaConfig: Sendable, Equatable {
             kvCompression: scalar("kv_compression", in: toml),
             promptCacheEnabled: pcEnabled,
             promptCacheMaxEntries: pcMaxEntries,
+            promptCacheMaxBytes: pcMaxBytes,
+            promptCacheIdleTtlSecs: pcIdleTtl,
             authKeysFile: scalar("auth_keys_file", in: toml),
             tlsCert: scalar("tls_cert", in: toml),
             tlsKey: scalar("tls_key", in: toml),

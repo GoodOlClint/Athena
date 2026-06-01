@@ -353,17 +353,15 @@ struct Load: AsyncParsableCommand {
             file: ConfigEditor.resolvePath(nil))
         let kvCompression = try KVCompression.resolve(
             config: tomlCfg?.kvCompression)
-        // M59.1 — cross-request prompt-prefix KV cache (`[prompt_cache]`),
-        // default OFF. Bit-identical greedy reuse on the MTP path; bound by
-        // entry count in this slice (governor accounting is M59.2).
-        // Precedence mirrors kv_compression: env ATHENA_PROMPT_CACHE
+        // M59.1/.2 — cross-request prompt-prefix KV cache (`[prompt_cache]`),
+        // default OFF. Bit-identical greedy reuse on the MTP path. Enable
+        // precedence mirrors kv_compression: env ATHENA_PROMPT_CACHE
         // (1/true/0/false) > TOML prompt_cache_enabled > built-in false.
         let prefixEnvEnabled = ProcessInfo.processInfo
             .environment["ATHENA_PROMPT_CACHE"]
             .map { $0 == "1" || $0.lowercased() == "true" }
-        let prefixCacheConfig = PrefixCacheConfig(
-            enabled: prefixEnvEnabled ?? tomlCfg?.promptCacheEnabled ?? false,
-            maxEntries: tomlCfg?.promptCacheMaxEntries ?? 4)
+        let prefixCacheEnabled =
+            prefixEnvEnabled ?? tomlCfg?.promptCacheEnabled ?? false
 
         let config = GovernorConfig(
             totalBudgetBytes: budgetBytes,
@@ -374,6 +372,32 @@ struct Load: AsyncParsableCommand {
         // M5.2: cap MLX's own allocator at the global budget so its
         // buffer pool can't overshoot the box into a Metal OOM.
         MLX.Memory.memoryLimit = config.totalBudgetBytes
+
+        // M59.2 — build the ONE shared pool instance now (when enabled), so
+        // the SAME object is injected into the LLM module (reuse) and the
+        // governor (pool-byte snapshot + pressure relief). `max_bytes`
+        // defaults to the governor's prompt-cache cap so the persistent pool
+        // and the per-request admission guard share one cap and don't starve
+        // each other. PrefixKVCache is a lock-guarded @unchecked Sendable, so
+        // the governor's sync probe/relief closures can call it directly.
+        let prefixMaxEntries = tomlCfg?.promptCacheMaxEntries ?? 4
+        let prefixIdleTTL = tomlCfg?.promptCacheIdleTtlSecs ?? 600
+        let prefixCfgBytes = tomlCfg?.promptCacheMaxBytes ?? 0
+        let prefixMaxBytes =
+            prefixCfgBytes > 0 ? prefixCfgBytes : config.promptCacheCapBytes
+        let prefixCache: PrefixKVCache? =
+            prefixCacheEnabled
+            ? PrefixKVCache(
+                maxEntries: prefixMaxEntries,
+                maxBytes: prefixMaxBytes,
+                idleTTLSecs: prefixIdleTTL)
+            : nil
+        var prefixPoolProbe: MemoryGovernor.PromptCachePoolProbe?
+        var prefixPoolRelief: MemoryGovernor.PromptCacheReliefHook?
+        if let c = prefixCache {
+            prefixPoolProbe = { c.poolBytesAndEntries() }
+            prefixPoolRelief = { _ = c.flushIdle(); MLX.Memory.clearCache() }
+        }
 
         // M5.1 + M5.5 (M41 follow-up): reconcile reservations to the
         // real Metal/MLX footprint. The probe is process RSS, NOT
@@ -396,7 +420,9 @@ struct Load: AsyncParsableCommand {
             onEvent: { id, msg in
                 Logger(label: AthenaLogLabel.model(id))
                     .notice("model \(id.rawValue) \(msg)")
-            })
+            },
+            promptCachePoolProbe: prefixPoolProbe,
+            promptCacheRelief: prefixPoolRelief)
 
         let store = ModelStore(
             rootDirectory: modelStore.map {
@@ -505,7 +531,7 @@ struct Load: AsyncParsableCommand {
                     speculative: speculative,
                     kvCompression: kvCompression),
                 promptCacheCapBytes: config.promptCacheCapBytes,
-                prefixCacheConfig: prefixCacheConfig)
+                prefixCache: prefixCache)
         }
         let embedding: any EmbeddingModule
         switch engine {

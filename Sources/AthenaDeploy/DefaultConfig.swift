@@ -61,8 +61,13 @@ public enum DefaultConfig {
         # instruction). MTP/speculative path only; bit-identical to a cold
         # prefill. Default OFF. The ATHENA_PROMPT_CACHE env var
         # (1/true/0/false) overrides prompt_cache_enabled at startup.
+        # The pool is governed: bounded by entry count, a byte cap
+        # (default = the governor prompt-cache cap), and an idle-TTL, and
+        # is shed under memory pressure before any module is evicted.
         # prompt_cache_enabled = false
         # prompt_cache_max_entries = 4
+        # prompt_cache_max_bytes = 0          # 0 ⇒ governor-derived
+        # prompt_cache_idle_ttl_secs = 600
 
 
         # ── Storage ──────────────────────────────────────────────────

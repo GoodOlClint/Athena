@@ -46,20 +46,6 @@ public struct LLMGenerationParameters: Sendable {
     public var speculativeEligible: Bool { speculative }
 }
 
-/// M59.1 — cross-request prompt-prefix KV cache config (`[prompt_cache]`).
-/// Disabled by default; flip `enabled` to true once the bit-identical gate
-/// passes on the real MTP model. `maxEntries` bounds the in-memory LRU by
-/// count in this slice (byte/idle-TTL governor eviction is M59.2).
-public struct PrefixCacheConfig: Sendable {
-    public var enabled: Bool
-    public var maxEntries: Int
-
-    public init(enabled: Bool = false, maxEntries: Int = 4) {
-        self.enabled = enabled
-        self.maxEntries = maxEntries
-    }
-}
-
 /// The real MLX-backed LLM module (M1). Loads a model from a local
 /// directory — no download, no HF hub round-trip — and streams native
 /// `TokenIterator` generation via the substrate's `ModelContainer`.
@@ -146,8 +132,10 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     private var configVocabSize: Int?
 
     /// M59.1 — cross-request prompt-prefix KV cache. `nil` unless the
-    /// operator enabled `[prompt_cache]`. Held for the module's lifetime;
-    /// entries are keyed by resident model id (M59.1 scope).
+    /// operator enabled `[prompt_cache]`. The SAME instance is shared with
+    /// the governor (M59.2: pool-byte snapshot + pressure relief), so it is
+    /// constructed once in the serve path and injected, not owned here.
+    /// Entries are keyed by resident model id (M59.1 scope).
     private let prefixCache: PrefixKVCache?
 
     /// Single-model convenience init kept for source-compat with M27/M40
@@ -159,14 +147,14 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         modelDirectory: URL,
         parameters: LLMGenerationParameters = .init(),
         promptCacheCapBytes: Int = 0,
-        prefixCacheConfig: PrefixCacheConfig = .init()
+        prefixCache: PrefixKVCache? = nil
     ) {
         self.init(
             modelDirectories: [modelDirectory],
             modelStoreRoot: modelDirectory.deletingLastPathComponent(),
             parameters: parameters,
             promptCacheCapBytes: promptCacheCapBytes,
-            prefixCacheConfig: prefixCacheConfig)
+            prefixCache: prefixCache)
     }
 
     /// M41.2: operator-declared list (first = default). Empty ⇒
@@ -179,14 +167,12 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         modelStoreRoot: URL? = nil,
         parameters: LLMGenerationParameters = .init(),
         promptCacheCapBytes: Int = 0,
-        prefixCacheConfig: PrefixCacheConfig = .init()
+        prefixCache: PrefixKVCache? = nil
     ) {
         precondition(
             !urls.isEmpty,
             "MLXLLMModule needs at least one model directory")
-        self.prefixCache =
-            prefixCacheConfig.enabled
-            ? PrefixKVCache(maxEntries: prefixCacheConfig.maxEntries) : nil
+        self.prefixCache = prefixCache
         self.modelDirectories = urls.map {
             (name: $0.lastPathComponent, url: $0)
         }

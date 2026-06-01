@@ -32,6 +32,29 @@ public struct GovernorSnapshot: Sendable, Codable {
     public let freeBytes: Int
     public let promptCacheCapBytes: Int
     public let modules: [ModuleSnapshot]
+    /// M59.2 — cross-request prompt-prefix KV pool (the persistent reuse
+    /// cache, distinct from `promptCacheCapBytes` which is the per-request
+    /// admission guard). Bytes are the pool's own estimate of its live KV
+    /// snapshots; entries is the count. Both 0 when the pool is disabled or
+    /// empty. Deliberately NOT folded into `residentBytes` — the live memory
+    /// probe already sees these MLX buffers, so adding them there would
+    /// double-count against module admission.
+    public let promptCachePoolBytes: Int
+    public let promptCachePoolEntries: Int
+
+    public init(
+        totalBudgetBytes: Int, residentBytes: Int, freeBytes: Int,
+        promptCacheCapBytes: Int, modules: [ModuleSnapshot],
+        promptCachePoolBytes: Int = 0, promptCachePoolEntries: Int = 0
+    ) {
+        self.totalBudgetBytes = totalBudgetBytes
+        self.residentBytes = residentBytes
+        self.freeBytes = freeBytes
+        self.promptCacheCapBytes = promptCacheCapBytes
+        self.modules = modules
+        self.promptCachePoolBytes = promptCachePoolBytes
+        self.promptCachePoolEntries = promptCachePoolEntries
+    }
 }
 
 /// M46.5 — last-known reason a module's slot is `.unloaded`. nil ⇒
@@ -89,6 +112,16 @@ public actor MemoryGovernor {
     /// logging dependency; the `athena` target maps it to a per-module
     /// unified-log category.
     public typealias EventHook = @Sendable (ModuleID, String) -> Void
+    /// M59.2 — sync read of the prompt-prefix KV pool's (bytes, entries) for
+    /// the snapshot. Injected so AthenaCore stays free of any AthenaLLM
+    /// dependency; the serve path backs it with the shared `PrefixKVCache`
+    /// (a lock-guarded class, so this is safe to call synchronously from
+    /// `snapshot()`). nil ⇒ pool disabled / not wired.
+    public typealias PromptCachePoolProbe = @Sendable () -> (bytes: Int, entries: Int)
+    /// M59.2 — shed the prompt-prefix KV pool (drop entries not in use) as a
+    /// cheap reclaim BEFORE evicting a module or refusing a load. Injected,
+    /// sync. nil ⇒ nothing to shed.
+    public typealias PromptCacheReliefHook = @Sendable () -> Void
 
     public let totalBudgetBytes: Int
     /// Governor-owned global prompt-cache byte cap (brief 4b). The LLM
@@ -107,6 +140,8 @@ public actor MemoryGovernor {
     private let memoryProbe: MemoryProbe?
     private let onUnloaded: UnloadHook?
     private let onEvent: EventHook?
+    private let promptCachePoolProbe: PromptCachePoolProbe?
+    private let promptCacheRelief: PromptCacheReliefHook?
     /// M5.4: real footprint observed on a prior load. Subsequent
     /// admissions use this instead of the static `memoryEstimate()`, so
     /// an evicted-then-reloaded module is admitted on its true cost.
@@ -116,7 +151,9 @@ public actor MemoryGovernor {
         totalBudgetBytes: Int, memoryProbe: MemoryProbe? = nil,
         onUnloaded: UnloadHook? = nil,
         onEvent: EventHook? = nil,
-        promptCacheCapBytes: Int? = nil
+        promptCacheCapBytes: Int? = nil,
+        promptCachePoolProbe: PromptCachePoolProbe? = nil,
+        promptCacheRelief: PromptCacheReliefHook? = nil
     ) {
         self.totalBudgetBytes = totalBudgetBytes
         self.memoryProbe = memoryProbe
@@ -124,18 +161,24 @@ public actor MemoryGovernor {
         self.onEvent = onEvent
         self.promptCacheCapBytes =
             promptCacheCapBytes ?? (totalBudgetBytes / 4)
+        self.promptCachePoolProbe = promptCachePoolProbe
+        self.promptCacheRelief = promptCacheRelief
     }
 
     public init(
         config: GovernorConfig, memoryProbe: MemoryProbe? = nil,
         onUnloaded: UnloadHook? = nil,
-        onEvent: EventHook? = nil
+        onEvent: EventHook? = nil,
+        promptCachePoolProbe: PromptCachePoolProbe? = nil,
+        promptCacheRelief: PromptCacheReliefHook? = nil
     ) {
         self.totalBudgetBytes = config.totalBudgetBytes
         self.memoryProbe = memoryProbe
         self.onUnloaded = onUnloaded
         self.onEvent = onEvent
         self.promptCacheCapBytes = config.promptCacheCapBytes
+        self.promptCachePoolProbe = promptCachePoolProbe
+        self.promptCacheRelief = promptCacheRelief
     }
 
     /// Register a module instance under its id. `evictable` controls whether
@@ -234,6 +277,13 @@ public actor MemoryGovernor {
         guard let memoryProbe else { return }
         let highWater = totalBudgetBytes / 10 * 9  // 90%
         guard memoryProbe() > highWater else { return }
+        // M59.2 — shed the prompt-prefix KV pool first: it's a pure
+        // performance cache (every entry is reconstructible by a cold
+        // prefill), so dropping it is a cheaper, less disruptive reclaim than
+        // evicting a loaded module. Best-effort; the freed MLX buffers return
+        // to the budget on the next clearCache (the unload hook).
+        promptCacheRelief?()
+        if memoryProbe() <= highWater { return }
         let victim =
             entries
             .filter {
@@ -367,6 +417,12 @@ public actor MemoryGovernor {
         }
 
         if residentBytes + estimate > totalBudgetBytes {
+            // M59.2 — last resort before refusing the load: shed the
+            // prompt-prefix KV pool (a reconstructible perf cache). It isn't
+            // in `residentBytes` (the live probe sees it instead), so this
+            // doesn't change the arithmetic here, but it frees real Metal
+            // bytes so the load that follows this admission has headroom.
+            promptCacheRelief?()
             throw AthenaError.memoryBudgetExceeded(
                 requested: estimate,
                 available: totalBudgetBytes - residentBytes,
@@ -456,12 +512,15 @@ public actor MemoryGovernor {
             )
         }
         .sorted { $0.id.rawValue < $1.id.rawValue }
+        let pool = promptCachePoolProbe?() ?? (bytes: 0, entries: 0)
         return GovernorSnapshot(
             totalBudgetBytes: totalBudgetBytes,
             residentBytes: residentBytes,
             freeBytes: totalBudgetBytes - residentBytes,
             promptCacheCapBytes: promptCacheCapBytes,
-            modules: mods
+            modules: mods,
+            promptCachePoolBytes: pool.bytes,
+            promptCachePoolEntries: pool.entries
         )
     }
 }
