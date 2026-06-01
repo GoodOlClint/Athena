@@ -20,11 +20,18 @@ extension AthenaServer {
         let store: StoreStatsResponse
         let queue: [QueueJobSummary]
         let model: String
+        /// M59 follow-up — live resident model id per module class
+        /// (module rawValue → the model actually loaded right now, e.g.
+        /// the LLM slot's `Qwen3.5-27B-4bit-mtp` vs `…-8bit-mtp`). Absent
+        /// entries = that slot is unloaded. Lets the dashboard show WHICH
+        /// model is loaded, not just that a slot is occupied.
+        let residentModels: [String: String]
     }
 
     func handleUIState() async -> Response {
         let gov = await governor.snapshot()
         let met = await metrics.snapshot()
+        let resident = await residentModelMap()
         let vs = await vectorStore.stats()
         let st = StoreStatsResponse(
             vectors: await store.vectorCount(),
@@ -42,7 +49,8 @@ extension AthenaServer {
                 vectors: VectorStatsResponse(
                     count: vs.count, dim: vs.dim, bytes: vs.bytes,
                     cap_bytes: vs.capBytes),
-                store: st, queue: Array(jobs), model: modelName))
+                store: st, queue: Array(jobs), model: modelName,
+                residentModels: resident))
     }
 
     static func html(_ s: String) -> Response {
@@ -348,10 +356,11 @@ extension AthenaServer {
             (g.promptCachePoolEntries>0?row("prompt-cache pool",
               g.promptCachePoolEntries+" ent · "+mb(g.promptCachePoolBytes)):"")+
             "</table>";
-          $("mods").innerHTML="<tr><th>module</th><th>state</th>"+
-            "<th>resident</th></tr>"+g.modules.map(m=>
-            `<tr><td>${m.id}</td><td class=${
-              m.state=="loaded"?"ok":"k"}>${m.state}${
+          const rm=s.residentModels||{};
+          $("mods").innerHTML="<tr><th>module</th><th>model</th>"+
+            "<th>state</th><th>resident</th></tr>"+g.modules.map(m=>
+            `<tr><td>${m.id}</td><td class=k>${rm[m.id]||"—"}</td>
+             <td class=${m.state=="loaded"?"ok":"k"}>${m.state}${
               m.unloadedReason?" ("+m.unloadedReason+")":""}</td>
              <td>${mb(m.residentBytes)}</td></tr>`).join("");
           const m=s.metrics;

@@ -3383,6 +3383,19 @@ struct AthenaServer {
     /// `GET /api/models/resident` (M41.1) — every slot's allowlist +
     /// default + currently-resident id. Read-only model-store
     /// projection: gated `model.read` by AuthPolicy.
+    /// Live resident model id per module class (module rawValue → loaded
+    /// id), omitting unloaded slots. Shared by `/api/models/resident` and
+    /// the `/ui` dashboard so both report the SAME resident truth.
+    func residentModelMap() async -> [String: String] {
+        var out: [String: String] = [:]
+        for id in ModuleID.allCases {
+            if let m = await selectable(id).residentModelId() {
+                out[id.rawValue] = m
+            }
+        }
+        return out
+    }
+
     private func handleModelsResident() async -> Response {
         var slots: [ModelSlotDTO] = []
         for id in ModuleID.allCases {
