@@ -85,7 +85,15 @@ timeout + max_tokens, model template) and are documented, not built here.
 - Docs: a "running unattended" note (this assertion + the `pmset`/`caffeinate`
   context) in the operator docs.
 
-### M60.3 — Sudoless GPU telemetry on `/healthz` (IOReport)
+### M60.3 — Sudoless GPU telemetry on `/healthz` (IOReport) — **SHIPPED v0.10.102 (uncommitted)**
+Built as a standalone MIT package `AppleSiliconMetrics` (`~/Source/AppleSiliconMetrics`,
+validated vs `powermetrics`), consumed by Athena via a local path-dep. `/healthz`
+gains `gpuClockMHz` + `gpuActiveResidency` from a background-sampled,
+lock-guarded `GPUTelemetryProbe` (nil-safe). Temp deferred to the package's
+later milestones. *(Original IOReport-in-daemon plan below superseded by the
+package approach.)*
+
+
 - The honest gap M60.1 left: actual **GPU clock (MHz)** and **die temp (°C)**
   have no public API and the daemon runs as a non-root service user (so
   `powermetrics` is out). The sudoless path is the **private `IOReport`

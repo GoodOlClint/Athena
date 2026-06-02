@@ -92,6 +92,10 @@ struct AthenaServer {
     /// `/healthz` so an operator can confirm the appliance won't idle-sleep
     /// and suspend inference mid-request. `var = false`, set post-init.
     var powerAssertionHeld: Bool = false
+    /// M60.3 — sudoless GPU clock probe (or nil when GPU telemetry is
+    /// unavailable). Set by `Load.run()`; read by `/healthz`. `var = nil`,
+    /// set post-init.
+    var gpuProbe: GPUTelemetryProbe? = nil
     /// Queue-result retention (M34.1). `queueResultTtlSecs` > 0 ⇒ prune
     /// terminal (done/error/canceled) results older than that window;
     /// `queueMaxRows` > 0 ⇒ cap total job rows (oldest terminal first).
@@ -151,6 +155,7 @@ struct AthenaServer {
             let snapshot = await governor.snapshot()
             let (inflight, lastAt, decodeTps) = await metrics.healthFields()
             let depth = await queue.depth()
+            let gpu = gpuProbe?.current ?? (mhz: nil, activeResidency: nil)
             return Self.json(
                 HealthResponse(
                     snapshot: snapshot,
@@ -158,7 +163,9 @@ struct AthenaServer {
                     queueDepth: depth,
                     lastRequestAt: lastAt,
                     lastDecodeTokensPerSec: decodeTps,
-                    powerAssertionHeld: powerAssertionHeld))
+                    powerAssertionHeld: powerAssertionHeld,
+                    gpuClockMHz: gpu.mhz,
+                    gpuActiveResidency: gpu.activeResidency))
         }
 
         router.get("/metrics") { request, _ -> Response in
@@ -5061,6 +5068,14 @@ struct HealthResponse: Encodable {
     /// investigation). An operator/monitor should alert if this is ever false
     /// on a serving appliance.
     let powerAssertionHeld: Bool
+    /// M60.3 — current GPU clock in MHz from in-process IOReport telemetry
+    /// (sudoless). `null` when GPU telemetry is unavailable on this host. Read
+    /// with `thermalState`: a clock well below the boost ceiling under load is
+    /// the throttle, in absolute terms.
+    let gpuClockMHz: Double?
+    /// M60.3 — fraction of the recent window the GPU was active (`0...1`), or
+    /// `null` when unavailable.
+    let gpuActiveResidency: Double?
     let modules: [ModuleSnapshot]
     let inflight: Int
     let queueDepth: Int
@@ -5069,7 +5084,8 @@ struct HealthResponse: Encodable {
     init(
         snapshot: GovernorSnapshot, inflight: Int,
         queueDepth: Int, lastRequestAt: Double,
-        lastDecodeTokensPerSec: Double, powerAssertionHeld: Bool
+        lastDecodeTokensPerSec: Double, powerAssertionHeld: Bool,
+        gpuClockMHz: Double? = nil, gpuActiveResidency: Double? = nil
     ) {
         self.totalBudgetBytes = snapshot.totalBudgetBytes
         self.residentBytes = snapshot.residentBytes
@@ -5082,6 +5098,8 @@ struct HealthResponse: Encodable {
             ProcessInfo.processInfo.thermalState)
         self.lastDecodeTokensPerSec = lastDecodeTokensPerSec
         self.powerAssertionHeld = powerAssertionHeld
+        self.gpuClockMHz = gpuClockMHz
+        self.gpuActiveResidency = gpuActiveResidency
         self.mlxActiveBytes = MLX.Memory.activeMemory
         self.mlxCacheBytes = MLX.Memory.cacheMemory
         self.modules = snapshot.modules

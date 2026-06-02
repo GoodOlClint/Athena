@@ -682,6 +682,15 @@ struct Load: AsyncParsableCommand {
         }
         defer { powerAssertion.release() }
         server.powerAssertionHeld = powerAssertion.isHeld
+        // M60.3 — sudoless GPU-clock telemetry on /healthz (IOReport via the
+        // AppleSiliconMetrics package). Background-sampled, nil-safe: if
+        // IOReport is unavailable the fields are simply omitted.
+        let gpuProbe = GPUTelemetryProbe()
+        server.gpuProbe = gpuProbe
+        if gpuProbe.isAvailable {
+            Logger(label: AthenaLogLabel.daemon).notice(
+                "gpu: IOReport telemetry available — reporting gpuClockMHz on /healthz")
+        }
         try await server.run()
     }
 

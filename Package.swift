@@ -79,6 +79,10 @@ let package = Package(
         // the on-demand whisper/embedding/diarization fetches). Revert to
         // the upstream `url:` dep + a version bump once PR #50 merges.
         .package(path: "../swift-huggingface"),
+        // M60.3 — sudoless Apple Silicon GPU clock via IOReport (the
+        // in-process replacement for a root `powermetrics` subprocess).
+        // Local path-dep for now; switch to a pinned git tag once published.
+        .package(path: "../AppleSiliconMetrics"),
     ],
     targets: [
         // The memory governor + module protocol. This is the thesis
@@ -272,6 +276,9 @@ let package = Package(
                 .product(
                     name: "ServiceLifecycle",
                     package: "swift-service-lifecycle"),
+                .product(
+                    name: "AppleSiliconMetrics",
+                    package: "AppleSiliconMetrics"),
             ],
             path: "Sources/athena",
             linkerSettings: [
