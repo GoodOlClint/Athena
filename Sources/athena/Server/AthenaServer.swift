@@ -1382,6 +1382,12 @@ struct AthenaServer {
             } onCancel: {
                 counter.cancelGeneration()
             }
+            // M60.6 — shed the prompt-prefix KV pool if this request pushed the
+            // process footprint over the high-water mark, so a pool that grew
+            // under sustained decode is reclaimed now instead of staying pinned
+            // over budget until the next model load. No-op (a cheap phys probe)
+            // when there's headroom.
+            await governor.relievePromptCachePressureIfNeeded()
             return c
         }
     }

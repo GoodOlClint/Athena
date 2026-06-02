@@ -150,7 +150,16 @@ abort — Hummingbird doesn't cancel a mid-compute handler task — so set
   the GPU within ~1 decode step; bit-identical contract for *completed* requests
   unchanged.
 
-### M60.6 — M59 pressure-relief during sustained operation
+### M60.6 — M59 pressure-relief during sustained operation — **SHIPPED v0.10.105 (uncommitted)**
+New `MemoryGovernor.relievePromptCachePressureIfNeeded()` sheds the prompt-prefix
+KV pool when **phys_footprint** (not the RSS probe, which under-counts the GPU
+buffers — M55) exceeds the 90% high-water mark; called after every metered
+generation in `collectMetered`. Prompt-cache only — never evicts a loaded module
+mid-serving. **Validated:** same temp=0 generation + prompt-cache engagement, at
+normal budget the pool retains 0.57 GB / 1 entry (relief idle), at a 20 GB budget
+(phys ~19.5 GB > 18 GB high-water) the pool is shed to 0 / 0 entries, no OOM.
+
+
 - Make the prompt-cache pool eviction **pressure-aware continuously**, not only
   at load-admission: when process phys / governor budget is exceeded during
   decode, shed idle (refcount-0) prefix entries even if under the static

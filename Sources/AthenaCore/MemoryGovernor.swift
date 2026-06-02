@@ -295,6 +295,23 @@ public actor MemoryGovernor {
         if let victim { evictSync(victim) }
     }
 
+    /// M60.6 — shed the prompt-prefix KV pool if the process footprint is over
+    /// the high-water mark, INDEPENDENT of a model-load admission. Called after
+    /// each generation so a pool that grew during sustained decode is reclaimed
+    /// instead of staying pinned over budget until the next load (`relievePressure`
+    /// above only runs on the load path). Prompt-cache only — it never evicts a
+    /// loaded module mid-serving.
+    ///
+    /// Deliberately uses **phys_footprint**, not the RSS `memoryProbe`: the
+    /// retained KV pool lives in Metal/GPU buffers that RSS under-counts (M55),
+    /// so an RSS check would miss the very memory we need to shed.
+    public func relievePromptCachePressureIfNeeded() {
+        guard promptCacheRelief != nil else { return }
+        let highWater = totalBudgetBytes / 10 * 9  // 90%
+        guard ProcessMemory.sample().physFootprint > highWater else { return }
+        promptCacheRelief?()
+    }
+
     private func performLoad(_ id: ModuleID) async throws {
         guard let entry = entries[id] else {
             throw AthenaError.moduleNotRegistered(id)
