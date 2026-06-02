@@ -81,8 +81,9 @@ let package = Package(
         .package(path: "../swift-huggingface"),
         // M60.3 — sudoless Apple Silicon GPU clock via IOReport (the
         // in-process replacement for a root `powermetrics` subprocess).
-        // Local path-dep for now; switch to a pinned git tag once published.
-        .package(path: "../AppleSiliconMetrics"),
+        .package(
+            url: "https://github.com/GoodOlClint/AppleSiliconMetrics.git",
+            from: "0.1.0"),
     ],
     targets: [
         // The memory governor + module protocol. This is the thesis

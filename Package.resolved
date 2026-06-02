@@ -1,6 +1,15 @@
 {
-  "originHash" : "98697d2eb3ee12a308e8afe6e7c5f3a4d611f0de8bd4e4f4a6e88d00fbabe7ec",
+  "originHash" : "7143204d682aa7fa30453c4c29b1816ce2a9170d77cc13f3282c489cde67a88e",
   "pins" : [
+    {
+      "identity" : "applesiliconmetrics",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/GoodOlClint/AppleSiliconMetrics.git",
+      "state" : {
+        "revision" : "74a6960db91ba96b3d1eed324d347d5f0a80b4d5",
+        "version" : "0.1.0"
+      }
+    },
     {
       "identity" : "async-http-client",
       "kind" : "remoteSourceControl",
