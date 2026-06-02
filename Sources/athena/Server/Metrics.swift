@@ -36,6 +36,13 @@ actor AthenaMetrics {
     /// Unix-epoch seconds the most recent request entered the
     /// metered surface; 0 ⇒ none since boot.
     private var lastRequestAt: Double = 0
+    /// M60.1 — most recent decode throughput (tok/s), recorded by the
+    /// `collectMetered` heartbeat each interval it observes the decode
+    /// phase. Surfaced on `/healthz` so a client can read the live rate
+    /// (alongside `thermalState`) and back off BEFORE submitting a call
+    /// that would cross its deadline, instead of eating a 540 s cancel.
+    /// Holds the last observed value while idle; 0 ⇒ none since boot.
+    private var lastDecodeTokensPerSec: Double = 0
 
     func record(kind: String, ms: Double, isError: Bool) {
         total += 1
@@ -59,10 +66,18 @@ actor AthenaMetrics {
         if inflight > 0 { inflight -= 1 }
     }
 
+    /// M60.1 — record the live decode rate observed by the heartbeat.
+    /// Called only while in the decode phase, so the value reflects real
+    /// generation throughput (not a setup/prefill zero).
+    func recordDecodeRate(_ tps: Double) { lastDecodeTokensPerSec = tps }
+
     /// M43.1 — snapshot of the live signals the /healthz response
     /// surfaces. `lastRequestAt == 0` ⇒ never-served sentinel.
-    func healthFields() -> (inflight: Int, lastRequestAt: Double) {
-        (inflight, lastRequestAt)
+    /// M60.1 adds the most recent decode tok/s (0 ⇒ none since boot).
+    func healthFields()
+        -> (inflight: Int, lastRequestAt: Double, decodeTokensPerSec: Double)
+    {
+        (inflight, lastRequestAt, lastDecodeTokensPerSec)
     }
 
     func snapshot() -> Snapshot {

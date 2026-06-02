@@ -625,7 +625,7 @@ struct Load: AsyncParsableCommand {
                 ? "auth: enabled (RBAC; bearer→user→roles, env/file + DB)"
                 : "auth: DISABLED (loopback, no credentials)")
 
-        let server = AthenaServer(
+        var server = AthenaServer(
             config: config, governor: governor, llm: llm,
             embedding: embedding, transcription: transcription,
             diarization: diarization,
@@ -665,6 +665,23 @@ struct Load: AsyncParsableCommand {
                 configuredForPull, storeRoot: pullStoreRoot,
                 governor: governor)
         }
+        // M60.2 — hold a system-sleep power assertion for the lifetime of the
+        // serve loop. Without it an unattended Mac sleeps and SUSPENDS the
+        // daemon mid-generation (the confirmed root cause of the consuming application's
+        // overnight "freeze"/timeouts — see docs/m60-plan.md). Released on
+        // shutdown via the defer. Acquisition failure is non-fatal: we log it
+        // and keep serving (/healthz reports the held state).
+        let powerAssertion = PowerAssertion(
+            reason: "Athena serving inference (prevent idle system sleep)")
+        if powerAssertion.acquire() {
+            Logger(label: AthenaLogLabel.daemon).notice(
+                "power: holding PreventUserIdleSystemSleep (the machine will not idle-sleep while serving)")
+        } else {
+            Logger(label: AthenaLogLabel.daemon).warning(
+                "power: could NOT acquire a sleep assertion — an unattended Mac may suspend inference mid-request. Run under `caffeinate -s` or set `pmset -c sleep 0` as a workaround.")
+        }
+        defer { powerAssertion.release() }
+        server.powerAssertionHeld = powerAssertion.isHeld
         try await server.run()
     }
 

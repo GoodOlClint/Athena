@@ -87,6 +87,11 @@ struct AthenaServer {
     /// /api/cache/prompt`) reads its stats and flushes it. `var = nil` so it's
     /// a memberwise-init param.
     var prefixCache: PrefixKVCache? = nil
+    /// M60.2 — whether the daemon holds a `PreventUserIdleSystemSleep` power
+    /// assertion (set by `Load.run()` after acquiring it). Surfaced on
+    /// `/healthz` so an operator can confirm the appliance won't idle-sleep
+    /// and suspend inference mid-request. `var = false`, set post-init.
+    var powerAssertionHeld: Bool = false
     /// Queue-result retention (M34.1). `queueResultTtlSecs` > 0 ⇒ prune
     /// terminal (done/error/canceled) results older than that window;
     /// `queueMaxRows` > 0 ⇒ cap total job rows (oldest terminal first).
@@ -144,14 +149,16 @@ struct AthenaServer {
 
         router.get("/healthz") { [metrics, queue] _, _ -> Response in
             let snapshot = await governor.snapshot()
-            let (inflight, lastAt) = await metrics.healthFields()
+            let (inflight, lastAt, decodeTps) = await metrics.healthFields()
             let depth = await queue.depth()
             return Self.json(
                 HealthResponse(
                     snapshot: snapshot,
                     inflight: inflight,
                     queueDepth: depth,
-                    lastRequestAt: lastAt))
+                    lastRequestAt: lastAt,
+                    lastDecodeTokensPerSec: decodeTps,
+                    powerAssertionHeld: powerAssertionHeld))
         }
 
         router.get("/metrics") { request, _ -> Response in
@@ -1197,9 +1204,10 @@ struct AthenaServer {
             let heartbeatAfterNanos: UInt64 = 10_000_000_000
             let heartbeatIntervalNanos: UInt64 = 5_000_000_000
             let governor = self.governor
+            let metrics = self.metrics
             let heartbeatTask = Task.detached(
                 priority: .utility
-            ) { [counter] in
+            ) { [counter, metrics] in
                 // Wait out the silent threshold; if the whole call
                 // finished before then, the outer defer cancels us
                 // and Task.sleep throws — try? swallows it.
@@ -1246,6 +1254,15 @@ struct AthenaServer {
                         phaseField = "setup:\(stage)"
                     } else {
                         phaseField = phase.rawValue
+                    }
+                    // M60.1 — publish the live decode rate to the metrics
+                    // actor so /healthz can report it (only while actually
+                    // decoding, so the surfaced value is real throughput
+                    // rather than a setup/prefill zero). Lets a client read
+                    // tok/s + thermalState and back off before submitting a
+                    // call that would cross its deadline.
+                    if phase == .decode {
+                        await metrics.recordDecodeRate(tps)
                     }
                     // M49.3 — per-module residentBytes appended so a
                     // memory-pressure regression is visible at-a-glance
@@ -5018,6 +5035,32 @@ struct HealthResponse: Encodable {
     /// M59.2 — cross-request prompt-prefix KV reuse pool (0 when disabled).
     let promptCachePoolBytes: Int
     let promptCachePoolEntries: Int
+    /// M60.1 — macOS thermal-pressure level from
+    /// `ProcessInfo.thermalState`: `nominal` / `fair` / `serious` /
+    /// `critical`. No elevated privilege required (unlike `powermetrics`).
+    /// This is the throttle indicator a client should poll and back off on:
+    /// at `serious`/`critical` the GPU clock is reduced and the
+    /// compute-bound prefill slows first, so a large call that completes
+    /// at `nominal` can cross its deadline. 0-cost to read.
+    let thermalState: String
+    /// M60.1 — most recent decode throughput (tok/s) observed by the
+    /// heartbeat; holds the last value while idle (0 ⇒ none since boot).
+    /// Read with `thermalState` to decide whether a planned output length
+    /// fits the client timeout at the current rate.
+    let lastDecodeTokensPerSec: Double
+    /// M60.1 — MLX allocator counters (the heartbeat's `mlx_active` /
+    /// `mlx_cache`), surfaced here so an operator can watch the recyclable
+    /// buffer pool across a sustained run without scraping the log. A
+    /// monotonically climbing `mlxCacheBytes` under steady load is the
+    /// tell for buffer-pool growth.
+    let mlxActiveBytes: Int
+    let mlxCacheBytes: Int
+    /// M60.2 — whether the daemon holds a `PreventUserIdleSystemSleep` power
+    /// assertion. `false` ⇒ an unattended Mac can idle-sleep and SUSPEND
+    /// inference mid-request (the root cause of the M60 throughput-decay
+    /// investigation). An operator/monitor should alert if this is ever false
+    /// on a serving appliance.
+    let powerAssertionHeld: Bool
     let modules: [ModuleSnapshot]
     let inflight: Int
     let queueDepth: Int
@@ -5025,7 +5068,8 @@ struct HealthResponse: Encodable {
 
     init(
         snapshot: GovernorSnapshot, inflight: Int,
-        queueDepth: Int, lastRequestAt: Double
+        queueDepth: Int, lastRequestAt: Double,
+        lastDecodeTokensPerSec: Double, powerAssertionHeld: Bool
     ) {
         self.totalBudgetBytes = snapshot.totalBudgetBytes
         self.residentBytes = snapshot.residentBytes
@@ -5034,10 +5078,28 @@ struct HealthResponse: Encodable {
         self.physFootprintBytes = ProcessMemory.sample().physFootprint
         self.promptCachePoolBytes = snapshot.promptCachePoolBytes
         self.promptCachePoolEntries = snapshot.promptCachePoolEntries
+        self.thermalState = HealthResponse.thermalLabel(
+            ProcessInfo.processInfo.thermalState)
+        self.lastDecodeTokensPerSec = lastDecodeTokensPerSec
+        self.powerAssertionHeld = powerAssertionHeld
+        self.mlxActiveBytes = MLX.Memory.activeMemory
+        self.mlxCacheBytes = MLX.Memory.cacheMemory
         self.modules = snapshot.modules
         self.inflight = inflight
         self.queueDepth = queueDepth
         self.lastRequestAt = lastRequestAt
+    }
+
+    /// M60.1 — stable string for the `ProcessInfo.ThermalState` enum so
+    /// the field is self-describing in JSON (the raw enum is an Int).
+    static func thermalLabel(_ s: ProcessInfo.ThermalState) -> String {
+        switch s {
+        case .nominal: return "nominal"
+        case .fair: return "fair"
+        case .serious: return "serious"
+        case .critical: return "critical"
+        @unknown default: return "unknown"
+        }
     }
 }
 

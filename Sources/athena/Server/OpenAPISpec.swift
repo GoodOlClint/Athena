@@ -55,7 +55,7 @@ enum OpenAPISpec {
               "get": {
                 "tags": ["Operational"],
                 "summary": "Liveness + memory-governor snapshot + live signals.",
-                "description": "Always open (no auth). Returns the governor's current reservations and budget, plus `inflight` (live request count), `queueDepth` (jobs in queued status), and `lastRequestAt` (unix-epoch seconds; 0 ⇒ none since boot) for at-a-glance diagnosis of a hung daemon (M43.1).",
+                "description": "Always open (no auth). Returns the governor's current reservations and budget, plus `inflight` (live request count), `queueDepth` (jobs in queued status), and `lastRequestAt` (unix-epoch seconds; 0 ⇒ none since boot) for at-a-glance diagnosis of a hung daemon (M43.1). M60.1 adds `thermalState` (`nominal`/`fair`/`serious`/`critical` from macOS thermal pressure — the throttle indicator to back off on), `lastDecodeTokensPerSec` (most recent decode throughput), and `mlxActiveBytes`/`mlxCacheBytes` (MLX allocator counters). M60.2 adds `powerAssertionHeld` (whether the daemon holds a PreventUserIdleSystemSleep assertion; `false` means an unattended Mac can sleep and suspend inference).",
                 "security": [],
                 "responses": {
                   "200": { "description": "Governor snapshot + live signals.", "content": { "application/json": { "schema": { "type": "object" } } } }
