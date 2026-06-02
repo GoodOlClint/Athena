@@ -136,6 +136,8 @@ extension SpeculativeSampling {
 
         // --- Draft / single-pass verify / accept-or-reject ------------
         while out.count < maxTokens {
+            // M60.5 — abort early on request cancellation (disconnect/deadline).
+            if DecodeProgress.counter?.isCancelled == true { break }
             let inp = MLXArray([Int32(prev), Int32(draft)], [1, 2])
             let (logits2, hidden2) = model.logitsAndHidden(
                 inp, cache: backbone, nConfirmed: 1, rollback: rollback)

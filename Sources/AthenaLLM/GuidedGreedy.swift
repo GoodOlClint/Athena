@@ -74,6 +74,8 @@ enum GuidedGreedy {
         }
 
         while out.count < maxTokens {
+            // M60.5 — abort early on request cancellation (disconnect/deadline).
+            if DecodeProgress.counter?.isCancelled == true { break }
             let t = decoder.pick(logits[0..., -1, 0...])
             if commit(t) { break }
             // M46.8 — per-iteration progress for the heartbeat. The

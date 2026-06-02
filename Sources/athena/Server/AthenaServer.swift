@@ -1111,6 +1111,21 @@ struct AthenaServer {
         private var prefillCompleted = 0
         private var prefillTotal = 0
         private var setupStage: String? = nil
+        /// M60.5 — set by the serve path's task-cancellation handler (client
+        /// disconnect or deadline); polled by the decode loops to stop early.
+        private var cancelled = false
+
+        func cancelGeneration() {
+            lock.lock()
+            defer { lock.unlock() }
+            cancelled = true
+        }
+
+        var isCancelled: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return cancelled
+        }
 
         func incrementToken() {
             lock.lock()
@@ -1338,23 +1353,34 @@ struct AthenaServer {
             // for the substrate-streamed (non-Guide) path, which emits
             // per-token `.text` events; those paths leave the TaskLocal
             // untouched so no double-counting happens.
-            try await DecodeProgress.$counter.withValue(counter) {
-                let events = eventsBuilder()
-                for await event in events {
-                    switch event {
-                    case .text(let chunk):
-                        c.text += chunk
-                        counter.incrementToken()
-                    case .usage(let u): c.usage = u
-                    case .finish(let r): c.finish = r
-                    case .error(let athenaErr):
-                        // M49.5.2 — re-throw the classified error so the
-                        // HTTP layer's `do { ... } catch let e as AthenaError`
-                        // returns the right status/code instead of a 200
-                        // with the error text in the chat content.
-                        throw athenaErr
+            // M60.5 — bridge task cancellation (client disconnect or the M33
+            // deadline) to the synchronous decode loops: the handler flips the
+            // shared counter's cancel flag, which the loops poll and `break`
+            // on, so an abandoned generation stops burning the GPU instead of
+            // decoding to maxTokens. The flag is on the SAME counter object the
+            // generation Task reads via the TaskLocal below, so it bridges the
+            // consuming task and the (unstructured) generation task.
+            try await withTaskCancellationHandler {
+                try await DecodeProgress.$counter.withValue(counter) {
+                    let events = eventsBuilder()
+                    for await event in events {
+                        switch event {
+                        case .text(let chunk):
+                            c.text += chunk
+                            counter.incrementToken()
+                        case .usage(let u): c.usage = u
+                        case .finish(let r): c.finish = r
+                        case .error(let athenaErr):
+                            // M49.5.2 — re-throw the classified error so the
+                            // HTTP layer's `do { ... } catch let e as AthenaError`
+                            // returns the right status/code instead of a 200
+                            // with the error text in the chat content.
+                            throw athenaErr
+                        }
                     }
                 }
+            } onCancel: {
+                counter.cancelGeneration()
             }
             return c
         }

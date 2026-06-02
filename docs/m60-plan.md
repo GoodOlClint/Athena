@@ -126,7 +126,20 @@ package approach.)*
   proxy) for batch runs.
 - **Default expectation: deferred** with the spike findings recorded.
 
-### M60.5 — Abort in-flight decode on client disconnect
+### M60.5 — Abort in-flight decode on cancellation — **SHIPPED v0.10.104 (uncommitted)**
+The synchronous decode loops (Speculative, GuidedGreedy, SpeculativeSampling,
+GuidedSubstrate) now poll a cancel flag bridged through the shared
+`HeartbeatCounter` TaskLocal: a `withTaskCancellationHandler` in `collectMetered`
+flips it on task cancellation, and the loops `break`, freeing the GPU.
+**Validated (deadline path):** with `request_timeout_secs=15`, a request that
+would run ~120 s returns 504 at 15 s and the GPU drops to idle (338 MHz) within
+~4 s — confirmed via `asmetrics`, vs. the old behavior of decoding to maxTokens.
+**Known limitation:** a pure client *disconnect* with NO server timeout does NOT
+abort — Hummingbird doesn't cancel a mid-compute handler task — so set
+`request_timeout_secs` (the deadline path is what cancels). The original
+(superseded) plan below.
+
+
 - Today a disconnected client's generation runs to completion on the GPU
   (observed: a killed soak client left the daemon decoding ~4.5k tokens). Under
   a retry cascade that compounds load. Wire request-cancellation

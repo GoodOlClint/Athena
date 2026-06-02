@@ -55,11 +55,24 @@ public protocol DecodeProgressCounter: AnyObject, Sendable {
     /// (typically via `defer`). Default: no-op so conformers that
     /// don't care about setup granularity stay valid.
     func setSetupStage(_ stage: String?)
+
+    /// M60.5 — request that the in-flight generation stop early. Set by the
+    /// serve path when it observes task cancellation (a client disconnect, or
+    /// the M33 request deadline) so the synchronous decode loops free the GPU
+    /// instead of decoding all the way to `maxTokens` for a request no one is
+    /// waiting on. Default: no-op.
+    func cancelGeneration()
+
+    /// M60.5 — whether `cancelGeneration()` has been called. The decode loops
+    /// poll this each iteration and `break`. Default: `false`.
+    var isCancelled: Bool { get }
 }
 
 extension DecodeProgressCounter {
     public func recordPrefillChunk(completed: Int, total: Int) {}
     public func setSetupStage(_ stage: String?) {}
+    public func cancelGeneration() {}
+    public var isCancelled: Bool { false }
 }
 
 public enum DecodeProgress {
