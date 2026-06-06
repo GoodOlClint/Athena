@@ -131,6 +131,14 @@ public actor MemoryGovernor {
     private var residentBytes: Int = 0
     /// Coalesces concurrent `ensureLoaded` callers onto one load.
     private var inFlight: [ModuleID: Task<Void, Error>] = [:]
+    /// M62 — the error from the most recent FAILED load, kept so the
+    /// non-blocking `beginLoadIfNeeded` path can surface the real reason to
+    /// the next caller instead of silently kicking another doomed load and
+    /// returning a perpetual `module_loading` 503. Set in `performLoad`'s
+    /// failure path, cleared on a successful load or once surfaced (so a
+    /// retry can still happen). `ensureLoaded` already throws directly, so it
+    /// doesn't consume this.
+    private var lastLoadError: [ModuleID: Error] = [:]
     /// M54.3 — modules with an operator-action model pull in flight
     /// (startup / allowlist-add). While set, `beginLoadIfNeeded` returns
     /// `.loading` (→ 503) WITHOUT attempting a load, so an inference
@@ -225,6 +233,15 @@ public actor MemoryGovernor {
         // 503 until it lands rather than attempt a (doomed, churning) load.
         if pulling.contains(id) { return .loading }
         if inFlight[id] != nil { return .loading }
+        // M62 — a prior load FAILED and nothing is in flight: surface the
+        // real error to THIS caller instead of silently launching another
+        // doomed load (which would just 503 `module_loading` forever — e.g. a
+        // model dir missing config.json). Cleared as we surface it so the
+        // next request retries fresh rather than wedging on a transient.
+        if let err = lastLoadError[id] {
+            lastLoadError[id] = nil
+            throw err
+        }
         let task = Task<Void, Error> { try await self.performLoad(id) }
         inFlight[id] = task
         Task { [weak self] in
@@ -345,13 +362,20 @@ public actor MemoryGovernor {
             onEvent?(id, "load failed after \(Self.ms(since: started)): \(error)")
             // A Metal/MLX OOM during load is classified to 503, not a
             // bare 500 (brief item 4a).
-            throw AthenaError.classify(error, module: id)
+            let classified = AthenaError.classify(error, module: id)
+            // M62 — remember it so the non-blocking `beginLoadIfNeeded` path
+            // surfaces the real reason to the next caller instead of a
+            // perpetual `module_loading` 503.
+            lastLoadError[id] = classified
+            throw classified
         }
         entries[id]?.state = .loaded
         entries[id]?.lastUsed = Date()
         // M46.5 — clear the reason once a load succeeds; nil while
         // loaded is the documented "currently resident" signal.
         entries[id]?.unloadedReason = nil
+        lastLoadError[id] = nil  // M62 — a success clears the prior failure
+
         // M56 — name WHICH model loaded, its real footprint, and how long
         // it took, so a sysadmin sees "loaded <id> (<bytes>) in <ms>"
         // instead of a bare "loaded". The specific model id comes from the

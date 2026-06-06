@@ -310,4 +310,113 @@ final class MemoryGovernorTests: XCTestCase {
                 "admission must use the learned footprint, not 100")
         }
     }
+
+    // MARK: - M62 cold-load model selection + failure surfacing
+
+    /// A cold governor load must bind the model chosen via
+    /// `selectColdLoadModel`, not the slot default — pre-M62 a request for a
+    /// non-default model on a cold/just-restarted slot silently served the
+    /// default (the consuming application asked for 4bit, got the 8bit default).
+    func testColdLoadBindsSelectedModelNotDefault() async throws {
+        let gov = MemoryGovernor(totalBudgetBytes: 1_000)
+        let stub = StubLLMModule(
+            reserveBytes: 100, modelIds: ["model-A", "model-B"])
+        await gov.register(stub, evictable: false)
+
+        try await stub.selectColdLoadModel("model-B")  // non-default
+        try await gov.ensureLoaded(.llm)
+
+        let resident = await stub.residentModelId()
+        XCTAssertEqual(resident, "model-B")
+    }
+
+    func testColdLoadUsesDefaultWhenSelectionCleared() async throws {
+        let gov = MemoryGovernor(totalBudgetBytes: 1_000)
+        let stub = StubLLMModule(
+            reserveBytes: 100, modelIds: ["model-A", "model-B"])
+        await gov.register(stub, evictable: false)
+
+        try await stub.selectColdLoadModel("model-B")
+        try await stub.selectColdLoadModel(nil)  // clear ⇒ default
+        try await gov.ensureLoaded(.llm)
+
+        let resident = await stub.residentModelId()
+        XCTAssertEqual(resident, "model-A")
+    }
+
+    func testSelectColdLoadModelRejectsUnknownId() async throws {
+        let stub = StubLLMModule(modelIds: ["model-A"])
+        do {
+            try await stub.selectColdLoadModel("not-allowed")
+            XCTFail("expected modelNotAvailable")
+        } catch let e as AthenaError {
+            guard case .modelNotAvailable = e else {
+                return XCTFail("wrong error: \(e)")
+            }
+            XCTAssertEqual(e.httpStatus, 400)
+        }
+    }
+
+    func testSelectColdLoadModelIsCaseInsensitiveCanonical() async throws {
+        let gov = MemoryGovernor(totalBudgetBytes: 1_000)
+        let stub = StubLLMModule(
+            reserveBytes: 100, modelIds: ["Model-B", "Model-A"])
+        await gov.register(stub, evictable: false)
+
+        try await stub.selectColdLoadModel("model-b")  // lowercased request
+        try await gov.ensureLoaded(.llm)
+
+        // The CANONICAL (stored) casing is bound, not the request's.
+        let resident = await stub.residentModelId()
+        XCTAssertEqual(resident, "Model-B")
+    }
+
+    /// A failed cold-load must surface the real error to the next
+    /// non-blocking caller — not silently kick another doomed load and 503
+    /// `module_loading` forever (a model dir missing config.json did exactly
+    /// that pre-M62).
+    func testColdLoadFailureSurfacedNotPerpetualLoading() async throws {
+        let gov = MemoryGovernor(totalBudgetBytes: 1_000)
+        await gov.register(FailingModule(id: .llm), evictable: false)
+
+        // First call kicks the doomed background load → .loading.
+        let first = try await gov.beginLoadIfNeeded(.llm)
+        guard case .loading = first else {
+            return XCTFail("first cold-load should be .loading")
+        }
+
+        // While the load is in flight it stays .loading; once it fails, the
+        // next call THROWS the real error instead of another .loading.
+        var surfaced: Error?
+        for _ in 0..<100 {
+            do {
+                let s = try await gov.beginLoadIfNeeded(.llm)
+                guard case .loading = s else {
+                    return XCTFail("unexpected non-loading status")
+                }
+                try await Task.sleep(nanoseconds: 10_000_000)
+            } catch {
+                surfaced = error
+                break
+            }
+        }
+        let e = try XCTUnwrap(
+            surfaced as? AthenaError, "the load failure should surface")
+        guard case .moduleLoadFailed = e else {
+            return XCTFail("expected moduleLoadFailed, got \(e)")
+        }
+    }
+
+    /// Module whose `load` always throws — drives the M62 failure-surfacing
+    /// path in `beginLoadIfNeeded`.
+    private actor FailingModule: InferenceModule {
+        nonisolated let id: ModuleID
+        init(id: ModuleID) { self.id = id }
+        var residentBytes: Int { 0 }
+        func memoryEstimate() -> Int { 10 }
+        func load(reservation: MemoryReservation) async throws {
+            throw AthenaError.moduleLoadFailed(id, reason: "test boom")
+        }
+        func unload() async {}
+    }
 }

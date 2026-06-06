@@ -7,7 +7,8 @@ import Foundation
 /// The binary is statically linked but its MLX/crypto/NIO resource bundles
 /// (incl. `mlx-swift_Cmlx.bundle/.../default.metallib`) MUST sit next to it,
 /// so everything installs together under `<prefix>/libexec/athena` with a
-/// thin `<prefix>/bin/athena` symlink for PATH.
+/// thin `<prefix>/bin/athena` exec WRAPPER for PATH (NOT a symlink — see
+/// `binLauncher`).
 public struct InstallPlan: Sendable, Equatable {
     public let sourceDir: URL
     public let prefix: URL
@@ -25,7 +26,14 @@ public struct InstallPlan: Sendable, Equatable {
     public var installedBinary: URL {
         libexecDir.appendingPathComponent("athena")
     }
-    public var binSymlink: URL {
+    /// `<prefix>/bin/athena` — the PATH entry point. M62: a tiny `exec`
+    /// wrapper, NOT a symlink. A symlink makes a foreground `athena …`
+    /// resolve `argv[0]` (and thus `Bundle.main`) to this `bin` dir, where
+    /// the MLX resource bundles do NOT live, so the metallib lookup fails
+    /// ("Failed to load the default metallib"). The wrapper `exec`s the real
+    /// libexec binary so `argv[0]` points beside the bundles (same fix the
+    /// launchd plist applies — see `LaunchdPlist`).
+    public var binLauncher: URL {
         prefix.appendingPathComponent("bin/athena")
     }
     public var configDir: URL {

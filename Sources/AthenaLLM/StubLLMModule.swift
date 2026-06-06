@@ -80,10 +80,25 @@ public protocol LLMModule: InferenceModule {
 
     /// Role-aware preflight (M24.1). Default bridges to the prompt path.
     func preflightPromptCache(messages: [ChatTurn]) async throws
+
+    /// M62 — choose the model the NEXT governor cold-load will bind, WITHOUT
+    /// loading now: the non-blocking cold-load path (`beginLoadIfNeeded`)
+    /// drives the actual load under the governor's reservation, and a cold
+    /// slot would otherwise always bind the DEFAULT — so a request for a
+    /// non-default model on a just-restarted/evicted slot silently served
+    /// the wrong model. Set the target here (before the load is kicked off)
+    /// and the cold-load binds it directly. Validated against the allowlist
+    /// so an unknown id throws `AthenaError.modelNotAvailable` (400) BEFORE a
+    /// doomed multi-GB load starts; `nil`/empty clears the override so the
+    /// cold-load uses the default. Default no-op for conformers whose slot
+    /// can't swap.
+    func selectColdLoadModel(_ id: String?) async throws
 }
 
 extension LLMModule {
     public func preflightPromptCache(prompt: String) async throws {}
+
+    public func selectColdLoadModel(_ id: String?) async throws {}
 
     public func preflightPromptCache(messages: [ChatTurn]) async throws {
         try await preflightPromptCache(prompt: messages.flattenedPrompt())
@@ -217,6 +232,8 @@ public actor StubLLMModule: LLMModule, ModelSelectable {
     private var modelIds: [String]
     private var defaultId: String
     private var residentId: String?
+    /// M62 — the model the next cold `load` will bind (nil ⇒ the default).
+    private var desiredId: String?
 
     /// `reserveBytes` defaults to a representative multi-GB LLM footprint so
     /// budget pressure behaves realistically; tests inject small values.
@@ -241,7 +258,9 @@ public actor StubLLMModule: LLMModule, ModelSelectable {
     public func memoryEstimate() -> Int { reserveBytes }
 
     public func load(reservation: MemoryReservation) async throws {
-        if residentId == nil { residentId = defaultId }
+        // M62 — bind the requested cold-load target (set via
+        // selectColdLoadModel), else the default.
+        if residentId == nil { residentId = desiredId ?? defaultId }
     }
 
     public func unload() async {
@@ -263,12 +282,22 @@ public actor StubLLMModule: LLMModule, ModelSelectable {
         residentId = target
     }
 
+    public func selectColdLoadModel(_ id: String?) async throws {
+        guard let id, !id.isEmpty else { desiredId = nil; return }
+        guard let target = modelIds.canonicalCaseInsensitive(id) else {
+            throw AthenaError.modelNotAvailable(
+                requested: id, available: modelIds)
+        }
+        desiredId = target
+    }
+
     public func setAllowedModelIds(_ ids: [String]) {
         modelIds = ids
         defaultId = ids.first ?? defaultId
         if let r = residentId, !ids.contains(r) {
             residentId = nil
         }
+        if let d = desiredId, !ids.contains(d) { desiredId = nil }
     }
 
     public nonisolated func generate(prompt: String) -> AsyncStream<String> {

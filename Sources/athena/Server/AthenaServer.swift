@@ -3369,12 +3369,23 @@ struct AthenaServer {
         request: Request? = nil, requestedModel: String?
     ) async -> Response? {
         do {
+            // M62 — bind the requested model on the (possibly cold) load,
+            // not the default. Setting the cold-load target BEFORE
+            // beginLoadIfNeeded means the background load binds the requested
+            // model directly; without this a cold/just-restarted slot loaded
+            // the DEFAULT and 503'd before the rebind ran, so a request for a
+            // non-default model silently got the default (the consuming application's
+            // 4bit→8bit). Validated here so an unknown id is a 400 before a
+            // doomed multi-GB load starts; nil/empty ⇒ the default.
+            try await llm.selectColdLoadModel(requestedModel)
             // M43.2: non-blocking cold-load — covers /v1/chat/completions
             // AND /api/chat (the brief's biggest hang vector).
             switch try await governor.beginLoadIfNeeded(.llm) {
             case .loaded: break
             case .loading: return Self.coldLoadResponse(.llm)
             }
+            // Warm slot already holding a different model ⇒ swap in place
+            // (the cold-load target above only applies while unloaded).
             if let m = requestedModel, !m.isEmpty {
                 try await auditedRebind(
                     request, module: .llm, target: m)

@@ -93,6 +93,11 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     private var container: ModelContainer?
     /// Currently-resident model name (nil ⇒ slot unloaded).
     private var residentName: String?
+    /// M62 — the model the NEXT cold `load(reservation:)` will bind, set by
+    /// `selectColdLoadModel` before the governor's non-blocking cold-load is
+    /// kicked off. nil ⇒ bind the default. Only consulted while the slot is
+    /// unloaded; a warm swap goes through `rebind`.
+    private var desiredName: String?
     /// Cached structured-output vocabulary tokens (the ~150k
     /// `tokenizer.decode` calls are model-fixed and schema-independent —
     /// build once, reuse every structured request). Sendable, so it
@@ -246,7 +251,11 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
 
     public func load(reservation: MemoryReservation) async throws {
         if container != nil { return }
-        try await loadModel(name: residentName ?? defaultName)
+        // M62 — bind the requested cold-load target (set via
+        // selectColdLoadModel) so a cold slot serves the requested model,
+        // not the default. residentName is normally nil here (slot empty);
+        // defaultName is the final fallback.
+        try await loadModel(name: desiredName ?? residentName ?? defaultName)
     }
 
     public func unload() async {
@@ -357,6 +366,17 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         try await loadModel(name: target)
     }
 
+    public func selectColdLoadModel(_ id: String?) async throws {
+        guard let id, !id.isEmpty else { desiredName = nil; return }
+        let allowed = modelDirectories.map { $0.name }
+        // Same case-insensitive, canonical-id discipline as rebind (M46.4).
+        guard let target = allowed.canonicalCaseInsensitive(id) else {
+            throw AthenaError.modelNotAvailable(
+                requested: id, available: allowed)
+        }
+        desiredName = target
+    }
+
     public func setAllowedModelIds(_ ids: [String]) {
         // Resolve every name to a URL under the model store root. An
         // absolute path (rare; an operator who pre-knows the directory)
@@ -380,6 +400,8 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             cachedVocabTokens = nil
         cachedStructuredVocabulary = nil  // M53 — mirror vocabTokens lifecycle
         }
+        // M62 — drop a stale cold-load target no longer in the allowlist.
+        if let d = desiredName, !ids.contains(d) { desiredName = nil }
     }
 
     public nonisolated func generate(prompt: String) -> AsyncStream<String> {

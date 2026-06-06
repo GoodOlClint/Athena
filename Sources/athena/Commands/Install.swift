@@ -126,7 +126,7 @@ struct Install: AsyncParsableCommand {
             print("  \(versionSummary)")
             print("  from:    \(plan.sourceDir.path)")
             print("  libexec: \(plan.libexecDir.path)")
-            print("  symlink: \(plan.binSymlink.path)")
+            print("  launcher: \(plan.binLauncher.path)")
             print(
                 "  config:  \(plan.installedConfig.path)"
                     + (synthesized
@@ -300,9 +300,19 @@ struct Install: AsyncParsableCommand {
         // abort an otherwise-good install.
         try? Data(Athena.appVersion.utf8).write(to: versionMarker)
 
-        try? fm.removeItem(at: plan.binSymlink)
-        try fm.createSymbolicLink(
-            at: plan.binSymlink, withDestinationURL: plan.installedBinary)
+        // M62 — write a thin `exec` WRAPPER (not a symlink). A symlink at
+        // <prefix>/bin/athena leaves `argv[0]` pointing at this bin dir, so
+        // MLX's `Bundle.main` lookup for
+        // `mlx-swift_Cmlx.bundle/.../default.metallib` searches a dir with no
+        // bundle and a foreground `athena load` throws "Failed to load the
+        // default metallib". `exec`ing the real libexec binary keeps `argv[0]`
+        // beside its resource bundles (the launchd plist already does this for
+        // the daemon — see LaunchdPlist).
+        try? fm.removeItem(at: plan.binLauncher)
+        let launcher = "#!/bin/sh\nexec \"\(plan.installedBinary.path)\" \"$@\"\n"
+        try Data(launcher.utf8).write(to: plan.binLauncher)
+        try fm.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: plan.binLauncher.path)
 
         try plistData.write(to: plan.plistPath)
         try fm.setAttributes(
@@ -379,12 +389,12 @@ struct Install: AsyncParsableCommand {
             print(
                 "  locked out? reset offline (no token needed):")
             print(
-                "    \(plan.binSymlink.path) auth user passwd admin "
+                "    \(plan.binLauncher.path) auth user passwd admin "
                     + "--data-dir \(dataDir.path)")
             print(
                 "  no admin token? mint one offline:")
             print(
-                "    \(plan.binSymlink.path) auth token add --user "
+                "    \(plan.binLauncher.path) auth token add --user "
                     + "admin --data-dir \(dataDir.path)")
         }
         print(

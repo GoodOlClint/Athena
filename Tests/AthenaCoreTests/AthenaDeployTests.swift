@@ -507,7 +507,7 @@ final class InstallPlanTests: XCTestCase {
         // M43.3 removed the athenad shim; the test's installedDaemon
         // assertion was dropped here so swift test compiles cleanly
         // (caught while wiring M46.1's InferenceDeadlineTests additions).
-        XCTAssertEqual(plan.binSymlink.path, "/opt/athena/bin/athena")
+        XCTAssertEqual(plan.binLauncher.path, "/opt/athena/bin/athena")
         XCTAssertEqual(
             plan.installedConfig.path, "/opt/athena/etc/athena/athena.toml")
         XCTAssertEqual(

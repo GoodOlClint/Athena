@@ -47,7 +47,7 @@ struct Uninstall: ParsableCommand {
         }
 
         var removals: [URL] = [
-            plan.plistPath, plan.binSymlink, plan.libexecDir,
+            plan.plistPath, plan.binLauncher, plan.libexecDir,
         ]
         if purge {
             removals += [plan.configDir, plan.workingDir]
