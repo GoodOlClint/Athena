@@ -18,6 +18,8 @@ final class SupportedModelsTests: XCTestCase {
         XCTAssertEqual(SupportedModels.support(for: "qwen3_5"), .qwen35)
         XCTAssertEqual(SupportedModels.support(for: "llama"), .validated)
         XCTAssertEqual(SupportedModels.support(for: "gemma3"), .validated)
+        XCTAssertEqual(SupportedModels.support(for: "gemma4_unified"), .validated)
+        XCTAssertEqual(SupportedModels.support(for: "GEMMA4_TEXT"), .validated)
         XCTAssertEqual(SupportedModels.support(for: "phi3"), .validated)
         XCTAssertEqual(
             SupportedModels.support(for: "some_exotic_arch"), .bestEffort)
@@ -40,7 +42,7 @@ final class SupportedModelsTests: XCTestCase {
     // MARK: - fork B: does the codec serve the arch?
 
     func testNoneAndTurboquantServeEveryArch() {
-        for t in ["qwen3_5", "llama", "gemma3", nil] {
+        for t in ["qwen3_5", "llama", "gemma3", "gemma4_unified", nil] {
             XCTAssertTrue(KVCompression.none.servesArch(modelType: t))
             XCTAssertTrue(
                 KVCompression.turboquant.servesArch(modelType: t))
@@ -57,6 +59,9 @@ final class SupportedModelsTests: XCTestCase {
             KVCompression.triattention.servesArch(modelType: "llama"))
         XCTAssertFalse(
             KVCompression.triattention.servesArch(modelType: "gemma3"))
+        XCTAssertFalse(
+            KVCompression.triattention.servesArch(
+                modelType: "gemma4_unified"))
         XCTAssertFalse(
             KVCompression.triattention.servesArch(modelType: nil))
     }

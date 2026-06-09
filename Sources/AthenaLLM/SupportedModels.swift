@@ -31,6 +31,7 @@ public enum SupportedModels {
     public static let validatedSubstrate: Set<String> = [
         "llama", "mistral", "qwen2", "qwen3", "qwen3_moe",
         "gemma", "gemma2", "gemma3", "gemma3_text",
+        "gemma4", "gemma4_text", "gemma4_unified", "gemma4_unified_text",
         "phi", "phi3", "phimoe",
     ]
 
