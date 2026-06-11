@@ -30,14 +30,4 @@ default.profraw
 
 # Claude/agent local settings
 .claude/
-
-# graphify: commit graphify-out/ so teammates start with the map, but exclude
-# per-user cost tracking and the rebuildable cache (graphify team-setup guidance).
-graphify-out/cost.json
-graphify-out/cache/
-# …and the machine-specific interpreter path + dated snapshot copies.
-graphify-out/.graphify_python
-graphify-out/20*/
-
-# ChunkHound local semantic index / daemon log
-.chunkhound/
+Sources/CSQLCipher
