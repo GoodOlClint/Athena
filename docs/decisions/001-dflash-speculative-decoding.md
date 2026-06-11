@@ -118,12 +118,38 @@ Key design choices:
    schema-allowed set. Carry the reference's "fall back to target-only AR when
    the speculative surplus goes negative" auto-fallback as the safety valve.
 
-3. **temp==0 stays bit-identical-greedy** — the same gate MTP/M40 hold. DFlash
-   verify accepts a draft token iff it equals the target argmax and otherwise
-   emits the target argmax, so the committed sequence is exactly the target's
-   greedy sequence. Proven by an A/B byte-identical gate (DFlash-on vs
-   DFlash-off), a **slice-one deliverable**, not an afterthought. An acceptance-
-   rate observer (reuse `SpeculativeStats`) is likewise slice-one.
+3. **temp==0 is lossless = every emitted token is the target's argmax under
+   the verify forward.** DFlash verify accepts a draft token iff it equals the
+   target argmax and otherwise emits the target argmax, so the committed
+   sequence is exactly the target's *block-forward* greedy sequence.
+
+   **AMENDED 2026-06-11 (M63.3 finding):** the original constraint "bit-identical
+   to non-speculative (single-token) greedy" is **unattainable for any block
+   speculative method on Gemma4**, and this is an intrinsic MLX kernel property,
+   not an engine defect. The MLX SDPA dispatch
+   (`backend/metal/scaled_dot_product_attention.cpp` `use_fallback`) selects a
+   different kernel by query length — `sdpa_vector` for `qL=1` (the
+   non-speculative single-token path), `sdpa_full`/pure-`mx` fallback for `qL≥2`
+   (any block verify) — with different floating-point rounding. At genuine
+   near-ties (~1/64 generated tokens on a representative prompt) the two kernels
+   pick different argmax tokens. A diagnostic (`testKernelBlockSizeSensitivity`)
+   confirms B=2/4/8/16 all agree with each other and differ from B=1 at the same
+   single position; the `n≥2` block-forward greedy is self-consistent. (This is
+   also why MTP's 2-token verify stayed bit-identical on Qwen — its smaller GQA
+   keeps `qL=2` inside the vector kernel — but does not on Gemma4-31B, whose
+   larger GQA pushes `qL≥2` out of it.) The only way to make the non-speculative
+   path agree would be to route it through an `n≥2` forward, which would shift
+   the validated base-decode numerics globally — rejected.
+
+   **Revised contract:** DFlash is *lossless* in the speculative-decoding sense
+   (it provably reproduces the self-consistent `n≥2` block-forward greedy) and
+   matches single-token greedy except at SDPA-kernel near-ties. The **gate**
+   (`DFlashEngineParityTests.testDFlashBitIdenticalToGreedy`) asserts DFlash
+   matches single-token greedy up to the first divergence, and that the
+   divergence is a *verified* kernel tie (the `n≥2` block forward of the shared
+   prefix predicts exactly what DFlash committed, and differs from the
+   single-token choice) — so the engine introduces **no error of its own**. An
+   acceptance-rate observer (reuse `SpeculativeStats`) ships in the same slice.
 
 4. **Gemma4 hidden-capture = a tracked additive substrate delta.** The engine
    needs the target's per-layer hidden states at selected layers during prefill

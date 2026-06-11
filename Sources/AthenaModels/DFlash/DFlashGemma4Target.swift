@@ -26,6 +26,12 @@ public protocol DFlashGemma4Backbone: AnyObject {
         _ inputs: MLXArray, cache: [KVCache]?, captureLayers: Set<Int>
     ) -> (logits: MLXArray, hidden: [Int: MLXArray])
     func newCache(parameters: GenerateParameters?) -> [any KVCache]
+    /// Token-embedding scale the draft adopts (Gemma4: sqrt(hidden)).
+    var textEmbedScale: Float { get }
+    /// Raw token-embedding lookup (no scale) for the draft noise block.
+    func embedTokens(_ ids: MLXArray) -> MLXArray
+    /// Softcapped logits from arbitrary hidden states (the tied head).
+    func logitsFromHidden(_ h: MLXArray) -> MLXArray
 }
 
 extension Gemma4Model: DFlashGemma4Backbone {}
