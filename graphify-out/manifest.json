@@ -1120,13 +1120,18 @@
     "semantic_hash": "371237f6ed34877c859b071318d9b529"
   },
   "CLAUDE.md": {
-    "mtime": 1781061819.6941738,
-    "ast_hash": "82efb97a359f5c7290bf2513d14686be",
+    "mtime": 1781118791.6045625,
+    "ast_hash": "9e3e4247b9362a7be34c36545cf9e33c",
     "semantic_hash": ""
   },
   "docs/cli-reference.md": {
     "mtime": 1781107504.1520834,
     "ast_hash": "099f21221aa2d3e9c82d8ff4ceb4adbd",
+    "semantic_hash": ""
+  },
+  "docs/decisions/README.md": {
+    "mtime": 1781118794.7229407,
+    "ast_hash": "62c321992b65a00a63dac2bb59bdbc20",
     "semantic_hash": ""
   }
 }
