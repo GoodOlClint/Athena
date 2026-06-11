@@ -881,10 +881,21 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             // otherwise); structured output stays on the substrate path
             // until M63.4. Output is the target's block-forward greedy.
             if let dflashBox, let target = ctx.model as? DFlashGemma4Backbone {
+                // Full stop-token set, matching the substrate generation path
+                // (config eos_token_id + tokenizer EOS + extra EOS like
+                // Gemma's <end_of_turn>) so DFlash stops where normal decode
+                // would, not just on the tokenizer's single eosTokenId.
+                var stopTokens = ctx.configuration.eosTokenIds
+                if let e = ctx.tokenizer.eosTokenId { stopTokens.insert(e) }
+                for tok in ctx.configuration.extraEOSTokens {
+                    if let id = ctx.tokenizer.convertTokenToId(tok) {
+                        stopTokens.insert(id)
+                    }
+                }
                 let ids = DFlashGeneration.generate(
                     target: target, draft: dflashBox.model,
                     promptTokens: promptTokens, maxTokens: maxTokens,
-                    eosTokenId: ctx.tokenizer.eosTokenId)
+                    stopTokens: stopTokens)
                 return (ctx.tokenizer.decode(tokenIds: ids), ids.count, 0)
             }
 

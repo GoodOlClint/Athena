@@ -57,8 +57,19 @@ final class DFlashEngineParityTests: XCTestCase {
         return nil
     }
 
+    /// Full stop-token set, matching the engine's dispatch.
+    private static func stopSet(_ ctx: ModelContext) -> Set<Int> {
+        var s = ctx.configuration.eosTokenIds
+        if let e = ctx.tokenizer.eosTokenId { s.insert(e) }
+        for tok in ctx.configuration.extraEOSTokens {
+            if let id = ctx.tokenizer.convertTokenToId(tok) { s.insert(id) }
+        }
+        return s
+    }
+
     private static func greedy(
-        _ b: DFlashGemma4Backbone, prompt: [Int], maxTokens: Int, eos: Int?
+        _ b: DFlashGemma4Backbone, prompt: [Int], maxTokens: Int,
+        stop: Set<Int>
     ) -> [Int] {
         let cache = b.newCache(parameters: nil)
         func argmaxLast(_ logits: MLXArray) -> Int {
@@ -70,7 +81,7 @@ final class DFlashEngineParityTests: XCTestCase {
         var staged = argmaxLast(l0)
         var out: [Int] = []
         while out.count < maxTokens {
-            if staged == eos { break }
+            if stop.contains(staged) { break }
             out.append(staged)
             if out.count >= maxTokens { break }
             let (l, _) = b.callReturningHidden(
@@ -112,7 +123,7 @@ final class DFlashEngineParityTests: XCTestCase {
             // Greedy single-token sequence.
             let gen = Self.greedy(
                 target, prompt: prompt, maxTokens: 64,
-                eos: ctx.tokenizer.eosTokenId)
+                stop: Self.stopSet(ctx))
             let seq = prompt + gen
             // One block forward over the whole sequence.
             let (blockLogits, _) = target.callReturningHidden(
@@ -170,7 +181,7 @@ final class DFlashEngineParityTests: XCTestCase {
             }
             let gen = Self.greedy(
                 target, prompt: prompt, maxTokens: 64,
-                eos: ctx.tokenizer.eosTokenId)
+                stop: Self.stopSet(ctx))
             let seq = prompt + gen
 
             func argmaxInBlocks(_ blockSize: Int) -> [Int] {
@@ -289,15 +300,15 @@ final class DFlashEngineParityTests: XCTestCase {
             guard let target = Self.backbone(ctx.model) else {
                 throw XCTSkip("loaded model is not a Gemma4 target")
             }
-            let eos = ctx.tokenizer.eosTokenId
+            let stop = Self.stopSet(ctx)
 
             let reference = Self.greedy(
-                target, prompt: prompt, maxTokens: maxTokens, eos: eos)
+                target, prompt: prompt, maxTokens: maxTokens, stop: stop)
             let counter = AcceptanceCounter()
             let dflash = SpeculativeStats.$observer.withValue(counter) {
                 DFlashGeneration.generate(
                     target: target, draft: draft, promptTokens: prompt,
-                    maxTokens: maxTokens, eosTokenId: eos)
+                    maxTokens: maxTokens, stopTokens: stop)
             }
             XCTAssertFalse(reference.isEmpty, "reference produced no tokens")
 

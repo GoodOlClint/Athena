@@ -36,7 +36,7 @@ enum DFlashGeneration {
         draft: DFlashDraftModel,
         promptTokens: [Int],
         maxTokens: Int,
-        eosTokenId: Int?
+        stopTokens: Set<Int>
     ) -> [Int] {
         precondition(!promptTokens.isEmpty, "DFlash requires a non-empty prompt")
         let layerOrder = draft.targetLayerIds
@@ -70,9 +70,11 @@ enum DFlashGeneration {
         var staged = argmaxIds(lastLogits![0..., (lastLogits!.dim(1) - 1)..., 0...])[0]
 
         var out: [Int] = []
-        /// Append `t` unless it is EOS; return true to stop (EOS or cap).
+        /// Append `t` unless it is a stop token; return true to stop (any
+        /// stop token — matching the substrate's full EOS set, including
+        /// e.g. Gemma's <end_of_turn> — or the token cap).
         func emit(_ t: Int) -> Bool {
-            if t == eosTokenId { return true }
+            if stopTokens.contains(t) { return true }
             out.append(t)
             DecodeProgress.counter?.incrementToken()
             return out.count >= maxTokens
