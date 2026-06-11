@@ -425,8 +425,8 @@
     "semantic_hash": "d16404614855c59c2001089f41c5bd78"
   },
   "Sources/athena/Athena.swift": {
-    "mtime": 1781213592.5261233,
-    "ast_hash": "44e88eecc8960efc0c5c0e0896213859",
+    "mtime": 1781213794.7558658,
+    "ast_hash": "c64a9ce8fb3836b38391bca0a55a4898",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Audit.swift": {
@@ -1202,6 +1202,11 @@
   "deploy/gemma4-moe/gen_parity_fixture.py": {
     "mtime": 1781213394.4214635,
     "ast_hash": "33c213353e7191469ad992c4fff5e3ee",
+    "semantic_hash": ""
+  },
+  "Tests/AthenaCoreTests/Gemma4MoEE2ETests.swift": {
+    "mtime": 1781213750.1871378,
+    "ast_hash": "2ce609f3dc0059506fe9205a69c830fe",
     "semantic_hash": ""
   }
 }
