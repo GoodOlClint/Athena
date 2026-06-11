@@ -57,6 +57,7 @@ Athena is a passive oracle. Consumers (the consuming application, etc.) interact
 Read `docs/decisions/` before architectural changes — particularly anything that would touch the passive-oracle rule, the OpenAPI spec, or the Metal memory governor.
 
 - [`001-dflash-speculative-decoding.md`](docs/decisions/001-dflash-speculative-decoding.md) — DFlash lossless speculative decoding for non-MTP targets (Gemma4-first), default-off; vendored from bstnxbt/dflash-mlx (Apache-2.0). M63.
+- [`002-gemma4-moe-arch.md`](docs/decisions/002-gemma4-moe-arch.md) — Gemma4 MoE architecture support (26B-A4B; 128-expert), additive substrate delta reusing `SwitchGLU`, dense path byte-unchanged; unblocks ADR 001's M63.5 (DFlash on the MoE target). M64.
 
 ## Build / run / test
 

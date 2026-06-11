@@ -268,7 +268,9 @@ M63.1–M63.4 SHIPPED (v0.10.108–112): the **31B dense Gemma4 path is complete
 — lossless DFlash speculative decoding, default-off, dispatched through the
 request path, with stop-token parity, validated end-to-end (bit-identical to the
 block-forward greedy; matches single-token greedy except at the documented SDPA
-kernel ties). M63.5 (MoE) is blocked on substrate Gemma4 MoE support as above.
+kernel ties). M63.5 (MoE) is blocked on substrate Gemma4 MoE support as above —
+the unblocking workstream is **ADR 002 (M64)**, which adds the additive Gemma4 MoE
+port; M63.5 ships as M64.4.
 
 ### Deferred / tracked (NOT silent descopes)
 
