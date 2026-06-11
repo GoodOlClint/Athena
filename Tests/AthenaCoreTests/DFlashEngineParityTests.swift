@@ -206,6 +206,54 @@ final class DFlashEngineParityTests: XCTestCase {
         }
     }
 
+    /// M63.3b integration: DFlash engages through the full module dispatch
+    /// (config flag → ensureDFlashDraft HF pull → runSpeculative branch →
+    /// engine) and produces coherent output. Uses a symlink named like the
+    /// store entry so `DFlashRegistry` matches the resident model name.
+    func testDFlashEngagesThroughTheModule() async throws {
+        guard ProcessInfo.processInfo.environment["ATHENA_RUN_MODEL_TESTS"] == "1"
+        else { throw XCTSkip("set ATHENA_RUN_MODEL_TESTS=1 (heavy, ~20GB)") }
+        let env = ProcessInfo.processInfo.environment
+        let targetOpt =
+            env["ATHENA_TEST_GEMMA4_DIR"].map(URL.init(fileURLWithPath:))
+            ?? snapshot("models--mlx-community--gemma-4-31b-it-4bit")
+        guard let target = targetOpt,
+            snapshot("models--z-lab--gemma-4-31B-it-DFlash") != nil
+                || env["ATHENA_DFLASH_DRAFT_DIR"] != nil
+        else { throw XCTSkip("31B target and/or drafter not present") }
+
+        let tmp = FileManager.default.temporaryDirectory
+            .appending(path: "dflash-it-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        // The module keys the drafter registry on the dir's lastPathComponent.
+        let link = tmp.appending(path: "gemma-4-31b-it-4bit")
+        try FileManager.default.createSymbolicLink(
+            at: link, withDestinationURL: target.resolvingSymlinksInPath())
+
+        let llm = MLXLLMModule(
+            modelDirectory: link,
+            parameters: .init(maxTokens: 48, temperature: 0, speculative: true),
+            dflashEnabled: true)
+        let gov = MemoryGovernor(totalBudgetBytes: Int(96) << 30)
+        await gov.register(llm, evictable: false)
+        try await gov.ensureLoaded(.llm)
+
+        var out = ""
+        for await chunk in llm.generate(
+            prompt: "Name three primary colors, comma separated.")
+        {
+            out += chunk
+        }
+        let text = out.trimmingCharacters(in: .whitespacesAndNewlines)
+        XCTAssertFalse(text.isEmpty, "DFlash module path produced no output")
+        XCTAssertGreaterThan(
+            Set(text.replacingOccurrences(of: " ", with: "")).count, 2,
+            "degenerate output via DFlash dispatch: \(text)")
+        print("DFlash via module dispatch: \(text.prefix(80))")
+    }
+
     func testDFlashBitIdenticalToGreedy() async throws {
         guard ProcessInfo.processInfo.environment["ATHENA_RUN_MODEL_TESTS"] == "1"
         else { throw XCTSkip("set ATHENA_RUN_MODEL_TESTS=1 (heavy, ~20GB)") }

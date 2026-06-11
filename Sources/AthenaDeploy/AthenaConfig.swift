@@ -49,6 +49,13 @@ public struct AthenaConfig: Sendable, Equatable {
     /// Scope mode (M59.3): `principal` (default — never cross callers),
     /// `cache_key` (key by the OpenAI prompt_cache_key hint), or `both`.
     public var promptCacheScope: String?
+    /// `dflash_enabled` (M63) — DFlash lossless speculative decoding for
+    /// attention-only targets (Gemma4) that MTP can't accelerate. Default
+    /// false. When on, a request to a target with a registered drafter
+    /// (`DFlashRegistry`) decodes via the block draft/verify engine; the
+    /// drafter is operator-pulled from Hugging Face on first use. The
+    /// `ATHENA_DFLASH` env var (1/true/0/false) overrides this at startup.
+    public var dflashEnabled: Bool?
     /// Bearer-auth keys file. Optional — no keys + loopback = open;
     /// no keys + non-loopback = the daemon refuses to start.
     public var authKeysFile: String?
@@ -137,6 +144,7 @@ public struct AthenaConfig: Sendable, Equatable {
         promptCacheMaxBytes: Int? = nil,
         promptCacheIdleTtlSecs: Int? = nil,
         promptCacheScope: String? = nil,
+        dflashEnabled: Bool? = nil,
         authKeysFile: String? = nil,
         tlsCert: String? = nil, tlsKey: String? = nil,
         rateLimit: String? = nil, rateBurst: Int? = nil,
@@ -173,6 +181,7 @@ public struct AthenaConfig: Sendable, Equatable {
         self.promptCacheMaxBytes = promptCacheMaxBytes
         self.promptCacheIdleTtlSecs = promptCacheIdleTtlSecs
         self.promptCacheScope = promptCacheScope
+        self.dflashEnabled = dflashEnabled
         self.authKeysFile = authKeysFile
         self.tlsCert = tlsCert
         self.tlsKey = tlsKey
@@ -309,6 +318,9 @@ public struct AthenaConfig: Sendable, Equatable {
         if let pt = scalar("prompt_cache_idle_ttl_secs", in: toml) {
             pcIdleTtl = try int("prompt_cache_idle_ttl_secs", pt)
         }
+        let dflashEnabled = scalar("dflash_enabled", in: toml).map {
+            $0 == "true"
+        }
         let preload = scalar("preload", in: toml).map { $0 == "true" }
         let dropReq = scalar("drop_request_content", in: toml).map {
             $0 == "true"
@@ -336,6 +348,7 @@ public struct AthenaConfig: Sendable, Equatable {
             promptCacheMaxBytes: pcMaxBytes,
             promptCacheIdleTtlSecs: pcIdleTtl,
             promptCacheScope: scalar("prompt_cache_scope", in: toml),
+            dflashEnabled: dflashEnabled,
             authKeysFile: scalar("auth_keys_file", in: toml),
             tlsCert: scalar("tls_cert", in: toml),
             tlsKey: scalar("tls_key", in: toml),

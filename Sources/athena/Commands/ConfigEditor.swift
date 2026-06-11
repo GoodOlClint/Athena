@@ -21,6 +21,7 @@ enum ConfigEditor {
     static let rawKeys: Set<String> = [
         "temperature", "speculative", "rate_limit", "preload",
         "drop_request_content", "encrypt_store", "prompt_cache_enabled",
+        "dflash_enabled",
     ]
     static let knownKeys: Set<String> = [
         "listen_host", "listen_port", "budget_bytes", "engine",
@@ -37,7 +38,7 @@ enum ConfigEditor {
         "kv_compression",
         "prompt_cache_enabled", "prompt_cache_max_entries",
         "prompt_cache_max_bytes", "prompt_cache_idle_ttl_secs",
-        "prompt_cache_scope",
+        "prompt_cache_scope", "dflash_enabled",
     ]
 
     /// `--config` wins; else the installed file if present; else the
@@ -117,6 +118,8 @@ enum ConfigEditor {
         case "kv_compression": return cfg.kvCompression
         case "prompt_cache_enabled":
             return cfg.promptCacheEnabled.map { $0 ? "true" : "false" }
+        case "dflash_enabled":
+            return cfg.dflashEnabled.map { $0 ? "true" : "false" }
         case "prompt_cache_max_entries":
             return cfg.promptCacheMaxEntries.map(String.init)
         case "prompt_cache_max_bytes":

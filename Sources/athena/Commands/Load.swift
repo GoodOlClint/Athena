@@ -363,6 +363,15 @@ struct Load: AsyncParsableCommand {
         let prefixCacheEnabled =
             prefixEnvEnabled ?? tomlCfg?.promptCacheEnabled ?? false
 
+        // M63 — DFlash lossless speculative decoding, default OFF. Same
+        // precedence: env ATHENA_DFLASH (1/true/0/false) > TOML
+        // dflash_enabled > built-in false.
+        let dflashEnvEnabled = ProcessInfo.processInfo
+            .environment["ATHENA_DFLASH"]
+            .map { $0 == "1" || $0.lowercased() == "true" }
+        let dflashEnabled =
+            dflashEnvEnabled ?? tomlCfg?.dflashEnabled ?? false
+
         let config = GovernorConfig(
             totalBudgetBytes: budgetBytes,
             listenHost: host,
@@ -536,7 +545,8 @@ struct Load: AsyncParsableCommand {
                     speculative: speculative,
                     kvCompression: kvCompression),
                 promptCacheCapBytes: config.promptCacheCapBytes,
-                prefixCache: prefixCache)
+                prefixCache: prefixCache,
+                dflashEnabled: dflashEnabled)
         }
         let embedding: any EmbeddingModule
         switch engine {

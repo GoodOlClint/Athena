@@ -61,6 +61,16 @@ public struct LLMGenerationParameters: Sendable {
 /// Memory accounting in M1 is the on-disk safetensors footprint: an honest
 /// pre-load admission estimate for the governor. Live Metal-footprint
 /// reconciliation is deferred to M5 (OOM/cache hardening).
+/// `@unchecked Sendable` holder so the (non-Sendable, MLXArray-bearing)
+/// DFlash drafter can cross into the `container.perform` `@Sendable` closure
+/// — the same pattern the module uses for `StructuredVocabulary`. The actor
+/// owns the single instance; the closure only reads it under the actor's
+/// serialized model domain. M63.3b.
+final class DFlashDraftBox: @unchecked Sendable {
+    let model: DFlashDraftModel
+    init(_ model: DFlashDraftModel) { self.model = model }
+}
+
 public actor MLXLLMModule: LLMModule, ModelSelectable {
     public nonisolated let id: ModuleID = .llm
     public nonisolated var moduleID: ModuleID { .llm }
@@ -143,6 +153,18 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     /// Entries are keyed by resident model id (M59.1 scope).
     private let prefixCache: PrefixKVCache?
 
+    /// M63.3b — DFlash lossless speculative decoding (default off). When
+    /// enabled, an unguided greedy request to a target with a registered
+    /// drafter (`DFlashRegistry`) decodes through the block draft/verify
+    /// engine. The drafter is operator-pulled from Hugging Face on first
+    /// use and held here, boxed `@unchecked Sendable` so it crosses into the
+    /// `container.perform` closure; cleared on rebind. `dflashDraftBytes`
+    /// feeds `residentBytes` so the governor accounts for the loaded drafter.
+    private let dflashEnabled: Bool
+    private var dflashDraft: DFlashDraftBox?
+    private var dflashDraftFor: String?
+    private var dflashDraftBytes: Int = 0
+
     /// Single-model convenience init kept for source-compat with M27/M40
     /// call sites; forwards to the M41.2 list form with a 1-entry
     /// allowlist. The store root is inferred from the directory's
@@ -152,14 +174,16 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         modelDirectory: URL,
         parameters: LLMGenerationParameters = .init(),
         promptCacheCapBytes: Int = 0,
-        prefixCache: PrefixKVCache? = nil
+        prefixCache: PrefixKVCache? = nil,
+        dflashEnabled: Bool = false
     ) {
         self.init(
             modelDirectories: [modelDirectory],
             modelStoreRoot: modelDirectory.deletingLastPathComponent(),
             parameters: parameters,
             promptCacheCapBytes: promptCacheCapBytes,
-            prefixCache: prefixCache)
+            prefixCache: prefixCache,
+            dflashEnabled: dflashEnabled)
     }
 
     /// M41.2: operator-declared list (first = default). Empty ⇒
@@ -172,12 +196,14 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         modelStoreRoot: URL? = nil,
         parameters: LLMGenerationParameters = .init(),
         promptCacheCapBytes: Int = 0,
-        prefixCache: PrefixKVCache? = nil
+        prefixCache: PrefixKVCache? = nil,
+        dflashEnabled: Bool = false
     ) {
         precondition(
             !urls.isEmpty,
             "MLXLLMModule needs at least one model directory")
         self.prefixCache = prefixCache
+        self.dflashEnabled = dflashEnabled
         self.modelDirectories = urls.map {
             (name: $0.lastPathComponent, url: $0)
         }
@@ -245,7 +271,9 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         return mapped.isEmpty ? [.user("")] : mapped
     }
 
-    public var residentBytes: Int { container == nil ? 0 : estimatedBytes }
+    public var residentBytes: Int {
+        container == nil ? 0 : estimatedBytes + dflashDraftBytes
+    }
 
     public func memoryEstimate() -> Int { estimatedBytes }
 
@@ -328,8 +356,56 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         // tokens belong to the previous tokenizer.
         cachedVocabTokens = nil
         cachedStructuredVocabulary = nil  // M53 — mirror vocabTokens lifecycle
+        // M63.3b — the drafter is target-specific; drop it on rebind so the
+        // next DFlash request reloads the one registered for the new model.
+        dflashDraft = nil
+        dflashDraftFor = nil
+        dflashDraftBytes = 0
         container = loaded
         residentName = name
+    }
+
+    /// M63.3b — ensure the DFlash drafter registered for the resident model
+    /// is loaded, returning it boxed for the `perform` closure. Returns nil
+    /// when DFlash is off, no model is resident, or no drafter is registered
+    /// for it — in which case the request decodes normally. The drafter is
+    /// fetched from Hugging Face on first use (the passive-oracle weight-fetch
+    /// carve-out) and cached until rebind.
+    private func ensureDFlashDraft() async throws -> DFlashDraftBox? {
+        guard dflashEnabled, let name = residentName,
+            let draftId = DFlashRegistry.draftId(forModel: name)
+        else { return nil }
+        if let box = dflashDraft, dflashDraftFor == name { return box }
+        let dir = try await #hubDownloader(
+            HuggingFace.HubClient(session: AthenaProxy.proxiedURLSession())
+        ).download(
+            id: draftId, revision: nil,
+            matching: ["*.json", "*.safetensors"],
+            useLatest: false, progressHandler: { _ in })
+        let model = try DFlashDraftLoader.load(directory: dir)
+        let box = DFlashDraftBox(model)
+        dflashDraft = box
+        dflashDraftFor = name
+        dflashDraftBytes = Self.directoryWeightBytes(dir)
+        Self.log.notice(
+            "DFlash drafter loaded id=\(draftId) for=\(name) bytes=\(dflashDraftBytes)",
+            metadata: ["function": "ensureDFlashDraft"])
+        return box
+    }
+
+    /// Sum of the `*.safetensors` file sizes in a checkpoint dir — the
+    /// drafter's resident-byte estimate for the governor.
+    private static func directoryWeightBytes(_ dir: URL) -> Int {
+        guard
+            let items = try? FileManager.default.contentsOfDirectory(
+                at: dir, includingPropertiesForKeys: [.fileSizeKey])
+        else { return 0 }
+        return items
+            .filter { $0.pathExtension == "safetensors" }
+            .reduce(0) {
+                $0 + ((try? $1.resourceValues(forKeys: [.fileSizeKey]))?
+                    .fileSize ?? 0)
+            }
     }
 
     // M41 — ModelSelectable. M41.2 generalizes to a repeatable
@@ -716,6 +792,16 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                 model: residentName ?? defaultName,
                 principal: principal, cacheKey: promptCacheKey)
         }
+        // M63.3b — for an unguided greedy request, load the DFlash drafter
+        // registered for the resident model (lazy HF pull on first use).
+        // Non-nil only when DFlash is enabled AND a drafter exists for this
+        // model AND the request is speculative-greedy + unstructured; the
+        // dispatch branch below then routes a Gemma4 target through the
+        // DFlash engine. nil ⇒ unchanged behavior.
+        let dflashBox: DFlashDraftBox? =
+            (dflashEnabled && schemaJSON == nil && greedyEligible)
+            ? try await ensureDFlashDraft() : nil
+
         // The closure returns the decoded text, the completion token count
         // (`ids.count`), and the cached-prefix token count (M59.3); the
         // prompt count is `promptTokens.count` from the outer scope. nil ⇒
@@ -787,6 +873,19 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                 return (
                     ctx.tokenizer.decode(tokenIds: ids), ids.count,
                     cachedTokens)
+            }
+
+            // M63.3b — DFlash lossless speculative decoding for an
+            // attention-only target (Gemma4) with a loaded drafter. Engages
+            // for the unguided greedy path only (`dflashBox` is nil
+            // otherwise); structured output stays on the substrate path
+            // until M63.4. Output is the target's block-forward greedy.
+            if let dflashBox, let target = ctx.model as? DFlashGemma4Backbone {
+                let ids = DFlashGeneration.generate(
+                    target: target, draft: dflashBox.model,
+                    promptTokens: promptTokens, maxTokens: maxTokens,
+                    eosTokenId: ctx.tokenizer.eosTokenId)
+                return (ctx.tokenizer.decode(tokenIds: ids), ids.count, 0)
             }
 
             // Any other architecture: schema-guided decoding on the

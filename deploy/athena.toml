@@ -66,6 +66,17 @@ engine = "mlx"
 # non-speculative sampling at the same temp/top_p/seed). Bare boolean.
 # speculative = false
 
+# DFlash lossless speculative decoding (M63, default false) — for the
+# attention-only targets MTP can't accelerate. When on, an unguided greedy
+# request (with `speculative` set) to a target that has a registered drafter
+# (currently gemma-4-31b-it / gemma-4-26b-a4b-it) decodes via a block
+# draft/verify engine; the small drafter is pulled from Hugging Face on
+# first use. Lossless = every emitted token is the target's argmax under the
+# verify forward (matches single-token greedy except at rare SDPA-kernel
+# near-ties — see docs/decisions/001). The ATHENA_DFLASH env var
+# (1/true/0/false) overrides this. Bare boolean.
+# dflash_enabled = false
+
 # KV-cache compression (default "none"): "none", "turboquant"
 # (TurboQuant quantized KV cache — applies to ANY architecture), or
 # "triattention" (norm-only TriAttention token eviction — caps the cache
