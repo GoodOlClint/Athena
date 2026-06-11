@@ -1,0 +1,31 @@
+DFlash draft model — attribution
+================================
+
+The Swift sources in this directory (Sources/AthenaModels/DFlash/) are a
+port of the DFlash speculative-draft model and Gemma4 target adapter from:
+
+    bstnxbt/dflash-mlx
+    https://github.com/bstnxbt/dflash-mlx
+    Copyright 2026 bstnxbt
+    Licensed under the Apache License, Version 2.0
+
+    Based on DFlash (paper: arXiv:2602.06036).
+
+A copy of the Apache License, Version 2.0 is available at:
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Portions of the architecture (DFlashDraftModel, DFlashAttention, the
+target hidden-state projection, and the Gemma4 target adapter) are
+derived from that project's `dflash_mlx/model.py` and
+`dflash_mlx/engine/target_gemma4.py`. The MLX-Swift implementation here is
+an independent re-expression of that technique; no source files were
+copied verbatim.
+
+Drafter weights are NOT distributed with Athena. The operator fetches them
+from Hugging Face (the z-lab org, e.g. z-lab/gemma-4-31B-it-DFlash) at
+runtime, exactly like any other model weight. Those weights are tagged
+Apache-2.0 and, as Gemma derivatives, are additionally governed by
+Google's Gemma Terms of Use — the same terms that govern the Gemma target
+models Athena already serves.
+
+See docs/decisions/001-dflash-speculative-decoding.md.

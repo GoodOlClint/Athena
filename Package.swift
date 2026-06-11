@@ -132,7 +132,8 @@ let package = Package(
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXNN", package: "mlx-swift"),
             ],
-            path: "Sources/AthenaModels"),
+            path: "Sources/AthenaModels",
+            exclude: ["DFlash/NOTICE"]),
 
         // Inference modules. M0 ships governed stubs that conform to the
         // module protocol and reserve/release real budget; the MLX-backed
@@ -297,6 +298,7 @@ let package = Package(
                 "AthenaStore",
             ],
             path: "Tests/AthenaCoreTests",
+            exclude: ["Fixtures"],
             linkerSettings: [
                 .unsafeFlags([
                     "-L\(Context.packageDirectory)/rust-shim/target/release"
