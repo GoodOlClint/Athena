@@ -250,11 +250,34 @@ after code changes; error envelope unchanged; passive-oracle preserved)
   target-only auto-fallback safety valve); reuse the `speculative` flag (runtime
   picks engine); update `OpenAPISpec.swift` + drift-guard; surface draft
   attachment; usage/`cached_tokens` parity. Error envelope unchanged.
-- **M63.5 — 26B-A4B MoE pair (follow-on).** Extend the Gemma4 target adapter to
-  MoE routing; pull/validate the 26B-A4B target+drafter; same parity +
-  bit-identical gates.
+- **M63.5 — 26B-A4B MoE pair (follow-on). BLOCKED — out of DFlash scope.**
+  `mlx-community/gemma-4-26b-a4b-it-4bit` is a 128-expert MoE
+  (`num_experts=128`, 30 layers), and the substrate `Gemma4Text.swift` has **no
+  expert-routing support** (only the dense `Gemma4MLP` + PLE gating) — the MoE
+  target cannot load at all. Unblocking M63.5 requires a substrate Gemma4 MoE
+  port, a Gemma4-architecture workstream independent of DFlash. All the
+  DFlash-side plumbing is already in place: the `DFlashRegistry` pair (M63.3b),
+  the capture seam (arch-general — `callReturningHidden` works on any
+  `Gemma4TextModel`; MoE only changes the MLP), and the dispatch. When substrate
+  MoE support lands, M63.5 is just: pull the pair + run the existing
+  parity/bit-identical gates.
+
+### Status (2026-06-11)
+
+M63.1–M63.4 SHIPPED (v0.10.108–112): the **31B dense Gemma4 path is complete**
+— lossless DFlash speculative decoding, default-off, dispatched through the
+request path, with stop-token parity, validated end-to-end (bit-identical to the
+block-forward greedy; matches single-token greedy except at the documented SDPA
+kernel ties). M63.5 (MoE) is blocked on substrate Gemma4 MoE support as above.
 
 ### Deferred / tracked (NOT silent descopes)
+
+- **DFlash-accelerated structured output** (M63.4 deferral) — Guide-masked block
+  draft/verify (the M47 generalization over a block) + target-only auto-fallback.
+  Structured requests stay correct on the substrate guided path; DFlash does not
+  yet accelerate constrained decoding. The verify side needs sequential
+  pick+commit over the block with the Guide advancing per committed token; the
+  draft side needs a Guide peek-advance/rollback shape the current Guide lacks.
 
 - `mx.fast.dflash_cross_attention` + verify Metal kernels — pure-`mx` fallback
   ships first; kernels are a perf follow-up (M20 #909 / M2 "Release tuning"
