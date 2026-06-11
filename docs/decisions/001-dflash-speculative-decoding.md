@@ -250,17 +250,18 @@ after code changes; error envelope unchanged; passive-oracle preserved)
   target-only auto-fallback safety valve); reuse the `speculative` flag (runtime
   picks engine); update `OpenAPISpec.swift` + drift-guard; surface draft
   attachment; usage/`cached_tokens` parity. Error envelope unchanged.
-- **M63.5 — 26B-A4B MoE pair (follow-on). BLOCKED — out of DFlash scope.**
+- **M63.5 — 26B-A4B MoE pair (follow-on). SHIPPED as M64.4 (v0.10.116).**
   `mlx-community/gemma-4-26b-a4b-it-4bit` is a 128-expert MoE
-  (`num_experts=128`, 30 layers), and the substrate `Gemma4Text.swift` has **no
-  expert-routing support** (only the dense `Gemma4MLP` + PLE gating) — the MoE
-  target cannot load at all. Unblocking M63.5 requires a substrate Gemma4 MoE
-  port, a Gemma4-architecture workstream independent of DFlash. All the
-  DFlash-side plumbing is already in place: the `DFlashRegistry` pair (M63.3b),
-  the capture seam (arch-general — `callReturningHidden` works on any
-  `Gemma4TextModel`; MoE only changes the MLP), and the dispatch. When substrate
-  MoE support lands, M63.5 is just: pull the pair + run the existing
-  parity/bit-identical gates.
+  (`num_experts=128`, 30 layers); the substrate `Gemma4Text.swift` originally had
+  no expert-routing support, so the MoE target could not load. **ADR 002 (M64)**
+  added the additive substrate Gemma4 MoE block; with it, M63.5 was exactly what
+  this entry predicted — pull the pair + run the existing gates, no new
+  DFlash-side code. The `testDFlashBitIdenticalToGreedy` gate passed on the 26B
+  pair: acceptance 0.64 (41/64), DFlash output bit-identical to single-token
+  greedy 64/64 (the capture seam and `DFlashGemma4Backbone` dispatch are
+  arch-general — the MoE only changes the layer's FF body, not the captured
+  post-layer hidden). DFlash now covers both the 31B dense and 26B-A4B MoE
+  Gemma4 targets.
 
 ### Status (2026-06-11)
 
@@ -268,9 +269,10 @@ M63.1–M63.4 SHIPPED (v0.10.108–112): the **31B dense Gemma4 path is complete
 — lossless DFlash speculative decoding, default-off, dispatched through the
 request path, with stop-token parity, validated end-to-end (bit-identical to the
 block-forward greedy; matches single-token greedy except at the documented SDPA
-kernel ties). M63.5 (MoE) is blocked on substrate Gemma4 MoE support as above —
-the unblocking workstream is **ADR 002 (M64)**, which adds the additive Gemma4 MoE
-port; M63.5 ships as M64.4.
+kernel ties). M63.5 (MoE) **SHIPPED as M64.4 (v0.10.116)** once **ADR 002 (M64)**
+added the additive substrate Gemma4 MoE block: DFlash now runs losslessly on the
+26B-A4B MoE target (bit-identical 64/64, acceptance 0.64) with no DFlash-side
+code change. The full DFlash program (31B dense + 26B MoE) is complete.
 
 ### Deferred / tracked (NOT silent descopes)
 

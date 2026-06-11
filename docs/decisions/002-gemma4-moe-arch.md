@@ -1,6 +1,6 @@
 # 002 — Gemma4 MoE architecture support (26B-A4B; unblocks DFlash M63.5)
 
-**Status:** Accepted (pending approval — not yet ratified; no code written)
+**Status:** Accepted — Implemented (M64.1–M64.4 shipped v0.10.113–116)
 **Date:** 2026-06-11
 **Milestone:** M64
 
@@ -170,6 +170,24 @@ gated on `enableMoeBlock`**). Current `appVersion` = 0.10.112.
   `DFlashEngineParityTests.testDFlashBitIdenticalToGreedy` + acceptance-observer
   gates on the MoE target; OpenAPI/doc note; flip ADR 001's M63.5 entry to
   shipped. Athena bump/tag.
+
+## Status (2026-06-11) — Implemented
+
+All four slices shipped (v0.10.113–116); the substrate Gemma4 MoE delta lives at
+`../mlx-swift-lm @ ce29d00` (additive, dense path byte-unchanged). Gates passed:
+M64.1 dense bit-identical A/B on `gemma-4-12B-it-8bit`; M64.2 Python-parity on
+`gemma-4-26b-a4b-it-4bit` (next-token argmax matches, cosine 0.99967, all
+mismatches verified bf16 near-ties, dense 31B as the methodology control); M64.3
+model-on coherence ("Paris") + schema-guided JSON through the Athena path;
+M64.4 DFlash on the 26B-A4B pair (lossless, bit-identical 64/64, acceptance
+0.64). Both named spike risks held: mixed per-tensor quant loaded with no port
+code, and the substrate divergence stayed bounded to the MoE block. ADR 001's
+M63.5 is unblocked and shipped.
+
+**Methodology note (carry forward):** Python-vs-Swift logit parity must use an
+in-distribution (chat-templated) prompt. Synthetic OOD token ids sit on near-ties
+everywhere and disagree even between two correct ports — the gate falsely failed
+on the *validated* dense 31B until the prompt was made real.
 
 ## References
 

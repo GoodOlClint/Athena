@@ -425,8 +425,8 @@
     "semantic_hash": "d16404614855c59c2001089f41c5bd78"
   },
   "Sources/athena/Athena.swift": {
-    "mtime": 1781213794.7558658,
-    "ast_hash": "c64a9ce8fb3836b38391bca0a55a4898",
+    "mtime": 1781214015.9352667,
+    "ast_hash": "333155d5864961507108ed7e7d90e674",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Audit.swift": {
@@ -1155,8 +1155,8 @@
     "semantic_hash": ""
   },
   "docs/decisions/001-dflash-speculative-decoding.md": {
-    "mtime": 1781211034.9744637,
-    "ast_hash": "f944ca465d276b40d8f0e0e624ef35a1",
+    "mtime": 1781213981.8912313,
+    "ast_hash": "f86f486ca30d6601f6ffef319f71929b",
     "semantic_hash": ""
   },
   "Sources/AthenaModels/DFlash/DFlashGemma4Target.swift": {
@@ -1190,8 +1190,8 @@
     "semantic_hash": ""
   },
   "docs/decisions/002-gemma4-moe-arch.md": {
-    "mtime": 1781211001.829868,
-    "ast_hash": "b0fc5a6bd759f392f9818a937bdebe15",
+    "mtime": 1781214006.088306,
+    "ast_hash": "bc92d9c816a6d8b03ea5cc170b5f95d5",
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/Gemma4MoEParityTests.swift": {
