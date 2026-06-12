@@ -2895,6 +2895,55 @@ stop_daemon
 rm -rf "$D6"; D6=""
 
 echo
+echo "== phase 25.2b: vector owner-scoping cross-tenant (H5/ADR 006) =="
+# Two operator tenants (vectors.read+write, non-admin) + an admin, auth
+# enabled. Each tenant's vectors are private; an admin sees across owners.
+DV="$(mktemp -d)"
+ATHENA_PASSWORD=opapass123 "$ATHENA" auth user add opa --role operator \
+  --data-dir "$DV" >/dev/null 2>&1
+ATHENA_PASSWORD=opbpass123 "$ATHENA" auth user add opb --role operator \
+  --data-dir "$DV" >/dev/null 2>&1
+ATHENA_PASSWORD=admpass123 "$ATHENA" auth user add vadm --role admin \
+  --data-dir "$DV" >/dev/null 2>&1
+vtok() { "$ATHENA" auth token add --user "$1" --data-dir "$DV" 2>/dev/null \
+  | grep -o 'sk-athena-[A-Za-z0-9_-]*' | head -1; }
+TOKA="$(vtok opa)"; TOKB="$(vtok opb)"; TOKADM="$(vtok vadm)"
+start_daemon "$DV" 127.0.0.1 \
+  || { echo "vector-owner daemon failed"; cat "$DV/daemon.log"; exit 1; }
+BV="http://127.0.0.1:$PORT"
+vpost() { curl -s -o /dev/null -w '%{http_code}' -X POST "$BV/v1/vectors" \
+  -H "Authorization: Bearer $1" -H 'Content-Type: application/json' \
+  -d "$2"; }
+[ "$(vpost "$TOKA" '{"id":"oa","vector":[1,0,0]}')" = 200 ] \
+  && ok "opa upserts its vector" || bad "opa upsert failed"
+[ "$(vpost "$TOKB" '{"id":"ob","vector":[0,1,0]}')" = 200 ] \
+  && ok "opb upserts its vector" || bad "opb upsert failed"
+# Query isolation: opa's search sees only opa's vector, never opb's.
+QA="$(curl -s -X POST "$BV/v1/vectors/query" \
+  -H "Authorization: Bearer $TOKA" -H 'Content-Type: application/json' \
+  -d '{"vector":[1,0,0],"k":10}')"
+echo "$QA" | grep -q '"id":"oa"' && ! echo "$QA" | grep -q '"id":"ob"' \
+  && ok "opa query returns only its own vectors" \
+  || bad "opa query leaked cross-tenant ($QA)"
+# Stats are owner-scoped; admin sees across owners.
+SA="$(curl -s "$BV/v1/vectors/stats" -H "Authorization: Bearer $TOKA")"
+echo "$SA" | grep -q '"count":1' \
+  && ok "opa stats count=1 (own only)" || bad "opa stats not scoped ($SA)"
+SADM="$(curl -s "$BV/v1/vectors/stats" -H "Authorization: Bearer $TOKADM")"
+echo "$SADM" | grep -q '"count":2' \
+  && ok "admin stats count=2 (all owners)" || bad "admin stats ($SADM)"
+# opb cannot delete or overwrite opa's vector.
+code 404 DELETE /v1/vectors/oa "$TOKB"          # cross-tenant delete hidden
+[ "$(vpost "$TOKB" '{"id":"oa","vector":[9,9,9]}')" = 409 ] \
+  && ok "cross-tenant overwrite → 409 owner_conflict" \
+  || bad "cross-tenant overwrite not blocked"
+# opa still owns the original; admin can delete it.
+code 200 DELETE /v1/vectors/oa "$TOKADM"
+code 404 DELETE /v1/vectors/oa "$TOKA"          # already gone
+stop_daemon
+rm -rf "$DV"; DV=""
+
+echo
 echo "== phase 25.3: content opt-out — drop prompt on completion (M34.2) =="
 # With --drop-request-content the queue wipes a job's request (prompt)
 # blob the moment it finishes; the result the client polls for stays.

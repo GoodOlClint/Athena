@@ -64,6 +64,115 @@ final class VectorStoreTests: XCTestCase {
         XCTAssertNil(goneB)
     }
 
+    /// H5 (M66.6 / ADR 006) — owner-scoping at the cache/stats/delete
+    /// layer. CI-safe: exercises everything EXCEPT `query` (MLX), so no
+    /// Metal needed; the gated `testQueryOwnerScopedGated` covers query.
+    func testOwnerScopingCI() async throws {
+        let (s, url) = try freshStore()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let vs = VectorStore(store: s, capBytes: 1 << 20)
+        let alice = VectorStore.Caller(
+            principal: "u:alice", isAdmin: false, enforced: true)
+        let bob = VectorStore.Caller(
+            principal: "u:bob", isAdmin: false, enforced: true)
+        let admin = VectorStore.Caller(
+            principal: "u:admin", isAdmin: true, enforced: true)
+
+        try await vs.upsert(
+            id: "av", vector: [1, 0, 0], metadata: nil, caller: alice)
+        try await vs.upsert(
+            id: "bv", vector: [0, 1, 0], metadata: nil, caller: bob)
+
+        // Each tenant's stats show only their own vector; admin sees both.
+        let aStats = await vs.stats(caller: alice)
+        XCTAssertEqual(aStats.count, 1)
+        let bStats = await vs.stats(caller: bob)
+        XCTAssertEqual(bStats.count, 1)
+        let adminStats = await vs.stats(caller: admin)
+        XCTAssertEqual(adminStats.count, 2)
+
+        // Bob cannot delete Alice's vector (false ⇒ 404 at the server),
+        // and it survives.
+        let crossDel = await vs.delete(id: "av", caller: bob)
+        XCTAssertFalse(crossDel)
+        let survived = await s.getVector(id: "av")
+        XCTAssertNotNil(survived)
+
+        // Bob cannot overwrite Alice's id either.
+        do {
+            try await vs.upsert(
+                id: "av", vector: [9, 9, 9], metadata: nil, caller: bob)
+            XCTFail("expected ownerConflict")
+        } catch let e as VectorStore.VectorError {
+            guard case .ownerConflict = e else {
+                return XCTFail("wrong error \(e)")
+            }
+        }
+        // Alice's vector is unchanged after the rejected overwrite.
+        let unchanged = await s.getVector(id: "av")?.vector
+        XCTAssertEqual(unchanged, [1, 0, 0])
+
+        // Alice deletes her own; admin deletes Bob's.
+        let aDel = await vs.delete(id: "av", caller: alice)
+        XCTAssertTrue(aDel)
+        let bDel = await vs.delete(id: "bv", caller: admin)
+        XCTAssertTrue(bDel)
+        let endStats = await vs.stats(caller: admin)
+        XCTAssertEqual(endStats.count, 0)
+    }
+
+    /// H5 — a legacy NULL-owner row (written pre-migration / auth-off) is
+    /// admin-only: invisible to a scoped tenant, visible to admin.
+    func testLegacyNullOwnerIsAdminOnlyCI() async throws {
+        let (s, url) = try freshStore()
+        defer { try? FileManager.default.removeItem(at: url) }
+        // Write directly with NULL owner (the pre-migration shape).
+        try await s.putVector(id: "legacy", vector: [1, 0], metadata: nil)
+        let vs = VectorStore(store: s, capBytes: 1 << 20)
+        let tenant = VectorStore.Caller(
+            principal: "u:t", isAdmin: false, enforced: true)
+        let admin = VectorStore.Caller(
+            principal: "u:a", isAdmin: true, enforced: true)
+        let tStats = await vs.stats(caller: tenant)
+        XCTAssertEqual(tStats.count, 0)
+        let adminStats = await vs.stats(caller: admin)
+        XCTAssertEqual(adminStats.count, 1)
+        // A scoped tenant can't delete it; admin can.
+        let tDel = await vs.delete(id: "legacy", caller: tenant)
+        XCTAssertFalse(tDel)
+        let aDel = await vs.delete(id: "legacy", caller: admin)
+        XCTAssertTrue(aDel)
+    }
+
+    /// H5 — `query` returns only the caller's visible vectors. Gated (MLX).
+    func testQueryOwnerScopedGated() async throws {
+        guard
+            ProcessInfo.processInfo.environment["ATHENA_RUN_MODEL_TESTS"]
+                == "1"
+        else { throw XCTSkip("set ATHENA_RUN_MODEL_TESTS=1 (MLX/Metal)") }
+        let (s, url) = try freshStore()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let vs = VectorStore(store: s, capBytes: 1 << 20)
+        let alice = VectorStore.Caller(
+            principal: "u:alice", isAdmin: false, enforced: true)
+        let bob = VectorStore.Caller(
+            principal: "u:bob", isAdmin: false, enforced: true)
+        try await vs.upsert(
+            id: "av", vector: [1, 0, 0], metadata: nil, caller: alice)
+        try await vs.upsert(
+            id: "bv", vector: [1, 0, 0], metadata: nil, caller: bob)
+        // Bob's query never returns Alice's identical-vector row.
+        let bobHits = await vs.query(
+            vector: [1, 0, 0], k: 10, caller: bob)
+        XCTAssertEqual(bobHits.map(\.id), ["bv"])
+        // Admin sees both.
+        let adminHits = await vs.query(
+            vector: [1, 0, 0], k: 10,
+            caller: VectorStore.Caller(
+                principal: "u:a", isAdmin: true, enforced: true))
+        XCTAssertEqual(Set(adminHits.map(\.id)), ["av", "bv"])
+    }
+
     func testCosineRankingGated() async throws {
         guard
             ProcessInfo.processInfo.environment["ATHENA_RUN_MODEL_TESTS"]

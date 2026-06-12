@@ -238,7 +238,7 @@ enum OpenAPISpec {
               "post": {
                 "tags": ["Vectors"],
                 "summary": "Upsert a vector.",
-                "description": "Provide `vector` directly, or `text` to embed server-side. Requires `vectors.write`.",
+                "description": "Provide `vector` directly, or `text` to embed server-side. Requires `vectors.write`. Owner-scoped: the vector is stored under the authenticated principal; upserting an id another principal owns returns 409. Auth-off loopback shares one space.",
                 "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VectorUpsertRequest" } } } },
                 "responses": {
                   "200": { "description": "Upserted.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VectorIdResponse" } } } },
@@ -252,7 +252,7 @@ enum OpenAPISpec {
               "delete": {
                 "tags": ["Vectors"],
                 "summary": "Delete a vector by id.",
-                "description": "Requires `vectors.write`.",
+                "description": "Requires `vectors.write`. Owner-scoped: deletes only the caller's own vector (an admin deletes across owners); another principal's id returns 404.",
                 "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } } ],
                 "responses": {
                   "200": { "description": "Delete result.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VectorIdResponse" } } } },
@@ -265,7 +265,7 @@ enum OpenAPISpec {
               "post": {
                 "tags": ["Vectors"],
                 "summary": "Nearest-neighbour query.",
-                "description": "Provide `vector` or `text`; `k` results (default server-side). Requires `vectors.read`.",
+                "description": "Provide `vector` or `text`; `k` results (default server-side). Requires `vectors.read`. Owner-scoped: searches only the caller's own vectors (an admin searches across owners).",
                 "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VectorQueryRequest" } } } },
                 "responses": {
                   "200": { "description": "Matches.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VectorQueryResponse" } } } },
@@ -279,7 +279,7 @@ enum OpenAPISpec {
               "get": {
                 "tags": ["Vectors"],
                 "summary": "Vector DB statistics.",
-                "description": "Requires `vectors.read`.",
+                "description": "Requires `vectors.read`. Owner-scoped: counts/bytes reflect the caller's own vectors (an admin sees all); `cap_bytes` is the shared global cap.",
                 "responses": {
                   "200": { "description": "Stats.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VectorStatsResponse" } } } },
                   "401": { "$ref": "#/components/responses/Unauthorized" },

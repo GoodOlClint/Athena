@@ -127,7 +127,10 @@ Local data loss, lockouts, and the config parser silently lying.
 - [x] B2 hard-removed `--password` from `auth user add`, `auth user passwd`, `proxy login` (macOS) + the portable `auth user add` (client). Secrets resolve via a shared `PasswordInput.resolve` (macOS) / `RemoteAuth.resolvePassword(stdin:)` (client): `--password-stdin` (one line) > `$ATHENA_PASSWORD` > interactive no-echo prompt (confirmed for new). e2e migrated to `ATHENA_PASSWORD`; new B2 assert that `--password` is rejected. ADR 005 → Implemented (v0.10.127)
 - K7 (`Credentials` Keychain `security -w <value>` argv leak) + K13 (`--key` in argv) — the remaining argv-secret items; audited here, **deferred to M71** (need a Keychain-API / `--key`-steering change beyond the `--password` removal).
 
-**M66 complete (M66.1–.5).**
+### M66.6 — Vector-store owner-scoping (ADR 006 / audit H5) ✅ v0.10.128
+- [x] H5 nullable `owner` column on vectors (additive migration + `vectors_owner` index); upsert stamps the authenticated principal; `query`/`stats`/`delete` owner-filter at the `VectorStore` cache AND the SQLite layer (defense-in-depth); admin/auth-off see across owners; legacy NULL-owner rows are admin-only; a cross-owner upsert is rejected 409 (`vector_owner_conflict`), a cross-owner delete is 404. New `VectorStore.Caller`. ADR 006 → Implemented. Tests: `testVectorOwnerColumnH5` (store) + `testOwnerScopingCI`/`testLegacyNullOwnerIsAdminOnlyCI` (CI) + `testQueryOwnerScopedGated` (MLX-gated); e2e phase 25.2b cross-tenant (query/stats/delete/overwrite on the real binary). OpenAPI vectors descriptions updated (v0.10.128)
+
+**M66 complete (M66.1–.6).**
 
 Re-verify while here: B6*, B7*, B8*, B10–B13, B15*, B18–B23, H6*, H14*, J5, K3, K6.
 
@@ -293,7 +296,7 @@ Implementation lands in the milestones below.
 |---|---|---|---|
 | 1 | Non-loopback auth-on TLS posture + login-IP source | A2, K1, K8, A12, A3 | **Warn-only** — loud startup warning + doctor finding, no `--insecure` gate, client https deferred; A3 keys on TCP **peer IP** (no XFF trust), now unblocked. [ADR 004] |
 | 2 | Secrets-in-argv | B2, K7, K13 | **Hard-remove `--password`** — prompt / `--password-stdin` / env only (breaking). [ADR 005] |
-| 3 | Vector-store `owner` column | H5 | **Add owner-scoping** — nullable `owner`, owner-filtered query/get/delete, admin sees all, legacy NULL = admin-only (additive migration). [ADR 006] |
+| 3 | Vector-store `owner` column | H5 | **Add owner-scoping** — nullable `owner`, owner-filtered query/get/delete, admin sees all, legacy NULL = admin-only (additive migration). [ADR 006] — **DONE M66.6 v0.10.128** |
 | 4 | rust-shim panic strategy | G1 | **Per-entry `catch_unwind`**, crate stays `panic="unwind"` — DONE M65.1 v0.10.117. [ADR 003] |
 | 5 | `/api` metering + token-budget quotas | NA8, backlog #8/#9 | **Bring #8/#9 into the program** as a new milestone; NA8 single-resolution folds in. [ADR 007] |
 

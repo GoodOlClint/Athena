@@ -1,8 +1,16 @@
 # 006 — Vector-store owner-scoping
 
-**Status:** Accepted — Not yet implemented
+**Status:** Implemented
 **Date:** 2026-06-12
 **Milestone:** M66 (audit-remediation; resolves standing DECISION #3; audit H5)
+
+**Implemented:** M66.6 (v0.10.128). Additive `owner TEXT` column + `vectors_owner`
+index; `putVector`/`getVector`/`deleteVector`/`allVectors` gained the owner; the
+`VectorStore` actor carries a `Caller` and owner-filters `query`/`stats`/`delete`
+(cache) with the SQLite layer enforcing too (defense-in-depth). Upsert stamps the
+principal; a cross-owner upsert is 409, a cross-owner delete is 404; legacy
+NULL-owner rows are admin-only; auth-off shares one space. OpenAPI vectors
+descriptions document it.
 
 ## Context
 

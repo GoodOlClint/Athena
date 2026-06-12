@@ -450,15 +450,17 @@ struct AthenaServer {
         router.post("/v1/vectors/query") { request, _ -> Response in
             await handleVectorQuery(request)
         }
-        router.get("/v1/vectors/stats") { _, _ -> Response in
-            let st = await vectorStore.stats()
+        router.get("/v1/vectors/stats") { request, _ -> Response in
+            let st = await vectorStore.stats(
+                caller: await vectorCaller(request))
             return Self.json(
                 VectorStatsResponse(
                     count: st.count, dim: st.dim, bytes: st.bytes,
                     cap_bytes: st.capBytes))
         }
-        router.delete("/v1/vectors/:id") { _, context -> Response in
-            await handleVectorDelete(context.parameters.get("id"))
+        router.delete("/v1/vectors/:id") { request, context -> Response in
+            await handleVectorDelete(
+                context.parameters.get("id"), request)
         }
 
         // Shared SQLite store admin (M9.3). Export = a live, consistent
@@ -2015,9 +2017,28 @@ struct AthenaServer {
                     status: .badRequest, message: e.description,
                     type: "invalid_request_error",
                     code: "dimension_mismatch")
+            case .ownerConflict:
+                // H5: another principal owns this id. Don't reveal more
+                // than "you can't write here".
+                return Self.error(
+                    status: .conflict,
+                    message: "vector id is owned by another principal",
+                    type: "invalid_request_error",
+                    code: "vector_owner_conflict")
             }
         }
         return Self.classified(error, module: .textEmbedding)
+    }
+
+    /// H5 (M66.6): the owner-scope for a `/v1/vectors` op, from the same
+    /// per-principal resolution the queue uses (admin/auth-off see all).
+    private func vectorCaller(_ request: Request) async
+        -> VectorStore.Caller
+    {
+        let who = await queuePrincipal(request)
+        return VectorStore.Caller(
+            principal: who.principal, isAdmin: who.isAdmin,
+            enforced: who.enforced)
     }
 
     private func handleVectorUpsert(_ request: Request) async
@@ -2037,7 +2058,8 @@ struct AthenaServer {
         let meta = body.metadata.flatMap { try? JSONEncoder().encode($0) }
         do {
             try await vectorStore.upsert(
-                id: body.id, vector: vec, metadata: meta)
+                id: body.id, vector: vec, metadata: meta,
+                caller: await vectorCaller(request))
         } catch {
             return Self.vectorErrorResponse(error)
         }
@@ -2068,7 +2090,8 @@ struct AthenaServer {
         case .ok(let v): vec = v
         }
         let hits = await vectorStore.query(
-            vector: vec, k: body.k ?? 5)
+            vector: vec, k: body.k ?? 5,
+            caller: await vectorCaller(request))
         return Self.json(
             VectorQueryResponse(
                 matches: hits.map {
@@ -2081,13 +2104,16 @@ struct AthenaServer {
                 }))
     }
 
-    private func handleVectorDelete(_ id: String?) async -> Response {
+    private func handleVectorDelete(_ id: String?, _ request: Request)
+        async -> Response
+    {
         guard let id, !id.isEmpty else {
             return Self.error(
                 status: .badRequest, message: "missing vector id",
                 type: "invalid_request_error", code: "missing_id")
         }
-        let ok = await vectorStore.delete(id: id)
+        let ok = await vectorStore.delete(
+            id: id, caller: await vectorCaller(request))
         if !ok {
             return Self.error(
                 status: .notFound, message: "no vector '\(id)'",

@@ -239,6 +239,16 @@ public actor AthenaStore {
         // pre-migration tokens keep working (fail-safe / backward-
         // compatible). Only tokens minted with a TTL carry a timestamp.
         try? Self.exec(db, "ALTER TABLE auth_tokens ADD COLUMN expires REAL;")
+        // H5 (M66.6 / ADR 006): vectors gained an owner. Existing rows get
+        // NULL owner (legacy) — treated as ADMIN-ONLY at the query/delete
+        // layer (a NULL never equals a scoped caller's `owner=?`), so a
+        // pre-migration vector is never silently exposed to, or claimable
+        // by, the next caller. New rows carry the authenticated principal.
+        try? Self.exec(db, "ALTER TABLE vectors ADD COLUMN owner TEXT;")
+        // Keep the owner predicate cheap so the resident-matrix caching
+        // still pays off (ADR 006 / M69.3 H3).
+        try? Self.exec(db,
+            "CREATE INDEX IF NOT EXISTS vectors_owner ON vectors(owner);")
     }
 
     deinit { sqlite3_close(db) }
@@ -443,12 +453,15 @@ public actor AthenaStore {
 
     // MARK: Vectors
 
+    /// Upsert a vector. `owner` (H5 / M66.6) is the authenticated
+    /// principal; nil ⇒ auth-off / legacy (admin-only at the read layer).
     public func putVector(
-        id: String, vector: [Float], metadata: Data?
+        id: String, vector: [Float], metadata: Data?, owner: String? = nil
     ) throws {
         let st = try Self.prepared(db,
-            "INSERT OR REPLACE INTO vectors(id,dim,vec,metadata,created) "
-                + "VALUES(?,?,?,?,?);")
+            "INSERT OR REPLACE INTO "
+                + "vectors(id,dim,vec,metadata,created,owner) "
+                + "VALUES(?,?,?,?,?,?);")
         defer { sqlite3_finalize(st) }
         sqlite3_bind_text(st, 1, id, -1, Self.transient)
         sqlite3_bind_int(st, 2, Int32(vector.count))
@@ -460,6 +473,11 @@ public actor AthenaStore {
         // REPLACE deletes+reinserts, so an upsert resets it) — backs the
         // M34.2 age-based vector retention.
         sqlite3_bind_double(st, 5, Date().timeIntervalSince1970)
+        if let owner {
+            sqlite3_bind_text(st, 6, owner, -1, Self.transient)
+        } else {
+            sqlite3_bind_null(st, 6)
+        }
         guard sqlite3_step(st) == SQLITE_DONE else {
             throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
         }
@@ -495,42 +513,63 @@ public actor AthenaStore {
         return Data(bytes: p, count: Int(sqlite3_column_bytes(st, i)))
     }
 
+    /// One vector by id. `owner` (H5 / M66.6) confines the lookup to that
+    /// principal's rows (a NULL/legacy row never matches a scoped owner);
+    /// nil = unfiltered (admin / auth-off / internal).
     public func getVector(
-        id: String
+        id: String, owner: String? = nil
     ) -> (vector: [Float], metadata: Data?)? {
-        guard
-            let st = try? Self.prepared(db,
-                "SELECT id,vec,metadata FROM vectors WHERE id=?;")
-        else { return nil }
+        let sql =
+            owner == nil
+            ? "SELECT id,vec,metadata FROM vectors WHERE id=?;"
+            : "SELECT id,vec,metadata FROM vectors WHERE id=? AND owner=?;"
+        guard let st = try? Self.prepared(db, sql) else { return nil }
         defer { sqlite3_finalize(st) }
         sqlite3_bind_text(st, 1, id, -1, Self.transient)
+        if let owner {
+            sqlite3_bind_text(st, 2, owner, -1, Self.transient)
+        }
         guard sqlite3_step(st) == SQLITE_ROW else { return nil }
         return (readVector(st), readMeta(st, 2))
     }
 
+    /// Delete a vector. `owner` (H5 / M66.6) confines the delete to that
+    /// principal's rows — defense-in-depth beneath `VectorStore`'s cache
+    /// check; nil = unscoped (admin / auth-off).
     @discardableResult
-    public func deleteVector(id: String) -> Bool {
-        guard let st = try? Self.prepared(db,"DELETE FROM vectors WHERE id=?;")
-        else { return false }
+    public func deleteVector(id: String, owner: String? = nil) -> Bool {
+        let sql =
+            owner == nil
+            ? "DELETE FROM vectors WHERE id=?;"
+            : "DELETE FROM vectors WHERE id=? AND owner=?;"
+        guard let st = try? Self.prepared(db, sql) else { return false }
         defer { sqlite3_finalize(st) }
         sqlite3_bind_text(st, 1, id, -1, Self.transient)
+        if let owner {
+            sqlite3_bind_text(st, 2, owner, -1, Self.transient)
+        }
         return sqlite3_step(st) == SQLITE_DONE
             && sqlite3_changes(db) > 0
     }
 
-    /// All vectors (for loading the resident MLX query matrix, M7.2).
+    /// All vectors (for loading the resident MLX query matrix, M7.2),
+    /// each with its `owner` (nil = legacy/auth-off) so the in-memory
+    /// store can owner-filter queries (H5 / M66.6).
     public func allVectors()
-        -> [(id: String, vector: [Float], metadata: Data?)]
+        -> [(id: String, vector: [Float], metadata: Data?, owner: String?)]
     {
         guard
             let st = try? Self.prepared(db,
-                "SELECT id,vec,metadata FROM vectors ORDER BY id;")
+                "SELECT id,vec,metadata,owner FROM vectors ORDER BY id;")
         else { return [] }
         defer { sqlite3_finalize(st) }
-        var out: [(String, [Float], Data?)] = []
+        var out: [(String, [Float], Data?, String?)] = []
         while sqlite3_step(st) == SQLITE_ROW {
             let id = String(cString: sqlite3_column_text(st, 0))
-            out.append((id, readVector(st), readMeta(st, 2)))
+            let owner =
+                sqlite3_column_type(st, 3) == SQLITE_NULL
+                ? nil : String(cString: sqlite3_column_text(st, 3))
+            out.append((id, readVector(st), readMeta(st, 2), owner))
         }
         return out
     }

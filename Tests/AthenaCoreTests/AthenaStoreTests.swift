@@ -51,6 +51,50 @@ final class AthenaStoreTests: XCTestCase {
         XCTAssertNil(gone)
     }
 
+    /// H5 (M66.6 / ADR 006) — the vectors `owner` column: round-trip via
+    /// `allVectors`, and the optional owner filter on `getVector`/
+    /// `deleteVector` (a NULL/legacy row never matches a scoped owner).
+    func testVectorOwnerColumnH5() async throws {
+        let url = tmpURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let s = try AthenaStore(path: url)
+        try await s.putVector(
+            id: "av", vector: [1, 0], metadata: nil, owner: "u:alice")
+        try await s.putVector(
+            id: "legacy", vector: [0, 1], metadata: nil)  // NULL owner
+
+        let owners = Dictionary(
+            uniqueKeysWithValues:
+                await s.allVectors().map { ($0.id, $0.owner) })
+        XCTAssertEqual(owners["av"], "u:alice")
+        XCTAssertNil(owners["legacy"] ?? nil)
+
+        // Owner filter: alice sees her row; the NULL row never matches a
+        // scoped owner; unfiltered (nil) sees both.
+        let avAlice = await s.getVector(id: "av", owner: "u:alice")
+        XCTAssertNotNil(avAlice)
+        let avBob = await s.getVector(id: "av", owner: "u:bob")
+        XCTAssertNil(avBob)
+        let legacyScoped = await s.getVector(id: "legacy", owner: "u:alice")
+        XCTAssertNil(legacyScoped)
+        let legacyUnfiltered = await s.getVector(id: "legacy")
+        XCTAssertNotNil(legacyUnfiltered)
+
+        // Scoped delete confines to the owner; the NULL row resists a
+        // scoped delete but yields to an unscoped (admin) one.
+        let crossDel = await s.deleteVector(id: "av", owner: "u:bob")
+        XCTAssertFalse(crossDel)
+        let legacyScopedDel =
+            await s.deleteVector(id: "legacy", owner: "u:alice")
+        XCTAssertFalse(legacyScopedDel)
+        let ownDel = await s.deleteVector(id: "av", owner: "u:alice")
+        XCTAssertTrue(ownDel)
+        let legacyAdminDel = await s.deleteVector(id: "legacy")
+        XCTAssertTrue(legacyAdminDel)
+        let cnt2 = await s.vectorCount()
+        XCTAssertEqual(cnt2, 0)
+    }
+
     func testJobLifecycle() async throws {
         let url = tmpURL()
         defer { try? FileManager.default.removeItem(at: url) }
