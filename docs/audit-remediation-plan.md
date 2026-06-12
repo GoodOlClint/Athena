@@ -27,13 +27,15 @@ The only Critical lives here (G1), plus everything an unprivileged or low-privil
 
 > Note: the 7 `StructuredGuideTests` regex cases + 1 `StructuredShimTests` ordering artifact are pre-existing reds on the dead regex path (engine is schema-only since M53) — that's **NG1**, scheduled for **M70.2**. Untouched by M65.1; new hostile-schema Swift test passes.
 
-### M65.2 — WebUI & login surface
-- [ ] NA1 (High) escape `t.label`/`t.username`/`t.scope` (+ users/roles fields) in /ui users page — stored XSS → daemonAdmin takeover
-- [ ] A11 server-side HTML escaping for config values (replace client-side `"`-only escape)
-- [ ] A3 rate-limit `POST /ui/login` by IP + backoff (lift the /ui* rate-limit exemption for login)
-- [ ] A10 generic login failure + always-run dummy PBKDF2 (username enumeration)
-- [ ] A12 `Secure` cookie attribute under TLS
-- [ ] NA7 percent-decode fallback keeps `+`→space normalization
+### M65.2 — WebUI & login surface — 5/6 ✅ v0.10.118 (A3 deferred)
+- [x] NA1 (High) escape `t.label`/`t.username`/`t.scope` (+ users/roles fields) in /ui users page — shared JS `esc()` + `data-u` delete button (v0.10.118)
+- [x] A11 HTML-escape config values via shared `esc()` (replaces `"`-only escape; also path + error sinks) (v0.10.118)
+- [ ] A3 rate-limit `POST /ui/login` by IP + backoff — **DEFERRED**: no client-IP plumbing today; correct IP source (peer via `RemoteAddressRequestContext` vs trusting `X-Forwarded-For`) overlaps DECISION #1's TLS/proxy trust model — needs sign-off
+- [x] A10 generic login failure + always-run dummy PBKDF2 (`Passwords.dummyVerify`) — closes enumeration timing oracle (v0.10.118)
+- [x] A12 `Secure` cookie attribute when the daemon serves TLS (`tlsEnabled`) (v0.10.118)
+- [x] NA7 percent-decode fallback keeps `+`→space normalization (v0.10.118)
+
+> Server/ login/session/XSS logic isn't unit-testable until M70 (NA2); validated via build + e2e-rbac 494/0 (login/cookie path) + binary inspection.
 
 ### M65.3 — Untrusted input caps (DoS)
 - [ ] ND1 (High) validate/clamp segment bounds before `Int()` in speaker embeddings — remote crash
