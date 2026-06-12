@@ -44,14 +44,14 @@ The only Critical lives here (G1), plus everything an unprivileged or low-privil
 - [x] NI4 per-input embedding token ceiling (32768) → 400 input_too_long (new AthenaError) (v0.10.119)
 - [x] G4 + NC2 fail closed: `structuredRequestError()` 400 on missing/unserializable schema (sync+queued); MLXLLMModule throws structured_output_unavailable on unresolvable vocab / uncompilable schema (v0.10.119)
 
-### M65.4 — Path confinement (file ops on caller-influenced paths)
-- [ ] A1 (High) confine store export under an export dir; reject symlinks/overwrite
-- [ ] C5 validate id before `removeItem` in ModelPull (`..` wipes store parent)
-- [ ] C6 validate `outName` in ModelConvert
-- [ ] C7 confine `copy` src under store root
-- [ ] C20/C24 symlink-resolution asserts in size/cp/prune; aux-copy allowlist
-- [ ] D6 confine `load(directory:)` under store root
-- [ ] NC12 validate allowlist id at model-load path resolution (defense-in-depth)
+### M65.4 — Path confinement (file ops on caller-influenced paths) ✅ v0.10.120
+- [x] A1 (High) store export confined under `exports/` dir; bare filename only; no overwrite (409) (v0.10.120)
+- [x] C5 ModelPull `isValidName` before `removeItem` (v0.10.120)
+- [x] C6 ModelConvert `isValidName(outName)` before removeItem/createDirectory (v0.10.120)
+- [x] C7 `copy` confines src too (`isValidName(src)`) (v0.10.120)
+- [x] C20/C24 prune child-name assert; C20 size/cp confined at entry via `isValidName` (HF-cache symlink target follow is by-design); C24 aux-copy = `isAux` exclusion-allowlist over trusted snapshot, bare `lastPathComponent` (v0.10.120)
+- [x] D6 confined at the shared resolver `ModelStoreLayout.localDirectory` (covers whisper + all modules) (v0.10.120)
+- [x] NC12 same shared-resolver guard validates the allowlist id at load-path resolution (v0.10.120)
 
 ### M65.5 — AuthZ gaps & info leaks
 - [ ] A5 (High) single caller/permission resolution in AuthMiddleware (4 drifted copies today) — *structural, do first in this slice; it underpins the rest*
