@@ -102,13 +102,15 @@ Local data loss, lockouts, and the config parser silently lying.
 
 > Store helpers (`usersWithRole` throws, `tokensMatchingHashPrefix`) unit-tested (`AthenaStoreTests` 19/0). Server/CLI fail-closed wiring + rotate ordering validated via build + e2e-rbac 502/0 (added B5 + H12 asserts).
 
-### M66.3 — Install & client store safety
-- [ ] B3 install seed: `O_NOFOLLOW`/`fchown` before writes (symlink TOCTOU)
-- [ ] B7 `fchmod`/`fchown` on fds throughout Install
-- [ ] B6 validate `data_dir`-style paths under allowed root before root chown
-- [ ] NB1 invalid `--label` must not bypass the root-daemon hard-fail
-- [ ] NK1 client `store import`: back up existing DB; abort on liveness-probe timeout
-- [ ] B8 privileged ops read `ATHENA_STORE_KEY` from service Keychain, not sudo env
+### M66.3 — Install & client store safety ✅ v0.10.125
+- [x] B3 (High) install seed-DB chown goes through `FsOwn.chown` (open `O_NOFOLLOW` → `fchown` the fd), so a symlink swapped in after the root-seeded DB can't redirect the chown onto an arbitrary file (v0.10.125)
+- [x] B7 `ensureDir`/`makeTraversable` chmod+chown via the same `O_NOFOLLOW`-fd helpers (`FsOwn.chmod`/`chown`) instead of by-path `setAttributes` (v0.10.125)
+- [x] B6 new `isSafeToOwn` rejects a config `data_dir`/`model_store`/`log_dir` that resolves to the fs root, a bare top-level dir, or a system subtree (e.g. `data_dir="/etc"`) before any chown; install prefix + service home + external volumes stay allowed (v0.10.125)
+- [x] NB1 `Start.run` validates `isValidLabel` UP FRONT (dies) before euid branching, so a malformed `--label` no longer skips the M43.1 root-daemon hard-fail and spawns the MLX daemon as root; e2e phase 1 asserts the rejection (v0.10.125)
+- [x] NK1 client `store import`: tri-state liveness probe (reachable/absent/**unknown**) — a probe timeout no longer reads as "absent"; refuses on unknown unless `--force`. Copy-to-temp-then-atomic-swap (with restore-on-failure) so the existing DB is never destroyed before the copy succeeds; old WAL/SHM removed only after (v0.10.125)
+- [x] B8 `StoreKey.resolve(trustEnv:)`/`source(trustEnv:)` — privileged (root) `install`/`doctor` pass `trustEnv: false` so the sudo-inherited environment is never trusted as the key source. A fresh install seeds plaintext; the daemon encrypts on first boot (crash-safe per NH1) as the service user with its own Keychain key (v0.10.125)
+
+> Filesystem/privilege helpers live in the executable + client targets (not unit-testable until M70/NA2); validated via xcodebuild Release + e2e-rbac 545/0 (NB1 assertion) + a clean client-target compile (NK1).
 
 ### M66.4 — Config parsing truth (AthenaDeploy + ConfigEditor)
 - [ ] J1 (High) truthy-set bool parsing (`1`/`True`/`yes`), ParseError otherwise — `encrypt_store`/`preload` silently off today

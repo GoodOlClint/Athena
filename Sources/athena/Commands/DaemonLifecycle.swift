@@ -81,6 +81,17 @@ struct Start: AsyncParsableCommand {
     var label: String = "me.goodolclint.athena"
 
     func run() async throws {
+        // NB1 (M66.3): validate the label BEFORE any euid branching. The
+        // old `if geteuid() == 0, isValidLabel(label)` skipped the entire
+        // root block — including the M43.1 hard-fail below — on a malformed
+        // label, falling through to the user-context Process() spawn and
+        // running the MLX daemon as ROOT (the metallib-bundle breakage
+        // M43.1 exists to prevent). Fail fast up front, like Stop/Restart.
+        guard isValidLabel(label) else {
+            FailableExit.die(
+                "error: invalid --label '\(label)' — use reverse-DNS "
+                    + "form (ASCII letters/digits and . - _)")
+        }
         // Root + an installed plist ⇒ delegate to launchctl so the
         // daemon runs as the plist's `UserName` (the service user the
         // installer recorded), not root. The pre-fix `Process()` spawn
@@ -93,7 +104,7 @@ struct Start: AsyncParsableCommand {
         // user with argv[0] = the full executable path. `athena stop`
         // already symmetrically goes through launchctl bootout; this
         // closes the loop on start.
-        if geteuid() == 0, isValidLabel(label) {
+        if geteuid() == 0 {
             let plist = InstallPlan.plistPath(label: label)
             if FileManager.default.fileExists(atPath: plist.path) {
                 // bootout is non-fatal (returns 3 when the service

@@ -207,6 +207,15 @@ echo "== phase 1: CLI escalation / validation guards =="
   --force --data-dir "$D" >/dev/null 2>&1 \
   && ok "B5: re-add with --force succeeds" \
   || bad "B5: --force re-add failed"
+# NB1 (M66.3): a malformed --label must fail UP FRONT (before euid
+# branching), not fall through to a root-owned daemon spawn. Validated
+# offline (non-root) — an invalid label dies before any daemon is spawned.
+NBOUT="$("$ATHENA" start --label 'bad label' --data-dir "$D" 2>&1)"
+if [ $? -ne 0 ] && echo "$NBOUT" | grep -qi "invalid --label"; then
+  ok "NB1: malformed --label rejected up front"
+else
+  bad "NB1: malformed --label not rejected ($NBOUT)"
+fi
 
 echo
 echo "== phase 2: permission gating (auth enforced) =="

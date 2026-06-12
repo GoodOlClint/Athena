@@ -33,13 +33,36 @@ private func storeFile(_ dataDir: String?) -> URL {
     return root.appendingPathComponent("athena.sqlite")
 }
 
-/// A fast liveness probe so `import` can refuse while a daemon holds
-/// the DB open. Short timeout — absence is the common, fast path.
-private func daemonReachable(_ d: DaemonOptions) async -> Bool {
+/// Result of the pre-import liveness probe (NK1). `reachable` = a daemon
+/// answered (running — refuse); `absent` = the connection was actively
+/// refused (nothing listening — safe to import); `unknown` = a timeout or
+/// other ambiguous error where we CANNOT tell whether a (possibly busy)
+/// daemon holds the DB — treat as refuse unless `--force`.
+private enum DaemonProbe { case reachable, absent, unknown }
+
+/// A fast liveness probe so `import` can refuse while a daemon holds the
+/// DB open. Short timeout — absence is the common, fast path. NK1: a
+/// timeout no longer reads as "absent" (which would let `import` clobber
+/// the DB under a live-but-slow daemon); only an actively-refused
+/// connection counts as absent.
+private func probeDaemon(_ d: DaemonOptions) async -> DaemonProbe {
     var req = URLRequest(
         url: URL(string: d.base + "/v1/store/stats")!)
     req.timeoutInterval = 1.5
-    return (try? await URLSession.shared.data(for: req)) != nil
+    do {
+        _ = try await URLSession.shared.data(for: req)
+        return .reachable  // any HTTP response ⇒ a daemon answered
+    } catch let e as URLError {
+        switch e.code {
+        case .cannotConnectToHost, .cannotFindHost,
+            .networkConnectionLost, .dnsLookupFailed:
+            return .absent  // nothing is listening
+        default:
+            return .unknown  // timedOut et al. — can't tell
+        }
+    } catch {
+        return .unknown
+    }
 }
 
 public struct StoreExport: AsyncParsableCommand {
@@ -75,17 +98,33 @@ public struct StoreImport: AsyncParsableCommand {
     @OptionGroup public var daemon: DaemonOptions
     @Option(help: "Store data dir (default ~/.athena).")
     public var dataDir: String?
+    @Flag(
+        name: .long,
+        help: "Import even if the daemon's liveness can't be determined (a probe timeout). Confirm no daemon is running first.")
+    public var force = false
     @Argument(help: "Snapshot file to import.") public var path:
         String
     public init() {}
 
     public func run() async throws {
-        if await daemonReachable(daemon) {
+        // NK1: refuse against a running daemon; on an INDETERMINATE probe
+        // (timeout) refuse unless --force, rather than assuming "absent"
+        // and clobbering the DB under a live-but-slow daemon.
+        switch await probeDaemon(daemon) {
+        case .reachable:
             FailableExit.die(
                 "error: a daemon is running at "
                     + "\(daemon.host):\(daemon.port) — stop it "
                     + "before import (swapping the DB under a live "
                     + "daemon corrupts it)")
+        case .unknown where !force:
+            FailableExit.die(
+                "error: could not determine whether a daemon is running "
+                    + "at \(daemon.host):\(daemon.port) (probe timed "
+                    + "out). Stop any daemon and retry, or pass --force "
+                    + "if you are certain none is running.")
+        case .unknown, .absent:
+            break
         }
         let src = URL(
             fileURLWithPath: (path as NSString)
@@ -95,18 +134,33 @@ public struct StoreImport: AsyncParsableCommand {
             FailableExit.die("error: no such file: \(src.path)")
         }
         let dest = storeFile(dataDir)
+        // NK1: copy the snapshot to a temp file in the dest dir FIRST, then
+        // atomically swap it in — the existing DB is never destroyed before
+        // the copy fully succeeds. On a swap failure the original is
+        // restored. Old WAL/SHM are removed only after the new DB is in
+        // place (they belonged to the replaced database).
+        let tmp = dest.appendingPathExtension("import-tmp")
+        let bak = dest.appendingPathExtension("import-bak")
         do {
             try fm.createDirectory(
                 at: dest.deletingLastPathComponent(),
                 withIntermediateDirectories: true)
-            for ext in ["", "wal", "shm"] {
-                let u = ext.isEmpty
-                    ? dest : dest.appendingPathExtension(ext)
-                if fm.fileExists(atPath: u.path) {
-                    try fm.removeItem(at: u)
-                }
+            try? fm.removeItem(at: tmp)
+            try? fm.removeItem(at: bak)
+            try fm.copyItem(at: src, to: tmp)  // original DB untouched here
+            let destExists = fm.fileExists(atPath: dest.path)
+            if destExists { try fm.moveItem(at: dest, to: bak) }
+            do {
+                try fm.moveItem(at: tmp, to: dest)
+            } catch {
+                if destExists { try? fm.moveItem(at: bak, to: dest) }
+                try? fm.removeItem(at: tmp)
+                throw error
             }
-            try fm.copyItem(at: src, to: dest)
+            for ext in ["wal", "shm"] {
+                try? fm.removeItem(at: dest.appendingPathExtension(ext))
+            }
+            if destExists { try? fm.removeItem(at: bak) }
         } catch {
             FailableExit.die("error: import failed: \(error)")
         }

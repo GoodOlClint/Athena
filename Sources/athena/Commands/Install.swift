@@ -7,6 +7,80 @@ import Crypto
 import Darwin
 import Foundation
 
+// MARK: - Privilege-boundary helpers (M66.3)
+
+/// Symlink-safe ownership/permission changes (B3/B7). `FileManager`'s
+/// `setAttributes(…, ofItemAtPath:)` and the POSIX `chown`/`chmod` calls
+/// resolve symlinks, so between the installer creating a path (as root)
+/// and changing its owner/mode by PATH, a hostile service account could
+/// swap that path for a symlink and redirect the chown/chmod onto an
+/// arbitrary file. Opening with `O_NOFOLLOW` first and operating on the
+/// resulting fd closes that TOCTOU: a symlink at the final component makes
+/// `open` fail (ELOOP) instead of being followed.
+enum FsOwn {
+    /// Resolve a username to its (uid, gid); nil if unknown.
+    static func ids(of user: String) -> (uid: uid_t, gid: gid_t)? {
+        guard let pw = getpwnam(user) else { return nil }
+        return (pw.pointee.pw_uid, pw.pointee.pw_gid)
+    }
+
+    /// Open `path` without following a final symlink. `O_DIRECTORY` is
+    /// added for directories. Returns the fd (caller closes) or nil.
+    private static func openNoFollow(_ path: String, isDir: Bool) -> Int32 {
+        var flags = O_RDONLY | O_NOFOLLOW
+        if isDir { flags |= O_DIRECTORY }
+        return open(path, flags)
+    }
+
+    /// `fchown` the path's own inode (never a symlink target). Returns
+    /// false (and leaves ownership unchanged) if the path is a symlink or
+    /// can't be opened.
+    @discardableResult
+    static func chown(
+        _ path: String, uid: uid_t, gid: gid_t, isDir: Bool
+    ) -> Bool {
+        let fd = openNoFollow(path, isDir: isDir)
+        guard fd >= 0 else { return false }
+        defer { close(fd) }
+        return fchown(fd, uid, gid) == 0
+    }
+
+    /// `fchmod` the path's own inode (never a symlink target).
+    @discardableResult
+    static func chmod(_ path: String, mode: mode_t, isDir: Bool) -> Bool {
+        let fd = openNoFollow(path, isDir: isDir)
+        guard fd >= 0 else { return false }
+        defer { close(fd) }
+        return fchmod(fd, mode) == 0
+    }
+}
+
+/// B6 (M66.3): a config-supplied `data_dir`/`model_store` that the
+/// installer would `chown` to the service user must not be a shared system
+/// directory — `data_dir = "/etc"` would otherwise hand `/etc` to the
+/// service account. A path is rejected when it is the filesystem root or a
+/// bare top-level directory (`/etc`, `/usr`, `/var`, …) or sits under a
+/// known system subtree. The install prefix (e.g. `/usr/local/...`) and
+/// the service user's home stay allowed; external volumes (depth ≥ 2,
+/// e.g. `/Volumes/SSD/models`) are fine.
+func isSafeToOwn(_ url: URL) -> Bool {
+    let std = url.standardizedFileURL
+    let comps = std.pathComponents.filter { $0 != "/" }
+    // Root or a single top-level component (`/etc`, `/usr`, `/`).
+    if comps.count <= 1 { return false }
+    // Known-dangerous system subtrees (does NOT include `/usr/local`).
+    let forbidden = [
+        "/System", "/bin", "/sbin", "/dev", "/Network", "/cores",
+        "/private/etc", "/private/var/db", "/usr/bin", "/usr/sbin",
+        "/usr/lib", "/usr/libexec", "/usr/share", "/usr/include",
+    ]
+    let p = std.path
+    for f in forbidden where p == f || p.hasPrefix(f + "/") {
+        return false
+    }
+    return true
+}
+
 /// `athena install` — install this binary as the boot-time launchd daemon.
 /// Collapses the old deploy/athena-install.sh. The one thing it cannot do
 /// is *build* (MLX's Metal shaders need xcodebuild — a binary can't build
@@ -202,13 +276,13 @@ struct Install: AsyncParsableCommand {
         func ensureDir(_ url: URL, owner: String?) throws {
             try fm.createDirectory(
                 at: url, withIntermediateDirectories: true)
-            try? fm.setAttributes(
-                [.posixPermissions: 0o755],
-                ofItemAtPath: url.path)
-            if let owner {
-                try? fm.setAttributes(
-                    [.ownerAccountName: owner],
-                    ofItemAtPath: url.path)
+            // B7 (M66.3): chmod/chown on an O_NOFOLLOW fd, not by path, so
+            // a symlink swapped in at the final component can't redirect
+            // the mode/owner change onto another file.
+            FsOwn.chmod(url.path, mode: 0o755, isDir: true)
+            if let owner, let ids = FsOwn.ids(of: owner) {
+                FsOwn.chown(
+                    url.path, uid: ids.uid, gid: ids.gid, isDir: true)
             }
         }
         /// Make every ancestor of `leaf` that lies under `prefix`
@@ -219,12 +293,24 @@ struct Install: AsyncParsableCommand {
             var cur = leaf.standardizedFileURL
             while cur.path.hasPrefix(base), cur.path != base {
                 if fm.fileExists(atPath: cur.path) {
-                    try? fm.setAttributes(
-                        [.posixPermissions: 0o755],
-                        ofItemAtPath: cur.path)
+                    FsOwn.chmod(cur.path, mode: 0o755, isDir: true)
                 }
                 cur = cur.deletingLastPathComponent()
             }
+        }
+
+        // B6 (M66.3): refuse to chown a config-supplied directory that is a
+        // shared system path (e.g. `data_dir = "/etc"`) to the service
+        // user. The install prefix and the service home stay allowed.
+        for (label, url) in [
+            ("data_dir", dataDir), ("model_store", modelStore),
+            ("log_dir", logURL),
+        ] where !isSafeToOwn(url) {
+            throw ValidationError(
+                "\(label) resolves to '\(url.standardizedFileURL.path)', "
+                    + "a system directory the installer refuses to chown "
+                    + "to the service user — choose a path under the "
+                    + "service home or a dedicated data volume")
         }
 
         try ensureDir(plan.libexecDir, owner: nil)
@@ -243,7 +329,13 @@ struct Install: AsyncParsableCommand {
         let dbURL = dataDir.appendingPathComponent("athena.sqlite")
         var seededPassword: String?
         var seededToken: String?
-        if let db = try? AthenaStore(path: dbURL, key: StoreKey.resolve()) {
+        // B8 (M66.3): install runs as root via sudo, so the inherited env
+        // is the invoker's, not the service user's — don't source the store
+        // key from it. A fresh install seeds plaintext; the daemon encrypts
+        // on first boot (as the service user, with its own Keychain key).
+        if let db = try? AthenaStore(
+            path: dbURL, key: StoreKey.resolve(trustEnv: false))
+        {
             if await db.userCount() == 0 {
                 let pw = Self.simplePassword()
                 let salt = Passwords.randomSalt()
@@ -282,13 +374,18 @@ struct Install: AsyncParsableCommand {
         }
         // The daemon runs as the service user and must own the DB
         // (install runs as root, so it would otherwise be root-owned
-        // and unwritable by the daemon).
-        for ext in ["", "-wal", "-shm"] {
-            let p = dbURL.path + ext
-            if fm.fileExists(atPath: p) {
-                try? fm.setAttributes(
-                    [.ownerAccountName: serviceUser],
-                    ofItemAtPath: p)
+        // and unwritable by the daemon). B3 (M66.3): chown via an
+        // O_NOFOLLOW fd, not by path — between seeding the DB (as root) and
+        // this chown, a hostile service account could swap the file for a
+        // symlink; following it would chown an arbitrary target to the
+        // service user. The fd open fails on a symlink instead.
+        if let ids = FsOwn.ids(of: serviceUser) {
+            for ext in ["", "-wal", "-shm"] {
+                let p = dbURL.path + ext
+                if fm.fileExists(atPath: p) {
+                    FsOwn.chown(
+                        p, uid: ids.uid, gid: ids.gid, isDir: false)
+                }
             }
         }
 

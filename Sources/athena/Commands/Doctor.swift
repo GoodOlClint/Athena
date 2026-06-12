@@ -180,7 +180,7 @@ struct Doctor: AsyncParsableCommand {
         var nAdmins = 0
         if let db = try? AthenaStore(
             path: dataDir.appendingPathComponent("athena.sqlite"),
-            key: StoreKey.resolve())
+            key: StoreKey.resolve(trustEnv: geteuid() != 0))
         {
             nTok = await db.tokenCount()
             nUsr = await db.userCount()
@@ -395,7 +395,7 @@ struct Doctor: AsyncParsableCommand {
         let onDiskEncrypted =
             storeExists && !AthenaStore.isPlaintextDatabase(at: storeFile)
         if parsed?.encryptStore == true {
-            let keySrc = StoreKey.source()
+            let keySrc = StoreKey.source(trustEnv: geteuid() != 0)
             if !storeExists {
                 say(
                     .ok,
@@ -477,7 +477,7 @@ struct Doctor: AsyncParsableCommand {
         //     retention (which PRUNES the trail) that's worth surfacing.
         var nAudit = 0
         if let db = try? AthenaStore(
-            path: storeFile, key: StoreKey.resolve())
+            path: storeFile, key: StoreKey.resolve(trustEnv: geteuid() != 0))
         {
             nAudit = await db.auditCount()
         }
@@ -503,7 +503,7 @@ struct Doctor: AsyncParsableCommand {
         var tokExpiring = 0
         var tokExpired = 0
         if let db = try? AthenaStore(
-            path: storeFile, key: StoreKey.resolve())
+            path: storeFile, key: StoreKey.resolve(trustEnv: geteuid() != 0))
         {
             let now = Date().timeIntervalSince1970
             for t in await db.listTokens() {

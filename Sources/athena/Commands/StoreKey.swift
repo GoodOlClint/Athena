@@ -16,9 +16,19 @@ enum StoreKey {
 
     /// Read-only resolution (no generation). `nil` ⇒ no key configured ⇒
     /// the store opens as a standard plaintext database.
-    static func resolve() -> String? {
-        let env = ProcessInfo.processInfo.environment
-        if let e = env[envVar], !e.isEmpty { return e }
+    ///
+    /// B8 (M66.3): `trustEnv: false` skips `ATHENA_STORE_KEY`. A privileged
+    /// (root) `install`/`doctor` invoked via `sudo` inherits the INVOKER's
+    /// environment, not the service user's, so the env var there is the
+    /// wrong source (and a credential exposure); those callers pass
+    /// `trustEnv: false` and rely on the Keychain (or, for a fresh install,
+    /// fall through to a plaintext store the daemon encrypts on first boot
+    /// as the service user).
+    static func resolve(trustEnv: Bool = true) -> String? {
+        if trustEnv {
+            let env = ProcessInfo.processInfo.environment
+            if let e = env[envVar], !e.isEmpty { return e }
+        }
         return Secrets.read(account: account)
     }
 
@@ -40,10 +50,13 @@ enum StoreKey {
     }
 
     /// How `resolve()` would source the key, for `athena doctor`
-    /// (no secret is printed).
-    static func source() -> String {
-        let env = ProcessInfo.processInfo.environment
-        if let v = env[envVar], !v.isEmpty { return "\(envVar) env" }
+    /// (no secret is printed). `trustEnv: false` mirrors a privileged
+    /// caller that ignores the sudo-inherited env (B8).
+    static func source(trustEnv: Bool = true) -> String {
+        if trustEnv {
+            let env = ProcessInfo.processInfo.environment
+            if let v = env[envVar], !v.isEmpty { return "\(envVar) env" }
+        }
         if Secrets.read(account: account) != nil { return "Keychain" }
         return "none"
     }
