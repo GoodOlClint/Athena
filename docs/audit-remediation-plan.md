@@ -53,12 +53,18 @@ The only Critical lives here (G1), plus everything an unprivileged or low-privil
 - [x] D6 confined at the shared resolver `ModelStoreLayout.localDirectory` (covers whisper + all modules) (v0.10.120)
 - [x] NC12 same shared-resolver guard validates the allowlist id at load-path resolution (v0.10.120)
 
-### M65.5 — AuthZ gaps & info leaks
-- [ ] A5 (High) single caller/permission resolution in AuthMiddleware (4 drifted copies today) — *structural, do first in this slice; it underpins the rest*
-- [ ] NA6 ownerless queue jobs: `owner==nil` → admin-only under enforced auth
-- [ ] H6 optional owner filter at store layer for jobs/usage (defense-in-depth)
-- [ ] A21 + NE7 stop reflecting raw `\(error)` / substrate detail into responses; log full, return generic
-- [ ] A22 fail closed on world-readable auth-keys file
+### M65.5 — AuthZ gaps & info leaks — contained items ✅ v0.10.121 (A5/A3/H6 → M65.6)
+- [x] NA6 ownerless queue jobs: `owner==nil` → admin-only under enforced auth (v0.10.121)
+- [x] A21 + NE7 substrate detail (paths/repo ids/state) scrubbed from client `message`; `serverDetail` → os_log only; remaining A21 sites are benign decode/validation errors (v0.10.121)
+- [x] A22 fail closed on group/other-accessible auth-keys file (skip its keys, error not warning) (v0.10.121)
+- [ ] **A5 (High) → M65.6**: single caller/permission resolution in AuthMiddleware (4 drifted copies) — needs a custom `RequestContext` to stash the resolved subject
+- [ ] **A3 → M65.6**: peer-IP login limiter (ADR 004) — same `RemoteAddressRequestContext`
+- [ ] **H6 → M65.6**: store-layer owner filter for jobs/usage — pairs with the owner-scoping work (ADR 006)
+
+### M65.6 — Auth-context refactor (structural)
+- [ ] A5 consolidate the 4 caller/perm resolutions (AthenaServer `callerPermissions`, WebUI `uiCaller`, AuthMiddleware, …) into one resolve stashed in a custom `AppRequestContext`
+- [ ] A3 peer-IP `POST /ui/login` rate-limit via `RemoteAddressRequestContext` (ADR 004; peer addr, no XFF trust)
+- [ ] H6 optional owner filter at the store layer (`getJob`/`listJobs`/`allUsage`) — defense-in-depth under the resolved-once principal
 
 **DECISION items parked at M65 (need sign-off, then ADR):**
 - A2/K1: require TLS (or explicit `--insecure`) for non-loopback auth-on daemons; add https to the portable client. Contract change for remote deployments.
