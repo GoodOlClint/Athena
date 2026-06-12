@@ -208,12 +208,34 @@ public struct AthenaConfig: Sendable, Equatable {
     public enum ParseError: Error, Equatable {
         case missingRequiredKey(String)
         case invalidInt(key: String, value: String)
+        case invalidBool(key: String, value: String)
+    }
+
+    /// J1 (M66.4): parse a TOML bool truthily but strictly. Accepts
+    /// `true/false`, `1/0`, `yes/no`, `on/off` (case-insensitive); ANY
+    /// other value is a ParseError, not a silent `false`. The old
+    /// `$0 == "true"` coerced `1`/`True`/`yes` — and a CRLF `true\r` — to
+    /// `false`, silently disabling `encrypt_store`/`preload`/etc.
+    static func parseBool(_ key: String, _ raw: String) throws -> Bool {
+        switch raw.lowercased() {
+        case "true", "1", "yes", "on": return true
+        case "false", "0", "no", "off": return false
+        default: throw ParseError.invalidBool(key: key, value: raw)
+        }
     }
 
     /// First uncommented `key = value`; strips surrounding quotes, inline
     /// `#` comments, and whitespace. Returns nil for absent/commented keys.
     static func scalar(_ key: String, in toml: String) -> String? {
-        for rawLine in toml.split(
+        // NJ1 (M66.4): normalize CRLF/CR → LF up front. `.whitespaces`
+        // does NOT strip a carriage return, so a Windows-saved config
+        // otherwise left a trailing `\r` on every value — breaking int
+        // parsing (`Int("7447\r")` ⇒ nil ⇒ abort), the quote-strip
+        // (closing `"` no longer last), and bool coercion (`"true\r"`).
+        let normalized = toml
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        for rawLine in normalized.split(
             separator: "\n", omittingEmptySubsequences: false)
         {
             let line = rawLine.drop(while: { $0 == " " || $0 == "\t" })
@@ -222,16 +244,27 @@ public struct AthenaConfig: Sendable, Equatable {
             let rest = line.dropFirst(key.count)
                 .drop(while: { $0 == " " || $0 == "\t" })
             guard rest.first == "=" else { continue }  // exact key, not prefix
-            var value = String(rest.dropFirst())
+            let value = String(rest.dropFirst())
                 .trimmingCharacters(in: .whitespaces)
-            if let hash = value.firstIndex(of: "#") {
-                value = String(value[..<hash])
+            // J2 (M66.4): a quoted value is literal — an inline `#` inside
+            // the quotes is part of the value, not a comment. Take the text
+            // up to the closing quote (anything after it, including a
+            // trailing `#` comment, is ignored). Only an UNQUOTED value
+            // treats `#` as the start of a comment.
+            if value.hasPrefix("\"") {
+                let body = value.dropFirst()
+                if let close = body.firstIndex(of: "\"") {
+                    let inner = String(body[..<close])
+                    return inner.isEmpty ? nil : inner
+                }
+                // Unterminated quote — fall through to unquoted handling.
+            }
+            var v = value
+            if let hash = v.firstIndex(of: "#") {
+                v = String(v[..<hash])
                     .trimmingCharacters(in: .whitespaces)
             }
-            if value.count >= 2, value.hasPrefix("\""), value.hasSuffix("\"") {
-                value = String(value.dropFirst().dropLast())
-            }
-            return value.isEmpty ? nil : value
+            return v.isEmpty ? nil : v
         }
         return nil
     }
@@ -302,10 +335,14 @@ public struct AthenaConfig: Sendable, Equatable {
         if let vt = scalar("vector_ttl_secs", in: toml) {
             vectorTtl = try int("vector_ttl_secs", vt)
         }
-        let spec = scalar("speculative", in: toml).map { $0 == "true" }
-        let pcEnabled = scalar("prompt_cache_enabled", in: toml).map {
-            $0 == "true"
+        // J1 (M66.4): all bool keys parse via the strict truthy `bool`
+        // helper; an unrecognized value is a ParseError, not silent false.
+        func bool(_ key: String) throws -> Bool? {
+            guard let v = scalar(key, in: toml) else { return nil }
+            return try parseBool(key, v)
         }
+        let spec = try bool("speculative")
+        let pcEnabled = try bool("prompt_cache_enabled")
         var pcMaxEntries: Int?
         if let pm = scalar("prompt_cache_max_entries", in: toml) {
             pcMaxEntries = try int("prompt_cache_max_entries", pm)
@@ -318,16 +355,10 @@ public struct AthenaConfig: Sendable, Equatable {
         if let pt = scalar("prompt_cache_idle_ttl_secs", in: toml) {
             pcIdleTtl = try int("prompt_cache_idle_ttl_secs", pt)
         }
-        let dflashEnabled = scalar("dflash_enabled", in: toml).map {
-            $0 == "true"
-        }
-        let preload = scalar("preload", in: toml).map { $0 == "true" }
-        let dropReq = scalar("drop_request_content", in: toml).map {
-            $0 == "true"
-        }
-        let encStore = scalar("encrypt_store", in: toml).map {
-            $0 == "true"
-        }
+        let dflashEnabled = try bool("dflash_enabled")
+        let preload = try bool("preload")
+        let dropReq = try bool("drop_request_content")
+        let encStore = try bool("encrypt_store")
 
         return AthenaConfig(
             listenHost: host,

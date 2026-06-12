@@ -112,14 +112,18 @@ Local data loss, lockouts, and the config parser silently lying.
 
 > Filesystem/privilege helpers live in the executable + client targets (not unit-testable until M70/NA2); validated via xcodebuild Release + e2e-rbac 545/0 (NB1 assertion) + a clean client-target compile (NK1).
 
-### M66.4 — Config parsing truth (AthenaDeploy + ConfigEditor)
-- [ ] J1 (High) truthy-set bool parsing (`1`/`True`/`yes`), ParseError otherwise — `encrypt_store`/`preload` silently off today
-- [ ] NJ1 (High) strip `\r` from CRLF config lines
-- [ ] J2 inline-`#` only outside quotes
-- [ ] NB2 escape strings in `setScalarThrowing` (TOML injection via /ui/api/config)
-- [ ] NB8 validate enum-ish keys (`engine`, `kv_compression`) at `config set` time
-- [ ] B15 appended bare key lands before first `[section]`
-- [ ] NJ2 + NB9 non-default `--prefix`: plist/daemon/CLI agree on config path; stop hardcoding /usr/local
+### M66.4 — Config parsing truth (AthenaDeploy + ConfigEditor) ✅ v0.10.126
+- [x] J1 (High) new strict `parseBool` (true/false, 1/0, yes/no, on/off — case-insensitive); all 6 bool keys route through it; an unrecognized value is `ParseError.invalidBool`, not silent false. `testBoolKeysTruthyAndStrict` + `testBoolKeyInvalidValueThrows` (v0.10.126)
+- [x] NJ1 (High) `scalar()` normalizes CRLF/CR→LF up front, so a Windows-saved config no longer leaves a trailing `\r` on every value (broke int/bool/quote parsing). `testCRLFLineEndingsParse` (v0.10.126)
+- [x] J2 `scalar()` treats a quoted value as literal — inline `#` inside quotes is part of the value; only an unquoted value starts a comment. `testQuotedHashIsLiteralUnquotedIsComment` (v0.10.126)
+- [x] NB2 `setScalarThrowing` rejects a string value containing a quote, backslash, or control char (incl. CR/LF — the newline-injection vector via `/ui/api/config`); AND rolls back to the pre-edit contents when THIS edit makes a previously-valid config unparseable (pre-existing breakage still keeps+warns). e2e NB2 asserts (v0.10.126)
+- [x] NB8 `setScalarThrowing` validates `engine`∈`Engine.allCases` and `kv_compression`∈`KVCompression.allCases` at set-time (reject the typo here, not at the next boot). e2e NB8 asserts (v0.10.126)
+- [x] B15 a NEW bare key is inserted before the first `[section]` header (stays top-level) instead of landing inside the last table. e2e B15 assert (v0.10.126)
+- [x] NJ2 + NB9 `ConfigEditor.resolvePath(nil)` now honors `$ATHENA_CONFIG`; the launchd plist exports `ATHENA_CONFIG=<prefix>/etc/athena/athena.toml` (`EnvironmentVariables`), so the daemon's TOML-only re-reads (kv_compression/prompt_cache_*/proxy) resolve to the prefix-correct file on a non-default `--prefix` install — and the CLI gets the same escape hatch. `testConfigPathExportsAthenaConfigEnv` (v0.10.126)
+
+> Parser (AthenaDeploy) + plist changes are unit-tested (`AthenaConfigTests` 31/0, `LaunchdPlistTests` 4/0). ConfigEditor lives in the executable target (not unit-testable until M70) — validated via e2e-rbac 551/0 (offline `config set` NB8/NB2/B15 asserts).
+
+**M66 is complete (M66.1–.4)** except the breaking `--password` removal (ADR 005) — done as its own slice (M66.5) next.
 
 Re-verify while here: B6*, B7*, B8*, B10–B13, B15*, B18–B23, H6*, H14*, J5, K3, K6.
 

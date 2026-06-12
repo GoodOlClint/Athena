@@ -155,7 +155,8 @@ struct ConfigSet: AsyncParsableCommand {
             executablePath: exec,
             user: user,
             workingDirectory: workdir,
-            config: cfg)
+            config: cfg,
+            configPath: configURL.path)  // NJ2: keep ATHENA_CONFIG correct
         try plistData.write(to: plistPath)
         try? FileManager.default.setAttributes(
             [.posixPermissions: 0o644],

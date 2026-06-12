@@ -11,7 +11,8 @@ public enum LaunchdPlist {
         executablePath: String,
         user: String,
         workingDirectory: String,
-        config: AthenaConfig
+        config: AthenaConfig,
+        configPath: String = ""
     ) -> [String: Any] {
         // `executablePath` is the `athena` binary itself; the launchd
         // daemon runs `athena load …` directly. The pre-M42 plist
@@ -129,7 +130,7 @@ public enum LaunchdPlist {
         // (fatalError, NIO precondition failures, MLX/Metal panics)
         // that fires after Logger is torn down — a CRASH DUMP, not a
         // diagnostic log.
-        return [
+        var dict: [String: Any] = [
             "Label": label,
             "ProgramArguments": args,
             "UserName": user,
@@ -141,6 +142,16 @@ public enum LaunchdPlist {
             "StandardErrorPath": "\(config.logDir)/athena.err.log",
             "SoftResourceLimits": ["NumberOfFiles": 8192],
         ]
+        // NJ2 (M66.4): export the PREFIX-CORRECT installed config path so
+        // the daemon's TOML-only re-reads (kv_compression, prompt_cache_*,
+        // the egress-proxy keys — none forwarded as `load` args above)
+        // resolve to the file this install actually wrote, not the
+        // hard-coded `/usr/local`. `ConfigEditor.resolvePath(nil)` reads
+        // `ATHENA_CONFIG`.
+        if !configPath.isEmpty {
+            dict["EnvironmentVariables"] = ["ATHENA_CONFIG": configPath]
+        }
+        return dict
     }
 
     public static func xmlData(
@@ -148,11 +159,13 @@ public enum LaunchdPlist {
         executablePath: String,
         user: String,
         workingDirectory: String,
-        config: AthenaConfig
+        config: AthenaConfig,
+        configPath: String = ""
     ) throws -> Data {
         let dict = dictionary(
             label: label, executablePath: executablePath, user: user,
-            workingDirectory: workingDirectory, config: config)
+            workingDirectory: workingDirectory, config: config,
+            configPath: configPath)
         return try PropertyListSerialization.data(
             fromPropertyList: dict, format: .xml, options: 0)
     }

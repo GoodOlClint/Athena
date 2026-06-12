@@ -1,5 +1,6 @@
 import AthenaClient
 import AthenaDeploy
+import AthenaLLM
 import Foundation
 
 /// Shared flat-TOML config editing used by `athena config` (M9.4b) and
@@ -41,13 +42,28 @@ enum ConfigEditor {
         "prompt_cache_scope", "dflash_enabled",
     ]
 
-    /// `--config` wins; else the installed file if present; else the
-    /// in-repo dev copy.
+    /// `--config` wins; else `$ATHENA_CONFIG`; else the installed file at
+    /// the default prefix; else the in-repo dev copy.
+    ///
+    /// NJ2/NB9 (M66.4): the launchd plist exports `ATHENA_CONFIG` =
+    /// `<prefix>/etc/athena/athena.toml`, so the daemon's TOML-only
+    /// re-reads (kv_compression, prompt_cache_*, the egress-proxy keys —
+    /// none forwarded as plist args) resolve to the PREFIX-CORRECT file
+    /// instead of the hard-coded `/usr/local`. A non-default `--prefix`
+    /// install no longer silently drops those keys. Operators editing on a
+    /// non-default prefix set `ATHENA_CONFIG` (or pass `--config`) so the
+    /// CLI edits the same file the daemon reads.
     static func resolvePath(_ override: String?) -> URL {
         if let override {
             return URL(
                 fileURLWithPath:
                     (override as NSString).expandingTildeInPath)
+        }
+        if let env = ProcessInfo.processInfo.environment["ATHENA_CONFIG"],
+            !env.isEmpty
+        {
+            return URL(
+                fileURLWithPath: (env as NSString).expandingTildeInPath)
         }
         let installed = URL(
             fileURLWithPath: "/usr/local/etc/athena/athena.toml")
@@ -225,12 +241,55 @@ enum ConfigEditor {
             }
             formatted = "\(key) = \(value)"
         } else {
+            // NB8 (M66.4): validate the two enum-ish string keys at
+            // set-time against their source-of-truth case lists, so a typo
+            // is rejected HERE instead of bricking the next daemon boot
+            // (engine → ArgumentParser, kv_compression → fail-closed
+            // KVCompression.resolve).
+            if key == "engine",
+                !Engine.allCases.map(\.rawValue).contains(value)
+            {
+                throw Failure.badValue(
+                    key, "one of "
+                        + Engine.allCases.map(\.rawValue)
+                        .joined(separator: ", "))
+            }
+            if key == "kv_compression",
+                !KVCompression.allCases.map(\.rawValue).contains(value)
+            {
+                throw Failure.badValue(
+                    key, "one of "
+                        + KVCompression.allCases.map(\.rawValue)
+                        .joined(separator: ", "))
+            }
+            // NB2 (M66.4): the value is written quoted (`key = "<value>"`).
+            // Reject a value containing a quote, backslash, or any control
+            // character (incl. CR/LF) — a newline would inject arbitrary
+            // EXTRA config lines (e.g. a forged `auth_keys_file`/`tls_cert`)
+            // and a quote/backslash would corrupt the file. Reachable over
+            // the network via `/ui/api/config`. (`#` is now safe — the
+            // reader treats it literally inside quotes per J2.)
+            if value.contains("\"") || value.contains("\\")
+                || value.unicodeScalars.contains(where: {
+                    $0.value < 0x20 || $0.value == 0x7F
+                })
+            {
+                throw Failure.badValue(
+                    key, "free of quotes, backslashes, and control "
+                        + "characters")
+            }
             formatted = "\(key) = \"\(value)\""
         }
         guard
             let contents = try? String(
                 contentsOf: url, encoding: .utf8)
         else { throw Failure.noConfig(url) }
+
+        // Whether the file parsed BEFORE this edit — so a post-edit parse
+        // failure can be attributed to the edit (roll back) vs. a
+        // pre-existing problem like a missing required key (keep + warn).
+        let wasParseable =
+            (try? AthenaConfig.parse(toml: contents)) != nil
 
         var lines = contents.split(
             separator: "\n", omittingEmptySubsequences: false)
@@ -240,6 +299,13 @@ enum ConfigEditor {
             isCommented($0, key)
         }) {
             lines[i] = Substring(formatted)
+        } else if let s = lines.firstIndex(where: { line in
+            // B15 (M66.4): a NEW bare top-level key appended at EOF would
+            // land inside the last `[section]` table. Insert it just before
+            // the first section header so it stays top-level.
+            line.drop(while: { $0 == " " || $0 == "\t" }).first == "["
+        }) {
+            lines.insert(Substring(formatted), at: s)
         } else {
             if lines.last?.isEmpty == true { lines.removeLast() }
             lines.append(Substring(formatted))
@@ -251,11 +317,22 @@ enum ConfigEditor {
         } catch {
             throw Failure.writeFailed(url, "\(error)")
         }
-        // Sanity-parse; warn (don't roll back) on failure — usually a
-        // pre-existing missing required key, not this edit.
+        // NB2 (M66.4): if THIS edit made a previously-valid config
+        // unparseable, roll back to the pre-edit contents and report —
+        // never leave a corrupt file that bricks the next daemon start. A
+        // config that was already unparseable (e.g. missing a required
+        // key) keeps the edit and only warns, so it can still be repaired.
         if (try? AthenaConfig.parse(file: url)) == nil {
+            if wasParseable {
+                try? contents.write(
+                    to: url, atomically: true, encoding: .utf8)
+                throw Failure.badValue(
+                    key, "a value that keeps the config parseable")
+            }
             FileHandle.standardError.write(
-                Data("warning: config now unparseable\n".utf8))
+                Data(
+                    "warning: config still unparseable (pre-existing)\n"
+                        .utf8))
         }
     }
 

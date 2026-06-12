@@ -198,7 +198,8 @@ struct Install: AsyncParsableCommand {
             executablePath: plan.installedBinary.path,
             user: serviceUser,
             workingDirectory: plan.libexecDir.path,
-            config: cfg)
+            config: cfg,
+            configPath: plan.installedConfig.path)
 
         if dryRun {
             print("athena install (dry-run)")

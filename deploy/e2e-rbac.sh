@@ -216,6 +216,43 @@ if [ $? -ne 0 ] && echo "$NBOUT" | grep -qi "invalid --label"; then
 else
   bad "NB1: malformed --label not rejected ($NBOUT)"
 fi
+# M66.4 config-set validation (NB8/NB2/B15), offline against a temp config.
+CFG="$D/cfgtest.toml"
+printf 'listen_host = "127.0.0.1"\nlisten_port = 7447\nlog_dir = "/tmp/l"\n' \
+  > "$CFG"
+# --no-apply: edit the TOML only (skip the root-gated plist re-render), so
+# the exit code reflects set-time VALIDATION, not the install state.
+"$ATHENA" config set engine bogus --no-apply --config "$CFG" \
+  >/dev/null 2>&1 \
+  && bad "NB8: invalid engine accepted" \
+  || ok "NB8: invalid engine rejected at set-time"
+"$ATHENA" config set kv_compression bogus --no-apply --config "$CFG" \
+  >/dev/null 2>&1 \
+  && bad "NB8: invalid kv_compression accepted" \
+  || ok "NB8: invalid kv_compression rejected at set-time"
+"$ATHENA" config set engine stub --no-apply --config "$CFG" \
+  >/dev/null 2>&1 \
+  && ok "NB8: valid engine accepted" || bad "NB8: valid engine rejected"
+# NB2: a value carrying a newline (config-line injection) or a quote is
+# rejected before it can be written.
+"$ATHENA" config set model "$(printf 'a\nauth_keys_file = "/x')" \
+  --no-apply --config "$CFG" >/dev/null 2>&1 \
+  && bad "NB2: newline-injection value accepted" \
+  || ok "NB2: newline-injection value rejected"
+"$ATHENA" config set model 'a"b' --no-apply --config "$CFG" \
+  >/dev/null 2>&1 \
+  && bad "NB2: quoted value accepted" || ok "NB2: quote in value rejected"
+# B15: a NEW bare key on a config that already has a [section] must land
+# BEFORE the section header (stay top-level), not inside the table.
+printf 'listen_host = "127.0.0.1"\nlisten_port = 7447\nlog_dir = "/tmp/l"\n[prompt_cache]\nprompt_cache_enabled = true\n' \
+  > "$CFG"
+"$ATHENA" config set max_tokens 2048 --no-apply --config "$CFG" \
+  >/dev/null 2>&1
+if awk '/^\[prompt_cache\]/{seen=1} /^max_tokens/{if(seen)after=1} END{exit(after?1:0)}' "$CFG"; then
+  ok "B15: bare key inserted before [section]"
+else
+  bad "B15: bare key landed inside [section]"
+fi
 
 echo
 echo "== phase 2: permission gating (auth enforced) =="

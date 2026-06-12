@@ -310,6 +310,69 @@ final class AthenaConfigTests: XCTestCase {
         }
     }
 
+    func testBoolKeysTruthyAndStrict() throws {
+        // J1 (M66.4): 1/yes/on (any case) ⇒ true; 0/no/off ⇒ false.
+        let toml = """
+            listen_host = "h"
+            listen_port = 7447
+            log_dir = "/l"
+            preload = 1
+            encrypt_store = YES
+            speculative = on
+            drop_request_content = 0
+            dflash_enabled = Off
+            """
+        let c = try AthenaConfig.parse(toml: toml)
+        XCTAssertEqual(c.preload, true)
+        XCTAssertEqual(c.encryptStore, true)
+        XCTAssertEqual(c.speculative, true)
+        XCTAssertEqual(c.dropRequestContent, false)
+        XCTAssertEqual(c.dflashEnabled, false)
+    }
+
+    func testBoolKeyInvalidValueThrows() {
+        // J1: an unrecognized bool value is a ParseError, not silent false.
+        let toml = """
+            listen_host = "h"
+            listen_port = 7447
+            log_dir = "/l"
+            encrypt_store = maybe
+            """
+        XCTAssertThrowsError(try AthenaConfig.parse(toml: toml)) {
+            XCTAssertEqual(
+                $0 as? AthenaConfig.ParseError,
+                .invalidBool(key: "encrypt_store", value: "maybe"))
+        }
+    }
+
+    func testCRLFLineEndingsParse() throws {
+        // NJ1 (M66.4): CRLF must not leave a trailing \r on values.
+        let toml =
+            "listen_host = \"127.0.0.1\"\r\n"
+            + "listen_port = 7447\r\n"
+            + "log_dir = \"/l\"\r\n"
+            + "encrypt_store = true\r\n"
+        let c = try AthenaConfig.parse(toml: toml)
+        XCTAssertEqual(c.listenHost, "127.0.0.1")
+        XCTAssertEqual(c.listenPort, 7447)  // Int("7447\r") would be nil
+        XCTAssertEqual(c.encryptStore, true)  // "true\r" != "true"
+    }
+
+    func testQuotedHashIsLiteralUnquotedIsComment() throws {
+        // J2 (M66.4): `#` inside quotes is literal; unquoted starts a
+        // comment.
+        let toml = """
+            listen_host = "127.0.0.1"
+            listen_port = 7447
+            log_dir = "/l"
+            model = "weird#name"
+            log_level = info  # inline comment
+            """
+        let c = try AthenaConfig.parse(toml: toml)
+        XCTAssertEqual(c.model, "weird#name")
+        XCTAssertEqual(c.logLevel, "info")
+    }
+
     func testCommittedDeployConfigParses() throws {
         // Guards deploy/athena.toml against schema drift.
         let repoRoot = URL(fileURLWithPath: #filePath)
@@ -426,6 +489,20 @@ final class LaunchdPlistTests: XCTestCase {
             ])
         XCTAssertEqual(d["RunAtLoad"] as? Bool, true)
         XCTAssertEqual(d["Label"] as? String, "me.goodolclint.athena")
+        // NJ2: no configPath ⇒ no EnvironmentVariables key.
+        XCTAssertNil(d["EnvironmentVariables"])
+    }
+
+    func testConfigPathExportsAthenaConfigEnv() {
+        // NJ2 (M66.4): the prefix-correct config path is exported as
+        // ATHENA_CONFIG so the daemon's TOML re-reads resolve to it.
+        let d = LaunchdPlist.dictionary(
+            label: "l", executablePath: "/bin/athena", user: "svc",
+            workingDirectory: "/w", config: cfg(),
+            configPath: "/opt/athena/etc/athena/athena.toml")
+        let env = d["EnvironmentVariables"] as? [String: String]
+        XCTAssertEqual(
+            env?["ATHENA_CONFIG"], "/opt/athena/etc/athena/athena.toml")
     }
 
     func testFullProgramArgumentsOrder() {
