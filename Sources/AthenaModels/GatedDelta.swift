@@ -75,6 +75,17 @@ private func makeGatedDeltaKernel(hasMask: Bool) -> MLXFast.MLXFastKernel? {
                 if (thread_index_in_simdgroup == 0) {
                   y[dv_idx] = static_cast<InT>(out);
                 }
+              } else {
+                // F1: masked (padded / cross-sequence) position. Without
+                // this else the kernel leaves y[dv_idx] UNINITIALIZED for
+                // masked steps (garbage / possible NaN that can poison
+                // downstream). Write a defined 0; state[] carries forward
+                // unchanged (the block is skipped), matching the ops
+                // fallback's `where(mask, newState, oldState)`. Dead code
+                // in the unmasked kernel variant (maskSource == "true").
+                if (thread_index_in_simdgroup == 0) {
+                  y[dv_idx] = static_cast<InT>(0);
+                }
               }
               // Increment data pointers to next time step
               q_ += Hk * Dk;
@@ -296,7 +307,14 @@ func gatedDeltaUpdate(
         state = state.asType(.float32)
     }
 
-    if GatedDeltaKernelManager.shared.kernel != nil {
+    // NF7: the kernel distributes Dk over exactly 32 simd lanes
+    // (`n_per_t = Dk / 32`, integer-truncating). A key head dim that is
+    // not a multiple of 32 would silently drop its trailing `Dk % 32`
+    // state dimensions and produce wrong output with no error. Stock
+    // Qwen3.5 uses Dk=192 (÷32), but the value is config-driven, so route
+    // any non-multiple-of-32 Dk to the ops fallback, which handles an
+    // arbitrary key dimension correctly (slower, but never truncating).
+    if GatedDeltaKernelManager.shared.kernel != nil, Dk % 32 == 0 {
         return gatedDeltaKernel(q: q, k: k, v: v, g: g, beta: beta, state: state, mask: mask)
     }
 

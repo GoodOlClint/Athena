@@ -62,21 +62,28 @@ public class AthenaQwen35MoEModel: AthenaQwen35Model {
             newWeights[key] = value
         }
 
-        for l in 0 ..< languageModel.configuration.hiddenLayers {
-            let prefix = "language_model.model.layers.\(l).mlp"
+        // Split a fused `experts.gate_up_proj` (+ paired `experts.down_proj`)
+        // at a given mlp prefix into the stacked `switch_mlp.{gate,up,down}_
+        // proj.weight` tensors `SparseMoeBlock` binds. Returns true when a
+        // fused layout was present and rewritten.
+        func splitFusedExperts(_ prefix: String) -> Bool {
             let gateUpKey = "\(prefix).experts.gate_up_proj"
-            if let gateUp = newWeights[gateUpKey] {
-                newWeights[gateUpKey] = nil
-                let mid = gateUp.dim(-2) / 2
-                newWeights["\(prefix).switch_mlp.gate_proj.weight"] =
-                    gateUp[.ellipsis, ..<mid, 0...]
-                newWeights["\(prefix).switch_mlp.up_proj.weight"] =
-                    gateUp[.ellipsis, mid..., 0...]
-                if let downProj = newWeights["\(prefix).experts.down_proj"] {
-                    newWeights["\(prefix).experts.down_proj"] = nil
-                    newWeights["\(prefix).switch_mlp.down_proj.weight"] = downProj
-                }
+            guard let gateUp = newWeights[gateUpKey] else { return false }
+            newWeights[gateUpKey] = nil
+            let mid = gateUp.dim(-2) / 2
+            newWeights["\(prefix).switch_mlp.gate_proj.weight"] =
+                gateUp[.ellipsis, ..<mid, 0...]
+            newWeights["\(prefix).switch_mlp.up_proj.weight"] =
+                gateUp[.ellipsis, mid..., 0...]
+            if let downProj = newWeights["\(prefix).experts.down_proj"] {
+                newWeights["\(prefix).experts.down_proj"] = nil
+                newWeights["\(prefix).switch_mlp.down_proj.weight"] = downProj
             }
+            return true
+        }
+
+        for l in 0 ..< languageModel.configuration.hiddenLayers {
+            _ = splitFusedExperts("language_model.model.layers.\(l).mlp")
         }
 
         // MTP layer(s): unlike the backbone layers (shipped pre-fused as
@@ -92,6 +99,14 @@ public class AthenaQwen35MoEModel: AthenaQwen35Model {
         if cfg.numExperts > 0 {
             for l in 0 ..< cfg.mtpNumHiddenLayers {
                 let prefix = "language_model.mtp.layers.\(l).mlp"
+                // F4: some MTP-MoE checkpoints ship the MTP experts
+                // PRE-FUSED as `experts.gate_up_proj` (the backbone
+                // layout) rather than per-expert. Detect & split that the
+                // same way; without this the fused MTP tensor never maps
+                // to `switch_mlp.*` and the checkpoint is unloadable. Only
+                // fall through to the per-expert fold when no fused tensor
+                // is present.
+                if splitFusedExperts(prefix) { continue }
                 for proj in ["gate_proj", "up_proj", "down_proj"] {
                     let perExpert = (0 ..< cfg.numExperts).map {
                         "\(prefix).experts.\($0).\(proj).weight"

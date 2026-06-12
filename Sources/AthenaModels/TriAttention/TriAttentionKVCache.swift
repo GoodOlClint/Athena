@@ -30,6 +30,17 @@ public final class TriAttentionKVCache: KVCache {
     public var offset: Int = 0
     public var maxSize: Int? { nil }
 
+    /// True absolute sequence position = total tokens ever appended,
+    /// monotonic across eviction (`compress()` never decrements it). RoPE
+    /// must key off THIS, not `offset`: keys are stored post-RoPE, so
+    /// retained keys carry their original absolute rotations, while
+    /// `offset` is compacted down to the retained-count by `compress()`.
+    /// Driving RoPE off the regressed `offset` would rotate new queries/
+    /// keys at the wrong (too-small) position and corrupt attention the
+    /// moment eviction fires (NF1). `offset` is kept purely for stored-
+    /// array slicing (`current()`/`state`) and causal-mask extent.
+    private var absolutePosition: Int = 0
+
     internal var keys: MLXArray?
     internal var values: MLXArray?
 
@@ -42,6 +53,13 @@ public final class TriAttentionKVCache: KVCache {
     public init(config: TriAttentionConfig = .init()) {
         self.config = config
     }
+
+    /// RoPE rotation is applied at the absolute sequence position. The
+    /// `KVCache` protocol default is `.scalar(offset)`, but `offset` here
+    /// is the eviction-compacted stored length, which regresses after the
+    /// first `compress()` — so we override to the monotonic absolute
+    /// position (NF1).
+    public var ropeOffset: RoPEOffset { .scalar(absolutePosition) }
 
     public func innerState() -> [MLXArray] {
         [keys, values].compactMap { $0 }
@@ -58,6 +76,12 @@ public final class TriAttentionKVCache: KVCache {
             self.values = newValues
         }
         offset = self.keys!.dim(2)
+        // Advance the true sequence position by however many tokens this
+        // forward appended (one in decode, the whole prompt in prefill).
+        // `ropeOffset` (read by the attention layer on the NEXT forward)
+        // keys off this, so it must reflect the absolute position, not
+        // the eviction-compacted `offset` (NF1).
+        absolutePosition += newKeys.dim(2)
 
         if !sawPrefill {
             // First pass = the prompt; pin it (the substrate
@@ -85,7 +109,10 @@ public final class TriAttentionKVCache: KVCache {
     private func shouldCompress() -> Bool {
         let effective =
             config.prefillPin ? max(0, offset - prefixLength) : offset
-        return effective >= config.kvBudget
+        // `divideLength >= 1` guard: a restored/malformed metaState could
+        // carry 0 (NF9), which would trap on `% config.divideLength`.
+        return config.divideLength > 0
+            && effective >= config.kvBudget
             && stepCount > 0
             && stepCount % config.divideLength == 0
     }
@@ -124,6 +151,10 @@ public final class TriAttentionKVCache: KVCache {
     public func trim(_ n: Int) -> Int {
         let trimmed = min(offset, n)
         offset -= trimmed
+        // A trim rolls the sequence back (speculative reject / restore), so
+        // the absolute RoPE position regresses with it — otherwise new
+        // tokens after a trim would rotate at a stale, too-large position.
+        absolutePosition -= trimmed
         return trimmed
     }
 
@@ -156,8 +187,10 @@ public final class TriAttentionKVCache: KVCache {
     }
 
     /// `[kvBudget, divideLength, scoreAggregation, prefillPin, offset,
-    /// prefixLength, sawPrefill, stepCount]` — fully reconstructs the
-    /// eviction policy and bookkeeping. The substrate's prompt-cache
+    /// prefixLength, sawPrefill, stepCount, absolutePosition]` — fully
+    /// reconstructs the eviction policy and bookkeeping (the 9th field,
+    /// absolutePosition, is the NF1 RoPE counter; an 8-field legacy meta
+    /// defaults it to `offset`). The substrate's prompt-cache
     /// registry (`cacheClassName`/`restoreCacheFromMetaState`) is
     /// `private` + hardcoded and Athena's standard path does not invoke
     /// the substrate persistence, so this cache is deliberately
@@ -175,6 +208,7 @@ public final class TriAttentionKVCache: KVCache {
                 String(prefixLength),
                 String(sawPrefill),
                 String(stepCount),
+                String(absolutePosition),
             ]
         }
         set { applyMetaState(newValue) }
@@ -199,6 +233,10 @@ public final class TriAttentionKVCache: KVCache {
         prefixLength = prefix
         sawPrefill = m[6] == "true"
         stepCount = step
+        // 9th field is the NF1 absolute-position counter; an older 8-field
+        // meta predates it — fall back to `offset` (correct when no
+        // eviction had yet occurred when the state was captured).
+        absolutePosition = (m.count >= 9 ? Int(m[8]) : nil) ?? off
     }
 
     /// Canonical round-trip: parse `metaState` first (it owns offset and
@@ -217,6 +255,31 @@ public final class TriAttentionKVCache: KVCache {
         let cache = TriAttentionKVCache()
         cache.metaState = metaState
         cache.state = state
+        // NF9: the metaState fields are untrusted on restore. Validate the
+        // geometry now (loudly) rather than letting a bad offset slice out
+        // of bounds in current()/state, or a 0 divideLength trap in
+        // shouldCompress, on the first decode of the restored worker.
+        guard cache.config.divideLength >= 1 else {
+            throw CacheError(
+                message: "TriAttentionKVCache: divideLength must be >= 1")
+        }
+        guard cache.offset >= 0, cache.prefixLength >= 0,
+            cache.prefixLength <= cache.offset
+        else {
+            throw CacheError(
+                message:
+                    "TriAttentionKVCache: require 0 <= prefixLength <= offset")
+        }
+        guard cache.absolutePosition >= cache.offset else {
+            throw CacheError(
+                message:
+                    "TriAttentionKVCache: absolutePosition must be >= offset")
+        }
+        if let k = cache.keys, cache.offset > k.dim(2) {
+            throw CacheError(
+                message:
+                    "TriAttentionKVCache: offset exceeds bound array length")
+        }
         return cache
     }
 
@@ -237,6 +300,7 @@ public final class TriAttentionKVCache: KVCache {
     public func copy() -> any KVCache {
         let new = TriAttentionKVCache(config: config)
         new.offset = offset
+        new.absolutePosition = absolutePosition
         new.prefixLength = prefixLength
         new.sawPrefill = sawPrefill
         new.stepCount = stepCount

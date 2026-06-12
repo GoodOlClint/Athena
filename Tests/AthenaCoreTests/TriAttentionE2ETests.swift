@@ -2,6 +2,7 @@ import AthenaCore
 import AthenaModels
 import Foundation
 import MLX
+import MLXLMCommon
 import XCTest
 
 @testable import AthenaLLM
@@ -117,6 +118,24 @@ final class TriAttentionE2ETests: XCTestCase {
         XCTAssertGreaterThanOrEqual(
             cache.offset, prefill, "prefill was evicted")
         XCTAssertEqual(Int(cache.metaState[5]), prefill)
+
+        // NF1: RoPE must rotate at the true absolute position (every token
+        // ever appended = prefill + 40), NOT the eviction-compacted offset.
+        // Pre-fix this regressed to `offset` and corrupted attention once
+        // eviction fired. ropeOffset and the persisted absolutePosition
+        // (metaState[8]) must both equal the absolute count, strictly above
+        // the bounded offset.
+        guard case .scalar(let rope) = cache.ropeOffset else {
+            return XCTFail("expected a scalar ropeOffset")
+        }
+        XCTAssertEqual(
+            rope, prefill + 40,
+            "NF1: ropeOffset must track the absolute sequence position")
+        XCTAssertGreaterThan(
+            rope, cache.offset,
+            "NF1: absolute position must exceed the compacted offset "
+                + "after eviction")
+        XCTAssertEqual(Int(cache.metaState[8]), prefill + 40)
 
         let state = cache.state
         XCTAssertEqual(state.count, 2)

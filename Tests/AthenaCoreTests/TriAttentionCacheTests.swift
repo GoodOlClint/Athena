@@ -11,7 +11,8 @@ import AthenaModels
 final class TriAttentionCacheTests: XCTestCase {
 
     func testMetaStateRoundTripsConfigAndBookkeeping() throws {
-        let meta = ["4096", "64", "max", "false", "0", "0", "false", "0"]
+        // 9th field = the NF1 absolutePosition RoPE counter.
+        let meta = ["4096", "64", "max", "false", "0", "0", "false", "0", "0"]
         let cache = try TriAttentionKVCache.fromState(
             state: [], metaState: meta)
         XCTAssertEqual(cache.config.kvBudget, 4096)
@@ -24,7 +25,11 @@ final class TriAttentionCacheTests: XCTestCase {
     }
 
     func testMetaStatePreservesPrefillAndStepCounters() throws {
-        let meta = ["2048", "128", "mean", "true", "300", "256", "true", "44"]
+        // Post-eviction: 512 tokens seen (absolutePosition), 300 retained
+        // (offset) — the NF1 split that keeps RoPE on the absolute position.
+        let meta = [
+            "2048", "128", "mean", "true", "300", "256", "true", "44", "512",
+        ]
         let cache = try TriAttentionKVCache.fromState(
             state: [], metaState: meta)
         XCTAssertTrue(cache.config.prefillPin)
@@ -33,9 +38,50 @@ final class TriAttentionCacheTests: XCTestCase {
         XCTAssertEqual(cache.metaState, meta)
     }
 
+    /// A legacy 8-field meta (predating NF1) loads, defaulting
+    /// absolutePosition to offset, and re-emits in the 9-field format.
+    func testLegacyEightFieldMetaDefaultsAbsolutePosition() throws {
+        let legacy = ["2048", "128", "mean", "true", "120", "16", "true", "9"]
+        let cache = try TriAttentionKVCache.fromState(
+            state: [], metaState: legacy)
+        XCTAssertEqual(cache.offset, 120)
+        XCTAssertEqual(cache.metaState, legacy + ["120"])
+    }
+
     func testFromStateRejectsTruncatedMetaState() {
         XCTAssertThrowsError(
             try TriAttentionKVCache.fromState(
                 state: [], metaState: ["2048", "128", "mean"]))
+    }
+
+    // MARK: - NF9 geometry validation on restore
+
+    func testFromStateRejectsZeroDivideLength() {
+        // divideLength 0 would trap on `% config.divideLength`.
+        XCTAssertThrowsError(
+            try TriAttentionKVCache.fromState(
+                state: [],
+                metaState: [
+                    "2048", "0", "mean", "true", "10", "0", "true", "1", "10",
+                ]))
+    }
+
+    func testFromStateRejectsPrefixLengthExceedingOffset() {
+        XCTAssertThrowsError(
+            try TriAttentionKVCache.fromState(
+                state: [],
+                metaState: [
+                    "2048", "128", "mean", "true", "10", "20", "true", "1", "10",
+                ]))
+    }
+
+    func testFromStateRejectsAbsolutePositionBelowOffset() {
+        // absolutePosition must never be < the retained-count offset.
+        XCTAssertThrowsError(
+            try TriAttentionKVCache.fromState(
+                state: [],
+                metaState: [
+                    "2048", "128", "mean", "true", "300", "16", "true", "1", "10",
+                ]))
     }
 }

@@ -857,10 +857,10 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                 // TriAttention is inert on the MTP/speculative + guided
                 // paths: eviction can't un-mix the GDN/Mamba recurrent
                 // state, and these paths must stay bit-identical greedy.
-                // Clear any policy a prior standard request left on the
-                // shared model instance before building caches here.
-                model.triAttentionEviction = nil
-
+                // Nothing to clear — this path never binds
+                // `TriAttentionRequestPolicy.current`, so the caches these
+                // generators build (`newCache(parameters: nil)`) read the
+                // task-local's default `nil` ⇒ `KVCacheSimple` (NF2).
                 let ids: [Int]
                 var cachedTokens = 0
                 if greedyEligible && model.hasMTPHead {
@@ -952,19 +952,15 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             throw AthenaError.moduleLoadFailed(
                 .llm, reason: "generate called before load")
         }
-        let userInput = UserInput(
-            chat: Self.chatMessages(messages), tools: tools,
-            additionalContext: chatTemplateKwargs)
-        let lmInput = try await container.prepare(input: userInput)
         // The standard attention path is the ONLY place TriAttention
-        // eviction applies. Set it on the model so the substrate's
-        // newCache(parameters:) builds evicting attention caches; nil
-        // (any non-triattention knob) leaves KVCacheSimple intact.
+        // eviction applies. NF2: bind the policy as a request-scoped
+        // task-local around prepare+generate (below) rather than stashing
+        // it on the shared model instance — the substrate's
+        // newCache(parameters:) reads it when it builds the per-layer
+        // caches. nil (any non-triattention knob) ⇒ KVCacheSimple. The
+        // `sending` UserInput/LMInput are constructed and consumed entirely
+        // inside the closure so no non-Sendable value crosses its boundary.
         let evictionPolicy = params.kvCompression.eviction
-        try await container.perform { (ctx: ModelContext) in
-            (ctx.model as? AthenaQwen35Model)?.triAttentionEviction =
-                evictionPolicy
-        }
         let gen = params.kvCompression.generation
         // M24.3: per-request max_tokens/temperature override the loaded
         // defaults (a negative/zero temperature override is ignored).
@@ -986,7 +982,19 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             kvQuantizationScheme: gen.scheme,
             temperature: temp,
             topP: tp)
-        return try await container.generate(input: lmInput, parameters: gp)
+        // NF2: the eviction policy is visible to the substrate's eager,
+        // same-Task `newCache` call inside `generate`; the deferred decode
+        // loop never needs it, so binding around this call is sufficient.
+        return try await TriAttentionRequestPolicy.$current.withValue(
+            evictionPolicy
+        ) {
+            let userInput = UserInput(
+                chat: Self.chatMessages(messages), tools: tools,
+                additionalContext: chatTemplateKwargs)
+            let lmInput = try await container.prepare(input: userInput)
+            return try await container.generate(
+                input: lmInput, parameters: gp)
+        }
     }
 
     /// A positive per-request `max_tokens` override wins; otherwise the

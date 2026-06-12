@@ -663,6 +663,28 @@ public class AthenaQwen35TextModelInner: Module {
     }
 }
 
+/// Request-scoped TriAttention eviction policy (NF2 / baseline C2).
+///
+/// Replaces the former shared `var triAttentionEviction` on the model
+/// instance: that was per-request transient state stashed on a long-lived
+/// shared model, written in one `container.perform` and consumed LATER in
+/// a separate hop when the substrate's `TokenIterator` built the caches via
+/// `newCache`. A concurrent structured/speculative request could clear it
+/// in the await gap between, so the standard request silently built
+/// `KVCacheSimple` instead of `TriAttentionKVCache` (eviction lost, KV
+/// grows unbounded) — a last-writer-wins race on shared instance state.
+///
+/// Binding the policy as a `@TaskLocal` around the `container.generate`
+/// call makes it per-request by construction: `newCache` is invoked
+/// EAGERLY and synchronously inside that call (TokenIterator init, same
+/// Task — no detached hop intervenes before it), so the bound value is
+/// reliably visible. The default `nil` ⇒ `KVCacheSimple`, so the
+/// speculative/guided paths — which never bind it — are eviction-inert
+/// with no explicit clear needed.
+public enum TriAttentionRequestPolicy {
+    @TaskLocal public static var current: TriAttentionConfig?
+}
+
 public class AthenaQwen35TextModel: Module, LLMModel, KVCacheDimensionProvider {
     public let vocabularySize: Int
     public let kvHeads: [Int]
@@ -676,13 +698,6 @@ public class AthenaQwen35TextModel: Module, LLMModel, KVCacheDimensionProvider {
     /// checkpoint declares `mtp_num_hidden_layers > 0`. Loaded in M2.2a;
     /// wired into generation in M2.2c.
     @ModuleInfo(key: "mtp") var mtp: AthenaQwen35MTPModule?
-
-    /// When non-nil, `newCache` builds self-evicting `TriAttentionKVCache`
-    /// for attention layers (the M21 norm-only eviction seam). Set only
-    /// by the standard generation path; the MTP/speculative path clears
-    /// it so eviction is inert there (it can't un-mix GDN recurrent
-    /// state). Not a model weight — plain transient generation state.
-    public var triAttentionEviction: TriAttentionConfig?
 
     public init(_ args: AthenaQwen35TextConfiguration) {
         self.configuration = args
@@ -753,7 +768,10 @@ public class AthenaQwen35TextModel: Module, LLMModel, KVCacheDimensionProvider {
             if layer.isLinear {
                 return MambaCache()
             }
-            if let evict = triAttentionEviction {
+            // Per-request eviction policy (NF2): nil ⇒ plain KVCacheSimple.
+            // Read EAGERLY here inside the substrate's TokenIterator init,
+            // same Task as the standard path's `container.generate` bind.
+            if let evict = TriAttentionRequestPolicy.current {
                 return TriAttentionKVCache(config: evict)
             }
             return KVCacheSimple()
@@ -851,13 +869,6 @@ public class AthenaQwen35Model: Module, LLMModel, KVCacheDimensionProvider {
 
     public func newCache(parameters: GenerateParameters?) -> [KVCache] {
         languageModel.newCache(parameters: parameters)
-    }
-
-    /// M21 norm-only TriAttention eviction policy (set-through to the
-    /// text model). Set by the standard path; cleared by the MTP path.
-    public var triAttentionEviction: TriAttentionConfig? {
-        get { languageModel.triAttentionEviction }
-        set { languageModel.triAttentionEviction = newValue }
     }
 
     // MARK: - MTP (M2.2b) passthrough — the speculative path uses these.

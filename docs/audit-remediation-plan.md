@@ -138,13 +138,14 @@ Re-verify while here: B6*, B7*, B8*, B10–B13, B15*, B18–B23, H6*, H14*, J5, 
 
 ## M67 — Inference correctness (silent wrong output)
 
-### M67.1 — TriAttention / models
-- [ ] NF1 (High) RoPE offset must keep absolute position after eviction (not `keepIndices.count`)
-- [ ] NF2 request-scoped eviction policy passed as parameter, not shared model state (subsumes baseline C2)
-- [ ] F1 Metal kernel `else { y = 0 }` on masked path
-- [ ] F4 detect & split fused `gate_up_proj` on MTP-MoE
-- [ ] NF9 validate `fromState`/`applyMetaState` restored geometry
-- [ ] NF7 reject/round non-multiple-of-8 `linear_key_head_dim` instead of silent truncate
+### M67.1 — TriAttention / models ✅ v0.10.129
+- [x] NF1 (High) `TriAttentionKVCache` now tracks a monotonic `absolutePosition` (total tokens ever appended, never decremented by `compress()`, decremented by `trim()`) and overrides `ropeOffset` to drive RoPE off it instead of the eviction-compacted `offset`. Keys are stored post-RoPE, so retained keys carry their original absolute rotations; pre-fix, `compress()` regressing `offset` rotated new q/k at a too-small position and corrupted attention the moment eviction fired. `offset` is now purely stored-array slice/mask extent. Persisted as a 9th `metaState` field (legacy 8-field meta defaults it to `offset`). New cache-level assertion in `TriAttentionE2ETests.testEvictionBoundsCacheAndPopulatedRoundTrip` (ropeOffset == absolute, > compacted offset) (v0.10.129)
+- [x] NF2 request-scoped eviction policy is now a `@TaskLocal TriAttentionRequestPolicy.current` bound around `container.generate` in `beginGeneration`, read EAGERLY by the substrate's same-Task `newCache` (TokenIterator init). Removed the shared `var triAttentionEviction` from both model classes — the former set-in-one-perform / consume-in-a-separate-hop split let a concurrent structured/speculative request clobber it across the await gap (last-writer-wins → standard request silently built `KVCacheSimple`, KV grew unbounded). Default `nil` ⇒ `KVCacheSimple`, so the speculative/guided paths (which never bind it) are eviction-inert with no explicit clear. Subsumes baseline C2 (v0.10.129)
+- [x] F1 masked gated-delta Metal kernel now writes a defined `0` on the masked branch (`else { y[dv_idx] = 0 }`) instead of leaving `y` uninitialized for padded/cross-seq positions (garbage / NaN-poison risk); state carries forward unchanged, matching the ops fallback. Dead code in the unmasked kernel variant (v0.10.129)
+- [x] F4 `AthenaQwen35MoEModel.sanitize` extracted a `splitFusedExperts(prefix:)` helper and now applies it to the MTP-MoE layers too: a fused `mtp.layers.L.mlp.experts.gate_up_proj` checkpoint is split into `switch_mlp.{gate,up,down}_proj.weight` (was: only per-expert MTP handled → a fused-MTP checkpoint was unloadable). Per-expert layout still falls through unchanged (v0.10.129)
+- [x] NF9 `fromState` now validates restored geometry loudly (throws `CacheError`): `divideLength >= 1`, `0 <= prefixLength <= offset`, `absolutePosition >= offset`, `offset <= keys.dim(2)`. `shouldCompress()` also guards `divideLength > 0` against a `% 0` trap on the live setter path. New CI-safe rejection tests in `TriAttentionCacheTests` (zero-divide, prefix>offset, absolute<offset) (v0.10.129)
+- [x] NF7 `gatedDeltaUpdate` routes a non-multiple-of-32 `Dk` (linear_key_head_dim) to the `gatedDeltaOps` fallback (correct for any Dk) instead of the kernel, whose `n_per_t = Dk/32` over 32 simd lanes would silently truncate the trailing `Dk % 32` state dims. Stock Qwen3.5 Dk=192 (÷32) keeps the kernel path. (Finding said ÷32, not ÷8 — kernel reality.) (v0.10.129)
+- Re-verified while here: **F6** (createSSMMask per-call alloc incl. n==1) — confirmed still valid; it's a substrate-side perf item (not an AthenaModels function), correctly deferred to M69 (perf), not a correctness fix.
 
 ### M67.2 — Embeddings
 - [ ] NI1 (High) pass attention mask to pooling (subsumes baseline I1's id==pad case — mask from real row lengths)
