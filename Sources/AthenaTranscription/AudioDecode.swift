@@ -7,21 +7,35 @@ import Foundation
 public enum AudioDecode {
     public static let sampleRate = 16_000
 
+    /// Hard ceiling on decoded samples (~4 h @ 16 kHz ≈ 0.9 GB of
+    /// `Float`). Bounds a decompression-bomb file (a tiny crafted input
+    /// that decodes to an enormous PCM stream) before it exhausts host
+    /// memory (D4). Comfortably above any legitimate transcription clip,
+    /// including the 1-hour streaming path; overridable per call.
+    public static let defaultMaxSamples = sampleRate * 3600 * 4
+
     public enum DecodeError: Error, CustomStringConvertible {
         case open(String)
         case converterInit
         case convert(String)
+        case tooLong(maxSamples: Int)
         public var description: String {
             switch self {
             case .open(let s): return "audio open failed: \(s)"
             case .converterInit: return "audio converter init failed"
             case .convert(let s): return "audio convert failed: \(s)"
+            case .tooLong(let m):
+                return "audio exceeds the \(m)-sample (~\(m / sampleRate)s) "
+                    + "decode limit"
             }
         }
     }
 
-    /// Decode `url` → `[Float]` mono @ 16 kHz, range ~[-1, 1].
-    public static func pcm16kMono(from url: URL) throws -> [Float] {
+    /// Decode `url` → `[Float]` mono @ 16 kHz, range ~[-1, 1]. Decoding
+    /// stops with `.tooLong` once `maxSamples` is exceeded.
+    public static func pcm16kMono(
+        from url: URL, maxSamples: Int = defaultMaxSamples
+    ) throws -> [Float] {
         let file: AVAudioFile
         do {
             file = try AVAudioFile(forReading: url)
@@ -77,9 +91,15 @@ public enum AudioDecode {
 
         var out: [Float] = []
         // Generous reserve: input frames scaled by the resample ratio.
-        out.reserveCapacity(
-            Int(Double(file.length) * Double(sampleRate)
-                / inFormat.sampleRate) + sampleRate)
+        // Guard the header-driven estimate — a crafted `file.length` or a
+        // zero/tiny input sample rate could make the Double non-finite or
+        // overflow the `Int` cast (a trap) or reserve gigabytes. Clamp to
+        // `maxSamples` and never feed a non-finite value to `Int()` (D4).
+        let inSR = inFormat.sampleRate > 0 ? inFormat.sampleRate : Double(sampleRate)
+        let estimate = (Double(file.length) * Double(sampleRate) / inSR).rounded()
+        let reserve = estimate.isFinite
+            ? Int(min(estimate, Double(maxSamples))) : maxSamples
+        out.reserveCapacity(reserve + sampleRate)
 
         let chunkFrames: AVAudioFrameCount = 1 << 15
         while true {
@@ -98,6 +118,11 @@ public enum AudioDecode {
                 out.append(
                     contentsOf: UnsafeBufferPointer(
                         start: ch[0], count: Int(outBuf.frameLength)))
+                // Decompression-bomb guard: stop as soon as the decoded
+                // stream passes the ceiling (D4).
+                if out.count > maxSamples {
+                    throw DecodeError.tooLong(maxSamples: maxSamples)
+                }
             }
             if status == .endOfStream || status == .error { break }
             if status == .inputRanDry && outBuf.frameLength == 0 { break }

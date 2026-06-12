@@ -251,6 +251,26 @@ struct ChatCompletionRequest: Codable {
         }
         return nil
     }
+
+    /// G4: validate a structured request up front. A `response_format` of
+    /// `json_schema` whose `schema` is missing or unserializable must 400
+    /// — never fall through to `effectiveSchema() == nil` and stream
+    /// unconstrained output (a silent breach of the structured-output
+    /// contract). Returns a problem description for the malformed case,
+    /// else nil. Tools take precedence and carry their own schema, so an
+    /// in-effect tool call is fine.
+    func structuredRequestError() -> String? {
+        guard response_format?.type == "json_schema" else { return nil }
+        if let ts = selectedTools(), !ts.isEmpty { return nil }
+        if StructuredSchema.schemaJSON(
+            responseFormatType: "json_schema",
+            jsonSchema: response_format?.json_schema?.schema) == nil
+        {
+            return "response_format.json_schema requires a valid, "
+                + "serializable 'schema' object"
+        }
+        return nil
+    }
 }
 
 struct ChatChoice: Codable {

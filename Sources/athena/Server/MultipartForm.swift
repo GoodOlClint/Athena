@@ -12,6 +12,12 @@ struct MultipartForm {
     }
     let parts: [Part]
 
+    /// Cap on the number of inter-boundary segments parsed from one body.
+    /// A real transcription form is one `file` part plus a handful of
+    /// short text fields; this bounds a body packed with boundaries from
+    /// spawning unbounded segment/part work (A9).
+    static let maxParts = 256
+
     /// `boundary` is the value from the `Content-Type` header
     /// (`multipart/form-data; boundary=...`).
     init?(body: Data, boundary: String) {
@@ -19,24 +25,19 @@ struct MultipartForm {
         let crlf = Data("\r\n".utf8)
         let headerSep = Data("\r\n\r\n".utf8)
 
-        // Split on the boundary delimiter.
+        // Split on the boundary delimiter using the stdlib substring
+        // search (`firstRange`) instead of an O(n·m) per-byte compare on
+        // the request thread, and cap the segment count (A9).
         var segments: [Data] = []
         var searchStart = body.startIndex
-        var cursor = body.startIndex
-        var lastCut = body.startIndex
-        let bLen = dashBoundary.count
-        while cursor <= body.endIndex - bLen {
-            if body[cursor ..< cursor + bLen] == dashBoundary {
-                if cursor > lastCut {
-                    segments.append(body[lastCut ..< cursor])
-                }
-                cursor += bLen
-                lastCut = cursor
-                searchStart = cursor
-            } else {
-                cursor += 1
+        while segments.count < Self.maxParts,
+            let r = body.firstRange(
+                of: dashBoundary, in: searchStart ..< body.endIndex)
+        {
+            if r.lowerBound > searchStart {
+                segments.append(body[searchStart ..< r.lowerBound])
             }
-            _ = searchStart
+            searchStart = r.upperBound
         }
 
         var out: [Part] = []

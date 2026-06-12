@@ -725,6 +725,17 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                 metadata: ["function": "runSpeculative"])
         }
         let vocabTokens = cachedVocabTokens
+        // NC2/G4 fail-closed: a structured request whose guide cannot be
+        // built must 400 — never stream unconstrained text with a 200. If
+        // the resident model's vocabulary can't be resolved (e.g. a
+        // non-Qwen substrate arch whose config.json lacks vocab_size),
+        // refuse here, before either the MTP or substrate dispatch branch
+        // can run guide-less.
+        if schemaJSON != nil, vocabTokens == nil {
+            throw AthenaError.structuredOutputUnavailable(
+                detail: "the resident model's vocabulary could not be "
+                    + "resolved to enforce the requested JSON schema")
+        }
 
         // M53 — build (once per model) the structured vocabulary + parser
         // factory, then a FRESH per-request `StructuredIndex` from it. The
@@ -762,8 +773,17 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                     """,
                     metadata: ["function": "runSpeculative"])
             }
-            return try StructuredIndex(
-                jsonSchema: schemaJSON, vocabulary: vocabulary)
+            // A client schema that won't compile is a 400, not a 500 or a
+            // silent unconstrained fall-through (G4/NC2).
+            do {
+                return try StructuredIndex(
+                    jsonSchema: schemaJSON, vocabulary: vocabulary)
+            } catch {
+                throw AthenaError.structuredOutputUnavailable(
+                    detail:
+                        "the requested JSON schema could not be compiled: "
+                        + "\(error)")
+            }
         }()
 
         let cfgVocab = configVocabSize

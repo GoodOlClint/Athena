@@ -68,6 +68,25 @@ final class AthenaErrorTests: XCTestCase {
         XCTAssertTrue(e.message.contains("9"))
         XCTAssertTrue(e.message.contains("4"))
     }
+
+    // M65.3 — the two input-cap / fail-closed error classes are 400s
+    // with stable codes and informative messages.
+    func testInputTooLongIs400() {
+        let e = AthenaError.inputTooLong(
+            module: .textEmbedding, tokens: 99_000, maxTokens: 32_768)
+        XCTAssertEqual(e.httpStatus, 400)
+        XCTAssertEqual(e.code, "input_too_long")
+        XCTAssertTrue(e.message.contains("99000"))
+        XCTAssertTrue(e.message.contains("32768"))
+    }
+
+    func testStructuredOutputUnavailableIs400() {
+        let e = AthenaError.structuredOutputUnavailable(
+            detail: "vocab unresolved")
+        XCTAssertEqual(e.httpStatus, 400)
+        XCTAssertEqual(e.code, "structured_output_unavailable")
+        XCTAssertTrue(e.message.contains("vocab unresolved"))
+    }
 }
 
 /// Brief 4b — the prompt-cache cap is owned by the governor (config

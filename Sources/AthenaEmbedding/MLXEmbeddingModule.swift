@@ -188,6 +188,12 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
     /// the set throws `modelNotAvailable` (400) — never a silent
     /// wrong-dimension fallback, never an on-request download. The
     /// returned batch reports the id actually served.
+    /// Per-input token ceiling (NI4). Matches the per-batch `tokenBudget`
+    /// below: a single input may be as large as one full bucket of work,
+    /// but no larger — above this it's rejected with a 400 rather than
+    /// driving an unbounded O(L²) forward pass via a singleton bucket.
+    static let maxInputTokens = 32_768
+
     public func embed(_ texts: [String], model: String? = nil) async throws
         -> EmbeddingBatch
     {
@@ -213,10 +219,24 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
             return EmbeddingBatch(
                 vectors: [], promptTokens: 0, model: target)
         }
-        return await container.perform { ctx in
+        return try await container.perform { ctx in
             let tokenizer = ctx.tokenizer
             let encoded = texts.map {
                 tokenizer.encode(text: $0, addSpecialTokens: true)
+            }
+            // NI4: reject any single input above the per-input token
+            // ceiling with a 400, before padding/forward. A lone oversized
+            // input otherwise gets its own singleton bucket — bypassing the
+            // per-batch token budget below — and drives an unbounded
+            // O(L²) forward pass on a RoPE embedder (remote OOM/compute
+            // DoS); OpenAI likewise 400s over-length input rather than
+            // returning a silently-truncated vector.
+            if let longest = encoded.map(\.count).max(),
+                longest > Self.maxInputTokens
+            {
+                throw AthenaError.inputTooLong(
+                    module: .textEmbedding, tokens: longest,
+                    maxTokens: Self.maxInputTokens)
             }
             let promptTokens = encoded.reduce(0) { $0 + $1.count }
             let pad = tokenizer.eosTokenId ?? 0

@@ -875,6 +875,16 @@ struct AthenaServer {
             return Self.classified(error, module: .llm)
         }
 
+        // G4 fail-closed: a `response_format: json_schema` with a
+        // missing/unserializable schema is a 400 here, never a silent
+        // fall-through to unconstrained output.
+        if let problem = body.structuredRequestError() {
+            return Self.error(
+                status: .badRequest, message: problem,
+                type: "invalid_request_error",
+                code: "invalid_response_format")
+        }
+
         let created = Int(Date().timeIntervalSince1970)
         let id = "chatcmpl-\(UUID().uuidString)"
         let effective = body.effectiveSchema()
@@ -2762,6 +2772,11 @@ struct AthenaServer {
                 return (nil, e.message)
             } catch {
                 return (nil, String(describing: error))
+            }
+            // G4 fail-closed (queued path): a json_schema job with no
+            // usable schema errors the job instead of running unconstrained.
+            if let problem = req.structuredRequestError() {
+                return (nil, problem)
             }
             let effective = req.effectiveSchema()
             let collected: GenCollected

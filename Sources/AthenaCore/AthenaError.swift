@@ -39,6 +39,19 @@ public enum AthenaError: Error, Sendable, Equatable {
     /// for embeddings would return wrong-dimension vectors, and never an
     /// arbitrary on-request download.
     case modelNotAvailable(requested: String, available: [String])
+    /// A single embedding input exceeds the per-input token ceiling. A
+    /// client error (400, OpenAI-style "maximum context length") — never
+    /// a silently-truncated vector or an unbounded O(L²) forward pass
+    /// (one oversized input would otherwise bypass the batch token
+    /// budget via its own singleton bucket).
+    case inputTooLong(module: ModuleID, tokens: Int, maxTokens: Int)
+    /// A structured-output request (`response_format`/`json_schema`)
+    /// could not be turned into an enforceable guide — the resident
+    /// model's vocabulary can't be resolved, or the schema won't
+    /// compile. A client error (400) — NEVER silently fall through to
+    /// unconstrained output (the structured-output contract breach G4/NC2
+    /// were meant to eliminate).
+    case structuredOutputUnavailable(detail: String)
 
     /// HTTP status the serve path should return for this error.
     public var httpStatus: Int {
@@ -52,6 +65,8 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .audioSegmentInvalid: return 400
         case .requestTimedOut: return 504
         case .modelNotAvailable: return 400
+        case .inputTooLong: return 400
+        case .structuredOutputUnavailable: return 400
         }
     }
 
@@ -67,6 +82,8 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .audioSegmentInvalid: return "audio_segment_invalid"
         case .requestTimedOut: return "inference_timeout"
         case .modelNotAvailable: return "model_not_available"
+        case .inputTooLong: return "input_too_long"
+        case .structuredOutputUnavailable: return "structured_output_unavailable"
         }
     }
 
@@ -117,6 +134,13 @@ public enum AthenaError: Error, Sendable, Equatable {
             return "Model '\(requested)' is not available. Configured "
                 + "models: "
                 + "\(available.dedupedCaseInsensitive().joined(separator: ", "))."
+        case let .inputTooLong(module, tokens, maxTokens):
+            return "Input for \(module.rawValue) is \(tokens) tokens, "
+                + "above the \(maxTokens)-token per-input maximum. "
+                + "Shorten the input or split it into multiple requests."
+        case let .structuredOutputUnavailable(detail):
+            return "Structured output could not be enforced for this "
+                + "request: \(detail)."
         }
     }
 

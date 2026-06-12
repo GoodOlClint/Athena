@@ -156,9 +156,25 @@ public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule,
 
         var out: [SpeakerSegmentEmbedding] = []
         out.reserveCapacity(reqs.count)
+        // Convert seconds → sample index with the clamp done in the
+        // Double domain BEFORE the Int cast: `Int(Double)` traps on
+        // non-finite/out-of-range input, so a tiny caller-supplied scalar
+        // like end=1e30 would abort the whole daemon (ND1). After this,
+        // the cast only ever runs on a value already in [0, pcm.count].
+        func sampleIndex(_ seconds: Double) -> Int {
+            let n = (seconds * sr).rounded()
+            if n <= 0 { return 0 }
+            if n >= Double(pcm.count) { return pcm.count }
+            return Int(n)
+        }
         for r in reqs {
-            let s = max(0, Int((r.start * sr).rounded()))
-            let e = min(pcm.count, Int((r.end * sr).rounded()))
+            guard r.start.isFinite, r.end.isFinite else {
+                throw AthenaError.audioSegmentInvalid(
+                    module: .speakerEmbedding,
+                    detail: "segment bounds must be finite seconds")
+            }
+            let s = sampleIndex(r.start)
+            let e = sampleIndex(r.end)
             guard e > s else {
                 // Classified 400 — never a silent zero embedding
                 // (M24.4a precedent).
