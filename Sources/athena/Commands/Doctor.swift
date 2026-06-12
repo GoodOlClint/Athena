@@ -184,7 +184,7 @@ struct Doctor: AsyncParsableCommand {
         {
             nTok = await db.tokenCount()
             nUsr = await db.userCount()
-            nAdmins = await db.usersWithRole("admin").count
+            nAdmins = (try? await db.usersWithRole("admin"))?.count ?? 0
         }
         let anyCreds = envKeys || fileKeys || nTok > 0 || nUsr > 0
         let loopback: Set<String> = [

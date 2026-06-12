@@ -4134,7 +4134,8 @@ struct AthenaServer {
                 auth_enabled: auth.isEnabled,
                 users: await store.userCount(),
                 tokens: await store.tokenCount(),
-                admins: await store.usersWithRole("admin").count))
+                admins:
+                    (try? await store.usersWithRole("admin"))?.count ?? 0))
     }
 
     // MARK: - WebUI daemon console reuse (M18.3)
@@ -4450,7 +4451,21 @@ struct AthenaServer {
                 status: .notFound, message: "no user '\(username)'",
                 type: "invalid_request_error", code: "not_found")
         }
-        if await store.usersWithRole("admin") == [username] {
+        let onlyAdmin: Bool
+        do {
+            onlyAdmin = try await store.usersWithRole("admin") == [username]
+        } catch {
+            // NB11: fail closed — refuse the delete if the admin set can't
+            // be read, rather than risk stripping the last admin.
+            await audit(
+                request, action: "user.delete", target: username,
+                result: "denied", detail: "admin-set check failed")
+            return Self.error(
+                status: .internalServerError,
+                message: "could not verify the admin set",
+                type: "server_error", code: "store_error")
+        }
+        if onlyAdmin {
             await audit(
                 request, action: "user.delete", target: username,
                 result: "denied", detail: "only admin")
@@ -4541,16 +4556,32 @@ struct AthenaServer {
                 status: .notFound, message: "no user '\(username)'",
                 type: "invalid_request_error", code: "not_found")
         }
-        if role == "admin",
-            await store.usersWithRole("admin") == [username]
-        {
-            await audit(
-                request, action: "role.revoke",
-                target: "\(username):\(role)", result: "denied",
-                detail: "only admin")
-            return Self.deny403(
-                "'\(username)' is the only admin — refusing to "
-                    + "revoke admin")
+        if role == "admin" {
+            let onlyAdmin: Bool
+            do {
+                onlyAdmin =
+                    try await store.usersWithRole("admin") == [username]
+            } catch {
+                // NB11: can't read the admin set ⇒ fail closed (refuse),
+                // never assume "not the last admin" on a query error.
+                await audit(
+                    request, action: "role.revoke",
+                    target: "\(username):\(role)", result: "denied",
+                    detail: "admin-set check failed")
+                return Self.error(
+                    status: .internalServerError,
+                    message: "could not verify the admin set",
+                    type: "server_error", code: "store_error")
+            }
+            if onlyAdmin {
+                await audit(
+                    request, action: "role.revoke",
+                    target: "\(username):\(role)", result: "denied",
+                    detail: "only admin")
+                return Self.deny403(
+                    "'\(username)' is the only admin — refusing to "
+                        + "revoke admin")
+            }
         }
         let ok = await store.revokeRole(
             username: username, role: role)
@@ -4567,7 +4598,7 @@ struct AthenaServer {
                 tokens: toks.map {
                     TokenSummaryDTO(
                         username: $0.username, scope: $0.scoped,
-                        hash_prefix: String($0.hex.prefix(12)),
+                        hash_prefix: $0.hashPrefix,
                         label: $0.label, expires: $0.expires)
                 }))
     }
@@ -4680,9 +4711,7 @@ struct AthenaServer {
                 message: "prefix must be >= 6 hex chars",
                 type: "invalid_request_error", code: "invalid_prefix")
         }
-        let matches = await store.listTokens().filter {
-            $0.hex.hasPrefix(prefix)
-        }
+        let matches = await store.tokensMatchingHashPrefix(prefix)
         if matches.isEmpty {
             return Self.error(
                 status: .notFound,
@@ -4725,9 +4754,7 @@ struct AthenaServer {
             if case .fail(let r) = decoded { return r }
             fatalError()
         }
-        let matches = await store.listTokens().filter {
-            $0.hex.hasPrefix(prefix)
-        }
+        let matches = await store.tokensMatchingHashPrefix(prefix)
         guard matches.count == 1, let m = matches.first,
             let oldHash = Self.hexData(m.hex)
         else {
@@ -4767,8 +4794,12 @@ struct AthenaServer {
         let expires = body.ttl_secs.flatMap {
             $0 > 0 ? Date().timeIntervalSince1970 + Double($0) : nil
         }
+        // NA4 (M66.2): persist the NEW token BEFORE revoking the old one.
+        // The previous order (delete-then-put) left the principal with no
+        // working token if putToken threw — a lockout on partial failure.
+        // New + old briefly coexist (distinct hashes); we revoke the old
+        // only once the new is durably stored.
         let (key, hash) = AuthConfig.mintToken()
-        _ = await store.deleteToken(hash: oldHash)
         do {
             try await store.putToken(
                 hash: hash, username: m.username, scopedRoles: m.scoped,
@@ -4778,6 +4809,7 @@ struct AthenaServer {
                 status: .internalServerError, message: "\(error)",
                 type: "server_error", code: "store_error")
         }
+        _ = await store.deleteToken(hash: oldHash)
         let newPrefix = String(AuthConfig.hex(Array(hash)).prefix(12))
         await audit(
             request, action: "token.rotate", target: m.username,

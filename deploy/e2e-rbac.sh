@@ -195,6 +195,18 @@ echo "== phase 1: CLI escalation / validation guards =="
   >/dev/null 2>&1 \
   && bad "grant to nonexistent user accepted" \
   || ok "grant to nonexistent user refused"
+# B5 (M66.2): `user add` must not silently overwrite an existing account.
+"$ATHENA" auth user add dupuser --password duppass12 --role member \
+  --data-dir "$D" >/dev/null 2>&1 \
+  && ok "B5: first user add succeeds" || bad "B5: first add failed"
+"$ATHENA" auth user add dupuser --password other123 --role member \
+  --data-dir "$D" >/dev/null 2>&1 \
+  && bad "B5: re-add overwrote existing user without --force" \
+  || ok "B5: re-add refused without --force"
+"$ATHENA" auth user add dupuser --password other123 --role member \
+  --force --data-dir "$D" >/dev/null 2>&1 \
+  && ok "B5: re-add with --force succeeds" \
+  || bad "B5: --force re-add failed"
 
 echo
 echo "== phase 2: permission gating (auth enforced) =="
@@ -1760,6 +1772,15 @@ NT="$(echo "$CRESP" \
 HP="$(echo "$CRESP" | grep -o '"hash_prefix":"[0-9a-f]*"' \
   | sed 's/.*:"//;s/"//')"
 [ -n "$NT" ] && ok "minted token via /api/tokens" || bad "api mint"
+# H12 (M66.2): the API exposes only a truncated hash prefix (12 hex), never
+# the full 64-hex SHA-256 digest.
+LT="$(curl -s -H "Authorization: Bearer $A2" \
+  "http://127.0.0.1:$PORT/api/tokens" \
+  | grep -o '"hash_prefix":"[0-9a-f]*"' | head -1 \
+  | sed 's/.*:"//;s/"//')"
+[ "${#LT}" = 12 ] \
+  && ok "H12: /api/tokens hash_prefix truncated to 12 hex" \
+  || bad "H12: hash_prefix not truncated (len ${#LT})"
 code 200 POST /v1/chat/completions "$NT" "$CHAT"   # member inference
 code 200 DELETE "/api/tokens/$HP" "$A2"            # delete the new one
 code 404 DELETE /api/tokens/deadbeef9999 "$A2"

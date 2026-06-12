@@ -1225,11 +1225,16 @@ public actor AthenaStore {
     }
 
     /// Usernames holding a given role (drives last-admin protection).
-    public func usersWithRole(_ role: String) -> [String] {
-        guard let st = try? Self.prepared(db,
+    /// Usernames holding `role`. NB11 (M66.2): THROWS on a prepare/step
+    /// failure instead of returning `[]`, so a transient query error is
+    /// distinguishable from "genuinely no users with this role". The
+    /// last-admin guards depend on that distinction — an empty result must
+    /// mean empty, never "the query broke" (which would silently bypass
+    /// the protection and allow the final admin to be stripped).
+    public func usersWithRole(_ role: String) throws -> [String] {
+        let st = try Self.prepared(db,
             "SELECT username FROM auth_user_roles WHERE role=? "
                 + "ORDER BY username;")
-        else { return [] }
         defer { sqlite3_finalize(st) }
         sqlite3_bind_text(st, 1, role, -1, Self.transient)
         var out: [String] = []
@@ -1302,14 +1307,56 @@ public actor AthenaStore {
             created: created, expires: expires)
     }
 
-    public func listTokens() -> [(hex: String, username: String,
+    /// Number of hex chars of the token-hash shown for display/matching —
+    /// enough to be an unambiguous handle, far short of the full digest.
+    public static let tokenHashPrefixLen = 12
+
+    /// Token listing for DISPLAY. H12 (M66.2): returns only a 12-hex
+    /// `hashPrefix`, never the full SHA-256 digest — the at-rest credential
+    /// digest no longer leaves the store for a listing. The rm/rotate
+    /// paths, which legitimately need the full hash to delete a row, use
+    /// `tokensMatchingHashPrefix` instead.
+    public func listTokens() -> [(hashPrefix: String, username: String,
         scoped: [String]?, label: String?, expires: Double?)]
     {
-        guard let st = try? Self.prepared(db,
+        rowsForTokenQuery(
             "SELECT hash,username,scoped_roles,label,expires FROM "
-                + "auth_tokens ORDER BY created;")
-        else { return [] }
+                + "auth_tokens ORDER BY created;",
+            prefix: nil
+        ).map {
+            (String($0.hex.prefix(Self.tokenHashPrefixLen)),
+                $0.username, $0.scoped, $0.label, $0.expires)
+        }
+    }
+
+    /// Tokens whose lowercase hash-hex starts with `prefix` (H12 / M66.2),
+    /// WITH the full hash — for the credential-mutation paths (`auth rm` /
+    /// `auth token rotate`) that must reconstruct the row's hash to delete
+    /// it. Confines the full digest to that path; display goes through
+    /// `listTokens`. `prefix` is matched case-insensitively and is
+    /// expected to be hex (callers validate), so no LIKE metacharacters.
+    public func tokensMatchingHashPrefix(_ prefix: String)
+        -> [(hex: String, username: String, scoped: [String]?,
+            label: String?, expires: Double?)]
+    {
+        rowsForTokenQuery(
+            "SELECT hash,username,scoped_roles,label,expires FROM "
+                + "auth_tokens WHERE lower(hex(hash)) LIKE ? "
+                + "ORDER BY created;",
+            prefix: prefix.lowercased() + "%")
+    }
+
+    /// Shared row reader for the token queries above. When `prefix` is
+    /// non-nil it is bound to the single `?` (a `LIKE` pattern).
+    private func rowsForTokenQuery(_ sql: String, prefix: String?)
+        -> [(hex: String, username: String, scoped: [String]?,
+            label: String?, expires: Double?)]
+    {
+        guard let st = try? Self.prepared(db, sql) else { return [] }
         defer { sqlite3_finalize(st) }
+        if let prefix {
+            sqlite3_bind_text(st, 1, prefix, -1, Self.transient)
+        }
         var out: [(String, String, [String]?, String?, Double?)] = []
         while sqlite3_step(st) == SQLITE_ROW {
             let h = Self.blob(st, 0)

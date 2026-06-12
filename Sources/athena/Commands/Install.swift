@@ -17,6 +17,11 @@ struct Install: AsyncParsableCommand {
         abstract: "Install Athena as a boot-time launchd system daemon."
     )
 
+    /// B17 (M66.2): lifetime (days) of the bootstrap admin token seeded at
+    /// install. A quarter-year rotation window — long enough for setup,
+    /// short of "forever". Recoverable via the seeded admin password.
+    static let installSeedTokenTTLDays = 90
+
     @Option(
         help:
             "Path to the TOML config. Omit to use ./deploy/athena.toml if present, else synthesize a documented default."
@@ -259,10 +264,19 @@ struct Install: AsyncParsableCommand {
                     .replacingOccurrences(of: "+", with: "-")
                     .replacingOccurrences(of: "/", with: "_")
                     .replacingOccurrences(of: "=", with: "")
+                // B17 (M66.2): the bootstrap token gets a default TTL (a
+                // 90-day rotation window) instead of living forever — a
+                // long-lived all-powerful credential is a standing risk. If
+                // it lapses the operator still has the seeded admin
+                // PASSWORD (/ui login + `athena auth`) to mint a fresh one,
+                // so a TTL can't lock anyone out.
+                let seedExpires =
+                    Date().timeIntervalSince1970
+                    + Double(Self.installSeedTokenTTLDays) * 86_400
                 try? await db.putToken(
                     hash: Data(AuthConfig.sha(key)),
                     username: "admin", scopedRoles: nil,
-                    label: "install-seed")
+                    label: "install-seed", expires: seedExpires)
                 seededToken = key
             }
         }
@@ -367,6 +381,11 @@ struct Install: AsyncParsableCommand {
                 print(
                     "    mint more: `athena auth token add --user "
                         + "<u>`")
+                print(
+                    "    expires in \(Self.installSeedTokenTTLDays)d — "
+                        + "rotate before then: `athena auth token rotate "
+                        + "<hashprefix>` (the seeded password recovers "
+                        + "access if it lapses).")
                 if stashed {
                     let who =
                         ProcessInfo.processInfo

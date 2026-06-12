@@ -172,7 +172,7 @@ final class AthenaStoreTests: XCTestCase {
         try await s.putUser(
             username: "bob", salt: salt, hash: hash, iters: 1000)
         try await s.grantRole(username: "bob", role: "admin")
-        let admins = await s.usersWithRole("admin")
+        let admins = try await s.usersWithRole("admin")
         XCTAssertEqual(admins, ["alice", "bob"])
 
         let revoked = await s.revokeRole(
@@ -214,10 +214,43 @@ final class AthenaStoreTests: XCTestCase {
         XCTAssertNil(aliceTok)
         let tokCount = await s.tokenCount()
         XCTAssertEqual(tokCount, 0)
-        let adminsLeft = await s.usersWithRole("admin")
+        let adminsLeft = try await s.usersWithRole("admin")
         XCTAssertEqual(adminsLeft, ["bob"])
         let delMissing = try await s.deleteUser(username: "ghost")
         XCTAssertFalse(delMissing)
+    }
+
+    /// H12 (M66.2) — `listTokens` exposes only a 12-hex display prefix
+    /// (never the full SHA-256 digest), while `tokensMatchingHashPrefix`
+    /// returns the full hash for the rm/rotate paths and matches a
+    /// case-insensitive hex prefix.
+    func testTokenHashPrefixMatchingH12() async throws {
+        let url = tmpURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let s = try AthenaStore(path: url)
+        try await s.putUser(
+            username: "u", salt: Data([1]), hash: Data([2]), iters: 1000)
+        let h1 = Data(repeating: 0xAB, count: 32)  // hex "abab…"
+        let h2 = Data(repeating: 0xCD, count: 32)  // hex "cdcd…"
+        try await s.putToken(
+            hash: h1, username: "u", scopedRoles: nil, label: "one")
+        try await s.putToken(
+            hash: h2, username: "u", scopedRoles: ["member"], label: "two")
+
+        // Display listing: 12-hex prefix only, no full digest leaked.
+        let list = await s.listTokens()
+        XCTAssertEqual(list.count, 2)
+        XCTAssertTrue(list.allSatisfy { $0.hashPrefix.count == 12 })
+        XCTAssertTrue(list.contains { $0.hashPrefix == "abababababab" })
+
+        // Matching path: full hash + case-insensitive prefix match.
+        let m = await s.tokensMatchingHashPrefix("ABABAB")
+        XCTAssertEqual(m.count, 1)
+        XCTAssertEqual(m.first?.hex.count, 64)
+        XCTAssertEqual(m.first?.label, "one")
+        XCTAssertTrue(m.first?.hex.hasPrefix("abab") ?? false)
+        let none = await s.tokensMatchingHashPrefix("ffff")
+        XCTAssertTrue(none.isEmpty)
     }
 
     func testTokenExpiryRoundTrip() async throws {

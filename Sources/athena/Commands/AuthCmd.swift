@@ -75,7 +75,17 @@ private func requireValidRole(_ role: String) {
 private func guardLastAdmin(
     _ db: AthenaStore, losing username: String
 ) async {
-    let admins = await db.usersWithRole("admin")
+    // NB11 (M66.2): a query failure must NOT be read as "no admins" (which
+    // would let the last admin be stripped). usersWithRole now throws on a
+    // store error; treat that as refuse (fail closed).
+    let admins: [String]
+    do {
+        admins = try await db.usersWithRole("admin")
+    } catch {
+        FailableExit.die(
+            "error: could not verify the admin set (\(error)) — "
+                + "refusing to remove the last admin")
+    }
     if admins == [username] {
         FailableExit.die(
             "error: '\(username)' is the only admin — refusing "
@@ -104,6 +114,10 @@ struct AuthUserAdd: AsyncParsableCommand {
     var password: String?
     @Option(help: "Initial role to grant (default: member).")
     var role: String = "member"
+    @Flag(
+        name: .long,
+        help: "Replace an existing account (resets its password); add refuses to overwrite an existing user without it.")
+    var force = false
     @Option(help: "Data dir (default: configured / ~/.athena).")
     var dataDir: String?
     @OptionGroup var daemon: DaemonOptions
@@ -138,6 +152,17 @@ struct AuthUserAdd: AsyncParsableCommand {
             password: pw, salt: salt,
             iters: Passwords.defaultIterations)
         let db = openStore(dataDir)
+        // B5 (M66.2): `putUser` is INSERT OR REPLACE, so an `add` against an
+        // existing username would silently reset that account's password.
+        // Refuse unless `--force`; point at `passwd` for a roles-preserving
+        // reset.
+        if await db.getUser(username: username) != nil, !force {
+            FailableExit.die(
+                "error: user '\(username)' already exists — pass --force "
+                    + "to replace it (resets the password), or use "
+                    + "`athena auth user passwd \(username)` to reset just "
+                    + "the password (roles kept)")
+        }
         do {
             try await db.putUser(
                 username: username, salt: salt, hash: hash,
@@ -510,9 +535,7 @@ struct AuthTokenRotate: AsyncParsableCommand {
             FailableExit.die("error: prefix must be >= 6 hex chars")
         }
         let db = openStore(dataDir)
-        let matches = await db.listTokens().filter {
-            $0.hex.hasPrefix(prefix)
-        }
+        let matches = await db.tokensMatchingHashPrefix(prefix)
         guard matches.count == 1, let m = matches.first,
             let oldBytes = hexBytes(Substring(m.hex))
         else {
@@ -526,7 +549,9 @@ struct AuthTokenRotate: AsyncParsableCommand {
         let expires = ttlSecs.map {
             Date().timeIntervalSince1970 + Double($0)
         }
-        _ = await db.deleteToken(hash: Data(oldBytes))
+        // B4 (M66.2): persist the new token BEFORE revoking the old one,
+        // so a putToken failure leaves the holder's existing token working
+        // instead of locking them out. Old is revoked only on success.
         do {
             try await db.putToken(
                 hash: hash, username: m.username,
@@ -534,6 +559,7 @@ struct AuthTokenRotate: AsyncParsableCommand {
         } catch {
             FailableExit.die("error: \(error)")
         }
+        _ = await db.deleteToken(hash: Data(oldBytes))
         let scopeNote =
             m.scoped.map { " scoped to [\($0.joined(separator: ", "))]" }
             ?? " (inherits \(m.username)'s roles)"
@@ -602,7 +628,7 @@ struct AuthList: AsyncParsableCommand {
                 t.scoped.map { "[\($0.joined(separator: ","))]" }
                 ?? "(full)"
             print(
-                "\(t.username)\t\(scope)\tsha256:\(t.hex.prefix(12))…"
+                "\(t.username)\t\(scope)\tsha256:\(t.hashPrefix)…"
                     + "\t\(tokenExpiryNote(t.expires))"
                     + (t.label.map { "\t\($0)" } ?? ""))
         }
@@ -632,9 +658,7 @@ struct AuthRemove: AsyncParsableCommand {
             FailableExit.die(
                 "error: no store at \(storeDBPath(dataDir).path)")
         }
-        let matches = await db.listTokens().filter {
-            $0.hex.hasPrefix(prefix)
-        }
+        let matches = await db.tokensMatchingHashPrefix(prefix)
         if matches.isEmpty {
             FailableExit.die("error: no token matched \(prefix)")
         }

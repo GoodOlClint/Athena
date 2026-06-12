@@ -92,13 +92,15 @@ Local data loss, lockouts, and the config parser silently lying.
 
 > Store helpers ARE unit-testable: `AthenaStoreTests` now 18 cases (NH1/H2 added, H11/H13 updated), all green. Server wiring (H11 500 path, H14 metric) validated via build + e2e-rbac 498/0.
 
-### M66.2 — Token/user lifecycle
-- [ ] NA4 server-side rotate: put new token BEFORE deleting old
-- [ ] B4 CLI rotate: same ordering fix
-- [ ] B5 `user add` on existing user requires `--force`/confirm
-- [ ] NB11 `guardLastAdmin` fails closed on query error
-- [ ] H12 `listTokens` returns truncated hash for display
-- [ ] B17 document/default TTL for install-seeded admin token
+### M66.2 — Token/user lifecycle ✅ v0.10.124
+- [x] NA4 server `handleTokenRotate` now `putToken` (new) BEFORE `deleteToken` (old) — a putToken failure leaves the holder's existing token working instead of a lockout-on-partial-failure (v0.10.124)
+- [x] B4 CLI `auth token rotate`: same put-before-delete ordering (v0.10.124)
+- [x] B5 `auth user add` refuses to overwrite an existing account without `--force` (new flag); points at `auth user passwd` for a roles-preserving reset. e2e phase 1 asserts refuse/force (v0.10.124)
+- [x] NB11 `usersWithRole` now THROWS on a query error (was `[]`, indistinguishable from "no admins"); the three last-admin guards (CLI `guardLastAdmin`, server user-delete + role-revoke) fail CLOSED on the throw; the two `.count` display sites use `try?` (v0.10.124)
+- [x] H12 `listTokens` returns a 12-hex `hashPrefix` only (no full SHA-256 digest); a new `tokensMatchingHashPrefix` confines the full hash to the rm/rotate paths (SQL `lower(hex(hash)) LIKE`). `testTokenHashPrefixMatchingH12` + e2e `/api/tokens` length assert (v0.10.124)
+- [x] B17 install-seeded admin token gets a default 90-day TTL (was never-expiring); post-install message notes the expiry + `auth token rotate` (the seeded password recovers access if it lapses) (v0.10.124)
+
+> Store helpers (`usersWithRole` throws, `tokensMatchingHashPrefix`) unit-tested (`AthenaStoreTests` 19/0). Server/CLI fail-closed wiring + rotate ordering validated via build + e2e-rbac 502/0 (added B5 + H12 asserts).
 
 ### M66.3 — Install & client store safety
 - [ ] B3 install seed: `O_NOFOLLOW`/`fchown` before writes (symlink TOCTOU)
