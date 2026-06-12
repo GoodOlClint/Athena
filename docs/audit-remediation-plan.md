@@ -123,7 +123,11 @@ Local data loss, lockouts, and the config parser silently lying.
 
 > Parser (AthenaDeploy) + plist changes are unit-tested (`AthenaConfigTests` 31/0, `LaunchdPlistTests` 4/0). ConfigEditor lives in the executable target (not unit-testable until M70) — validated via e2e-rbac 551/0 (offline `config set` NB8/NB2/B15 asserts).
 
-**M66 is complete (M66.1–.4)** except the breaking `--password` removal (ADR 005) — done as its own slice (M66.5) next.
+### M66.5 — Remove secrets from argv (ADR 005, breaking) ✅ v0.10.127
+- [x] B2 hard-removed `--password` from `auth user add`, `auth user passwd`, `proxy login` (macOS) + the portable `auth user add` (client). Secrets resolve via a shared `PasswordInput.resolve` (macOS) / `RemoteAuth.resolvePassword(stdin:)` (client): `--password-stdin` (one line) > `$ATHENA_PASSWORD` > interactive no-echo prompt (confirmed for new). e2e migrated to `ATHENA_PASSWORD`; new B2 assert that `--password` is rejected. ADR 005 → Implemented (v0.10.127)
+- K7 (`Credentials` Keychain `security -w <value>` argv leak) + K13 (`--key` in argv) — the remaining argv-secret items; audited here, **deferred to M71** (need a Keychain-API / `--key`-steering change beyond the `--password` removal).
+
+**M66 complete (M66.1–.5).**
 
 Re-verify while here: B6*, B7*, B8*, B10–B13, B15*, B18–B23, H6*, H14*, J5, K3, K6.
 

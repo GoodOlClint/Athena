@@ -144,7 +144,7 @@ hash-only (SHA-256); constant-time compare.
 
 | Subcommand | Abstract |
 |------------|----------|
-| `auth user add <username>` | Create/replace an account (prompts, no echo). `--role` (default member), `--password`. |
+| `auth user add <username>` | Create an account. `--role` (default member), `--force` (replace existing). Password: prompt (no echo), or `--password-stdin`, or `$ATHENA_PASSWORD` — never on argv (ADR 005). |
 | `auth user list` | List accounts and roles. |
 | `auth user passwd <username>` | Offline password reset (local-only; keeps roles/tokens). |
 | `auth user rm <username>` | Delete an account (cascades roles + tokens). |

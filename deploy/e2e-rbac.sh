@@ -156,20 +156,20 @@ CHAT='{"model":"Qwen3.5-27B-4bit-mtp","messages":[{"role":"user","content":"hi"}
 
 echo
 echo "== phase 0: seed RBAC subjects (offline CLI) =="
-"$ATHENA" auth user add admin --password adminpass1 \
+ATHENA_PASSWORD=adminpass1 "$ATHENA" auth user add admin \
   --role admin --data-dir "$D" >/dev/null \
   && ok "create admin user (role admin)" || bad "create admin user"
-"$ATHENA" auth user add alice --password alicepass1 \
+ATHENA_PASSWORD=alicepass1 "$ATHENA" auth user add alice \
   --role member --data-dir "$D" >/dev/null \
   && ok "create alice (member)" || bad "create alice"
-"$ATHENA" auth user add bob --password bobpass123 \
+ATHENA_PASSWORD=bobpass123 "$ATHENA" auth user add bob \
   --role member --data-dir "$D" >/dev/null \
   && ok "create bob (member)" || bad "create bob"
-"$ATHENA" auth user add ro --password ropass1234 \
+ATHENA_PASSWORD=ropass1234 "$ATHENA" auth user add ro \
   --role readonly --data-dir "$D" >/dev/null \
   && ok "create ro (readonly)" || bad "create ro"
 # boss is a full admin USER but we mint a member-SCOPED token for it.
-"$ATHENA" auth user add boss --password bosspass123 \
+ATHENA_PASSWORD=bosspass123 "$ATHENA" auth user add boss \
   --role admin --data-dir "$D" >/dev/null \
   && ok "create boss (admin)" || bad "create boss"
 
@@ -196,17 +196,26 @@ echo "== phase 1: CLI escalation / validation guards =="
   && bad "grant to nonexistent user accepted" \
   || ok "grant to nonexistent user refused"
 # B5 (M66.2): `user add` must not silently overwrite an existing account.
-"$ATHENA" auth user add dupuser --password duppass12 --role member \
+ATHENA_PASSWORD=duppass12 "$ATHENA" auth user add dupuser --role member \
   --data-dir "$D" >/dev/null 2>&1 \
   && ok "B5: first user add succeeds" || bad "B5: first add failed"
-"$ATHENA" auth user add dupuser --password other123 --role member \
+ATHENA_PASSWORD=other123 "$ATHENA" auth user add dupuser --role member \
   --data-dir "$D" >/dev/null 2>&1 \
   && bad "B5: re-add overwrote existing user without --force" \
   || ok "B5: re-add refused without --force"
-"$ATHENA" auth user add dupuser --password other123 --role member \
+ATHENA_PASSWORD=other123 "$ATHENA" auth user add dupuser --role member \
   --force --data-dir "$D" >/dev/null 2>&1 \
   && ok "B5: re-add with --force succeeds" \
   || bad "B5: --force re-add failed"
+# B2 (ADR 005): `--password` is REMOVED from argv. A valid ATHENA_PASSWORD
+# is set, so the only reason this fails is the now-unknown --password flag.
+B2OUT="$(ATHENA_PASSWORD=validpass12 "$ATHENA" auth user add b2user \
+  --password secret123 --role member --data-dir "$D" 2>&1)"
+if [ $? -ne 0 ] && echo "$B2OUT" | grep -qi "password"; then
+  ok "B2: --password rejected (removed from argv)"
+else
+  bad "B2: --password still accepted ($B2OUT)"
+fi
 # NB1 (M66.3): a malformed --label must fail UP FRONT (before euid
 # branching), not fall through to a root-owned daemon spawn. Validated
 # offline (non-root) — an invalid label dies before any daemon is spawned.
@@ -1671,7 +1680,7 @@ echo "== phase 5.5: CLI seeds merge on every boot (M44.2) =="
 # choices are preserved (modulo the documented trade — a seed flag
 # the operator removed comes BACK if the flag is still set).
 D5="$(mktemp -d)"
-"$ATHENA" auth user add admin --password adminpass1 --role admin \
+ATHENA_PASSWORD=adminpass1 "$ATHENA" auth user add admin --role admin \
   --data-dir "$D5" >/dev/null && ok "seed D5 admin" || bad "seed admin"
 A5="$("$ATHENA" auth token add --user admin --data-dir "$D5" \
   2>/dev/null | grep -o 'sk-athena-[A-Za-z0-9_-]*' | head -1)"
@@ -1767,11 +1776,11 @@ echo
 echo "== phase 8: RBAC admin over HTTP (M16.4) =="
 # Isolated DB so create/delete/last-admin can't disturb phases 0–7.
 D2="$(mktemp -d)"
-"$ATHENA" auth user add admin --password adminpass1 --role admin \
+ATHENA_PASSWORD=adminpass1 "$ATHENA" auth user add admin --role admin \
   --data-dir "$D2" >/dev/null && ok "seed D2 admin" || bad "seed admin"
-"$ATHENA" auth user add ro --password ropass1234 --role readonly \
+ATHENA_PASSWORD=ropass1234 "$ATHENA" auth user add ro --role readonly \
   --data-dir "$D2" >/dev/null && ok "seed D2 ro" || bad "seed ro"
-"$ATHENA" auth user add mem --password mempass12 --role member \
+ATHENA_PASSWORD=mempass12 "$ATHENA" auth user add mem --role member \
   --data-dir "$D2" >/dev/null && ok "seed D2 mem" || bad "seed mem"
 t2() {
   "$ATHENA" auth token add --user "$1" --data-dir "$D2" 2>/dev/null \
@@ -1941,7 +1950,7 @@ echo "== phase 8.7: audit retention bound (M30.3) =="
 # with --audit-retention-days 1, then trigger ONE mutation: the
 # opportunistic prune drops the stale row and keeps the fresh one.
 D3="$(mktemp -d)"
-"$ATHENA" auth user add admin --password adminpass1 --role admin \
+ATHENA_PASSWORD=adminpass1 "$ATHENA" auth user add admin --role admin \
   --data-dir "$D3" >/dev/null && ok "seed D3 admin" || bad "seed D3 admin"
 A3="$("$ATHENA" auth token add --user admin --data-dir "$D3" \
   2>/dev/null | grep -o 'sk-athena-[A-Za-z0-9_-]*' | head -1)"
@@ -2052,11 +2061,14 @@ elif start_daemon "$D2" 127.0.0.1; then
   clic nz "auth user list (member=403)"   auth user list --key "$M2"
   clic 0  "auth role list (readonly)"     auth role list --key "$R2"
   clic nz "auth role list (member=403)"   auth role list --key "$M2"
-  # users.admin: create/delete/grant (admin only)
+  # users.admin: create/delete/grant (admin only). ADR 005: the password
+  # comes from ATHENA_PASSWORD (exported to the client), never argv.
+  export ATHENA_PASSWORD=pw12345678
   clic nz "auth user add (readonly=403)"  auth user add e2c \
-    --password pw12345678 --role member --key "$R2"
+    --role member --key "$R2"
   clic 0  "auth user add (admin)"         auth user add e2c \
-    --password pw12345678 --role member --key "$A2"
+    --role member --key "$A2"
+  unset ATHENA_PASSWORD
   clic 0  "auth role grant (admin)"  auth role grant e2c operator --key "$A2"
   clic nz "auth role grant bad role=400" auth role grant e2c nope --key "$A2"
   clic nz "auth role grant ghost=404" auth role grant gh member --key "$A2"
@@ -2932,7 +2944,7 @@ export ATHENA_STORE_KEY="e2e-store-key-0123456789abcdef0123"
 # 26a: a store written by the keyed CLI is encrypted on disk, the daemon
 # (same key) serves it, and a plaintext sqlite3 cannot read it.
 D9="$(mktemp -d)"; edb="$D9/athena.sqlite"
-"$ATHENA" auth user add admin --password adminpass1 --role admin \
+ATHENA_PASSWORD=adminpass1 "$ATHENA" auth user add admin --role admin \
   --data-dir "$D9" >/dev/null \
   && ok "seed admin into keyed store" || bad "seed keyed admin"
 EMAGIC="$(head -c 15 "$edb" | tr -d '\0')"
@@ -2956,7 +2968,7 @@ rm -rf "$D9"; D9=""
 # start, and pre-migration data + credentials survive.
 unset ATHENA_STORE_KEY
 D10="$(mktemp -d)"; mdb="$D10/athena.sqlite"
-"$ATHENA" auth user add admin --password adminpass1 --role admin \
+ATHENA_PASSWORD=adminpass1 "$ATHENA" auth user add admin --role admin \
   --data-dir "$D10" >/dev/null \
   && ok "seed admin into plaintext store" || bad "seed plaintext admin"
 PMAGIC="$(head -c 15 "$mdb" | tr -d '\0')"
@@ -2997,7 +3009,7 @@ dcfg27() { # CFGPATH DATADIR extra-lines…
 # 27a: encrypt_store=true over an ENCRYPTED store ⇒ "store encrypted".
 export ATHENA_STORE_KEY="e2e-store-key-0123456789abcdef0123"
 EDD="$(mktemp -d)"
-"$ATHENA" auth user add admin --password adminpass1 --role admin \
+ATHENA_PASSWORD=adminpass1 "$ATHENA" auth user add admin --role admin \
   --data-dir "$EDD" >/dev/null
 CE="$DOC3/enc.toml"; dcfg27 "$CE" "$EDD" "encrypt_store = true"
 OE="$("$ATHENA" doctor --config "$CE" --model-store "$MSTORE" 2>&1)"
@@ -3010,7 +3022,7 @@ echo "$OE" | grep -qi "key from ATHENA_STORE_KEY env" \
 rm -rf "$EDD"; unset ATHENA_STORE_KEY
 # 27b: plaintext store, no encrypt_store ⇒ at-rest warns/relies on FileVault.
 PDD="$(mktemp -d)"
-"$ATHENA" auth user add admin --password adminpass1 --role admin \
+ATHENA_PASSWORD=adminpass1 "$ATHENA" auth user add admin --role admin \
   --data-dir "$PDD" >/dev/null
 CP="$DOC3/plain.toml"; dcfg27 "$CP" "$PDD"
 OP="$("$ATHENA" doctor --config "$CP" --model-store "$MSTORE" 2>&1)"
@@ -3058,12 +3070,12 @@ echo "== phase 29: bearer-token expiry + global age cap (M36.1) =="
 # → 401, exactly like an unknown one (no "expired" oracle). Deterministic
 # via sqlite3 backdating (no sleeps), mirroring phase 8.7's audit backdate.
 DE="$(mktemp -d)"
-"$ATHENA" auth user add expu --password expupass12 --role member \
+ATHENA_PASSWORD=expupass12 "$ATHENA" auth user add expu --role member \
   --data-dir "$DE" >/dev/null \
   && ok "expiry: seed expu" || bad "expiry: seed expu"
-"$ATHENA" auth user add gooduser --password goodpass12 --role member \
+ATHENA_PASSWORD=goodpass12 "$ATHENA" auth user add gooduser --role member \
   --data-dir "$DE" >/dev/null
-"$ATHENA" auth user add capu --password capupass123 --role member \
+ATHENA_PASSWORD=capupass123 "$ATHENA" auth user add capu --role member \
   --data-dir "$DE" >/dev/null
 # Parser: a malformed --ttl is rejected offline (nothing minted).
 "$ATHENA" auth token add --user expu --ttl bogus --data-dir "$DE" \
@@ -3111,9 +3123,9 @@ echo "== phase 30: token rotate + list-expiry + doctor posture (M36.2) =="
 # posture. Hash prefixes are derived from the printed key via shasum
 # (the store hashes the full sk-athena-… string, like AuthConfig.sha).
 DR="$(mktemp -d)"
-"$ATHENA" auth user add admin --password adminpass1 --role admin \
+ATHENA_PASSWORD=adminpass1 "$ATHENA" auth user add admin --role admin \
   --data-dir "$DR" >/dev/null
-"$ATHENA" auth user add rotu --password rotupass12 --role member \
+ATHENA_PASSWORD=rotupass12 "$ATHENA" auth user add rotu --role member \
   --data-dir "$DR" >/dev/null
 ADMTOK="$("$ATHENA" auth token add --user admin --data-dir "$DR" \
   2>/dev/null | grep -o 'sk-athena-[A-Za-z0-9_-]*' | head -1)"
@@ -3175,9 +3187,9 @@ echo "== phase 31: /metrics Prometheus exposition (content-negotiated, M37) =="
 # sent. Auth/role gating (metrics.read) is unchanged. Self-contained
 # realm (own admin/member) so it's independent of earlier phases' state.
 DM="$(mktemp -d)"
-"$ATHENA" auth user add admin --password adminpass1 --role admin \
+ATHENA_PASSWORD=adminpass1 "$ATHENA" auth user add admin --role admin \
   --data-dir "$DM" >/dev/null
-"$ATHENA" auth user add mu --password mupass12345 --role member \
+ATHENA_PASSWORD=mupass12345 "$ATHENA" auth user add mu --role member \
   --data-dir "$DM" >/dev/null
 AM="$("$ATHENA" auth token add --user admin --data-dir "$DM" \
   2>/dev/null | grep -o 'sk-athena-[A-Za-z0-9_-]*' | head -1)"

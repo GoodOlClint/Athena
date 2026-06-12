@@ -73,25 +73,24 @@ struct ProxyLogin: AsyncParsableCommand {
         abstract:
             "Store egress-proxy credentials (macOS Keychain).")
     @Option(help: "Proxy username.") var user: String?
-    @Option(help: "Password (omit to prompt, no echo).")
-    var password: String?
+    @Flag(
+        name: .customLong("password-stdin"),
+        help: "Read the proxy password from stdin (one line) instead of prompting. Else set ATHENA_PASSWORD. (ADR 005 — never on argv.)")
+    var passwordStdin = false
 
     func run() async throws {
         let u: String
         if let user, !user.isEmpty {
             u = user
-        } else if isatty(0) == 0 {
-            u = (readLine() ?? "").trimmingCharacters(
-                in: .whitespacesAndNewlines)
         } else {
             u = String(cString: getpass("proxy username: "))
         }
         guard !u.isEmpty else {
             FailableExit.die("error: empty username")
         }
-        let p =
-            (password.map { $0.isEmpty ? nil : $0 } ?? nil)
-            ?? String(cString: getpass("proxy password: "))
+        let p = PasswordInput.resolve(
+            stdin: passwordStdin, confirmNew: false,
+            prompt: "proxy password: ")
         do {
             try ProxyAuth.store(user: u, pass: p)
         } catch {

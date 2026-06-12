@@ -283,15 +283,20 @@ public enum RemoteAuth {
         try fail(code, data)
     }
 
-    /// Resolve a password: explicit flag, else piped stdin, else an
-    /// interactive no-echo prompt with confirmation. Shared by the
-    /// portable and macOS-overload `user add`.
-    public static func resolvePassword(_ explicit: String?) -> String
-    {
-        if let explicit, !explicit.isEmpty { return explicit }
-        if isatty(0) == 0 {
-            return (readLine() ?? "").trimmingCharacters(
-                in: .whitespacesAndNewlines)
+    /// Resolve a password WITHOUT ever accepting it on argv (ADR 005 /
+    /// audit B2). Precedence: `--password-stdin` (one line) >
+    /// `$ATHENA_PASSWORD` > an interactive no-echo prompt with
+    /// confirmation. Shared by the portable and macOS-overload `user add`.
+    public static func resolvePassword(stdin: Bool) -> String {
+        if stdin {
+            var line = readLine(strippingNewline: true) ?? ""
+            if line.hasSuffix("\r") { line.removeLast() }
+            return line
+        }
+        if let env = ProcessInfo.processInfo.environment[
+            "ATHENA_PASSWORD"], !env.isEmpty
+        {
+            return env
         }
         let a = String(cString: getpass("password: "))
         let b = String(cString: getpass("confirm:  "))
@@ -326,13 +331,15 @@ public struct CAuthUserAdd: AsyncParsableCommand {
         abstract: "Create an account (server hashes the password).")
     @OptionGroup public var daemon: DaemonOptions
     @Argument(help: "Username.") public var username: String
-    @Option(help: "Password (omit to prompt; avoid shell history).")
-    public var password: String?
+    @Flag(
+        name: .customLong("password-stdin"),
+        help: "Read the password from stdin (one line) instead of prompting. Else set ATHENA_PASSWORD. (ADR 005 — never on argv.)")
+    public var passwordStdin = false
     @Option(help: "Initial role (default: member).")
     public var role: String = "member"
     public init() {}
     public func run() async throws {
-        let pw = RemoteAuth.resolvePassword(password)
+        let pw = RemoteAuth.resolvePassword(stdin: passwordStdin)
         try await RemoteAuth.userCreate(
             daemon, username: username, password: pw, role: role)
     }

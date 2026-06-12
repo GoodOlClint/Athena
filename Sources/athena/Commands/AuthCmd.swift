@@ -110,8 +110,10 @@ struct AuthUserAdd: AsyncParsableCommand {
         commandName: "add",
         abstract: "Create/replace an account (prompts, no echo).")
     @Argument(help: "Username.") var username: String
-    @Option(help: "Password (omit to prompt; avoid in shell history).")
-    var password: String?
+    @Flag(
+        name: .customLong("password-stdin"),
+        help: "Read the password from stdin (one line) instead of prompting. Else set ATHENA_PASSWORD. (ADR 005 — never on argv.)")
+    var passwordStdin = false
     @Option(help: "Initial role to grant (default: member).")
     var role: String = "member"
     @Flag(
@@ -124,26 +126,15 @@ struct AuthUserAdd: AsyncParsableCommand {
 
     func run() async throws {
         if daemon.isRemote {
-            let pw = RemoteAuth.resolvePassword(password)
+            let pw = RemoteAuth.resolvePassword(stdin: passwordStdin)
             try await RemoteAuth.userCreate(
                 daemon, username: username, password: pw,
                 role: role)
             return
         }
         requireValidRole(role)
-        let pw: String
-        if let password, !password.isEmpty {
-            pw = password
-        } else if isatty(0) == 0 {
-            pw = (readLine() ?? "")
-        } else {
-            let a = String(cString: getpass("password: "))
-            let b = String(cString: getpass("confirm:  "))
-            guard a == b else {
-                FailableExit.die("error: passwords do not match")
-            }
-            pw = a
-        }
+        let pw = PasswordInput.resolve(
+            stdin: passwordStdin, confirmNew: true)
         guard pw.count >= 8 else {
             FailableExit.die("error: password must be >= 8 chars")
         }
@@ -188,9 +179,10 @@ struct AuthUserPasswd: AsyncParsableCommand {
         abstract:
             "Reset an existing account's password (roles kept).")
     @Argument(help: "Username.") var username: String
-    @Option(
-        help: "Password (omit to prompt; avoid in shell history).")
-    var password: String?
+    @Flag(
+        name: .customLong("password-stdin"),
+        help: "Read the new password from stdin (one line) instead of prompting. Else set ATHENA_PASSWORD. (ADR 005 — never on argv.)")
+    var passwordStdin = false
     @Option(help: "Data dir (default: configured / ~/.athena).")
     var dataDir: String?
     @OptionGroup var daemon: DaemonOptions
@@ -208,19 +200,9 @@ struct AuthUserPasswd: AsyncParsableCommand {
                 "error: no such user '\(username)' — create it "
                     + "with `athena auth user add`")
         }
-        let pw: String
-        if let password, !password.isEmpty {
-            pw = password
-        } else if isatty(0) == 0 {
-            pw = (readLine() ?? "")
-        } else {
-            let a = String(cString: getpass("new password: "))
-            let b = String(cString: getpass("confirm:      "))
-            guard a == b else {
-                FailableExit.die("error: passwords do not match")
-            }
-            pw = a
-        }
+        let pw = PasswordInput.resolve(
+            stdin: passwordStdin, confirmNew: true,
+            prompt: "new password: ")
         guard pw.count >= 8 else {
             FailableExit.die("error: password must be >= 8 chars")
         }
