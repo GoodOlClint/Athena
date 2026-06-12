@@ -124,9 +124,23 @@ struct AthenaServer {
     /// WebUI session signer (M12.2). Per-process random secret —
     /// sessions invalidate on restart (acceptable for an appliance).
     let session = Session()
+    /// Per-IP login throttle (M65.6 / audit A3). `POST /ui/login` is
+    /// exempt from the global per-principal rate limiter (it's pre-auth —
+    /// there's no principal yet), so brute-forcing the password was
+    /// unthrottled. A small token bucket keyed on the TCP peer address
+    /// gives a short burst then forces a wait (the bucket's Retry-After
+    /// hint), capping sustained guesses without locking a real operator out
+    /// for long. burst 5 / 0.2 per sec ⇒ ~5 immediate tries, then 1 every
+    /// 5s. Behind a reverse proxy every client shares the proxy's bucket
+    /// (ADR 004) — throttle at the proxy for per-client login limits.
+    let loginLimiter = RateLimiter(rate: 0.2, burst: 5)
 
     func run() async throws {
-        let router = Router()
+        // M65.6: custom context carries the TCP peer address (for the A3
+        // login limiter) and lets AuthMiddleware publish the single
+        // resolved caller (A5). Middlewares are generic over Context, so
+        // they specialize to AppRequestContext unchanged.
+        let router = Router(context: AppRequestContext.self)
         // Auth outermost — reject at the edge, before timing work.
         router.add(
             middleware: AuthMiddleware(
@@ -383,8 +397,12 @@ struct AthenaServer {
         router.get("/ui/login") { _, _ -> Response in
             Self.html(Self.loginPage(error: nil))
         }
-        router.post("/ui/login") { request, _ -> Response in
-            await handleUILoginPost(request)
+        router.post("/ui/login") { request, context -> Response in
+            // A3: throttle by the TCP peer address only (ADR 004 — never
+            // trust X-Forwarded-For). `remoteAddress` comes off the channel
+            // via AppRequestContext.
+            await handleUILoginPost(
+                request, peerIP: context.remoteAddress?.ipAddress)
         }
         router.get("/ui/logout") { _, _ -> Response in
             Self.logoutResponse(secure: tlsEnabled)
@@ -2168,16 +2186,16 @@ struct AthenaServer {
     private func queuePrincipal(_ request: Request) async -> (
         principal: String?, isAdmin: Bool, enforced: Bool
     ) {
+        // M65.6 (A5): read the single resolution AuthMiddleware published
+        // (the bearer surface this gates always passes through the bearer
+        // branch, which bound it) instead of resolving the token again.
         guard auth.isEnabled else { return (nil, false, false) }
-        guard
-            let h = request.headers[.authorization],
-            h.hasPrefix("Bearer "),
-            case let tok = String(h.dropFirst(7)), !tok.isEmpty,
-            let subject = await auth.resolve(bearer: tok)
-        else { return (nil, false, true) }
+        guard let caller = ResolvedCaller.current else {
+            return (nil, false, true)
+        }
         let isAdmin = Set(Permission.allCases).isSubset(
-            of: subject.permissions)
-        return (subject.principal, isAdmin, true)
+            of: caller.permissions)
+        return (caller.principal, isAdmin, true)
     }
 
     /// Metering principal for the unauthenticated loopback caller (auth
@@ -2560,6 +2578,16 @@ struct AthenaServer {
         return owner == principal
     }
 
+    /// H6 (M65.6): the store-layer owner scope for a queue read. An admin
+    /// or an auth-off operator sees every job (nil = unfiltered); a scoped
+    /// tenant is confined to its own principal at the SQL layer, beneath
+    /// the `canAccess` check the handlers still apply.
+    private static func ownerScope(
+        _ who: (principal: String?, isAdmin: Bool, enforced: Bool)
+    ) -> String? {
+        (who.isAdmin || !who.enforced) ? nil : who.principal
+    }
+
     private func handleQueueSubmit(
         _ kind: String?, _ request: Request
     ) async -> Response {
@@ -2630,9 +2658,13 @@ struct AthenaServer {
             }
         }
         let who = await queuePrincipal(request)
+        // H6: scope the store fetch to the caller for a non-admin tenant
+        // (nil = admin / auth-off see all). `canAccess` below still
+        // enforces — this is the defense-in-depth layer underneath it.
+        let scope = Self.ownerScope(who)
         let deadline = Date().addingTimeInterval(Double(wait))
         while true {
-            guard let job = await queue.status(id: id),
+            guard let job = await queue.status(id: id, owner: scope),
                 Self.canAccess(
                     job, principal: who.principal,
                     isAdmin: who.isAdmin, enforced: who.enforced)
@@ -2653,7 +2685,8 @@ struct AthenaServer {
         _ id: String?, _ request: Request
     ) async -> Response {
         let who = await queuePrincipal(request)
-        if let id, let job = await queue.status(id: id),
+        let scope = Self.ownerScope(who)  // H6 defense-in-depth
+        if let id, let job = await queue.status(id: id, owner: scope),
             !Self.canAccess(
                 job, principal: who.principal, isAdmin: who.isAdmin,
                 enforced: who.enforced)
@@ -2687,7 +2720,8 @@ struct AthenaServer {
                 // Cap the stream so a stuck job can't hold a
                 // connection forever (~600 × 0.5 s = 5 min).
                 for _ in 0..<600 {
-                    guard let id, let job = await q.status(id: id)
+                    guard let id,
+                        let job = await q.status(id: id, owner: scope)
                     else { break }
                     if job.status != last {
                         emit(job)
@@ -2722,7 +2756,8 @@ struct AthenaServer {
         // Only the owner (or admin) may remove — and a non-owner
         // gets 404, not 403, so job existence stays hidden.
         let who = await queuePrincipal(request)
-        if let job = await queue.status(id: id),
+        let scope = Self.ownerScope(who)  // H6 defense-in-depth
+        if let job = await queue.status(id: id, owner: scope),
             !Self.canAccess(
                 job, principal: who.principal, isAdmin: who.isAdmin,
                 enforced: who.enforced)
@@ -2751,7 +2786,11 @@ struct AthenaServer {
             }
         }
         let who = await queuePrincipal(request)
-        let jobs = await queue.list(status: status).filter {
+        // H6: the store already confines a non-admin tenant to its own
+        // rows; `canAccess` stays as the enforcing check on top.
+        let jobs = await queue.list(
+            status: status, owner: Self.ownerScope(who)
+        ).filter {
             Self.canAccess(
                 $0, principal: who.principal, isAdmin: who.isAdmin,
                 enforced: who.enforced) && (
@@ -4212,21 +4251,12 @@ struct AthenaServer {
     private func callerPermissions(_ request: Request) async
         -> Set<Permission>
     {
+        // M65.6 (A5): read the single resolution AuthMiddleware published
+        // for this request rather than re-deriving it from the headers
+        // (which is what drifted from the gate). Auth-off keeps the
+        // single-trusted-operator full-perms behavior.
         guard auth.isEnabled else { return Set(Permission.allCases) }
-        if let h = request.headers[.authorization],
-            h.hasPrefix("Bearer "),
-            case let tok = String(h.dropFirst(7)), !tok.isEmpty,
-            let s = await auth.resolve(bearer: tok)
-        {
-            return s.permissions
-        }
-        if let ck = Session.token(
-            fromCookieHeader: request.headers[.cookie]),
-            let user = session.validate(ck)
-        {
-            return await auth.permissions(forUser: user)
-        }
-        return []
+        return ResolvedCaller.current?.permissions ?? []
     }
 
     /// The acting principal for an audit record, resolved for BOTH
@@ -4235,21 +4265,10 @@ struct AthenaServer {
     /// (`xenos`). Mirrors `callerPermissions` so neither path is
     /// missed.
     private func auditPrincipal(_ request: Request) async -> String {
+        // M65.6 (A5): the published resolution carries the principal for
+        // BOTH surfaces (bearer `u:`/`t:`, cookie `u:<user>`); no re-derive.
         guard auth.isEnabled else { return Self.xenos }
-        if let h = request.headers[.authorization],
-            h.hasPrefix("Bearer "),
-            case let tok = String(h.dropFirst(7)), !tok.isEmpty,
-            let s = await auth.resolve(bearer: tok)
-        {
-            return s.principal
-        }
-        if let ck = Session.token(
-            fromCookieHeader: request.headers[.cookie]),
-            let user = session.validate(ck)
-        {
-            return "u:" + user
-        }
-        return "unknown"
+        return ResolvedCaller.current?.principal ?? "unknown"
     }
 
     /// Record one admin/security mutation to the M30 audit trail. The

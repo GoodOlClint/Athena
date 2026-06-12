@@ -1,8 +1,15 @@
 # 004 — Non-loopback TLS posture: warn-only, not fail-closed
 
-**Status:** Accepted — Not yet implemented
+**Status:** Implemented
 **Date:** 2026-06-12
 **Milestone:** M65 (audit-remediation; resolves standing DECISION #1; audit A2/K1/K8/A12/A3)
+
+**Implemented across:** A12 `Secure` cookie — M65.2 (v0.10.118); doctor TLS posture
+finding — M28.2; the loud non-loopback-plaintext **startup warning** (`Load.swift`)
+and the **A3 peer-IP login limiter** (`AppRequestContext.remoteAddress` →
+`loginLimiter`, no XFF trust) — M65.6 (v0.10.122). Client `https` (K1/K8) stays
+deferred per the ruling below; A2/K1/K8 remain advisory (warn + doctor), not
+fail-closed.
 
 ## Context
 

@@ -86,12 +86,15 @@ actor RequestQueue {
         return id
     }
 
-    func status(id: String) async -> JobRow? {
-        await store.getJob(id: id)
+    /// `owner` (M65.6 / audit H6) is the optional defense-in-depth scope
+    /// passed straight to the store: nil for admin / worker callers (see
+    /// every job), the caller's principal for a scoped tenant.
+    func status(id: String, owner: String? = nil) async -> JobRow? {
+        await store.getJob(id: id, owner: owner)
     }
 
-    func list(status: String?) async -> [JobRow] {
-        await store.listJobs(status: status)
+    func list(status: String?, owner: String? = nil) async -> [JobRow] {
+        await store.listJobs(status: status, owner: owner)
     }
 
     /// M43.1 — count rows in `queued` for `/healthz`. /healthz is not a

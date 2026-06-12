@@ -30,7 +30,7 @@ The only Critical lives here (G1), plus everything an unprivileged or low-privil
 ### M65.2 — WebUI & login surface — 5/6 ✅ v0.10.118 (A3 deferred)
 - [x] NA1 (High) escape `t.label`/`t.username`/`t.scope` (+ users/roles fields) in /ui users page — shared JS `esc()` + `data-u` delete button (v0.10.118)
 - [x] A11 HTML-escape config values via shared `esc()` (replaces `"`-only escape; also path + error sinks) (v0.10.118)
-- [ ] A3 rate-limit `POST /ui/login` by IP + backoff — **DEFERRED**: no client-IP plumbing today; correct IP source (peer via `RemoteAddressRequestContext` vs trusting `X-Forwarded-For`) overlaps DECISION #1's TLS/proxy trust model — needs sign-off
+- [x] A3 rate-limit `POST /ui/login` by IP + backoff — shipped in **M65.6** (v0.10.122) once the `AppRequestContext` peer-IP plumbing landed (ADR 004: peer addr, no XFF trust)
 - [x] A10 generic login failure + always-run dummy PBKDF2 (`Passwords.dummyVerify`) — closes enumeration timing oracle (v0.10.118)
 - [x] A12 `Secure` cookie attribute when the daemon serves TLS (`tlsEnabled`) (v0.10.118)
 - [x] NA7 percent-decode fallback keeps `+`→space normalization (v0.10.118)
@@ -57,14 +57,16 @@ The only Critical lives here (G1), plus everything an unprivileged or low-privil
 - [x] NA6 ownerless queue jobs: `owner==nil` → admin-only under enforced auth (v0.10.121)
 - [x] A21 + NE7 substrate detail (paths/repo ids/state) scrubbed from client `message`; `serverDetail` → os_log only; remaining A21 sites are benign decode/validation errors (v0.10.121)
 - [x] A22 fail closed on group/other-accessible auth-keys file (skip its keys, error not warning) (v0.10.121)
-- [ ] **A5 (High) → M65.6**: single caller/permission resolution in AuthMiddleware (4 drifted copies) — needs a custom `RequestContext` to stash the resolved subject
-- [ ] **A3 → M65.6**: peer-IP login limiter (ADR 004) — same `RemoteAddressRequestContext`
-- [ ] **H6 → M65.6**: store-layer owner filter for jobs/usage — pairs with the owner-scoping work (ADR 006)
+- [x] **A5 (High) → M65.6**: single caller/permission resolution in AuthMiddleware (4 drifted copies) — shipped M65.6 v0.10.122 (custom `AppRequestContext` + `ResolvedCaller` task-local)
+- [x] **A3 → M65.6**: peer-IP login limiter (ADR 004) — shipped M65.6 v0.10.122
+- [x] **H6 → M65.6**: store-layer owner filter for jobs/usage — shipped M65.6 v0.10.122
 
-### M65.6 — Auth-context refactor (structural)
-- [ ] A5 consolidate the 4 caller/perm resolutions (AthenaServer `callerPermissions`, WebUI `uiCaller`, AuthMiddleware, …) into one resolve stashed in a custom `AppRequestContext`
-- [ ] A3 peer-IP `POST /ui/login` rate-limit via `RemoteAddressRequestContext` (ADR 004; peer addr, no XFF trust)
-- [ ] H6 optional owner filter at the store layer (`getJob`/`listJobs`/`allUsage`) — defense-in-depth under the resolved-once principal
+### M65.6 — Auth-context refactor (structural) ✅ v0.10.122
+- [x] A5 single resolution in `AuthMiddleware`: a new `AppRequestContext` (RequestContext + RemoteAddressRequestContext) replaces the default `Router()` context; the resolved caller is published once via a request-scoped `ResolvedCaller` task-local (bound beside the existing `LogScope`), and the 4 former copies (`callerPermissions`, `uiCaller`, `auditPrincipal`, `queuePrincipal`) now read it instead of re-deriving from headers — no more bearer-vs-cookie/sentinel/loopback drift (v0.10.122)
+- [x] A3 peer-IP `POST /ui/login` limiter: `loginLimiter` (token bucket, burst 5 / 0.2 per sec) keyed on `context.remoteAddress` (TCP peer only, **no XFF trust** per ADR 004); 429 + Retry-After; behind-a-proxy limitation documented in code + ADR. e2e phase 33 asserts the 429 (v0.10.122)
+- [x] H6 optional owner filter at the store layer (`getJob`/`listJobs`/`allUsage`); nil = unfiltered (admin/worker/auth-off), a scoped principal confines the rows (ownerless NULL never matches) — defense-in-depth beneath the handlers' `canAccess`, wired via `ownerScope(who)`. New `AthenaStoreTests.testOwnerScopedQueriesH6` (v0.10.122)
+
+> Server/ resolution/login logic isn't unit-testable until M70 (NA2); A5/A3 validated via build + e2e-rbac (497/0, incl. the new login-throttle phase 33) + reasoning. The H6 store helpers ARE unit-testable and now are.
 
 **DECISION items parked at M65 (need sign-off, then ADR):**
 - A2/K1: require TLS (or explicit `--insecure`) for non-loopback auth-on daemons; add https to the portable client. Contract change for remote deployments.

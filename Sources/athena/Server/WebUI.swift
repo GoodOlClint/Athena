@@ -168,14 +168,14 @@ extension AthenaServer {
     func uiCaller(_ request: Request)
         async -> (user: String, perms: Set<Permission>)
     {
+        // M65.6 (A5): read the single resolution AuthMiddleware published
+        // for the /ui cookie session, rather than re-validating the cookie
+        // here. Auth-off loopback = one trusted local operator.
         guard auth.isEnabled else {
             return ("(local)", Set(Permission.allCases))
         }
-        if let tok = Session.token(
-            fromCookieHeader: request.headers[.cookie]),
-            let user = session.validate(tok)
-        {
-            return (user, await auth.permissions(forUser: user))
+        if let c = ResolvedCaller.current, let user = c.uiUser {
+            return (user, c.permissions)
         }
         return ("", [])
     }
@@ -1026,7 +1026,35 @@ extension AthenaServer {
         return nil
     }
 
-    func handleUILoginPost(_ request: Request) async -> Response {
+    func handleUILoginPost(
+        _ request: Request, peerIP: String? = nil
+    ) async -> Response {
+        // A3 (M65.6): throttle password attempts per TCP peer address.
+        // Login is exempt from the global per-principal limiter (it runs
+        // before any principal exists), so without this a remote client can
+        // brute-force the form unbounded. Keyed on the channel peer only —
+        // X-Forwarded-For is never trusted (ADR 004). Only meaningful when
+        // auth is on (open loopback dev has no user accounts to guess).
+        if auth.isEnabled {
+            let ip = peerIP ?? "unknown"
+            if let retryAfter = await loginLimiter.take(
+                ip, now: Date().timeIntervalSince1970)
+            {
+                var h = HTTPFields()
+                h[.contentType] = "text/html; charset=utf-8"
+                h[.retryAfter] = String(retryAfter)
+                var buf = ByteBuffer()
+                buf.writeBytes(
+                    Data(
+                        Self.loginPage(
+                            error:
+                                "too many attempts; retry in "
+                                + "\(retryAfter)s").utf8))
+                return Response(
+                    status: .tooManyRequests, headers: h,
+                    body: ResponseBody(byteBuffer: buf))
+            }
+        }
         let body: String
         if let buf = try? await request.body.collect(
             upTo: 64 * 1024)

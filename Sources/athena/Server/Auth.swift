@@ -412,9 +412,17 @@ struct AuthMiddleware<Context: RequestContext>: RouterMiddleware {
         {
             let perms = await config.permissions(forUser: user)
             if perms.contains(required) {
+                // A5: publish the single resolved caller so /ui handlers
+                // (uiCaller, callerPermissions, audit) read THIS resolution
+                // instead of re-validating the cookie themselves.
+                let caller = ResolvedCaller(
+                    principal: "u:\(user)", permissions: perms,
+                    uiUser: user)
                 let scope = LogScope(principal: "u:\(user)")
-                return try await LogScope.$current.withValue(scope) {
-                    try await next(request, context)
+                return try await ResolvedCaller.$current.withValue(caller) {
+                    try await LogScope.$current.withValue(scope) {
+                        try await next(request, context)
+                    }
                 }
             }
             return Self.redirect("/ui/login")
@@ -453,9 +461,17 @@ struct AuthMiddleware<Context: RequestContext>: RouterMiddleware {
                     + "grant the role via `athena auth role grant "
                     + "<user> <role>`.")
         }
+        // A5: publish the single resolved caller (bearer path). Downstream
+        // helpers (queuePrincipal, callerPermissions, audit) read this
+        // instead of calling config.resolve(bearer:) a second time.
+        let caller = ResolvedCaller(
+            principal: subject.principal,
+            permissions: subject.permissions, uiUser: nil)
         let scope = LogScope(principal: subject.principal)
-        return try await LogScope.$current.withValue(scope) {
-            try await next(request, context)
+        return try await ResolvedCaller.$current.withValue(caller) {
+            try await LogScope.$current.withValue(scope) {
+                try await next(request, context)
+            }
         }
     }
 

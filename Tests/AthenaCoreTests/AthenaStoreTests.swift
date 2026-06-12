@@ -97,6 +97,61 @@ final class AthenaStoreTests: XCTestCase {
         XCTAssertEqual(after, 1)
     }
 
+    /// H6 (M65.6) — the optional store-layer owner filter on
+    /// getJob/listJobs/allUsage. nil keeps the legacy unfiltered behavior;
+    /// a non-nil owner confines the result, and an ownerless (NULL) row
+    /// never matches a scoped query (so a tenant can't read pre-auth jobs).
+    func testOwnerScopedQueriesH6() async throws {
+        let url = tmpURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let s = try AthenaStore(path: url)
+
+        try await s.insertJob(
+            id: "a", kind: "conversation", request: Data(),
+            owner: "u:alice")
+        try await s.insertJob(
+            id: "b", kind: "conversation", request: Data(),
+            owner: "u:bob")
+        try await s.insertJob(
+            id: "legacy", kind: "conversation", request: Data(),
+            owner: nil)
+
+        // getJob: scoped to the owner; cross-owner and ownerless both miss.
+        let aScoped = await s.getJob(id: "a", owner: "u:alice")
+        XCTAssertEqual(aScoped?.id, "a")
+        let aWrong = await s.getJob(id: "a", owner: "u:bob")
+        XCTAssertNil(aWrong)
+        let legacyScoped = await s.getJob(id: "legacy", owner: "u:alice")
+        XCTAssertNil(legacyScoped)
+        // nil = unfiltered: the ownerless row is reachable (admin path).
+        let legacyUnfiltered = await s.getJob(id: "legacy")
+        XCTAssertEqual(legacyUnfiltered?.id, "legacy")
+
+        // listJobs: owner filter confines; nil sees all three.
+        let aliceList = await s.listJobs(owner: "u:alice").map(\.id)
+        XCTAssertEqual(aliceList, ["a"])
+        let allCount = await s.listJobs().count
+        XCTAssertEqual(allCount, 3)
+        // status + owner compose.
+        let bobQueued =
+            await s.listJobs(status: "queued", owner: "u:bob").map(\.id)
+        XCTAssertEqual(bobQueued, ["b"])
+        // a scoped query never returns the NULL-owner row.
+        let nobody = await s.listJobs(owner: "u:nobody")
+        XCTAssertTrue(nobody.isEmpty)
+
+        // allUsage: principal filter scopes to one row; nil = full table.
+        try await s.addUsage(
+            principal: "u:alice", promptTokens: 5, completionTokens: 1)
+        try await s.addUsage(
+            principal: "u:bob", promptTokens: 2, completionTokens: 1)
+        let aliceUsage =
+            await s.allUsage(principal: "u:alice").map(\.principal)
+        XCTAssertEqual(aliceUsage, ["u:alice"])
+        let allUsageCount = await s.allUsage().count
+        XCTAssertEqual(allUsageCount, 2)
+    }
+
     func testUserRolesAndCascadingDelete() async throws {
         let url = tmpURL()
         defer { try? FileManager.default.removeItem(at: url) }

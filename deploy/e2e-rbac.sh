@@ -3175,6 +3175,35 @@ echo "$DN" | grep -q "DOWNGRADING 99.0.0" \
 rm -rf "$IP"
 
 echo
+echo "== phase 33: login brute-force throttle (M65.6 / audit A3) =="
+# POST /ui/login is exempt from the global per-principal limiter (it runs
+# before any principal exists), so a remote client could brute-force the
+# password unbounded. The per-IP login bucket (burst 5) now returns 429 +
+# Retry-After once a peer fires a rapid run of attempts. Own auth-enabled
+# daemon ($D already has seeded users) ⇒ a full bucket; bad creds so no
+# session is minted; fired with no delay so the 0.2/s refill is negligible.
+stop_daemon
+start_daemon "$D" 127.0.0.1 \
+  && ok "A3: login-throttle daemon up" || bad "A3: daemon failed"
+BA3="http://127.0.0.1:$PORT"
+L429=0; LRA=""
+for _ in $(seq 1 12); do
+  read -r LSTATUS LRETRY < <(curl -s -o /dev/null \
+    -w '%{http_code} %header{retry-after}' \
+    -d 'username=admin&password=wrongwrong' "$BA3/ui/login")
+  if [ "$LSTATUS" = 429 ]; then
+    L429=$((L429+1)); [ -n "$LRETRY" ] && LRA="$LRETRY"
+  fi
+done
+[ "$L429" -ge 1 ] \
+  && ok "rapid /ui/login burst throttled ($L429/12 → 429)" \
+  || bad "no /ui/login attempt throttled (got 0 429s in 12)"
+[ -n "$LRA" ] \
+  && ok "login 429 carries Retry-After ($LRA s)" \
+  || bad "login 429 missing Retry-After header"
+stop_daemon
+
+echo
 echo "════════════════════════════════════════"
 echo "  PASS=$PASS  FAIL=$FAIL"
 echo "════════════════════════════════════════"

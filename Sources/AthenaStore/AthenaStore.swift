@@ -526,27 +526,50 @@ public actor AthenaStore {
     private static let jobCols =
         "id,kind,status,request,result,error,created,updated,owner"
 
-    public func getJob(id: String) -> JobRow? {
-        guard
-            let st = try? Self.prepared(db,
-                "SELECT \(Self.jobCols) FROM jobs WHERE id=?;")
-        else { return nil }
+    /// One job by id. `owner` (M65.6 / audit H6) is an optional
+    /// defense-in-depth filter: when non-nil, the row matches only if its
+    /// `owner` column equals it (a NULL/ownerless row never matches, so a
+    /// scoped caller can't read pre-auth jobs — same outcome the server's
+    /// `canAccess` enforces, pushed down a layer). nil = unfiltered (admin
+    /// / worker / auth-off), preserving every existing caller.
+    public func getJob(id: String, owner: String? = nil) -> JobRow? {
+        let sql =
+            owner == nil
+            ? "SELECT \(Self.jobCols) FROM jobs WHERE id=?;"
+            : "SELECT \(Self.jobCols) FROM jobs WHERE id=? AND owner=?;"
+        guard let st = try? Self.prepared(db, sql) else { return nil }
         defer { sqlite3_finalize(st) }
         sqlite3_bind_text(st, 1, id, -1, Self.transient)
+        if let owner {
+            sqlite3_bind_text(st, 2, owner, -1, Self.transient)
+        }
         return sqlite3_step(st) == SQLITE_ROW ? rowToJob(st) : nil
     }
 
-    /// Jobs, optionally filtered by status, oldest first.
-    public func listJobs(status: String? = nil) -> [JobRow] {
-        let sql =
-            status == nil
-            ? "SELECT \(Self.jobCols) FROM jobs ORDER BY created;"
-            : "SELECT \(Self.jobCols) FROM jobs WHERE status=? "
-                + "ORDER BY created;"
-        guard let st = try? Self.prepared(db,sql) else { return [] }
+    /// Jobs, optionally filtered by status and/or `owner`, oldest first.
+    /// `owner` is the H6 defense-in-depth scope (see `getJob`); nil leaves
+    /// the listing unfiltered.
+    public func listJobs(status: String? = nil, owner: String? = nil)
+        -> [JobRow]
+    {
+        var conds: [String] = []
+        if status != nil { conds.append("status=?") }
+        if owner != nil { conds.append("owner=?") }
+        var sql = "SELECT \(Self.jobCols) FROM jobs"
+        if !conds.isEmpty {
+            sql += " WHERE " + conds.joined(separator: " AND ")
+        }
+        sql += " ORDER BY created;"
+        guard let st = try? Self.prepared(db, sql) else { return [] }
         defer { sqlite3_finalize(st) }
+        var idx: Int32 = 1
         if let s = status {
-            sqlite3_bind_text(st, 1, s, -1, Self.transient)
+            sqlite3_bind_text(st, idx, s, -1, Self.transient)
+            idx += 1
+        }
+        if let o = owner {
+            sqlite3_bind_text(st, idx, o, -1, Self.transient)
+            idx += 1
         }
         var out: [JobRow] = []
         while sqlite3_step(st) == SQLITE_ROW { out.append(rowToJob(st)) }
@@ -686,13 +709,25 @@ public actor AthenaStore {
     }
 
     /// Every principal's usage, highest total tokens first (admin view).
-    public func allUsage() -> [UsageRow] {
-        guard let st = try? Self.prepared(db,
-            "SELECT \(Self.usageCols) FROM usage_counters "
-                + "ORDER BY (prompt_tokens + completion_tokens) DESC, "
-                + "principal;")
-        else { return [] }
+    /// `principal` (M65.6 / audit H6) is an optional defense-in-depth
+    /// filter: non-nil scopes the result to that one principal's row, so a
+    /// non-admin caller can't read the whole table even if a future handler
+    /// forgets to branch. nil = unfiltered (the admin view), preserving the
+    /// existing caller.
+    public func allUsage(principal: String? = nil) -> [UsageRow] {
+        let order =
+            " ORDER BY (prompt_tokens + completion_tokens) DESC, "
+            + "principal;"
+        let sql =
+            principal == nil
+            ? "SELECT \(Self.usageCols) FROM usage_counters" + order
+            : "SELECT \(Self.usageCols) FROM usage_counters "
+                + "WHERE principal=?" + order
+        guard let st = try? Self.prepared(db, sql) else { return [] }
         defer { sqlite3_finalize(st) }
+        if let principal {
+            sqlite3_bind_text(st, 1, principal, -1, Self.transient)
+        }
         var out: [UsageRow] = []
         while sqlite3_step(st) == SQLITE_ROW { out.append(rowToUsage(st)) }
         return out

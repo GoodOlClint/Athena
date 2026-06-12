@@ -634,6 +634,28 @@ struct Load: AsyncParsableCommand {
             authConfig.isEnabled
                 ? "auth: enabled (RBAC; bearer→user→roles, env/file + DB)"
                 : "auth: DISABLED (loopback, no credentials)")
+        // ADR 004 (warn-only, audit A2/K1) — an auth-on daemon on a
+        // non-loopback bind serving plaintext starts, but loudly: bearer
+        // tokens and the session cookie cross the wire in clear. Mirrors
+        // the doctor TLS-posture finding (M28.2). No fail-closed, no
+        // `--insecure` gate. Loopback binds (incl. the e2e suite) never
+        // trip this.
+        do {
+            let loopback: Set<String> = ["127.0.0.1", "::1", "localhost"]
+            let plaintext = tlsCert == nil && tlsKey == nil
+            if authConfig.isEnabled, plaintext,
+                !loopback.contains(config.listenHost)
+            {
+                Logger(label: AthenaLogLabel.daemon).warning(
+                    """
+                    TLS: serving plaintext on non-loopback \
+                    \(config.listenHost) with auth ENABLED — bearer tokens \
+                    and the session cookie are exposed on the wire. Set \
+                    tls_cert/tls_key or front the daemon with a \
+                    TLS-terminating reverse proxy (see docs/quickstart.md).
+                    """)
+            }
+        }
 
         var server = AthenaServer(
             config: config, governor: governor, llm: llm,
