@@ -425,8 +425,8 @@
     "semantic_hash": "d16404614855c59c2001089f41c5bd78"
   },
   "Sources/athena/Athena.swift": {
-    "mtime": 1781297548.1212528,
-    "ast_hash": "057c6e64482da1d3fa768253d1962f16",
+    "mtime": 1781298410.3414178,
+    "ast_hash": "3de371d85471c5e171beba2701569db4",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Audit.swift": {
@@ -460,9 +460,9 @@
     "semantic_hash": "05d9a597cdd295f4fc06cc7dedf96d79"
   },
   "Sources/athena/Commands/DaemonLifecycle.swift": {
-    "mtime": 1779900025.3299773,
-    "ast_hash": "1b1a688b5902475621929901e76cdd9b",
-    "semantic_hash": "1b1a688b5902475621929901e76cdd9b"
+    "mtime": 1781298011.1693568,
+    "ast_hash": "152ce1ba9dbcc5aee02dc255c2c513b9",
+    "semantic_hash": ""
   },
   "Sources/athena/Commands/Default.swift": {
     "mtime": 1779134816.1387768,
@@ -470,8 +470,8 @@
     "semantic_hash": "b6f7441bff95e5bcfe4786066a68b0af"
   },
   "Sources/athena/Commands/Doctor.swift": {
-    "mtime": 1781297425.8465366,
-    "ast_hash": "671a916c19851f93569abb9ba97aabb2",
+    "mtime": 1781298393.36487,
+    "ast_hash": "77aa7fad78001cb7d3ca9438da214448",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/HfCmd.swift": {
@@ -485,8 +485,8 @@
     "semantic_hash": "386dab6a52e5d0d719447cbf50535329"
   },
   "Sources/athena/Commands/Install.swift": {
-    "mtime": 1781297532.2297497,
-    "ast_hash": "9bc4de3d0ee65c2baaf9bf8ef31eb0a1",
+    "mtime": 1781298366.7198734,
+    "ast_hash": "f102dcb9a1843bc700994248d4296283",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/ListModels.swift": {
@@ -530,9 +530,9 @@
     "semantic_hash": "b9da5486accb76dd9a51b84b9d43f85e"
   },
   "Sources/athena/Commands/StoreKey.swift": {
-    "mtime": 1779508259.2206714,
-    "ast_hash": "ef1b07a664cb8b6c69efe9442d2a60bc",
-    "semantic_hash": "ef1b07a664cb8b6c69efe9442d2a60bc"
+    "mtime": 1781298357.802107,
+    "ast_hash": "c58d0863c80421d5f7c949296a88da0c",
+    "semantic_hash": ""
   },
   "Sources/athena/Commands/Uninstall.swift": {
     "mtime": 1780788021.6421669,
@@ -890,9 +890,9 @@
     "semantic_hash": "0e7d06f0b4fd46a3da1397bcc15b8f37"
   },
   "clients/Sources/AthenaClient/StoreCmd.swift": {
-    "mtime": 1779123769.3312473,
-    "ast_hash": "5d432cfb9f3ce8496d996f646b0e9ce8",
-    "semantic_hash": "5d432cfb9f3ce8496d996f646b0e9ce8"
+    "mtime": 1781298244.6785846,
+    "ast_hash": "626dccf2d6fa935046e92f633d08987d",
+    "semantic_hash": ""
   },
   "clients/Sources/AthenaClient/Unload.swift": {
     "mtime": 1779892089.4193304,
@@ -915,8 +915,8 @@
     "semantic_hash": "e29565ca41e2bea1b26a9e5469e5349c"
   },
   "deploy/e2e-rbac.sh": {
-    "mtime": 1781297775.9543748,
-    "ast_hash": "72262a8e5c682572fd3604575b433f68",
+    "mtime": 1781298610.3766878,
+    "ast_hash": "441ce9c897cb433af5a932b382bcb9f8",
     "semantic_hash": ""
   },
   "deploy/integration/e2e-embedding-select.sh": {
@@ -1210,8 +1210,8 @@
     "semantic_hash": ""
   },
   "docs/audit-remediation-plan.md": {
-    "mtime": 1781297848.2689474,
-    "ast_hash": "a11041b070b0d4986a82d1cb6d17c315",
+    "mtime": 1781298702.6170456,
+    "ast_hash": "51c53f5a856c1558745b693423330ba0",
     "semantic_hash": ""
   },
   "docs/decisions/003-rust-shim-panic-strategy.md": {
