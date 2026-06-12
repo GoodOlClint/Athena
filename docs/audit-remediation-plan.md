@@ -37,12 +37,12 @@ The only Critical lives here (G1), plus everything an unprivileged or low-privil
 
 > Server/ login/session/XSS logic isn't unit-testable until M70 (NA2); validated via build + e2e-rbac 494/0 (login/cookie path) + binary inspection.
 
-### M65.3 — Untrusted input caps (DoS)
-- [ ] ND1 (High) validate/clamp segment bounds before `Int()` in speaker embeddings — remote crash
-- [ ] D4 cap decoded audio samples; clamp header-driven `reserveCapacity`; guard Int overflow
-- [ ] A9 cap multipart part count/size; replace O(n·m) byte scan
-- [ ] NI4 per-input token-length cap on embeddings (OpenAI-style 400)
-- [ ] G4 + NC2 fail closed: unusable/unresolvable `json_schema` → 400, never silently unconstrained
+### M65.3 — Untrusted input caps (DoS) ✅ v0.10.119
+- [x] ND1 (High) finite-check + Double-domain clamp before `Int()` in speaker embeddings → 400 audio_segment_invalid (v0.10.119)
+- [x] D4 `AudioDecode` decode-sample ceiling (~4h) + clamped/guarded header reserve (v0.10.119)
+- [x] A9 multipart `firstRange(of:)` split + `maxParts=256` cap (v0.10.119)
+- [x] NI4 per-input embedding token ceiling (32768) → 400 input_too_long (new AthenaError) (v0.10.119)
+- [x] G4 + NC2 fail closed: `structuredRequestError()` 400 on missing/unserializable schema (sync+queued); MLXLLMModule throws structured_output_unavailable on unresolvable vocab / uncompilable schema (v0.10.119)
 
 ### M65.4 — Path confinement (file ops on caller-influenced paths)
 - [ ] A1 (High) confine store export under an export dir; reject symlinks/overwrite
