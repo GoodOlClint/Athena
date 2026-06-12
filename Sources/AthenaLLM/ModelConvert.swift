@@ -74,6 +74,12 @@ public enum ModelConvert {
         let base = id.split(separator: "/").last.map(String.init) ?? id
         let outName =
             name ?? (bits.map { "\(base)-\($0)bit" } ?? "\(base)-mlx")
+        // C6: a caller-supplied `name` like `../evil` would escape the
+        // store root through the `removeItem`/`createDirectory` below.
+        // Confine the output to a bare child name.
+        guard ModelStoreOps.isValidName(outName) else {
+            throw ModelStoreOps.OpError.invalidName(outName)
+        }
         let dest = storeRoot.appendingPathComponent(
             outName, isDirectory: true)
         try? FileManager.default.removeItem(at: dest)

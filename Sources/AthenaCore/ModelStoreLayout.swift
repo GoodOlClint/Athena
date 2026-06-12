@@ -21,8 +21,19 @@ public enum ModelStoreLayout {
             return FileManager.default.fileExists(atPath: u.path) ? u : nil
         }
         guard let root = storeRoot else { return nil }
-        let u = root.appendingPathComponent(
-            id.modelStoreIdentity, isDirectory: true)
+        let identity = id.modelStoreIdentity
+        // Defense-in-depth path confinement (D6/NC12): `modelStoreIdentity`
+        // is `split("/").last`, so a crafted id like `foo/..` yields the
+        // identity `..` and `root/..` would resolve to the store root's
+        // PARENT — loading config/weights from outside the store. Every
+        // module class resolves local models through here, so confining it
+        // once covers the LLM, embedding, transcription, diarization, and
+        // speaker load paths. Refuse anything that isn't a plain child-dir
+        // name.
+        guard !identity.isEmpty, identity != "..", identity != ".",
+            !identity.contains("/")
+        else { return nil }
+        let u = root.appendingPathComponent(identity, isDirectory: true)
         return FileManager.default.fileExists(atPath: u.path) ? u : nil
     }
 }

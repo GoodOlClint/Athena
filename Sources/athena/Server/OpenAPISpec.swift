@@ -291,13 +291,14 @@ enum OpenAPISpec {
               "post": {
                 "tags": ["Store"],
                 "summary": "Export the shared store to a file.",
-                "description": "Requires `store.admin`.",
+                "description": "Requires `store.admin`. `path` is a bare filename; the backup is written under the daemon's `exports/` directory (no absolute paths, `~`, or `..`), and an existing target is not overwritten.",
                 "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StoreExportRequest" } } } },
                 "responses": {
                   "200": { "description": "Export result.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StoreExportResponse" } } } },
                   "400": { "$ref": "#/components/responses/BadRequest" },
                   "401": { "$ref": "#/components/responses/Unauthorized" },
-                  "403": { "$ref": "#/components/responses/Forbidden" }
+                  "403": { "$ref": "#/components/responses/Forbidden" },
+                  "409": { "description": "Export target already exists." }
                 }
               }
             },

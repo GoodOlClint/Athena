@@ -140,6 +140,14 @@ public enum ModelStoreOps {
         root: URL, src: String, dst: String,
         deepCopy: Bool, force: Bool
     ) throws -> URL {
+        // C7: the destination was confined but the SOURCE was not — an
+        // `src` of `/etc/passwd` or `../something` would be read and
+        // copied/aliased out of the store. Confine both to bare child
+        // names; a model is always a direct child of the store root (its
+        // symlink may target the HF cache, but its store entry is a child).
+        guard isValidName(src) else {
+            throw OpError.invalidName(src)
+        }
         let store = ModelStore(rootDirectory: root)
         let source = store.resolve(src)
         let fm = FileManager.default
@@ -246,6 +254,13 @@ public enum ModelStoreOps {
         }
         var removed = 0, failed = 0
         for v in victims {
+            // C24: victims come from `contentsOfDirectory` (bare names),
+            // but assert the child invariant before a removeItem so the
+            // delete can never reach outside the store root.
+            guard isValidName(v.name) else {
+                failed += 1
+                continue
+            }
             do {
                 try fm.removeItem(
                     at: root.appendingPathComponent(v.name))

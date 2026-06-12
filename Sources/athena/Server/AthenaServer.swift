@@ -2100,13 +2100,40 @@ struct AthenaServer {
             if case .fail(let r) = decoded { return r }
             fatalError()
         }
-        let raw = (body.path as NSString).expandingTildeInPath
-        guard !raw.isEmpty else {
+        // A1: confine the backup under a dedicated `exports/` dir beside
+        // the store DB. The request path is reduced to a bare filename —
+        // no absolute paths, no `~`, no `..`, no `/` — so a storeAdmin
+        // caller can't turn a DB backup into an arbitrary file write as
+        // the daemon user, and we refuse to overwrite an existing target.
+        let filename = (body.path as NSString).lastPathComponent
+        guard !filename.isEmpty, filename != ".", filename != "..",
+            !filename.hasPrefix("."), !filename.contains("/")
+        else {
             return Self.error(
-                status: .badRequest, message: "missing export path",
-                type: "invalid_request_error", code: "missing_path")
+                status: .badRequest,
+                message:
+                    "export 'path' must be a bare filename (the backup "
+                    + "is written under the daemon's exports directory)",
+                type: "invalid_request_error", code: "invalid_path")
         }
-        let dest = URL(fileURLWithPath: raw)
+        let exportRoot = store.dbPath.deletingLastPathComponent()
+            .appendingPathComponent("exports", isDirectory: true)
+        let dest = exportRoot.appendingPathComponent(filename)
+        do {
+            try FileManager.default.createDirectory(
+                at: exportRoot, withIntermediateDirectories: true)
+        } catch {
+            return Self.error(
+                status: .internalServerError,
+                message: "could not prepare exports dir: \(error)",
+                type: "server_error", code: "export_failed")
+        }
+        guard !FileManager.default.fileExists(atPath: dest.path) else {
+            return Self.error(
+                status: .conflict,
+                message: "export target already exists: \(filename)",
+                type: "invalid_request_error", code: "export_exists")
+        }
         do {
             try await store.backup(to: dest)
         } catch {

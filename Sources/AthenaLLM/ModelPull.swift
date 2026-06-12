@@ -58,6 +58,12 @@ public enum ModelPull {
         }
 
         let name = id.split(separator: "/").last.map(String.init) ?? id
+        // C5: an id whose last path component is `..` (e.g. `org/..`)
+        // would make `dest` the store root's PARENT and the `removeItem`
+        // below would wipe it. Reject anything that isn't a bare child name.
+        guard ModelStoreOps.isValidName(name) else {
+            throw ModelStoreOps.OpError.invalidName(name)
+        }
         try FileManager.default.createDirectory(
             at: storeRoot, withIntermediateDirectories: true)
         let dest = storeRoot.appendingPathComponent(
