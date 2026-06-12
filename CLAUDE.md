@@ -58,6 +58,11 @@ Read `docs/decisions/` before architectural changes — particularly anything th
 
 - [`001-dflash-speculative-decoding.md`](docs/decisions/001-dflash-speculative-decoding.md) — DFlash lossless speculative decoding for non-MTP targets (Gemma4-first), default-off; vendored from bstnxbt/dflash-mlx (Apache-2.0). M63.
 - [`002-gemma4-moe-arch.md`](docs/decisions/002-gemma4-moe-arch.md) — Gemma4 MoE architecture support (26B-A4B; 128-expert), additive substrate delta reusing `SwitchGLU`, dense path byte-unchanged; unblocks ADR 001's M63.5 (DFlash on the MoE target). M64.
+- [`003-rust-shim-panic-strategy.md`](docs/decisions/003-rust-shim-panic-strategy.md) — rust-shim FFI panic strategy: per-entry `catch_unwind` (crate stays `panic="unwind"`, NOT `abort`) so a hostile schema degrades to an error, not a daemon abort. Shipped M65.1 v0.10.117 (audit G1).
+- [`004-nonloopback-tls-posture.md`](docs/decisions/004-nonloopback-tls-posture.md) — non-loopback auth-on plaintext is **warn-only** (loud startup warning + doctor finding), not fail-closed; no `--insecure` gate, client https deferred; login limiter (A3) keys on TCP peer IP, no XFF trust. M65 (audit A2/K1/K8/A3).
+- [`005-remove-secrets-from-argv.md`](docs/decisions/005-remove-secrets-from-argv.md) — hard-remove `--password` from argv; prompt / `--password-stdin` / env only (breaking CLI change). M66 (audit B2/K7/K13).
+- [`006-vector-store-owner-scoping.md`](docs/decisions/006-vector-store-owner-scoping.md) — add a nullable `owner` column to the vector store; query/get/delete owner-filtered, admin sees all, legacy NULL rows admin-only (additive migration). M66 (audit H5).
+- [`007-api-metering-and-quotas.md`](docs/decisions/007-api-metering-and-quotas.md) — bring native `/api` metering (#8) + token-budget quotas (#9) into the program as their own milestone; NA8 single-resolution folds in. M69+ (audit NA8).
 
 ## Build / run / test
 
