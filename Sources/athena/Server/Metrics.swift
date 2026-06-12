@@ -18,6 +18,12 @@ actor AthenaMetrics {
         /// Observations in the latency reservoir the quantiles/avg are
         /// computed over (bounded; M37 — backs the summary _count/_sum).
         let latencyWindow: Int
+        /// H14 (M66.1) — cumulative audit-log write failures. The M30 audit
+        /// trail is a security record; a failed append is non-fatal to the
+        /// mutation that triggered it but MUST be visible, so it surfaces
+        /// here (scrapeable via /metrics) as well as in the error log.
+        /// Non-zero ⇒ the trail has gaps; alert on any increase.
+        let auditWriteFailures: Int
     }
 
     private var total = 0
@@ -43,6 +49,10 @@ actor AthenaMetrics {
     /// that would cross its deadline, instead of eating a 540 s cancel.
     /// Holds the last observed value while idle; 0 ⇒ none since boot.
     private var lastDecodeTokensPerSec: Double = 0
+    /// H14 (M66.1) — count of audit-log writes that failed (the store
+    /// `addAudit` threw). Surfaced on /metrics so a gap in the security
+    /// trail is observable, not silently swallowed.
+    private var auditWriteFailures = 0
 
     func record(kind: String, ms: Double, isError: Bool) {
         total += 1
@@ -53,6 +63,9 @@ actor AthenaMetrics {
     }
 
     func addTokens(_ n: Int) { tokens += n }
+
+    /// H14 (M66.1) — record one failed audit-log write.
+    func recordAuditWriteFailure() { auditWriteFailures += 1 }
 
     /// M43.1 — call on handler entry. Increments the live counter and
     /// stamps `lastRequestAt`.
@@ -96,7 +109,8 @@ actor AthenaMetrics {
             totalRequests: total, totalErrors: errors,
             byKind: byKind, avgMs: avg, p50Ms: pct(0.5),
             p95Ms: pct(0.95), llmTokens: tokens,
-            sinceEpoch: started, latencyWindow: sorted.count)
+            sinceEpoch: started, latencyWindow: sorted.count,
+            auditWriteFailures: auditWriteFailures)
     }
 
     /// Render a snapshot as Prometheus text-exposition format 0.0.4
@@ -131,6 +145,10 @@ actor AthenaMetrics {
         out += "(prompt+completion) metered.\n"
         out += "# TYPE athena_llm_tokens_total counter\n"
         out += "athena_llm_tokens_total \(s.llmTokens)\n"
+        out += "# HELP athena_audit_write_failures_total Audit-log writes "
+        out += "that failed (security trail gaps).\n"
+        out += "# TYPE athena_audit_write_failures_total counter\n"
+        out += "athena_audit_write_failures_total \(s.auditWriteFailures)\n"
         out += "# HELP athena_request_latency_ms Request latency (ms) "
         out += "over a recent bounded window.\n"
         out += "# TYPE athena_request_latency_ms summary\n"

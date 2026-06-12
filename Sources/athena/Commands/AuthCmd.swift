@@ -267,7 +267,12 @@ struct AuthUserRemove: AsyncParsableCommand {
                 "error: no store at \(storeDBPath(dataDir).path)")
         }
         await guardLastAdmin(db, losing: username)
-        let ok = await db.deleteUser(username: username)
+        let ok: Bool
+        do {
+            ok = try await db.deleteUser(username: username)
+        } catch {
+            FailableExit.die("error: delete failed: \(error)")
+        }
         print(ok ? "removed '\(username)'" : "no such user")
     }
 }

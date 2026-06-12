@@ -86,7 +86,13 @@ public actor VectorStore {
     public func delete(id: String) async -> Bool {
         await ensureLoaded()
         let ok = await store.deleteVector(id: id)
-        cache.removeAll { $0.id == id }
+        // NH2 (M66.1): only drop the row from the resident cache when the
+        // persisted delete actually succeeded. `deleteVector` returns false
+        // both for an absent id and for a genuine SQLite failure; clearing
+        // the cache unconditionally would, on a real failure, desync the
+        // cache from the store for the actor's lifetime (queries omit a row
+        // still on disk; a re-upsert is miscounted as new).
+        if ok { cache.removeAll { $0.id == id } }
         return ok
     }
 

@@ -81,14 +81,16 @@ Re-verify while here (not-refound): A2, A9*, A10*, A12*, A13, A14, A16–A22, A2
 
 Local data loss, lockouts, and the config parser silently lying.
 
-### M66.1 — Store integrity
-- [ ] NH1 (High) recoverable `migrateToEncrypted` swap: plaintext → `.bak`, move, delete `.bak` only on success; startup adopts orphaned `.enc-migrate`
-- [ ] H2 transactional allowlist default clear-then-set (`BEGIN IMMEDIATE`)
-- [ ] H11 `deleteUser` cascade in one transaction, errors surfaced
-- [ ] NH2 don't clear vector cache when persisted delete failed
-- [ ] H13 `trimJobs` excess computed against terminal rows
-- [ ] H14 failed audit write: log + health signal
-- [ ] H15 zero at-rest key buffer after keying
+### M66.1 — Store integrity ✅ v0.10.123
+- [x] NH1 (High) recoverable `migrateToEncrypted` swap: plaintext → `.migrate-bak`, move `enc-migrate` in, delete `.bak` only on success; rolls back on a failed move. New static `recoverInterruptedMigration(at:)` run at startup (Load.swift) completes/rolls back an interrupted swap (3 crash states). `testRecoverInterruptedMigrationNH1` (v0.10.123)
+- [x] H2 transactional allowlist default clear-then-set via new `withTransaction` (`BEGIN IMMEDIATE…COMMIT`/`ROLLBACK`) — exactly-one-default invariant survives a mid-swap throw. `testAllowlistDefaultSingleSwapH2` (v0.10.123)
+- [x] H11 `deleteUser` cascade (roles+tokens+user) in one `withTransaction`; now `throws -> Bool` (errors surfaced, not swallowed); callers (server→500, CLI→die) updated (v0.10.123)
+- [x] NH2 `VectorStore.delete` mutates the resident cache only when the persisted delete succeeded (no cache/store desync on a SQLite failure) (v0.10.123)
+- [x] H13 `trimJobs` excess computed against the TERMINAL-row count (retained results), not total rows — a large pending backlog no longer evicts finished results; `queueMaxRows` doc + the two trim tests updated (v0.10.123)
+- [x] H14 failed audit write → `.error` log + `metrics.recordAuditWriteFailure()` surfaced as `athena_audit_write_failures_total` on `/metrics`; e2e phase 31 asserts the counter (v0.10.123)
+- [x] H15 zero the at-rest key byte buffer after `sqlite3_key` (defer-zero on every exit path) (v0.10.123)
+
+> Store helpers ARE unit-testable: `AthenaStoreTests` now 18 cases (NH1/H2 added, H11/H13 updated), all green. Server wiring (H11 500 path, H14 metric) validated via build + e2e-rbac 498/0.
 
 ### M66.2 — Token/user lifecycle
 - [ ] NA4 server-side rotate: put new token BEFORE deleting old

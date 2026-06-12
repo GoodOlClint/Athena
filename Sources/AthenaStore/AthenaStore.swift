@@ -158,7 +158,12 @@ public actor AthenaStore {
         }
         if let key, !key.isEmpty {
             // Key MUST precede any other statement on the connection.
-            let bytes = Array(key.utf8)
+            var bytes = Array(key.utf8)
+            // H15 (M66.1): SQLCipher derives and copies its own key from
+            // these bytes during `sqlite3_key`; zero our copy afterwards so
+            // the raw material doesn't linger on the heap for the process
+            // lifetime. The `defer` fires on every exit (success + throws).
+            defer { for i in bytes.indices { bytes[i] = 0 } }
             guard sqlite3_key(db, bytes, Int32(bytes.count)) == SQLITE_OK
             else {
                 throw StoreError.encryption(
@@ -297,16 +302,75 @@ public actor AthenaStore {
         }
         sqlite3_close(db)
 
-        // Atomic-ish swap: drop the plaintext db + its WAL/SHM, move the
-        // encrypted copy into place.
+        // NH1 (M66.1) — recoverable swap. The plaintext db is moved ASIDE
+        // to a `.migrate-bak` (NOT deleted) before the encrypted copy takes
+        // its place, and the backup is removed only once the move
+        // succeeds. A crash or a failed `moveItem` therefore never destroys
+        // data: the encrypted copy survives at `enc-migrate` and/or the
+        // plaintext at `.migrate-bak`, and `recoverInterruptedMigration`
+        // (run at startup before the plaintext probe) finishes or rolls
+        // back the swap. The plaintext WAL/SHM are checkpointed on the
+        // close above, so removing them here loses nothing.
+        let bak = path.appendingPathExtension("migrate-bak")
+        try? fm.removeItem(at: bak)  // clear any interrupted prior attempt
         do {
-            for ext in ["", "-wal", "-shm"] {
-                try? fm.removeItem(
-                    at: URL(fileURLWithPath: path.path + ext))
-            }
+            try fm.moveItem(at: path, to: bak)  // plaintext aside, not gone
+        } catch {
+            try? fm.removeItem(at: enc)
+            throw StoreError.encryption("migration backup: \(error)")
+        }
+        for ext in ["-wal", "-shm"] {
+            try? fm.removeItem(at: URL(fileURLWithPath: path.path + ext))
+        }
+        do {
             try fm.moveItem(at: enc, to: path)
         } catch {
+            // Move failed — restore the plaintext and abort. No data lost.
+            try? fm.moveItem(at: bak, to: path)
+            try? fm.removeItem(at: enc)
             throw StoreError.encryption("migration swap: \(error)")
+        }
+        try? fm.removeItem(at: bak)  // success — drop the plaintext backup
+    }
+
+    /// NH1 (M66.1) — finish or roll back a `migrateToEncrypted` that a
+    /// crash interrupted mid-swap, so the store is never left without a
+    /// usable database. Run at startup BEFORE `isPlaintextDatabase`. The
+    /// three recoverable states (see the swap above):
+    ///   - `path` missing, `enc-migrate` present → the plaintext was moved
+    ///     to `.migrate-bak` but the encrypted copy hadn't landed: complete
+    ///     the swap by moving `enc-migrate` into place (its content equals
+    ///     the backup's), then drop the backup.
+    ///   - `path` present, `enc-migrate` present → a stale encrypted copy
+    ///     from a crash before the swap began: discard it; the normal
+    ///     migration (if still plaintext) re-runs cleanly.
+    ///   - `path` present, `.migrate-bak` present → the swap completed but
+    ///     the backup deletion didn't: drop the orphaned plaintext backup.
+    public nonisolated static func recoverInterruptedMigration(at path: URL)
+        throws
+    {
+        let fm = FileManager.default
+        let enc = path.appendingPathExtension("enc-migrate")
+        let bak = path.appendingPathExtension("migrate-bak")
+        let pathExists = fm.fileExists(atPath: path.path)
+        if fm.fileExists(atPath: enc.path) {
+            if !pathExists {
+                do {
+                    try fm.moveItem(at: enc, to: path)
+                } catch {
+                    throw StoreError.encryption(
+                        "migration recovery (complete swap): \(error)")
+                }
+                try? fm.removeItem(at: bak)
+            } else {
+                // path already in place — the orphan is stale.
+                try? fm.removeItem(at: enc)
+            }
+        }
+        if fm.fileExists(atPath: bak.path),
+            fm.fileExists(atPath: path.path)
+        {
+            try? fm.removeItem(at: bak)
         }
     }
 
@@ -331,6 +395,32 @@ public actor AthenaStore {
         _ db: OpaquePointer?, _ sql: String
     ) -> Int32 {
         sqlite3_exec(db, sql, nil, nil, nil)
+    }
+
+    /// Run `body` inside a single `BEGIN IMMEDIATE … COMMIT` write
+    /// transaction (M66.1): a throw mid-`body` ROLLBACKs so a multi-
+    /// statement mutation can't leave a half-applied state (e.g. the
+    /// allowlist default clear-then-set landing with zero defaults, or a
+    /// user delete cascading partway). Actor-isolated, so the single
+    /// connection has no concurrent writer — this adds atomicity, not
+    /// locking. Not re-entrant: SQLite rejects a nested BEGIN, so a `body`
+    /// must not itself call `withTransaction`.
+    private func withTransaction<T>(_ body: () throws -> T) throws -> T {
+        try Self.exec(db, "BEGIN IMMEDIATE;")
+        let result: T
+        do {
+            result = try body()
+        } catch {
+            try? Self.exec(db, "ROLLBACK;")
+            throw error
+        }
+        do {
+            try Self.exec(db, "COMMIT;")
+        } catch {
+            try? Self.exec(db, "ROLLBACK;")
+            throw error
+        }
+        return result
     }
 
     private static func prepared(
@@ -632,15 +722,33 @@ public actor AthenaStore {
         return Int(sqlite3_changes(db))
     }
 
-    /// Bound total job rows to `maxRows` by deleting the OLDEST terminal
-    /// jobs first (by completion time). Returns the number removed.
-    /// Backs the M34.1 queue-result row cap. Pending (queued/running)
-    /// rows are never deleted, so the table can stay above `maxRows` if
-    /// pending work alone exceeds it — retention never drops live work.
+    /// Count of terminal (done/error/canceled) job rows — the retained
+    /// RESULTS the row cap governs (H13).
+    private func terminalJobCount() -> Int {
+        guard let st = try? Self.prepared(db,
+            "SELECT COUNT(*) FROM jobs WHERE status IN "
+                + "(\(Self.terminalJobStatuses));")
+        else { return 0 }
+        defer { sqlite3_finalize(st) }
+        return sqlite3_step(st) == SQLITE_ROW
+            ? Int(sqlite3_column_int(st, 0)) : 0
+    }
+
+    /// Bound the retained RESULT rows to `maxRows` by deleting the OLDEST
+    /// terminal jobs first (by completion time). Returns the number
+    /// removed. Backs the M34.1 queue-result row cap. Pending
+    /// (queued/running) rows are live work — never deleted AND never
+    /// counted toward the cap.
+    ///
+    /// H13 (M66.1): the excess is computed against the TERMINAL count, not
+    /// `jobCount()` (all rows). The old total-based excess over-pruned
+    /// whenever a pending backlog was present — e.g. maxRows 60 with 50
+    /// pending + 50 terminal gave excess 40 and destroyed 40 good results,
+    /// even though the 50 terminal results were already within a 60-result
+    /// budget. Now a large pending queue no longer evicts finished results.
     @discardableResult
     public func trimJobs(maxRows: Int) throws -> Int {
-        let total = jobCount()
-        let excess = total - maxRows
+        let excess = terminalJobCount() - maxRows
         guard maxRows > 0, excess > 0 else { return 0 }
         let st = try Self.prepared(db,
             "DELETE FROM jobs WHERE id IN ("
@@ -941,19 +1049,28 @@ public actor AthenaStore {
                 "model_allowlist: '\(id)' is not in the \(module) "
                 + "allowlist")
         }
-        let clr = try Self.prepared(db,
-            "UPDATE model_allowlist SET is_default=0 WHERE module=?;")
-        defer { sqlite3_finalize(clr) }
-        sqlite3_bind_text(clr, 1, module, -1, Self.transient)
-        _ = sqlite3_step(clr)
-        let set = try Self.prepared(db,
-            "UPDATE model_allowlist SET is_default=1 "
-                + "WHERE module=? AND id=?;")
-        defer { sqlite3_finalize(set) }
-        sqlite3_bind_text(set, 1, module, -1, Self.transient)
-        sqlite3_bind_text(set, 2, id, -1, Self.transient)
-        guard sqlite3_step(set) == SQLITE_DONE else {
-            throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
+        // H2 (M66.1): the clear-then-set is one atomic swap. Without the
+        // transaction, a throw/crash between the two UPDATEs leaves the
+        // module with ZERO defaults (the clear committed, the set didn't),
+        // which breaks default-model resolution. BEGIN IMMEDIATE …
+        // COMMIT — or ROLLBACK — keeps exactly one default per module.
+        try withTransaction {
+            let clr = try Self.prepared(db,
+                "UPDATE model_allowlist SET is_default=0 WHERE module=?;")
+            defer { sqlite3_finalize(clr) }
+            sqlite3_bind_text(clr, 1, module, -1, Self.transient)
+            guard sqlite3_step(clr) == SQLITE_DONE else {
+                throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
+            }
+            let set = try Self.prepared(db,
+                "UPDATE model_allowlist SET is_default=1 "
+                    + "WHERE module=? AND id=?;")
+            defer { sqlite3_finalize(set) }
+            sqlite3_bind_text(set, 1, module, -1, Self.transient)
+            sqlite3_bind_text(set, 2, id, -1, Self.transient)
+            guard sqlite3_step(set) == SQLITE_DONE else {
+                throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
+            }
         }
     }
 
@@ -1027,24 +1144,35 @@ public actor AthenaStore {
     /// they own go too (no orphaned grants/tokens). Returns whether
     /// the user row existed.
     @discardableResult
-    public func deleteUser(username: String) -> Bool {
-        for sql in [
-            "DELETE FROM auth_user_roles WHERE username=?;",
-            "DELETE FROM auth_tokens WHERE username=?;",
-        ] {
-            if let st = try? Self.prepared(db, sql) {
+    /// Delete a user and cascade its role grants + tokens. H11 (M66.1):
+    /// all three DELETEs run in ONE transaction (was three autonomous
+    /// statements, the first two swallowing errors) so a mid-cascade
+    /// failure rolls back instead of orphaning role/token rows under a
+    /// deleted user — and the error is surfaced (throws) rather than
+    /// dropped. Returns whether a user row existed.
+    public func deleteUser(username: String) throws -> Bool {
+        try withTransaction {
+            for sql in [
+                "DELETE FROM auth_user_roles WHERE username=?;",
+                "DELETE FROM auth_tokens WHERE username=?;",
+            ] {
+                let st = try Self.prepared(db, sql)
+                defer { sqlite3_finalize(st) }
                 sqlite3_bind_text(st, 1, username, -1, Self.transient)
-                _ = sqlite3_step(st)
-                sqlite3_finalize(st)
+                guard sqlite3_step(st) == SQLITE_DONE else {
+                    throw StoreError.sql(
+                        String(cString: sqlite3_errmsg(db)))
+                }
             }
+            let st = try Self.prepared(db,
+                "DELETE FROM auth_users WHERE username=?;")
+            defer { sqlite3_finalize(st) }
+            sqlite3_bind_text(st, 1, username, -1, Self.transient)
+            guard sqlite3_step(st) == SQLITE_DONE else {
+                throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
+            }
+            return sqlite3_changes(db) > 0
         }
-        guard let st = try? Self.prepared(db,
-            "DELETE FROM auth_users WHERE username=?;")
-        else { return false }
-        defer { sqlite3_finalize(st) }
-        sqlite3_bind_text(st, 1, username, -1, Self.transient)
-        return sqlite3_step(st) == SQLITE_DONE
-            && sqlite3_changes(db) > 0
     }
 
     public func userCount() -> Int {

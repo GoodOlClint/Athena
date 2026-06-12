@@ -102,10 +102,11 @@ struct AthenaServer {
     var gpuProbe: GPUTelemetryProbe? = nil
     /// Queue-result retention (M34.1). `queueResultTtlSecs` > 0 ⇒ prune
     /// terminal (done/error/canceled) results older than that window;
-    /// `queueMaxRows` > 0 ⇒ cap total job rows (oldest terminal first).
-    /// Both 0 ⇒ keep forever (opt-in). Swept on the worker idle path so
-    /// inference outputs don't accumulate on disk unbounded. `var = 0`
-    /// so they're memberwise-init params.
+    /// `queueMaxRows` > 0 ⇒ cap RETAINED RESULT (terminal) rows, deleting
+    /// the oldest first (H13: pending queued/running work is never counted
+    /// toward — or evicted by — the cap). Both 0 ⇒ keep forever (opt-in).
+    /// Swept on the worker idle path so inference outputs don't accumulate
+    /// on disk unbounded. `var = 0` so they're memberwise-init params.
     var queueResultTtlSecs: Int = 0
     var queueMaxRows: Int = 0
     /// Vector-store retention (M34.2). > 0 ⇒ on each upsert, prune
@@ -4291,8 +4292,14 @@ struct AthenaServer {
                 principal: principal, action: action,
                 target: target, result: result, detail: detail)
         } catch {
-            Self.auditLog.warning(
-                "audit write failed action=\(action): \(error)")
+            // H14 (M66.1): a dropped audit write leaves a gap in the
+            // security trail — log it at ERROR (not warning) and bump the
+            // /metrics counter so the gap is observable, not silent. The
+            // mutation that triggered the audit already happened; we never
+            // fail it on an audit hiccup.
+            Self.auditLog.error(
+                "audit write FAILED action=\(action): \(error)")
+            await metrics.recordAuditWriteFailure()
         }
         // Opportunistic age-based retention (M30.3): bound the trail as
         // it grows. 0 ⇒ keep forever. Non-fatal.
@@ -4451,7 +4458,20 @@ struct AthenaServer {
                 "'\(username)' is the only admin — refusing "
                     + "(grant admin to another user first)")
         }
-        let ok = await store.deleteUser(username: username)
+        let ok: Bool
+        do {
+            ok = try await store.deleteUser(username: username)
+        } catch {
+            // H11 (M66.1): the cascade rolled back as a unit — surface the
+            // failure instead of reporting a partial delete as success.
+            await audit(
+                request, action: "user.delete", target: username,
+                result: "denied", detail: "store error")
+            return Self.error(
+                status: .internalServerError,
+                message: "failed to delete user",
+                type: "server_error", code: "store_error")
+        }
         await audit(
             request, action: "user.delete", target: username,
             result: ok ? "ok" : "denied")

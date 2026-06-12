@@ -456,6 +456,10 @@ struct Load: AsyncParsableCommand {
         let storeKey: String?
         if encryptStore {
             let key = try StoreKey.ensure()
+            // NH1 (M66.1): if a prior encrypt-migration was interrupted
+            // mid-swap, finish or roll it back before probing — so a crash
+            // never leaves the daemon without a usable database.
+            try AthenaStore.recoverInterruptedMigration(at: dbPath)
             if AthenaStore.isPlaintextDatabase(at: dbPath) {
                 Logger(label: AthenaLogLabel.daemon).notice(
                     "encrypt_store: migrating plaintext store to encrypted")

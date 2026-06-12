@@ -205,7 +205,7 @@ final class AthenaStoreTests: XCTestCase {
 
         // Deleting alice cascades: her roles AND her tokens vanish;
         // bob (also admin) is untouched.
-        let delAlice = await s.deleteUser(username: "alice")
+        let delAlice = try await s.deleteUser(username: "alice")
         XCTAssertTrue(delAlice)
         let aliceRoles = await s.rolesForUser(username: "alice")
         XCTAssertEqual(aliceRoles, [])
@@ -216,7 +216,7 @@ final class AthenaStoreTests: XCTestCase {
         XCTAssertEqual(tokCount, 0)
         let adminsLeft = await s.usersWithRole("admin")
         XCTAssertEqual(adminsLeft, ["bob"])
-        let delMissing = await s.deleteUser(username: "ghost")
+        let delMissing = try await s.deleteUser(username: "ghost")
         XCTAssertFalse(delMissing)
     }
 
@@ -402,12 +402,13 @@ final class AthenaStoreTests: XCTestCase {
         }
         try await s.insertJob(
             id: "q", kind: "conversation", request: Data(), owner: nil)
-        // Cap at 2 total rows ⇒ delete 2 oldest terminal (a, b);
-        // c (terminal) + q (pending) remain.
+        // H13: the cap governs RETAINED RESULTS (terminal rows), not total
+        // rows. 3 terminal, cap 2 ⇒ delete 1 oldest terminal (a); b, c
+        // (terminal) + q (pending, never counted) remain.
         let trimmed = try await s.trimJobs(maxRows: 2)
-        XCTAssertEqual(trimmed, 2)
+        XCTAssertEqual(trimmed, 1)
         let left = await s.listJobs().map { $0.id }.sorted()
-        XCTAssertEqual(left, ["c", "q"])
+        XCTAssertEqual(left, ["b", "c", "q"])
         // maxRows 0 disables; never deletes.
         let none = try await s.trimJobs(maxRows: 0)
         XCTAssertEqual(none, 0)
@@ -417,8 +418,10 @@ final class AthenaStoreTests: XCTestCase {
         let url = tmpURL()
         defer { try? FileManager.default.removeItem(at: url) }
         let s = try AthenaStore(path: url)
-        // Two pending + one terminal; cap of 1 can only reclaim the
-        // terminal one — pending work is never trimmed.
+        // H13: a large pending backlog must NOT cause terminal results to
+        // be over-pruned. Two pending + one terminal, cap 1: the single
+        // terminal result is within the 1-result budget, so nothing is
+        // trimmed — pending rows don't count toward (or trigger) the cap.
         try await s.insertJob(
             id: "p1", kind: "conversation", request: Data(), owner: nil)
         try await s.insertJob(
@@ -428,9 +431,19 @@ final class AthenaStoreTests: XCTestCase {
         try await s.updateJob(
             id: "t1", status: "done", result: Data(), error: nil)
         let trimmed = try await s.trimJobs(maxRows: 1)
-        XCTAssertEqual(trimmed, 1)
+        XCTAssertEqual(trimmed, 0, "terminal count within cap ⇒ no prune")
         let left = await s.listJobs().map { $0.id }.sorted()
-        XCTAssertEqual(left, ["p1", "p2"], "stays above cap, keeps pending")
+        XCTAssertEqual(left, ["p1", "p2", "t1"])
+        // Add a second terminal result: now 2 terminal > cap 1 ⇒ drop the
+        // oldest terminal (t1), keep t2 + both pending.
+        try await s.insertJob(
+            id: "t2", kind: "conversation", request: Data(), owner: nil)
+        try await s.updateJob(
+            id: "t2", status: "done", result: Data(), error: nil)
+        let trimmed2 = try await s.trimJobs(maxRows: 1)
+        XCTAssertEqual(trimmed2, 1)
+        let left2 = await s.listJobs().map { $0.id }.sorted()
+        XCTAssertEqual(left2, ["p1", "p2", "t2"])
     }
 
     // MARK: At-rest encryption (M34.3b)
@@ -498,6 +511,101 @@ final class AthenaStoreTests: XCTestCase {
         let s = try AthenaStore(path: url, key: key)
         let got = await s.getVector(id: "keep")?.vector
         XCTAssertEqual(got, [7, 8])
+    }
+
+    /// NH1 (M66.1) — `recoverInterruptedMigration` finishes or rolls back
+    /// a migration crash mid-swap. Exercised at the file level (the swap is
+    /// pure file moves); no SQLCipher needed.
+    func testRecoverInterruptedMigrationNH1() async throws {
+        let fm = FileManager.default
+        // State 1: plaintext moved aside, encrypted copy not yet in place
+        // (path missing, enc-migrate present) ⇒ complete the swap.
+        do {
+            let url = tmpURL()
+            let enc = url.appendingPathExtension("enc-migrate")
+            let bak = url.appendingPathExtension("migrate-bak")
+            defer {
+                for u in [url, enc, bak] { try? fm.removeItem(at: u) }
+            }
+            try Data("ENCRYPTED".utf8).write(to: enc)
+            try Data("OLDPLAINTEXT".utf8).write(to: bak)
+            XCTAssertFalse(fm.fileExists(atPath: url.path))
+            try AthenaStore.recoverInterruptedMigration(at: url)
+            XCTAssertEqual(
+                try String(contentsOf: url, encoding: .utf8), "ENCRYPTED",
+                "encrypted copy completes the swap into place")
+            XCTAssertFalse(
+                fm.fileExists(atPath: enc.path), "enc-migrate consumed")
+            XCTAssertFalse(
+                fm.fileExists(atPath: bak.path), "backup dropped")
+        }
+        // State 2: a stale encrypted orphan with the real db still present
+        // (crash before the swap began) ⇒ discard the orphan, keep the db.
+        do {
+            let url = tmpURL()
+            let enc = url.appendingPathExtension("enc-migrate")
+            defer {
+                for u in [url, enc] { try? fm.removeItem(at: u) }
+            }
+            try Data("REALDB".utf8).write(to: url)
+            try Data("STALE".utf8).write(to: enc)
+            try AthenaStore.recoverInterruptedMigration(at: url)
+            XCTAssertEqual(
+                try String(contentsOf: url, encoding: .utf8), "REALDB",
+                "live db is untouched")
+            XCTAssertFalse(
+                fm.fileExists(atPath: enc.path), "stale orphan removed")
+        }
+        // State 3: swap completed but the backup deletion didn't
+        // (encrypted in place, .migrate-bak leftover) ⇒ drop the backup.
+        do {
+            let url = tmpURL()
+            let bak = url.appendingPathExtension("migrate-bak")
+            defer {
+                for u in [url, bak] { try? fm.removeItem(at: u) }
+            }
+            try Data("ENCRYPTED".utf8).write(to: url)
+            try Data("OLDPLAINTEXT".utf8).write(to: bak)
+            try AthenaStore.recoverInterruptedMigration(at: url)
+            XCTAssertEqual(
+                try String(contentsOf: url, encoding: .utf8), "ENCRYPTED")
+            XCTAssertFalse(
+                fm.fileExists(atPath: bak.path), "orphan backup removed")
+        }
+    }
+
+    /// H2 (M66.1) — the allowlist default swap is transactional and keeps
+    /// EXACTLY one default per module across repeated re-points, and a
+    /// rejected (unknown-id) re-point leaves the existing default intact.
+    func testAllowlistDefaultSingleSwapH2() async throws {
+        let url = tmpURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let s = try AthenaStore(path: url)
+        try await s.addModelAllowlist(
+            module: "llm", id: "a", isDefault: true)
+        try await s.addModelAllowlist(module: "llm", id: "b")
+        try await s.addModelAllowlist(module: "llm", id: "c")
+        func defaults() async -> [String] {
+            await s.listModelAllowlist(module: "llm")
+                .filter(\.isDefault).map(\.id)
+        }
+        let d0 = await defaults()
+        XCTAssertEqual(d0, ["a"])
+        try await s.setModelAllowlistDefault(module: "llm", id: "b")
+        let d1 = await defaults()
+        XCTAssertEqual(d1, ["b"], "exactly one default, swapped")
+        try await s.setModelAllowlistDefault(module: "llm", id: "c")
+        let d2 = await defaults()
+        XCTAssertEqual(d2, ["c"])
+        // A re-point to an unknown id is rejected and changes nothing.
+        do {
+            try await s.setModelAllowlistDefault(module: "llm", id: "zzz")
+            XCTFail("expected a throw for an unknown default id")
+        } catch {
+            // expected
+        }
+        let d3 = await defaults()
+        XCTAssertEqual(d3, ["c"], "rejected swap left default intact")
     }
 
     func testPruneVectorsByAge() async throws {

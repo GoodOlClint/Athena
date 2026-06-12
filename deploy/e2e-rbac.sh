@@ -3136,6 +3136,11 @@ echo "$PM" | grep -q 'athena_request_latency_ms{quantile="0.95"}' \
 echo "$PM" | grep -q "athena_requests_by_kind_total{kind=\"chat\"}" \
   && ok "/metrics emits per-kind counters" \
   || bad "/metrics missing per-kind counter"
+# H14 (M66.1) — the audit-write-failure health signal is exposed (0 on a
+# healthy run; its presence is what makes a trail gap observable).
+echo "$PM" | grep -q "# TYPE athena_audit_write_failures_total counter" \
+  && ok "/metrics exposes audit_write_failures counter (H14)" \
+  || bad "/metrics missing athena_audit_write_failures_total"
 # Accept: application/json still returns the JSON snapshot (negotiation).
 JM="$(curl -s -H "Authorization: Bearer $AM" \
   -H "Accept: application/json" \
