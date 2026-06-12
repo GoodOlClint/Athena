@@ -264,13 +264,13 @@ Re-verify while here: E15, E17, D14, A26, K3 (client SSE teardown — fix lands 
 
 ## Standing decisions queue (blockers for their items, not for the program)
 
-| # | Decision | Affects |
-|---|---|---|
-| 1 | Require TLS or `--insecure` for non-loopback auth-on; https in portable client | A2, K1, K8, A12 |
-| 2 | Secrets-in-argv deprecation path (`--password-stdin`, env) | B2, K7, K13 |
-| 3 | Vector-store `owner` column (schema migration, cross-principal semantics) | H5 |
-| 4 | rust-shim panic strategy: `catch_unwind` per entry vs `panic="abort"` | G1 |
-| 5 | Native `/api` metering + token-budget quotas (pre-existing backlog #8/#9) interplay with NA8 | M27 follow-ups |
+| # | Decision | Affects | Status |
+|---|---|---|---|
+| 1 | Require TLS or `--insecure` for non-loopback auth-on; https in portable client; **+ login-limiter client-IP source (peer addr vs trusted XFF)** | A2, K1, K8, A12, **A3** | open |
+| 2 | Secrets-in-argv deprecation path (`--password-stdin`, env) | B2, K7, K13 | open |
+| 3 | Vector-store `owner` column (schema migration, cross-principal semantics) | H5 | open |
+| 4 | rust-shim panic strategy: `catch_unwind` per entry vs `panic="abort"` | G1 | **DECIDED — per-entry `catch_unwind`, crate stays `panic="unwind"` (shipped M65.1 v0.10.117); record as ADR** |
+| 5 | Native `/api` metering + token-budget quotas (pre-existing backlog #8/#9) interplay with NA8 | M27 follow-ups | open |
 
 ## Tracking
 
