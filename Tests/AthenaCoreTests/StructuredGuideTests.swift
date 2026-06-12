@@ -57,6 +57,53 @@ final class StructuredGuideTests: XCTestCase {
         XCTAssertGreaterThan(guide.maskLength, 0)
     }
 
+    // MARK: - M65.1 — hostile response_format degrades, never crashes
+    //
+    // A `/v1` caller controls the `response_format.json_schema` string that
+    // reaches the Rust shim (MLXLLMModule builds `StructuredIndex(jsonSchema:)`
+    // from it). After the G1/G3 hardening, a hostile schema must come back as
+    // a thrown `StructuredError` — which the server boundary turns into the
+    // standard `{"error":{message,type,code}}` envelope — rather than panic
+    // across the C ABI and abort the daemon. We can't drive the full HTTP
+    // handler until the Server target is testable (M70), so this pins the
+    // throw at the structured-compile layer the handler delegates to, and
+    // proves the process survives by compiling a valid schema afterwards.
+
+    func testHostileSchemaThrowsInsteadOfCrashing() throws {
+        let vocab = try digitVocab()
+
+        // Repetition bound past the shim cap (would be a pathological
+        // grammar; rejected before compile).
+        let hugeRepetition =
+            #"{"type":"array","items":{"type":"integer"},"maxItems":100001}"#
+        XCTAssertThrowsError(
+            try StructuredIndex(jsonSchema: hugeRepetition, vocabulary: vocab)
+        ) { err in
+            XCTAssertTrue(
+                err is StructuredError,
+                "hostile schema surfaces a typed StructuredError, not a crash")
+        }
+
+        // Oversized raw schema string (past the 1 MiB shim cap).
+        let oversized =
+            "{\"type\":\"string\",\"description\":\""
+            + String(repeating: "x", count: 1_100_000) + "\"}"
+        XCTAssertThrowsError(
+            try StructuredIndex(jsonSchema: oversized, vocabulary: vocab))
+
+        // Malformed JSON is likewise a clean throw.
+        XCTAssertThrowsError(
+            try StructuredIndex(jsonSchema: #"{"type":"#, vocabulary: vocab))
+
+        // The daemon path is still alive: a normal schema compiles after the
+        // hostile ones (a panic-across-FFI would have aborted the process and
+        // we'd never reach here).
+        let guide = try StructuredGuide(
+            index: StructuredIndex(
+                jsonSchema: #"{"type":"integer"}"#, vocabulary: vocab))
+        XCTAssertGreaterThan(guide.maskLength, 0)
+    }
+
     // MARK: - Issue #2 opener realignment
 
     func testOpenerAliasesMapsWhitespacePrefixedOpeners() {

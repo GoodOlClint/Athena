@@ -31,6 +31,26 @@
 //!
 //! Error convention: fallible calls return NULL / -1 / false and stash a
 //! message in a thread-local; the caller reads `oc_last_error`.
+//!
+//! ## Hardening (M65.1 — audit G1/G2/G3/G6/G10)
+//!
+//! The schema string crosses the FFI from a *remote* caller (`/v1`
+//! `response_format.json_schema`), and the token arrays come from the
+//! model tokenizer. Both are validated before they reach llguidance:
+//!   - **G1** every `extern "C"` entry runs inside [`ffi_guard`], which
+//!     `catch_unwind`s the body. A panic in llguidance (or anywhere) is
+//!     turned into the normal NULL/-1/false error return instead of
+//!     unwinding across the C ABI — which is UB and aborts the process
+//!     (remote DoS). The crate stays `panic = "unwind"` (no `abort`) so the
+//!     catch is live; see [`ffi_guard`].
+//!   - **G2/G6** [`build_words`] caps the token count and `max_id+1` dense
+//!     allocation (a `0xFFFF_FFFF` id would otherwise reserve ~4 GB) and
+//!     caps each token's byte length before the unchecked pointer read.
+//!   - **G3** [`validate_schema`] caps raw schema bytes, nesting depth, and
+//!     repetition bounds before compile.
+//!   - **G10** `id < size` is enforced before every dense index, a
+//!     too-small mask buffer fails loud instead of silently truncating, and
+//!     [`set_err`] is interior-NUL-safe and panic-reentrancy-safe.
 
 use std::cell::RefCell;
 use std::ffi::{c_char, CStr, CString};
@@ -41,13 +61,59 @@ use llguidance::api::TopLevelGrammar;
 use llguidance::{ParserFactory, TokenParser};
 use toktrie::{ApproximateTokEnv, SimpleVob, TokEnv, TokRxInfo, TokTrie};
 
+// ---- input caps (G2/G3/G6) ------------------------------------------
+//
+// All comfortably above any real workload, so legitimate callers never
+// hit them; they exist purely to bound a hostile or corrupt input.
+
+/// Max vocabulary size — bounds the `max_id+1` dense `Vec<Vec<u8>>` in
+/// [`build_words`]. ~16× the largest real tokenizer (~262 K for Gemma);
+/// the worst-case dense alloc is `MAX_VOCAB * size_of::<Vec<u8>>()` ≈ 96 MB,
+/// vs the ~4 GB a 32-bit-max id would otherwise reserve (G2).
+const MAX_VOCAB: usize = 1 << 22; // 4,194,304
+
+/// Max decoded bytes for a single token. Real BPE merges are well under
+/// 100 bytes; this only rejects an absurd caller-supplied length before the
+/// raw-pointer read (G6).
+const MAX_TOKEN_BYTES: usize = 4096;
+
+/// Max raw schema length in bytes (G3). Real schemas are a few KB; 1 MiB is
+/// far past any legitimate `response_format`.
+const MAX_SCHEMA_BYTES: usize = 1 << 20; // 1 MiB
+
+/// Max JSON nesting depth for a schema (G3). Deep nesting risks stack
+/// blow-up in the grammar compiler; serde already caps at 128, this is
+/// stricter and explicit.
+const MAX_SCHEMA_DEPTH: usize = 64;
+
+/// Max value for a repetition bound key (`maxItems`, `minItems`, etc.) in a
+/// schema (G3). 100 K bounded repetitions is already absurd for structured
+/// LLM output; rejecting larger keeps the parser's repetition counters and
+/// any derived grammar state bounded.
+const MAX_REPETITION: u64 = 100_000;
+
 thread_local! {
     static LAST_ERR: RefCell<CString> = RefCell::new(CString::default());
 }
 
+/// Stash a message for the next `oc_last_error`. Interior-NUL-safe (a NUL in
+/// an llguidance message would otherwise truncate the C string or make
+/// `CString::new` fail and silently drop the whole message) and reentrancy-
+/// safe (`try_borrow_mut` so a panic-during-panic that re-enters here can't
+/// double-panic into a process abort) — G10.
 fn set_err(msg: impl Into<Vec<u8>>) {
-    let c = CString::new(msg).unwrap_or_default();
-    LAST_ERR.with(|e| *e.borrow_mut() = c);
+    let mut bytes = msg.into();
+    for b in bytes.iter_mut() {
+        if *b == 0 {
+            *b = b'?';
+        }
+    }
+    let c = CString::new(bytes).unwrap_or_default();
+    LAST_ERR.with(|e| {
+        if let Ok(mut slot) = e.try_borrow_mut() {
+            *slot = c;
+        }
+    });
 }
 
 unsafe fn cstr<'a>(p: *const c_char) -> Option<&'a str> {
@@ -55,6 +121,110 @@ unsafe fn cstr<'a>(p: *const c_char) -> Option<&'a str> {
         return None;
     }
     CStr::from_ptr(p).to_str().ok()
+}
+
+// ---- panic boundary (G1) --------------------------------------------
+
+/// Run an FFI entry body inside `catch_unwind` so a panic NEVER unwinds
+/// across the C ABI. Unwinding past `extern "C"` is undefined behaviour and
+/// in practice aborts the whole daemon — a remote DoS, since the schema a
+/// `/v1` caller supplies is what reaches llguidance. On a caught panic we
+/// stash a message and return `default` (the function's normal failure
+/// sentinel: NULL / -1 / false / 0), so the caller sees an ordinary error
+/// and the daemon stays up. Requires `panic = "unwind"` (the default — we
+/// deliberately do NOT set `panic = "abort"`, which would make the catch a
+/// no-op and re-expose the abort).
+/// The body is wrapped in `AssertUnwindSafe`: most handles carry an
+/// `llguidance::TokenParser` (an `Arc<dyn BiasComputer>` inside), which is
+/// not `UnwindSafe`. The assertion is sound here because a caught panic is
+/// reported to the caller as an ordinary failure (NULL/-1/false) and the
+/// handle is discarded on that path — we never observe post-panic state.
+fn ffi_guard<F, R>(label: &str, default: R, f: F) -> R
+where
+    F: FnOnce() -> R,
+{
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(r) => r,
+        Err(payload) => {
+            set_err(format!(
+                "{label}: panic caught at FFI boundary: {}",
+                panic_message(payload)
+            ));
+            default
+        }
+    }
+}
+
+fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        return (*s).to_string();
+    }
+    if let Some(s) = payload.downcast_ref::<String>() {
+        return s.clone();
+    }
+    "unknown panic".to_string()
+}
+
+// ---- schema validation (G3) -----------------------------------------
+
+fn is_repetition_key(k: &str) -> bool {
+    matches!(
+        k,
+        "maxItems"
+            | "minItems"
+            | "maxLength"
+            | "minLength"
+            | "maxProperties"
+            | "minProperties"
+            | "maxContains"
+            | "minContains"
+    )
+}
+
+/// Parse and bound a caller schema before it reaches the grammar compiler:
+/// raw byte length, nesting depth, and repetition-bound magnitude (G3). The
+/// depth/repetition walk is iterative (explicit stack) so the validator
+/// itself can't be made to overflow by a deep input.
+fn validate_schema(json: &str) -> Result<serde_json::Value, String> {
+    if json.len() > MAX_SCHEMA_BYTES {
+        return Err(format!(
+            "schema too large: {} bytes > {} cap",
+            json.len(),
+            MAX_SCHEMA_BYTES
+        ));
+    }
+    let value: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| format!("invalid JSON schema: {e}"))?;
+
+    let mut stack: Vec<(&serde_json::Value, usize)> = vec![(&value, 1)];
+    while let Some((v, depth)) = stack.pop() {
+        if depth > MAX_SCHEMA_DEPTH {
+            return Err(format!("schema nesting too deep: > {MAX_SCHEMA_DEPTH}"));
+        }
+        match v {
+            serde_json::Value::Object(map) => {
+                for (k, child) in map {
+                    if is_repetition_key(k) {
+                        if let Some(n) = child.as_u64() {
+                            if n > MAX_REPETITION {
+                                return Err(format!(
+                                    "schema repetition bound {k}={n} > {MAX_REPETITION} cap"
+                                ));
+                            }
+                        }
+                    }
+                    stack.push((child, depth + 1));
+                }
+            }
+            serde_json::Value::Array(arr) => {
+                for child in arr {
+                    stack.push((child, depth + 1));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(value)
 }
 
 // Athena caches one `OcVocab` per model and calls `oc_index_from_schema` /
@@ -119,8 +289,21 @@ impl OcGuide {
     }
 
     /// Fill `buf` (one bit per token, bit `i` of byte `i>>3`) with the
-    /// tokens allowed from the current state.
+    /// tokens allowed from the current state. A buffer shorter than
+    /// `mask_len` fails LOUD (returns false) rather than writing a
+    /// truncated mask — a short mask reads as "high token ids disallowed",
+    /// which silently under-constrains decoding and could let through a
+    /// token the schema forbids (G10).
     fn allowed_mask(&mut self, buf: &mut [u8]) -> bool {
+        let need = self.mask_len();
+        if buf.len() < need {
+            set_err(format!(
+                "allowed_mask: buffer {} < required {} bytes",
+                buf.len(),
+                need
+            ));
+            return false;
+        }
         for b in buf.iter_mut() {
             *b = 0;
         }
@@ -129,9 +312,11 @@ impl OcGuide {
         }
         let mask = self.cached_mask.as_ref().unwrap();
         // `write_to` asserts `buf.len() <= words*4`; clamp to both the
-        // requested byte length and the mask's capacity.
+        // required byte length and the mask's word capacity (the mask may be
+        // shorter than `need` when the vocab isn't a multiple of the word
+        // size — the trailing bytes stay zero = disallowed, which is safe).
         let cap = mask.as_slice().len() * 4;
-        let n = buf.len().min(self.mask_len()).min(cap);
+        let n = need.min(cap);
         mask.write_to(&mut buf[..n]);
         true
     }
@@ -174,6 +359,10 @@ impl OcGuide {
 /// carry the model's own decoded bytes; the eos id and any gap slots are
 /// marked with a leading `0xFF`, toktrie's convention for a control token
 /// that is never matched as document content.
+///
+/// Hardened (G2/G6/G10): the token count, the `max_id+1` dense size, and
+/// each token's byte length are all capped before any allocation or
+/// unchecked pointer read, and every dense index is `id < size` guarded.
 unsafe fn build_words(
     ids: *const u32,
     byte_ptrs: *const *const u8,
@@ -185,16 +374,37 @@ unsafe fn build_words(
         set_err("build_words: null array");
         return None;
     }
+    // G6: bound the caller-supplied token count before any per-token read.
+    if n > MAX_VOCAB {
+        set_err(format!(
+            "build_words: token count {n} exceeds {MAX_VOCAB} cap"
+        ));
+        return None;
+    }
     let mut max_id = eos;
     for i in 0..n {
         max_id = max_id.max(*ids.add(i));
     }
     let size = max_id as usize + 1;
+    // G2: a hostile/corrupt id (e.g. 0xFFFF_FFFF) would otherwise reserve a
+    // multi-GB dense table — OOM DoS. Reject before the allocation.
+    if size > MAX_VOCAB {
+        set_err(format!(
+            "build_words: max token id {max_id} exceeds {} vocab cap",
+            MAX_VOCAB - 1
+        ));
+        return None;
+    }
     let mut words: Vec<Vec<u8>> = vec![Vec::new(); size];
     let mut filled = vec![false; size];
 
     for i in 0..n {
         let id = *ids.add(i) as usize;
+        // G10: guaranteed by `size = max_id+1`, but never index OOB even if
+        // that invariant is ever broken.
+        if id >= size {
+            continue;
+        }
         if id == eos as usize {
             continue; // eos is a control token, set below
         }
@@ -202,6 +412,13 @@ unsafe fn build_words(
         let l = *byte_lens.add(i);
         if p.is_null() {
             continue;
+        }
+        // G6: cap the caller-supplied byte length before the unchecked read.
+        if l > MAX_TOKEN_BYTES {
+            set_err(format!(
+                "build_words: token {i} byte length {l} exceeds {MAX_TOKEN_BYTES} cap"
+            ));
+            return None;
         }
         words[id] = std::slice::from_raw_parts(p, l).to_vec();
         filled[id] = true;
@@ -244,22 +461,26 @@ unsafe fn build_factory(
 
 #[no_mangle]
 pub extern "C" fn oc_version() -> *const c_char {
-    c"llguidance-1.7.5".as_ptr()
+    ffi_guard("oc_version", std::ptr::null(), || {
+        c"llguidance-1.7.5".as_ptr()
+    })
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn oc_last_error(buf: *mut c_char, len: usize) -> usize {
-    LAST_ERR.with(|e| {
-        let e = e.borrow();
-        let bytes = e.as_bytes_with_nul();
-        if !buf.is_null() && len > 0 {
-            let n = bytes.len().min(len);
-            std::ptr::copy_nonoverlapping(bytes.as_ptr() as *const c_char, buf, n);
-            if n == len {
-                *buf.add(len - 1) = 0;
+    ffi_guard("oc_last_error", 0, move || {
+        LAST_ERR.with(|e| {
+            let e = e.borrow();
+            let bytes = e.as_bytes_with_nul();
+            if !buf.is_null() && len > 0 {
+                let n = bytes.len().min(len);
+                std::ptr::copy_nonoverlapping(bytes.as_ptr() as *const c_char, buf, n);
+                if n == len {
+                    *buf.add(len - 1) = 0;
+                }
             }
-        }
-        bytes.len()
+            bytes.len()
+        })
     })
 }
 
@@ -277,17 +498,25 @@ pub unsafe extern "C" fn oc_vocab_new_from_tokens(
     n: usize,
     eos: u32,
 ) -> *mut OcVocab {
-    match build_factory(ids, byte_ptrs, byte_lens, n, eos) {
-        Some((factory, vocab_size)) => Box::into_raw(Box::new(OcVocab { factory, vocab_size })),
-        None => std::ptr::null_mut(),
-    }
+    ffi_guard(
+        "oc_vocab_new_from_tokens",
+        std::ptr::null_mut(),
+        move || match build_factory(ids, byte_ptrs, byte_lens, n, eos) {
+            Some((factory, vocab_size)) => {
+                Box::into_raw(Box::new(OcVocab { factory, vocab_size }))
+            }
+            None => std::ptr::null_mut(),
+        },
+    )
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn oc_vocab_free(v: *mut OcVocab) {
-    if !v.is_null() {
-        drop(Box::from_raw(v));
-    }
+    ffi_guard("oc_vocab_free", (), move || {
+        if !v.is_null() {
+            drop(Box::from_raw(v));
+        }
+    })
 }
 
 // ---- index ----------------------------------------------------------
@@ -300,8 +529,10 @@ pub unsafe extern "C" fn oc_index_from_regex(
     // The regex path is unused by Athena (all constraints are JSON
     // schema); llguidance is grammar-based and we do not expose a raw
     // regex compile. Fail explicitly rather than silently misbehave.
-    set_err("oc_index_from_regex: unsupported (use oc_index_from_schema)");
-    std::ptr::null_mut()
+    ffi_guard("oc_index_from_regex", std::ptr::null_mut(), || {
+        set_err("oc_index_from_regex: unsupported (use oc_index_from_schema)");
+        std::ptr::null_mut()
+    })
 }
 
 #[no_mangle]
@@ -310,75 +541,86 @@ pub unsafe extern "C" fn oc_index_from_schema(
     _whitespace: *const c_char,
     v: *const OcVocab,
 ) -> *mut OcIndex {
-    if v.is_null() {
-        set_err("oc_index_from_schema: null vocabulary");
-        return std::ptr::null_mut();
-    }
-    let Some(json) = cstr(json) else {
-        set_err("oc_index_from_schema: bad json string");
-        return std::ptr::null_mut();
-    };
-    let value: serde_json::Value = match serde_json::from_str(json) {
-        Ok(v) => v,
-        Err(e) => {
-            set_err(format!("oc_index_from_schema: invalid JSON schema: {e}"));
+    ffi_guard("oc_index_from_schema", std::ptr::null_mut(), move || {
+        if v.is_null() {
+            set_err("oc_index_from_schema: null vocabulary");
             return std::ptr::null_mut();
         }
-    };
-    let vocab = &*v;
-    let grammar = TopLevelGrammar::from_json_schema(value);
-    Box::into_raw(Box::new(OcIndex {
-        factory: vocab.factory.clone(),
-        grammar,
-        vocab_size: vocab.vocab_size,
-    }))
+        let Some(json) = cstr(json) else {
+            set_err("oc_index_from_schema: bad json string");
+            return std::ptr::null_mut();
+        };
+        // G3: bound size/depth/repetition before the grammar compiler sees it.
+        let value = match validate_schema(json) {
+            Ok(v) => v,
+            Err(e) => {
+                set_err(format!("oc_index_from_schema: {e}"));
+                return std::ptr::null_mut();
+            }
+        };
+        let vocab = &*v;
+        let grammar = TopLevelGrammar::from_json_schema(value);
+        Box::into_raw(Box::new(OcIndex {
+            factory: vocab.factory.clone(),
+            grammar,
+            vocab_size: vocab.vocab_size,
+        }))
+    })
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn oc_index_free(i: *mut OcIndex) {
-    if !i.is_null() {
-        drop(Box::from_raw(i));
-    }
+    ffi_guard("oc_index_free", (), move || {
+        if !i.is_null() {
+            drop(Box::from_raw(i));
+        }
+    })
 }
 
 // ---- guide ----------------------------------------------------------
 
 #[no_mangle]
 pub unsafe extern "C" fn oc_guide_new(i: *const OcIndex) -> *mut OcGuide {
-    if i.is_null() {
-        set_err("oc_guide_new: null index");
-        return std::ptr::null_mut();
-    }
-    let index = &*i;
-    let mut parser = match index.factory.create_parser(index.grammar.clone()) {
-        Ok(p) => p,
-        Err(e) => {
-            set_err(format!("oc_guide_new: create_parser: {e}"));
+    ffi_guard("oc_guide_new", std::ptr::null_mut(), move || {
+        if i.is_null() {
+            set_err("oc_guide_new: null index");
             return std::ptr::null_mut();
         }
-    };
-    parser.start_without_prompt();
-    Box::into_raw(Box::new(OcGuide {
-        parser,
-        vocab_size: index.vocab_size,
-        cached_mask: None,
-    }))
+        let index = &*i;
+        let mut parser = match index.factory.create_parser(index.grammar.clone()) {
+            Ok(p) => p,
+            Err(e) => {
+                set_err(format!("oc_guide_new: create_parser: {e}"));
+                return std::ptr::null_mut();
+            }
+        };
+        parser.start_without_prompt();
+        Box::into_raw(Box::new(OcGuide {
+            parser,
+            vocab_size: index.vocab_size,
+            cached_mask: None,
+        }))
+    })
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn oc_guide_free(g: *mut OcGuide) {
-    if !g.is_null() {
-        drop(Box::from_raw(g));
-    }
+    ffi_guard("oc_guide_free", (), move || {
+        if !g.is_null() {
+            drop(Box::from_raw(g));
+        }
+    })
 }
 
 /// Required mask length in bytes for this guide's vocabulary.
 #[no_mangle]
 pub unsafe extern "C" fn oc_guide_mask_len(g: *const OcGuide) -> usize {
-    if g.is_null() {
-        return 0;
-    }
-    (*g).mask_len()
+    ffi_guard("oc_guide_mask_len", 0, move || {
+        if g.is_null() {
+            return 0;
+        }
+        (*g).mask_len()
+    })
 }
 
 /// 0 on success; -1 if buffer too small (call `oc_guide_mask_len`) or on a
@@ -386,32 +628,38 @@ pub unsafe extern "C" fn oc_guide_mask_len(g: *const OcGuide) -> usize {
 /// mask mutates (and caches) parser state.
 #[no_mangle]
 pub unsafe extern "C" fn oc_guide_allowed_mask(g: *mut OcGuide, buf: *mut u8, len: usize) -> c_int {
-    if g.is_null() || buf.is_null() {
-        return -1;
-    }
-    let g = &mut *g;
-    if len < g.mask_len() {
-        return -1;
-    }
-    if g.allowed_mask(std::slice::from_raw_parts_mut(buf, len)) {
-        0
-    } else {
-        -1
-    }
+    ffi_guard("oc_guide_allowed_mask", -1, move || {
+        if g.is_null() || buf.is_null() {
+            return -1;
+        }
+        let g = &mut *g;
+        if len < g.mask_len() {
+            return -1;
+        }
+        if g.allowed_mask(std::slice::from_raw_parts_mut(buf, len)) {
+            0
+        } else {
+            -1
+        }
+    })
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn oc_guide_advance(g: *mut OcGuide, token: u32) -> bool {
-    if g.is_null() {
-        return false;
-    }
-    (*g).advance(token)
+    ffi_guard("oc_guide_advance", false, move || {
+        if g.is_null() {
+            return false;
+        }
+        (*g).advance(token)
+    })
 }
 
 /// Takes `*mut` because `is_accepting` mutates parser state.
 #[no_mangle]
 pub unsafe extern "C" fn oc_guide_is_final(g: *mut OcGuide) -> bool {
-    !g.is_null() && (*g).is_final()
+    ffi_guard("oc_guide_is_final", false, move || {
+        !g.is_null() && (*g).is_final()
+    })
 }
 
 // Rollback is dead code (the guide only ever advances on committed
@@ -419,13 +667,13 @@ pub unsafe extern "C" fn oc_guide_is_final(g: *mut OcGuide) -> bool {
 
 #[no_mangle]
 pub unsafe extern "C" fn oc_guide_allowed_rollback(_g: *const OcGuide) -> usize {
-    0
+    ffi_guard("oc_guide_allowed_rollback", 0, || 0)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn oc_guide_rollback(_g: *mut OcGuide, n: usize) -> bool {
     // Only the no-op (n == 0) "rollback" succeeds.
-    n == 0
+    ffi_guard("oc_guide_rollback", false, move || n == 0)
 }
 
 // ---- tests ----------------------------------------------------------
@@ -524,5 +772,129 @@ mod tests {
         };
         let p = unsafe { oc_index_from_regex(c"[0-9]+".as_ptr(), &v as *const _) };
         assert!(p.is_null(), "regex path returns null");
+    }
+
+    // ---- M65.1 hardening fixtures (G1/G2/G3/G6/G10) -----------------
+
+    /// Build a real `OcVocab` for the FFI-level hostile-schema tests.
+    fn make_vocab() -> *mut OcVocab {
+        let (factory, vocab_size, _eos) = byte_vocab();
+        Box::into_raw(Box::new(OcVocab { factory, vocab_size }))
+    }
+
+    /// G1: a panic inside an FFI body must be caught and converted to the
+    /// function's failure sentinel — never unwind across the C ABI.
+    #[test]
+    fn ffi_guard_catches_panic_and_sets_error() {
+        let r: i32 = ffi_guard("unit_panic", -1, || panic!("boom from the schema"));
+        assert_eq!(r, -1, "panic returns the default sentinel");
+        assert!(
+            StructuredShimErr::last().contains("panic caught at FFI boundary"),
+            "panic message stashed for oc_last_error"
+        );
+        assert!(
+            StructuredShimErr::last().contains("boom from the schema"),
+            "original panic payload surfaced"
+        );
+    }
+
+    /// Test helper mirroring the Swift `oc_last_error` read.
+    struct StructuredShimErr;
+    impl StructuredShimErr {
+        fn last() -> String {
+            LAST_ERR.with(|e| e.borrow().to_string_lossy().into_owned())
+        }
+    }
+
+    /// G2: a token id past the vocab cap must be rejected before the dense
+    /// `max_id+1` allocation, not OOM the process.
+    #[test]
+    fn oversized_token_id_rejected() {
+        let ids: [u32; 1] = [0xFFFF_FFFF];
+        let bytes: [u8; 1] = [b'a'];
+        let byte_ptrs: [*const u8; 1] = [bytes.as_ptr()];
+        let byte_lens: [usize; 1] = [1];
+        let v = unsafe {
+            oc_vocab_new_from_tokens(ids.as_ptr(), byte_ptrs.as_ptr(), byte_lens.as_ptr(), 1, 0)
+        };
+        assert!(v.is_null(), "0xFFFFFFFF id rejected, no 4GB alloc");
+        assert!(StructuredShimErr::last().contains("vocab cap"));
+    }
+
+    /// G6: an absurd per-token byte length must be rejected before the
+    /// unchecked `from_raw_parts` read.
+    #[test]
+    fn oversized_token_bytes_rejected() {
+        let ids: [u32; 1] = [0];
+        let bytes: [u8; 1] = [b'a'];
+        let byte_ptrs: [*const u8; 1] = [bytes.as_ptr()];
+        let byte_lens: [usize; 1] = [usize::MAX]; // hostile length
+        let v = unsafe {
+            oc_vocab_new_from_tokens(ids.as_ptr(), byte_ptrs.as_ptr(), byte_lens.as_ptr(), 1, 1)
+        };
+        assert!(v.is_null(), "absurd byte length rejected");
+        assert!(StructuredShimErr::last().contains("byte length"));
+    }
+
+    /// G3: schema bytes / depth / repetition all rejected before compile,
+    /// each via the normal NULL return (never a crash).
+    #[test]
+    fn hostile_schemas_rejected_before_compile() {
+        let v = make_vocab();
+
+        // (a) oversized raw schema
+        let big = format!(r#"{{"type":"string","description":"{}"}}"#, "x".repeat(MAX_SCHEMA_BYTES + 16));
+        let p = unsafe { oc_index_from_schema(CString::new(big).unwrap().as_ptr(), std::ptr::null(), v) };
+        assert!(p.is_null(), "oversized schema rejected");
+        assert!(StructuredShimErr::last().contains("schema too large"));
+
+        // (b) pathologically deep nesting
+        let mut deep = String::new();
+        let layers = MAX_SCHEMA_DEPTH + 8;
+        for _ in 0..layers {
+            deep.push_str(r#"{"type":"object","properties":{"a":"#);
+        }
+        deep.push_str(r#"{"type":"integer"}"#);
+        for _ in 0..layers {
+            deep.push_str("}}");
+        }
+        let p = unsafe { oc_index_from_schema(CString::new(deep).unwrap().as_ptr(), std::ptr::null(), v) };
+        assert!(p.is_null(), "deep schema rejected (depth or serde recursion)");
+
+        // (c) huge repetition bound
+        let rep = format!(r#"{{"type":"array","items":{{"type":"integer"}},"maxItems":{}}}"#, MAX_REPETITION + 1);
+        let p = unsafe { oc_index_from_schema(CString::new(rep).unwrap().as_ptr(), std::ptr::null(), v) };
+        assert!(p.is_null(), "huge maxItems rejected");
+        assert!(StructuredShimErr::last().contains("repetition bound"));
+
+        // A normal schema still compiles fine through the same path.
+        let ok = r#"{"type":"object","properties":{"n":{"type":"integer"}},"required":["n"]}"#;
+        let p = unsafe { oc_index_from_schema(CString::new(ok).unwrap().as_ptr(), std::ptr::null(), v) };
+        assert!(!p.is_null(), "valid schema still compiles");
+        unsafe {
+            oc_index_free(p);
+            oc_vocab_free(v);
+        }
+    }
+
+    /// G10: a mask buffer shorter than `mask_len` fails loud rather than
+    /// writing a truncated (under-constraining) mask.
+    #[test]
+    fn short_mask_buffer_fails_loud() {
+        let (mut g, _eos) = guide_for(r#"{"type":"integer"}"#);
+        let need = g.mask_len();
+        let mut too_short = vec![0u8; need - 1];
+        assert!(!g.allowed_mask(&mut too_short), "short buffer rejected");
+        assert!(StructuredShimErr::last().contains("buffer"));
+    }
+
+    /// G10: `set_err` survives an interior NUL in the message (it would
+    /// otherwise truncate or be dropped entirely).
+    #[test]
+    fn set_err_is_interior_nul_safe() {
+        set_err("before\0after");
+        let got = StructuredShimErr::last();
+        assert!(got.starts_with("before"), "message not truncated at NUL: {got:?}");
+        assert!(got.contains("after"), "tail after the NUL survives: {got:?}");
     }
 }
