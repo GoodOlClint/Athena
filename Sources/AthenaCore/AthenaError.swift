@@ -92,13 +92,16 @@ public enum AthenaError: Error, Sendable, Equatable {
         case let .memoryBudgetExceeded(requested, available, module):
             return "Insufficient governed memory for \(module.rawValue): "
                 + "requested \(requested) B, \(available) B available after eviction."
-        case let .moduleLoadFailed(module, reason):
-            return "Module \(module.rawValue) failed to load: \(reason)"
+        case let .moduleLoadFailed(module, _):
+            // NE7: the substrate `reason` (filesystem paths, repo ids,
+            // internal state) is for the server log only — see
+            // `serverDetail`. Keep the client body stable and detail-free.
+            return "Module \(module.rawValue) failed to load."
         case let .moduleNotRegistered(module):
             return "No module registered for \(module.rawValue)."
-        case let .metalOutOfMemory(module, detail):
+        case let .metalOutOfMemory(module, _):
             let who = module.map { " for \($0.rawValue)" } ?? ""
-            return "Metal/MLX out of memory\(who): \(detail)"
+            return "Metal/MLX out of memory\(who)."
         case let .promptCacheCapExceeded(requested, cap):
             return "Prompt too large for the governed prompt-cache "
                 + "cap: needs ~\(requested) B, cap \(cap) B."
@@ -141,6 +144,17 @@ public enum AthenaError: Error, Sendable, Equatable {
         case let .structuredOutputUnavailable(detail):
             return "Structured output could not be enforced for this "
                 + "request: \(detail)."
+        }
+    }
+
+    /// Full, potentially-sensitive detail (substrate paths, repo ids,
+    /// internal state) for the SERVER LOG ONLY — never the client body.
+    /// nil when `message` is already safe to return verbatim (NE7).
+    public var serverDetail: String? {
+        switch self {
+        case let .moduleLoadFailed(_, reason): return reason
+        case let .metalOutOfMemory(_, detail): return detail
+        default: return nil
         }
     }
 

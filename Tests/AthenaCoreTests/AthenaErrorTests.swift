@@ -87,6 +87,27 @@ final class AthenaErrorTests: XCTestCase {
         XCTAssertEqual(e.code, "structured_output_unavailable")
         XCTAssertTrue(e.message.contains("vocab unresolved"))
     }
+
+    // NE7 — substrate detail (paths/repo ids/state) must stay OUT of the
+    // client-facing `message` and live only in `serverDetail` (server log).
+    func testSubstrateDetailNotInClientMessage() {
+        let secret = "/Users/op/.athena/models/secret-repo/config.json"
+        let load = AthenaError.moduleLoadFailed(.llm, reason: secret)
+        XCTAssertFalse(
+            load.message.contains(secret),
+            "moduleLoadFailed must not leak the substrate reason")
+        XCTAssertEqual(load.serverDetail, secret)
+
+        let oom = AthenaError.metalOutOfMemory(
+            module: .textEmbedding, detail: secret)
+        XCTAssertFalse(
+            oom.message.contains(secret),
+            "metalOutOfMemory must not leak the detail")
+        XCTAssertEqual(oom.serverDetail, secret)
+
+        // Cases that are already client-safe expose no serverDetail.
+        XCTAssertNil(AthenaError.requestTimedOut(seconds: 5).serverDetail)
+    }
 }
 
 /// Brief 4b — the prompt-cache cap is owned by the governor (config

@@ -2551,7 +2551,12 @@ struct AthenaServer {
         enforced: Bool
     ) -> Bool {
         if !enforced || isAdmin { return true }
-        guard let owner = job.owner else { return true }
+        // NA6: an ownerless job (owner==nil — e.g. submitted while auth was
+        // disabled, before an off→on transition) is NOT readable/removable
+        // by an arbitrary authenticated tenant. Under enforced auth it's
+        // admin-only; only auth-off or admin already returned true above, so
+        // reaching here means a non-admin under enforced auth → deny.
+        guard let owner = job.owner else { return isAdmin || !enforced }
         return owner == principal
     }
 
@@ -5091,10 +5096,12 @@ struct AthenaServer {
         _ err: any Error, module: ModuleID
     ) -> Response {
         let e = AthenaError.classify(err, module: module)
+        // NE7: log the FULL detail (substrate paths/ids/state) to os_log,
+        // but return only the stable, detail-free `e.message` to the client.
         log.warning(
             """
             governed request failed module=\(module) \
-            status=\(e.httpStatus) code=\(e.code) \(e.message)
+            status=\(e.httpStatus) code=\(e.code) \(e.serverDetail ?? e.message)
             """)
         return error(
             status: HTTPResponse.Status(code: e.httpStatus),

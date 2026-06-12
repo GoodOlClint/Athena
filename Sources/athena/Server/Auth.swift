@@ -142,14 +142,23 @@ struct AuthConfig: Sendable {
             let url = URL(
                 fileURLWithPath:
                     (file as NSString).expandingTildeInPath)
-            if let perms = (try? FileManager.default
+            let perms = (try? FileManager.default
                 .attributesOfItem(atPath: url.path)[.posixPermissions]
-                as? Int), perms & 0o077 != 0 {
-                log.warning(
-                    "auth_keys_file is group/other-accessible — chmod 600 \(url.path)"
-                )
-            }
-            if let text = try? String(
+                as? Int)
+            if let perms, perms & 0o077 != 0 {
+                // A22: fail closed. A group/other-accessible keys file may
+                // have been read — or planted — by another local user, so
+                // we refuse to honor its keys until 0600 is restored
+                // (SSH-style). Env-supplied keys still load; only the
+                // file's entries are skipped, and the operator sees an
+                // error, not a warning they can ignore.
+                log.error(
+                    """
+                    auth_keys_file \(url.path) is group/other-accessible \
+                    (mode \(String(perms & 0o777, radix: 8))); refusing to \
+                    load it — chmod 600 to enable
+                    """)
+            } else if let text = try? String(
                 contentsOf: url, encoding: .utf8) {
                 for raw in text.split(
                     separator: "\n", omittingEmptySubsequences: true)
