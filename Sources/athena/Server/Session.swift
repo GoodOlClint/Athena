@@ -101,11 +101,19 @@ struct Session: Sendable {
         return nil
     }
 
-    static func setCookie(_ value: String) -> String {
+    /// `secure` adds the `Secure` attribute so the browser only ever
+    /// returns the session cookie over HTTPS (A12). Set it when the
+    /// daemon itself serves TLS; behind a TLS-terminating reverse proxy
+    /// the daemon speaks plaintext, so either enable daemon TLS too or
+    /// have the proxy add `Secure` on the way out.
+    static func setCookie(_ value: String, secure: Bool) -> String {
         "\(cookieName)=\(value); HttpOnly; SameSite=Strict; "
             + "Path=/; Max-Age=\(Int(ttl))"
+            + (secure ? "; Secure" : "")
     }
-    static let clearCookie =
+    static func clearCookie(secure: Bool) -> String {
         "\(cookieName)=; HttpOnly; SameSite=Strict; Path=/; "
-        + "Max-Age=0"
+            + "Max-Age=0"
+            + (secure ? "; Secure" : "")
+    }
 }

@@ -51,4 +51,17 @@ enum Passwords {
             password: password, salt: salt, iters: iters))
         return AuthConfig.constantTimeEqual(got, Array(hash))
     }
+
+    /// Run a throwaway derivation at the default cost so a login attempt
+    /// for a NON-existent username takes the same wall-time as one for a
+    /// real account — closes the PBKDF2 timing oracle that would
+    /// otherwise let an attacker enumerate valid usernames (A10). All
+    /// accounts are hashed at `defaultIterations`, so the cost matches.
+    /// The result is intentionally discarded.
+    static func dummyVerify(password: String) {
+        let dummySalt = Data(repeating: 0, count: saltLen)
+        _ = derive(
+            password: password, salt: dummySalt,
+            iters: defaultIterations)
+    }
 }

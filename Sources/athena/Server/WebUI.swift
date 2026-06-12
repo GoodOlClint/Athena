@@ -422,13 +422,20 @@ extension AthenaServer {
         <script>
         const $=i=>document.getElementById(i);
         const CSRF=document.querySelector('meta[name=csrf]').content;
+        // Full HTML escape for every server value rendered into the
+        // form (config values, the resolved path, and error text — which
+        // echoes the rejected value back). Replaces the old `"`-only
+        // escape, which left `<`/`>`/`&` unescaped (A11).
+        const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>(
+          {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
         let KEYS=[];
         async function load(){
           const c=await (await fetch("/ui/api/config")).json();
           KEYS=c.keys; $("path").textContent=c.path;
           $("f").innerHTML=c.keys.map(k=>
-            `<label>${k}</label><input id="in_${k}" value="${
-              (c.values[k]||"").replace(/"/g,'&quot;')}">`).join("");
+            `<label>${esc(k)}</label>`+
+            `<input id="in_${esc(k)}" value="${esc(c.values[k]||"")}">`)
+            .join("");
         }
         async function save(){
           const b={};
@@ -440,11 +447,11 @@ extension AthenaServer {
             body:JSON.stringify(b)});
           const j=await r.json();
           if(r.ok)$("msg").innerHTML=
-            `<span class=ok>saved ${j.saved.join(", ")}</span>`+
-            `<br><span class=k>${j.note}</span>`;
+            `<span class=ok>saved ${esc((j.saved||[]).join(", "))}</span>`+
+            `<br><span class=k>${esc(j.note)}</span>`;
           else $("msg").innerHTML=`<span class=err>`+
             Object.entries(j.errors||{"":j.error}).map(
-              ([k,v])=>`${k}: ${v}`).join("<br>")+`</span>`;
+              ([k,v])=>`${esc(k)}: ${esc(v)}`).join("<br>")+`</span>`;
         }
         load();
         </script>
@@ -847,6 +854,12 @@ extension AthenaServer {
         <script>
         const $=i=>document.getElementById(i);
         const CSRF=document.querySelector('meta[name=csrf]').content;
+        // Escape any server-supplied value before it lands in innerHTML
+        // or an attribute — token labels, usernames, scopes, role names
+        // are operator-controlled and a stored `<img onerror=…>` here
+        // would run in a daemonAdmin's browser (NA1).
+        const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>(
+          {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
         const M=n=>{const e=document.querySelector(
           'meta[name='+n+']');return e&&e.content==="1";};
         const UA=M("uadm"),TA=M("tadm");
@@ -866,18 +879,18 @@ extension AthenaServer {
           const d=await jget("/ui/api/users");
           $("ul").innerHTML="<tr><th>user</th><th>roles</th>"+
             (UA?"<th></th>":"")+"</tr>"+
-            ((d.users||[]).map(u=>`<tr><td>${u.username}</td>
-              <td class=k>${(u.roles||[]).join(", ")}</td>`+
-              (UA?`<td><button class=danger onclick=
-                "delUser('${u.username}')">delete</button></td>`:``)+
+            ((d.users||[]).map(u=>`<tr><td>${esc(u.username)}</td>
+              <td class=k>${esc((u.roles||[]).join(", "))}</td>`+
+              (UA?`<td><button class=danger data-u="${esc(u.username)}"
+                onclick="delUser(this.dataset.u)">delete</button></td>`:``)+
               `</tr>`).join("")||
             "<tr><td class=k>no users</td></tr>");
         }
         async function roles(){
           const d=await jget("/ui/api/roles");
           $("rl").innerHTML="<tr><th>role</th><th>permissions</th>"+
-            "</tr>"+(d.roles||[]).map(r=>`<tr><td>${r.role}</td>
-            <td class=k>${(r.permissions||[]).join(" ")}</td></tr>`)
+            "</tr>"+(d.roles||[]).map(r=>`<tr><td>${esc(r.role)}</td>
+            <td class=k>${esc((r.permissions||[]).join(" "))}</td></tr>`)
             .join("");
         }
         async function toks(){
@@ -885,10 +898,10 @@ extension AthenaServer {
           const d=await jget("/ui/api/tokens");
           $("tl").innerHTML="<tr><th>user</th><th>scope</th>"+
             "<th>prefix</th><th>label</th></tr>"+
-            ((d.tokens||[]).map(t=>`<tr><td>${t.username}</td>
-              <td class=k>${(t.scope||[]).join(",")||"—"}</td>
-              <td class=k>${t.hash_prefix}</td>
-              <td class=k>${t.label||""}</td></tr>`).join("")||
+            ((d.tokens||[]).map(t=>`<tr><td>${esc(t.username)}</td>
+              <td class=k>${esc((t.scope||[]).join(",")||"—")}</td>
+              <td class=k>${esc(t.hash_prefix)}</td>
+              <td class=k>${esc(t.label||"")}</td></tr>`).join("")||
             "<tr><td class=k>no tokens</td></tr>");
         }
         async function mkUser(){
@@ -897,8 +910,8 @@ extension AthenaServer {
             password:$("np").value,role:$("nr").value.trim()});
           const j=await r.json();
           $("umsg").innerHTML=r.ok?
-            `<span class=ok>created ${j.username}</span>`:
-            `<span class=err>${em(j)}</span>`;
+            `<span class=ok>created ${esc(j.username)}</span>`:
+            `<span class=err>${esc(em(j))}</span>`;
           if(r.ok)users();
         }
         async function delUser(n){
@@ -912,8 +925,8 @@ extension AthenaServer {
             name:$("gu").value.trim(),role:$("gr").value.trim()});
           const j=await r.json();
           $("gmsg").innerHTML=r.ok?
-            `<span class=ok>${act} ok</span>`:
-            `<span class=err>${em(j)}</span>`;
+            `<span class=ok>${esc(act)} ok</span>`:
+            `<span class=err>${esc(em(j))}</span>`;
           if(r.ok)users();
         }
         async function mkTok(){
@@ -925,10 +938,10 @@ extension AthenaServer {
           const j=await r.json();
           if(r.ok)$("tok").innerHTML=
             `<span class=ok>token (shown once):</span><br>`+
-            `<input readonly value="${j.token}" `+
+            `<input readonly value="${esc(j.token)}" `+
             `onclick="this.select()" style="margin-top:6px">`;
           else $("tok").innerHTML=
-            `<span class=err>${em(j)}</span>`;
+            `<span class=err>${esc(em(j))}</span>`;
           if(r.ok)toks();
         }
         async function rmTok(){
@@ -938,8 +951,8 @@ extension AthenaServer {
           const r=await jpost("/ui/api/tokens/delete",{prefix:p});
           const j=await r.json();
           $("tmsg").innerHTML=r.ok?
-            `<span class=ok>revoked ${j.removed}</span>`:
-            `<span class=err>${em(j)}</span>`;
+            `<span class=ok>revoked ${esc(j.removed)}</span>`:
+            `<span class=err>${esc(em(j))}</span>`;
           if(r.ok)toks();
         }
         show();users();roles();toks();
@@ -1002,8 +1015,13 @@ extension AthenaServer {
             guard kv.first == name[...] else { continue }
             let raw =
                 kv.count == 2 ? String(kv[1]) : ""
-            return raw.replacingOccurrences(of: "+", with: " ")
-                .removingPercentEncoding ?? raw
+            // `+` is space in form-urlencoded; normalize FIRST, then
+            // percent-decode. On a malformed `%` (decode returns nil)
+            // fall back to the `+`-normalized string, not the raw one —
+            // otherwise a username/password with a space would arrive
+            // with literal `+`s and silently fail to match (NA7).
+            let plus = raw.replacingOccurrences(of: "+", with: " ")
+            return plus.removingPercentEncoding ?? plus
         }
         return nil
     }
@@ -1026,25 +1044,36 @@ extension AthenaServer {
                 Self.loginPage(error: "missing credentials"),
                 .badRequest)
         }
-        guard let row = await store.getUser(username: user),
-            Passwords.verify(
+        // Always run one PBKDF2 derivation, whether or not the username
+        // exists, so the response time can't distinguish a real account
+        // from a missing one (A10). The error is identical for both the
+        // unknown-user and wrong-password cases — no enumeration oracle.
+        let row = await store.getUser(username: user)
+        let credsOK: Bool
+        if let row {
+            credsOK = Passwords.verify(
                 password: pass, salt: row.salt, hash: row.hash,
                 iters: row.iters)
-        else {
+        } else {
+            Passwords.dummyVerify(password: pass)
+            credsOK = false
+        }
+        guard credsOK else {
             return Self.htmlStatus(
                 Self.loginPage(error: "invalid credentials"),
                 .unauthorized)
         }
         var h = HTTPFields()
         h[.location] = "/ui"
-        h[.setCookie] = Session.setCookie(session.mint(user: user))
+        h[.setCookie] = Session.setCookie(
+            session.mint(user: user), secure: tlsEnabled)
         return Response(status: .seeOther, headers: h)
     }
 
-    static func logoutResponse() -> Response {
+    static func logoutResponse(secure: Bool) -> Response {
         var h = HTTPFields()
         h[.location] = "/ui/login"
-        h[.setCookie] = Session.clearCookie
+        h[.setCookie] = Session.clearCookie(secure: secure)
         return Response(status: .seeOther, headers: h)
     }
 }

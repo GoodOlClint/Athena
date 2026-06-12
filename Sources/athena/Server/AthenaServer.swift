@@ -50,6 +50,10 @@ struct AthenaServer {
     /// memberwise-init params (same convention as `auth`/`modelStoreRoot`).
     var tlsCertPath: String? = nil
     var tlsKeyPath: String? = nil
+    /// True when the daemon itself terminates TLS (both cert+key set —
+    /// the same both-or-neither contract `serverBuilder` enforces). Used
+    /// to mark the session cookie `Secure` (A12).
+    var tlsEnabled: Bool { tlsCertPath != nil && tlsKeyPath != nil }
     /// Inbound rate limiting (M29.1). `rateLimit` = sustained
     /// requests/sec per principal; `rateBurst` = bucket capacity. A
     /// non-positive `rateLimit` disables it (no middleware installed) —
@@ -383,10 +387,10 @@ struct AthenaServer {
             await handleUILoginPost(request)
         }
         router.get("/ui/logout") { _, _ -> Response in
-            Self.logoutResponse()
+            Self.logoutResponse(secure: tlsEnabled)
         }
         router.post("/ui/logout") { _, _ -> Response in
-            Self.logoutResponse()
+            Self.logoutResponse(secure: tlsEnabled)
         }
 
         router.post("/v1/chat/completions") { request, _ -> Response in
