@@ -18,12 +18,14 @@ Scope counts at plan time: 1 Critical + ~49 High + ~55 Medium confirmed across b
 
 The only Critical lives here (G1), plus everything an unprivileged or low-privileged remote caller can trigger.
 
-### M65.1 — FFI hardening (rust-shim)
-- [ ] G1 (Critical) `catch_unwind` on every `extern "C"` entry (or `panic="abort"` + documented tradeoff)
-- [ ] G2 reject oversized token ids before `max_id+1` dense alloc
-- [ ] G3 cap schema bytes/depth/repetition before compile
-- [ ] G6 cap caller-supplied `n`/`l` in `build_words`
-- [ ] G10 `id < size` bounds asserts; mask short-write fails loud; `set_err` interior-NUL safety
+### M65.1 — FFI hardening (rust-shim) ✅ v0.10.117
+- [x] G1 (Critical) per-entry `catch_unwind` via `ffi_guard`; crate stays `panic="unwind"` (abort path is parked DECISION #4, not taken) (v0.10.117)
+- [x] G2 reject oversized token ids before `max_id+1` dense alloc (`MAX_VOCAB` cap) (v0.10.117)
+- [x] G3 cap schema bytes/depth/repetition before compile (`validate_schema`: 1 MiB / depth 64 / 100k reps) (v0.10.117)
+- [x] G6 cap caller-supplied `n`/`l` in `build_words` (`MAX_VOCAB`/`MAX_TOKEN_BYTES`) (v0.10.117)
+- [x] G10 `id < size` guard; mask short-write fails loud; `set_err` interior-NUL + reentrancy safe (v0.10.117)
+
+> Note: the 7 `StructuredGuideTests` regex cases + 1 `StructuredShimTests` ordering artifact are pre-existing reds on the dead regex path (engine is schema-only since M53) — that's **NG1**, scheduled for **M70.2**. Untouched by M65.1; new hostile-schema Swift test passes.
 
 ### M65.2 — WebUI & login surface
 - [ ] NA1 (High) escape `t.label`/`t.username`/`t.scope` (+ users/roles fields) in /ui users page — stored XSS → daemonAdmin takeover
