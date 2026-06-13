@@ -163,14 +163,15 @@ Re-verify while here: B6*, B7*, B8*, B10–B13, B15*, B18–B23, H6*, H14*, J5, 
 - [x] G9 rust-shim `advance` now `set_err`s the out-of-range case (a caller contract violation) so it is distinguishable from a legitimate schema rejection (a clean errorless `false`). New rust `advance_distinguishes_out_of_range_from_disallowed_g9` (cargo 10/0). Staticlib rebuilt (v0.10.131)
 - [ ] **C11 DEFERRED** — the substrate's `TopPSampler`/`CategoricalSampler` each seed a private `RandomState` from `DispatchTime.now()` and consult neither the global `MLXRandom.seed` nor the task-local; and `container.generate` exposes no sampler-injection seam. So Athena cannot make the substrate non-speculative sampling path per-request-reproducible without a substrate fork (custom seedable `LogitSampler`). The load-bearing reproducible path — MTP speculative sampling — ALREADY uses a per-request `SamplingRNG`, so the exposure is narrow (seeded temp>0 on a NON-MTP model). Tracked for a substrate-seam workstream; the existing global `MLXRandom.seed` call is harmless (NSLock-guarded, sampler-ignored) and left in place.
 
-### M67.4 — Whisper / transcription
-- [ ] D5 + ND3 full 99-language table (forced language AND auto-detect reporting)
-- [ ] ND2 derive special-token ids from tokenizer/config, not hardcoded large-v3
-- [ ] D8 empty PCM early-return
-- [ ] D9 seed `segStart` from `lastTs ?? 0`
-- [ ] D12 clamp inverted segments
-- [ ] ND5 eviction id-match parity with load/rebind (needless multi-GB reload)
-- [ ] D10 validate clustering threshold; expose minClusters
+### M67.4 — Whisper / transcription ✅ v0.10.132
+- [x] D5 + ND3 `WhisperDecode.langOrder` is now the full 100-entry canonical Whisper ordering (16→100, large-v3 `yue` at index 99). Fixes BOTH directions: `languageToken` (forced `language:` past index 15 silently forced English) and `languageCode` (auto-detected language past 15 reported as "en" in `verbose_json`). New CI-safe `testLanguageTableCoversBeyondSixteen` (v0.10.132)
+- [x] ND2 `MLXTranscriptionModule.loadModel` rejects any whisper checkpoint whose `config.n_vocab != 51866` (the large-v3 family the special-token ids are pinned to) — a v1/v2/medium model (vocab 51865/51864) shifts every special id from `transcribe` on and silently mis-decodes. Chosen the "fail loud at load" option over per-checkpoint id derivation (the family Athena ships) (v0.10.132)
+- [x] D8 `transcribeResult` early-returns an empty result for empty PCM (was `LogMel.logMel([])` crash/NaN) (v0.10.132)
+- [x] D9 `parseSegments` flush uses `start: segStart ?? (lastTs ?? 0)` — content after a closing timestamp now starts at the last timestamp, not 0 (out-of-order span). New CI-safe `testContentAfterClosingTimestampStartsAtLastTs` (v0.10.132)
+- [x] D12 `TranscriptionFormat.srt`/`vtt` clamp the cue end to `max(start, end)` — an inverted span no longer emits a backwards cue. New CI-safe `testInvertedSegmentClampsEnd` (v0.10.132)
+- [x] ND5 all three real audio modules (transcription/diarization/speaker-embedding) now evict in `setAllowedModelIds` via `ids.canonicalByStoreIdentity(r) == nil` (the same resolver as load/rebind) instead of a stricter `!ids.contains(r)` — an M42 live refresh re-supplying the resident model under an equivalent spelling no longer forces a needless multi-GB reload (v0.10.132)
+- [x] D10 `AgglomerativeClustering.cluster` clamps `threshold` to the valid cosine-distance range [0, 2] and adds a `minClusters` floor (default 1 = prior behavior) so a permissive threshold can't over-merge distinct speakers into one. New CI-safe `testMinClustersFloorPreventsOverMerge` (v0.10.132)
+- Re-verified while here: ND6 (`num_speakers` silently ignored on the default Sortformer path) is a contract/threading change (needs `diarize(...)` signature + OpenAPI reconcile) — left for M71 API-surface; ND4 (per-frame GPU→host `.item()` syncs) is perf → M69.4.
 
 ### M67.5 — LLM module odds
 - [ ] NC1 (High) remove/lock `currentModelDirectory` global (queued convert vs cold-load race)

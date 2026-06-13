@@ -80,9 +80,12 @@ public enum TranscriptionFormat {
 
     public static func srt(_ segs: [TranscriptionSegment]) -> String {
         segs.enumerated().map { i, s in
+            // D12: never emit a cue whose end precedes its start — an
+            // inverted span (start > end from a malformed timestamp stream)
+            // produces a backwards cue most players reject. Clamp end ≥ start.
             "\(i + 1)\n"
                 + "\(stamp(s.start, comma: true)) --> "
-                + "\(stamp(s.end, comma: true))\n"
+                + "\(stamp(max(s.start, s.end), comma: true))\n"
                 + "\(s.text.trimmingCharacters(in: .whitespaces))\n"
         }.joined(separator: "\n")
     }
@@ -90,8 +93,9 @@ public enum TranscriptionFormat {
     public static func vtt(_ segs: [TranscriptionSegment]) -> String {
         "WEBVTT\n\n"
             + segs.map { s in
+                // D12: clamp end ≥ start (see srt).
                 "\(stamp(s.start, comma: false)) --> "
-                    + "\(stamp(s.end, comma: false))\n"
+                    + "\(stamp(max(s.start, s.end), comma: false))\n"
                     + "\(s.text.trimmingCharacters(in: .whitespaces))\n"
             }.joined(separator: "\n")
     }

@@ -14,18 +14,31 @@ public enum AgglomerativeClustering {
     ///   - numClusters: exact cluster count, or nil to auto-stop at
     ///     `threshold`.
     ///   - threshold: cosine-distance stop bound for auto mode
-    ///     (merge while the closest pair is ≤ threshold).
+    ///     (merge while the closest pair is ≤ threshold). Clamped to the
+    ///     valid cosine-distance range [0, 2] (D10).
     ///   - maxClusters: optional cap on the auto-mode count.
+    ///   - minClusters: auto-mode floor — never merge below this many
+    ///     clusters even if the closest pair is within `threshold` (D10).
+    ///     Guards against a permissive threshold collapsing distinct
+    ///     speakers into one. Default 1 = prior behavior.
     /// - Returns: a 0-based contiguous label per input row.
     public static func cluster(
         _ embeddings: [[Float]],
         numClusters: Int? = nil,
         threshold: Float = 0.75,
-        maxClusters: Int? = nil
+        maxClusters: Int? = nil,
+        minClusters: Int = 1
     ) -> [Int] {
         let n = embeddings.count
         if n == 0 { return [] }
         if n == 1 { return [0] }
+
+        // D10: a cosine distance over unit vectors is in [0, 2]; clamp a
+        // caller-supplied threshold into range so an out-of-band value can't
+        // force everything to merge (>=2) or nothing (<0). And bound the
+        // auto-mode floor to [1, n].
+        let stopThreshold = min(max(threshold, 0), 2)
+        let minC = max(1, min(minClusters, n))
 
         // Pairwise cosine distance (1 − dot for unit vectors; we
         // normalize defensively in case inputs aren't unit-length).
@@ -82,7 +95,9 @@ public enum AgglomerativeClustering {
             } else if let cap = maxClusters, activeCount > cap {
                 shouldMerge = true
             } else {
-                shouldMerge = bestD <= threshold
+                // D10: respect the minClusters floor so a permissive
+                // threshold can't over-merge distinct speakers into one.
+                shouldMerge = bestD <= stopThreshold && activeCount > minC
             }
             if !shouldMerge { break }
 

@@ -17,9 +17,24 @@ public enum WhisperDecode {
     static let timeStep = 0.02
     static let windowSeconds = 30.0
 
+    /// The full Whisper language ordering — token id = `langBase + index`.
+    /// D5 (forced `language:`) and ND3 (reported `language`) both indexed a
+    /// truncated 16-entry table, so any language past index 15 silently fell
+    /// back to English in BOTH directions. This is the canonical
+    /// `openai/whisper` `LANGUAGES` order (the first 16 are unchanged),
+    /// extended with the large-v3 addition `yue` (Cantonese) at index 99 —
+    /// the family Athena's special-token ids and the ND2 vocab guard pin to.
     private static let langOrder = [
         "en", "zh", "de", "es", "ru", "ko", "fr", "ja", "pt", "tr",
-        "pl", "ca", "nl", "ar", "sv", "it",
+        "pl", "ca", "nl", "ar", "sv", "it", "id", "hi", "fi", "vi",
+        "he", "uk", "el", "ms", "cs", "ro", "da", "hu", "ta", "no",
+        "th", "ur", "hr", "bg", "lt", "la", "mi", "ml", "cy", "sk",
+        "te", "fa", "lv", "bn", "sr", "az", "sl", "kn", "et", "mk",
+        "br", "eu", "is", "hy", "ne", "mn", "bs", "kk", "sq", "sw",
+        "gl", "mr", "pa", "si", "km", "sn", "yo", "so", "af", "oc",
+        "ka", "be", "tg", "sd", "gu", "am", "yi", "lo", "uz", "fo",
+        "ht", "ps", "tk", "nn", "mt", "sa", "lb", "my", "bo", "tl",
+        "mg", "as", "tt", "haw", "ln", "ha", "ba", "jw", "su", "yue",
     ]
     private static let langIndex: [String: Int] = {
         var m: [String: Int] = [:]
@@ -97,7 +112,11 @@ public enum WhisperDecode {
                 : bufLogprobs.reduce(0, +) / Double(bufLogprobs.count)
             segments.append(
                 ParsedSegment(
-                    start: segStart ?? 0, end: end, tokens: buf,
+                    // D9: content after a CLOSING timestamp (segStart reset
+                    // to nil) must start at the last timestamp seen, not 0 —
+                    // otherwise the trailing span is emitted out of order at
+                    // time 0.
+                    start: segStart ?? (lastTs ?? 0), end: end, tokens: buf,
                     avgLogprob: avg))
             buf = []
             bufLogprobs = []
@@ -206,6 +225,16 @@ public enum WhisperDecode {
         maxTokens: Int = 224,
         wordTimestamps: Bool = false
     ) -> TranscriptionResult {
+        // D8: empty PCM ⇒ `LogMel.logMel([])` would crash / yield NaN. An
+        // empty clip has nothing to transcribe — return an empty result
+        // (the requested language if explicit, else "en").
+        guard !pcm.isEmpty else {
+            let lang =
+                (language.flatMap { $0.lowercased() != "auto" ? $0 : nil })?
+                .lowercased() ?? "en"
+            return TranscriptionResult(
+                text: "", language: lang, duration: 0, segments: [])
+        }
         let n = LogMel.nSamples
         let windows: [[Float]] =
             pcm.count <= n

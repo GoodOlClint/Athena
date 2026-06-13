@@ -56,6 +56,20 @@ final class WeSpeakerStructureTests: XCTestCase {
         XCTAssertEqual(Set(auto).count, 3, "auto count wrong")
     }
 
+    /// D10: a permissive threshold over near-identical vectors would
+    /// over-merge to a single cluster; the `minClusters` floor keeps the
+    /// auto-mode count from collapsing below the requested minimum.
+    func testMinClustersFloorPreventsOverMerge() {
+        let v: [[Float]] = [[1, 0, 0], [0.99, 0.01, 0], [0.98, 0.02, 0]]
+        // threshold 0.75 ⇒ every pair (distance ~0) would merge to 1.
+        let merged = AgglomerativeClustering.cluster(v, threshold: 0.75)
+        XCTAssertEqual(Set(merged).count, 1, "baseline over-merges to 1")
+        // minClusters=2 holds the floor.
+        let floored = AgglomerativeClustering.cluster(
+            v, threshold: 0.75, minClusters: 2)
+        XCTAssertEqual(Set(floored).count, 2, "minClusters=2 floor respected")
+    }
+
     func testFeatureFrameMathAndShape() {
         let fe = WeSpeakerFeatures()
         // 1 s of a 220 Hz tone at 16 kHz.

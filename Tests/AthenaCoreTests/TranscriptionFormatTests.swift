@@ -34,4 +34,18 @@ final class TranscriptionFormatTests: XCTestCase {
         XCTAssertEqual(TranscriptionFormat.srt([]), "")
         XCTAssertEqual(TranscriptionFormat.vtt([]), "WEBVTT\n\n")
     }
+
+    /// D12: an inverted span (start > end) must not produce a backwards cue;
+    /// the end is clamped up to the start in both subtitle formats.
+    func testInvertedSegmentClampsEnd() {
+        let seg = [TranscriptionSegment(start: 3.0, end: 1.0, text: "x")]
+        XCTAssertTrue(
+            TranscriptionFormat.srt(seg).contains(
+                "00:00:03,000 --> 00:00:03,000"),
+            TranscriptionFormat.srt(seg))
+        XCTAssertTrue(
+            TranscriptionFormat.vtt(seg).contains(
+                "00:00:03.000 --> 00:00:03.000"),
+            TranscriptionFormat.vtt(seg))
+    }
 }

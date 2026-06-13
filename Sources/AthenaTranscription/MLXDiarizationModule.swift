@@ -127,7 +127,10 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
     public func setAllowedModelIds(_ ids: [String]) {
         allowedIds = ids
         defaultId = ids.first ?? defaultId
-        if let r = residentId, !ids.contains(r) {
+        // ND5: evict only when the resident id is no longer allowed under the
+        // SAME store-identity resolver as load/rebind (an equivalent spelling
+        // must NOT force a needless reload).
+        if let r = residentId, ids.canonicalByStoreIdentity(r) == nil {
             model = nil
             residentId = nil
         }

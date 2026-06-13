@@ -103,6 +103,25 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
                 .transcription,
                 reason: "whisper \(id): \(error)")
         }
+        // ND2: the decoder's special-token ids (eot/sot/langBase/transcribe/
+        // timestampBegin) are pinned to the whisper-large-v3 family
+        // (vocab 51866). A non-v3 checkpoint (e.g. v1/v2/medium, vocab
+        // 51865/51864) shifts every special id from `transcribe` onward by
+        // one (v3 inserted Cantonese), so the forced prefix, the eot stop
+        // test, the special mask and timestamp parsing would all target the
+        // wrong tokens — silently mis-decoding. Fail loud at load instead.
+        if let m = model, m.config.n_vocab != 51866 {
+            let bad = m.config.n_vocab
+            model = nil
+            tokenizer = nil
+            residentId = nil
+            throw AthenaError.moduleLoadFailed(
+                .transcription,
+                reason: "whisper model '\(canonical)' has vocab \(bad); "
+                    + "Athena's decoder is pinned to the large-v3 family "
+                    + "(vocab 51866) — use a large-v3 / large-v3-turbo "
+                    + "checkpoint")
+        }
     }
 
     public func unload() async {
@@ -136,7 +155,13 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
     public func setAllowedModelIds(_ ids: [String]) {
         allowedIds = ids
         defaultId = ids.first ?? defaultId
-        if let r = residentId, !ids.contains(r) {
+        // ND5: evict only when the resident id is no longer allowed under
+        // the SAME store-identity resolver that load/rebind use. A plain
+        // `!ids.contains(r)` is a stricter case-sensitive full-string match,
+        // so an M42 live refresh re-supplying the resident model under an
+        // equivalent spelling (bare vs full HF id, case diff) would needlessly
+        // drop the loaded model+tokenizer and force a multi-GB reload.
+        if let r = residentId, ids.canonicalByStoreIdentity(r) == nil {
             model = nil
             tokenizer = nil
             residentId = nil

@@ -60,4 +60,29 @@ final class WhisperDecodeParseTests: XCTestCase {
         XCTAssertEqual(segs.count, 1)
         XCTAssertNil(segs[0].avgLogprob)
     }
+
+    /// D9: content arriving after a CLOSING timestamp (no new opening ts)
+    /// must start at the last timestamp, not 0 — else the trailing span is
+    /// emitted out of order at the head of the window.
+    func testContentAfterClosingTimestampStartsAtLastTs() {
+        let gen = [ts(0), 100, ts(2), 200]  // '200' after the closing <|2|>
+        let lp = [-9.0, -1.0, -9.0, -1.0]
+        let segs = WhisperDecode.parseSegments(generated: gen, logprobs: lp)
+        XCTAssertEqual(segs.count, 2)
+        XCTAssertEqual(segs[1].tokens, [200])
+        XCTAssertEqual(
+            segs[1].start, 2, accuracy: 1e-9,
+            "trailing span starts at lastTs (2.0), not 0")
+    }
+
+    /// D5 + ND3: the full Whisper language table round-trips a language past
+    /// the old 16-entry truncation in BOTH directions (forced + reported),
+    /// instead of silently collapsing to English.
+    func testLanguageTableCoversBeyondSixteen() {
+        let hi = WhisperDecode.languageToken("hi")  // index 17
+        XCTAssertEqual(WhisperDecode.languageCode(forToken: hi), "hi")
+        XCTAssertNotEqual(hi, WhisperDecode.languageToken("en"))
+        let yue = WhisperDecode.languageToken("yue")  // large-v3 addition
+        XCTAssertEqual(WhisperDecode.languageCode(forToken: yue), "yue")
+    }
 }
