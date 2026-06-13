@@ -272,11 +272,14 @@ Re-verified across M67: F6 (createSSMMask alloc) → M69 perf; I7 (embed canonic
 - [ ] ND11 skip logprob syncs when avg_logprob unused
 - [ ] ND9 move heavy sync decode off the cooperative pool (DECISION-lite: executor strategy)
 
-### M69.5 — Decode-path costs (benchmark-gated; skip any that don't pay)
-- [ ] C4 (High) `guidedArgmax` reusable buffer / O(allowed) mask / on-device
-- [ ] F2 on-device eviction scoring (no per-layer host sort)
-- [ ] F3 hoist `clearCache` out of per-layer eviction
-- [ ] F5 chunked KV pre-alloc; C22 prefix-hit tie-break; C14 partial-select sampling; NF8 prefix gather skip
+### M69.5 — Decode-path costs (benchmark-gated) — MEASURED → SKIP/DEFER (v0.10.142 measurement pass)
+Measured on the M5 Max against the Release binary (Qwen3.5-27B-4bit-mtp, `ATHENA_PERF_TRACE=1`). **Decode is backbone-bound** — confirms [[decode-throughput-characterization]] on current (M53 llguidance) code. Every item is <1% of the default decode path or gated behind an off-by-default knob, so per the milestone's own "skip any that don't pay" rule the whole milestone is skipped (no risky changes to the bit-identical-greedy decode path for no measurable gain).
+- [~] C4 (High) `guidedArgmax` — **SKIP, measured 0.8%.** On a 179-token structured decode (guided=true, 40.4 tok/s): backbone **92.8%**, verifySample (incl. guidedArgmax) **0.8%**, mtp 4.7%, draftPick 0.8%. Ceiling <1%; not worth the bit-identical risk.
+- [~] C14 (Med) sampling sort — **SKIP, below noise.** temp0.8 top_p=0.95 (full 250k sort runs) vs top_p=1.0 (both sorts skipped; `topK` defaults nil) measured **21.8 vs 21.5 tok/s** — identical within noise. Only on the temp>0 path. (Aside: temp>0 is 2× slower than greedy — 21.8 vs 43.9 — but that's the M40 sampling-SPECULATIVE path, not C14's sort; a separate, distribution-identical-contract-bound investigation, out of M69.5 scope.)
+- [~] F2/F3 (High) / F5 / NF8 TriAttention eviction — **DEFER (off-path).** `kv_compression` defaults to `.none`; the scorer's per-layer host sync + sort + `clearCache` (F2/F3) fires only every `divideLength` tokens during long-context decode WHEN TriAttention is opted in — a narrow regime the default deployment (and the structured/dflash consumer path) never enters. Revisit only if TriAttention long-context becomes a production path; the audit's "High" was a static-severity, not a measured one.
+- [~] C22 (Low) prefix-cache hit tie-break — DEFER (prefix-cache opt-in, correctness-preserving micro).
+
+> **Verdict: M69.5 skipped on measurement.** The gate did its job — it prevented speculative micro-optimizations to the load-bearing decode path that the profiler shows would yield <1%. Findings recorded so a future regime change (TriAttention adoption, or a temp>0-throughput push) can reopen the relevant items with data.
 
 ---
 
