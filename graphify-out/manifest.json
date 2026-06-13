@@ -145,9 +145,9 @@
     "semantic_hash": "485055df6c860264f916d546594e50db"
   },
   "Sources/AthenaLLM/GuidedSubstrate.swift": {
-    "mtime": 1780419098.094136,
-    "ast_hash": "c63adb58bb98107baad513d553a88bfd",
-    "semantic_hash": "c63adb58bb98107baad513d553a88bfd"
+    "mtime": 1781368678.0203137,
+    "ast_hash": "58e7510820c07cadd76c1164812e45fb",
+    "semantic_hash": ""
   },
   "Sources/AthenaLLM/KVCompression.swift": {
     "mtime": 1779422180.4710155,
@@ -195,9 +195,9 @@
     "semantic_hash": "1c1cbb9790e4e9d0fcea009c0ddd4684"
   },
   "Sources/AthenaLLM/SpeculativeGeneration.swift": {
-    "mtime": 1780419056.4601293,
-    "ast_hash": "f4b8d79e87195fb157fa704eb074d6b7",
-    "semantic_hash": "f4b8d79e87195fb157fa704eb074d6b7"
+    "mtime": 1781368670.3656347,
+    "ast_hash": "114e38b3cd779235dd062b16fe387b12",
+    "semantic_hash": ""
   },
   "Sources/AthenaLLM/SpeculativeSampling.swift": {
     "mtime": 1781309785.5572526,
@@ -425,8 +425,8 @@
     "semantic_hash": "d16404614855c59c2001089f41c5bd78"
   },
   "Sources/athena/Athena.swift": {
-    "mtime": 1781368401.5439084,
-    "ast_hash": "a986baa3d643d31fa635449b3e80960e",
+    "mtime": 1781368750.548919,
+    "ast_hash": "550f9910a12e9d19e9f96f780a762b36",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Audit.swift": {
@@ -1180,8 +1180,8 @@
     "semantic_hash": ""
   },
   "docs/audit-remediation-plan.md": {
-    "mtime": 1781368450.45492,
-    "ast_hash": "579acc94a1eac32dddb6cc458c19c8a9",
+    "mtime": 1781368759.6456196,
+    "ast_hash": "4dbf4878b30e0b51609e67372804778b",
     "semantic_hash": ""
   },
   "docs/decisions/003-rust-shim-panic-strategy.md": {
@@ -1282,6 +1282,16 @@
   "docs/decisions/009-stub-decode-ci-tier.md": {
     "mtime": 1781368153.429865,
     "ast_hash": "79d3080ee87c58c8d4094c2bf4eeefb4",
+    "semantic_hash": ""
+  },
+  "Sources/AthenaLLM/GuidedMask.swift": {
+    "mtime": 1781368662.006821,
+    "ast_hash": "9f0001a2ca4a04d5bd403bbea0ef1752",
+    "semantic_hash": ""
+  },
+  "Tests/AthenaCoreTests/GuidedMaskTests.swift": {
+    "mtime": 1781368712.9971662,
+    "ast_hash": "4f0342b03dc5f2479aa1f405ef7dd6d4",
     "semantic_hash": ""
   }
 }

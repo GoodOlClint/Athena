@@ -1,16 +1,16 @@
 # Graph Report - Athena  (2026-06-13)
 
 ## Corpus Check
-- 253 files · ~339,574 words
+- 255 files · ~340,562 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 4332 nodes · 8483 edges · 251 communities (223 shown, 28 thin omitted)
+- 4342 nodes · 8502 edges · 258 communities (231 shown, 27 thin omitted)
 - Extraction: 95% EXTRACTED · 5% INFERRED · 0% AMBIGUOUS · INFERRED: 420 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `b327c366`
+- Built from commit: `86d1cc00`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -260,13 +260,20 @@
 - [[_COMMUNITY_Community 246|Community 246]]
 - [[_COMMUNITY_Community 247|Community 247]]
 - [[_COMMUNITY_Community 248|Community 248]]
+- [[_COMMUNITY_Community 249|Community 249]]
+- [[_COMMUNITY_Community 250|Community 250]]
+- [[_COMMUNITY_Community 251|Community 251]]
 - [[_COMMUNITY_Community 252|Community 252]]
+- [[_COMMUNITY_Community 253|Community 253]]
+- [[_COMMUNITY_Community 254|Community 254]]
 - [[_COMMUNITY_Community 255|Community 255]]
+- [[_COMMUNITY_Community 256|Community 256]]
+- [[_COMMUNITY_Community 257|Community 257]]
 
 ## God Nodes (most connected - your core abstractions)
 1. `AthenaStore` - 72 edges
 2. `Data` - 61 edges
-3. `String` - 57 edges
+3. `String` - 58 edges
 4. `MemoryGovernor` - 54 edges
 5. `CodingKeys` - 53 edges
 6. `AthenaServer` - 52 edges
@@ -298,19 +305,19 @@
 - **Prompt-prefix KV cache program (cache, shred, queue contract, pressure-relief)** — docs_m59_prompt_prefix_cache_prefixkvcache, docs_m59_6_prompt_cache_shred_shred, docs_queue_prompt_cache_contract_multipass_reuse, docs_m60_plan_pressure_relief, docs_m61_prefix_affinity_queue_affinity_scheduler [INFERRED 0.85]
 - **Structured-output RSS blowup root cause and llguidance resolution** — docs_structured_rss_rootcause_dfa_blowup, docs_structured_rss_rootcause_outer_maxitems_driver, docs_structured_rss_rootcause_llguidance_swap, docs_m49_plan_structuredindex_cache [EXTRACTED 1.00]
 
-## Communities (251 total, 28 thin omitted)
+## Communities (258 total, 27 thin omitted)
 
 ### Community 0 - "AthenaStore (SQLite Persistence)"
-Cohesion: 0.10
-Nodes (9): StubEmbeddingModuleTests, UsageAccountingTests, EmbeddingBatch, EmbeddingModule, StubEmbeddingModule, Int, MemoryReservation, ModuleID (+1 more)
+Cohesion: 0.09
+Nodes (10): StubEmbeddingModuleTests, UsageAccountingTests, EmbeddingBatch, EmbeddingModule, StubEmbeddingModule, ModelSelectable, Int, MemoryReservation (+2 more)
 
 ### Community 1 - "AthenaServer (HTTP Daemon Core)"
 Cohesion: 0.13
-Nodes (13): MLXTranscriptionModule, ModelSelectable, Bool, Data, Int, MemoryReservation, MLXLMCommon, ModuleID (+5 more)
+Nodes (12): MLXTranscriptionModule, Bool, Data, Int, MemoryReservation, MLXLMCommon, ModuleID, String (+4 more)
 
 ### Community 2 - "Qwen3.5 MTP Model"
-Cohesion: 0.17
-Nodes (9): AcceptCounter, ChatTurnMappingTests, SeededSamplingReproducibilityTests, StructuredSpeculativeParityTests, Bool, ChatTurn, Double, String (+1 more)
+Cohesion: 0.26
+Nodes (6): ChatTurnMappingTests, StructuredSpeculativeParityTests, ChatTurn, Double, String, URL
 
 ### Community 3 - "Native API DTOs"
 Cohesion: 0.09
@@ -333,24 +340,24 @@ Cohesion: 0.12
 Nodes (19): Permission, daemonAdmin, inference, metricsRead, modelRead, modelWrite, queueSubmit, storeAdmin (+11 more)
 
 ### Community 8 - "MLX Speaker Embedding Module"
-Cohesion: 0.14
-Nodes (9): AthenaLog, LogScope, OSUnifiedLogHandler, TerminalLogHandler, ISO8601DateFormatter, os, OSLogType, Bool (+1 more)
+Cohesion: 0.11
+Nodes (18): AthenaLog, LogScope, OSUnifiedLogHandler, TerminalLogHandler, ISO8601DateFormatter, Logging, AthenaLog, LogScope (+10 more)
 
 ### Community 9 - "Whisper Encoder Config"
 Cohesion: 0.04
 Nodes (51): CodingKeys, attentionBias, chunkLeftContext, chunkLen, chunkRightContext, convKernelSize, dModel, encoderAttentionHeads (+43 more)
 
 ### Community 10 - "Speculative Sampling Tests"
-Cohesion: 0.08
-Nodes (6): SpeculativeSamplingTests, SamplingRNG, SplitMix64, Double, Double, UInt64
+Cohesion: 0.09
+Nodes (3): SpeculativeSamplingTests, SamplingRNG, Double
 
 ### Community 11 - "Diarization Module"
 Cohesion: 0.07
-Nodes (24): DiarizationResult, DiarizationTurn, StubDiarizationModule, MLXDiarizationModule, Send, DiarizationResult, SortformerModel, Data (+16 more)
+Nodes (25): DiarizationModule, DiarizationResult, DiarizationTurn, StubDiarizationModule, MLXDiarizationModule, Send, DiarizationResult, SortformerModel (+17 more)
 
 ### Community 12 - "MLX LLM Module & Speculative Gate"
-Cohesion: 0.29
-Nodes (9): AsyncStream, Chat, ChatTurn, GenChunk, Generation, GenCollected, Sendable, Sendable (+1 more)
+Cohesion: 0.23
+Nodes (12): Caller, Hit, Stats, VectorStore, AthenaStore, Bool, Data, Double (+4 more)
 
 ### Community 13 - "Memory Governor"
 Cohesion: 0.14
@@ -361,16 +368,16 @@ Cohesion: 0.08
 Nodes (32): ApplicationRequestContextSource, AppRequestContext, ResolvedCaller, CoreRequestContextStorage, RemoteAddressRequestContext, RequestContext, AppRequestContext, ResolvedCaller (+24 more)
 
 ### Community 15 - "Metrics & Prometheus"
-Cohesion: 0.16
-Nodes (15): DiarizationModule, HTTPServerBuilder, AthenaServer, NavItem, AuthConfig, MemoryGovernor, RequestQueue, URL (+7 more)
+Cohesion: 0.17
+Nodes (15): DiarizationModule, AthenaServer, NavItem, AthenaStore, AuthConfig, MemoryGovernor, RequestQueue, URL (+7 more)
 
 ### Community 16 - "Rust Structured Shim (FFI)"
-Cohesion: 0.07
-Nodes (59): Any, Arc, Box, c_char, c_int, F, Into, Option (+51 more)
+Cohesion: 0.06
+Nodes (62): Any, Arc, LaunchdPlist, Box, c_char, c_int, F, Into (+54 more)
 
 ### Community 17 - "Inference Deadline / Timeout"
-Cohesion: 0.08
-Nodes (22): deadlineBounded(), deadlineBoundedNanos(), StreamTruncationState, withDeadlineNanos(), withInferenceDeadline(), InferenceDeadlineTests, TestFlag, AthenaError (+14 more)
+Cohesion: 0.18
+Nodes (9): deadlineBounded(), deadlineBoundedNanos(), StreamTruncationState, InferenceDeadlineTests, TestFlag, AsyncStream, Bool, Void (+1 more)
 
 ### Community 18 - "OpenAI DTOs"
 Cohesion: 0.07
@@ -402,22 +409,22 @@ Nodes (19): AsyncThrowingStream, DiarizationOutput, DiarizationSegment, DType, M
 
 ### Community 26 - "Memory Governor Tests"
 Cohesion: 0.13
-Nodes (10): Executor, JobRow, JobSummary, RequestQueue, AthenaStore, Bool, Data, Int (+2 more)
+Nodes (11): Executor, JobRow, JobSummary, RequestQueue, AthenaStore, Bool, Data, Int (+3 more)
 
 ### Community 27 - "MLX Embedding Module"
 Cohesion: 0.09
 Nodes (18): StopStreamFilterTests, StopStreamFilter, ParsedSegment, WhisperDecode, Range, Bool, Int, String (+10 more)
 
 ### Community 28 - "Structured/TriAttention Cache Tests"
-Cohesion: 0.20
-Nodes (4): EmbeddingBucketingTests, MLXEmbeddingIntegrationTests, MLXEmbeddingModuleEstimateTests, Int
+Cohesion: 0.27
+Nodes (3): EmbeddingBucketingTests, MLXEmbeddingIntegrationTests, Int
 
 ### Community 29 - "Convert/Init CLI"
 Cohesion: 0.09
 Nodes (16): Convert, Init, ProgressBar, Pull, DaemonOptions, Int, String, Bool (+8 more)
 
 ### Community 30 - "Prefix KV Cache (Prompt Cache)"
-Cohesion: 0.15
+Cohesion: 0.14
 Nodes (15): Entry, Hit, PrefixKVCache, Recorder, ScopeMode, both, cacheKey, principal (+7 more)
 
 ### Community 31 - "Auth (Tokens/Permissions)"
@@ -425,12 +432,12 @@ Cohesion: 0.05
 Nodes (41): Audit Remediation Program — M65–M71, M65.1 — FFI hardening (rust-shim) ✅ v0.10.117, M65.2 — WebUI & login surface — 5/6 ✅ v0.10.118 (A3 deferred), M65.3 — Untrusted input caps (DoS) ✅ v0.10.119, M65.4 — Path confinement (file ops on caller-influenced paths) ✅ v0.10.120, M65.5 — AuthZ gaps & info leaks — contained items ✅ v0.10.121 (A5/A3/H6 → M65.6), M65.6 — Auth-context refactor (structural) ✅ v0.10.122, M65 — Remote attack surface (security) (+33 more)
 
 ### Community 32 - "Community 32"
-Cohesion: 0.18
-Nodes (7): MLXEmbeddingModule, EmbedderModelContainer, EmbeddingBatch, EmbeddingModule, Int, String, URL
+Cohesion: 0.16
+Nodes (8): MLXEmbeddingModuleEstimateTests, MLXEmbeddingModule, EmbedderModelContainer, EmbeddingBatch, EmbeddingModule, Int, String, URL
 
 ### Community 33 - "Community 33"
-Cohesion: 0.21
-Nodes (16): BrokenStoreEntry, Detail, Entry, ModelStoreOps, OpError, exists, invalidName, io (+8 more)
+Cohesion: 0.20
+Nodes (17): BrokenStoreEntry, Detail, Entry, ModelStoreOps, OpError, exists, invalidName, io (+9 more)
 
 ### Community 34 - "Community 34"
 Cohesion: 0.13
@@ -441,24 +448,24 @@ Cohesion: 0.15
 Nodes (14): AuditCmd, Entry, RemoteAudit, Report, DaemonOptions, Double, Int, String (+6 more)
 
 ### Community 36 - "Community 36"
-Cohesion: 0.06
-Nodes (23): CommitResult, GuidedDecoderTests, StructuredGuideTests, StructuredVocabTests, StructuredVocab, StructuredError, StructuredGuide, StructuredIndex (+15 more)
+Cohesion: 0.28
+Nodes (3): StructuredGuideTests, StructuredIndex, StructuredGuide
 
 ### Community 37 - "Community 37"
-Cohesion: 0.20
-Nodes (13): AuthConfig, AuthPolicy, AuthStartupError, openOnNonLoopback, AuthSubject, AthenaStore, Bool, Data (+5 more)
+Cohesion: 0.14
+Nodes (19): AuthConfig, AuthMiddleware, AuthPolicy, AuthStartupError, openOnNonLoopback, AuthSubject, Session, AthenaStore (+11 more)
 
 ### Community 38 - "Community 38"
 Cohesion: 0.14
 Nodes (14): parseMetadata(), parseVector(), postJSON(), Vectors, VectorsAdd, VectorsQuery, VectorsRm, VectorsStats (+6 more)
 
 ### Community 39 - "Community 39"
-Cohesion: 0.18
-Nodes (11): JSONValue, array, bool, integer, null, number, object, string (+3 more)
+Cohesion: 0.16
+Nodes (12): JSONValue, array, bool, integer, null, number, object, string (+4 more)
 
 ### Community 40 - "Community 40"
-Cohesion: 0.10
-Nodes (13): AllocatingModule, Counter, CountingModule, FailingModule, FakeProbe, MemBox, SlowUnloadModule, DiarizationModule (+5 more)
+Cohesion: 0.09
+Nodes (13): AllocatingModule, Counter, CountingModule, FailingModule, FakeProbe, MemBox, SlowUnloadModule, TranscriptionModule (+5 more)
 
 ### Community 41 - "Community 41"
 Cohesion: 0.22
@@ -466,7 +473,7 @@ Nodes (6): Gemma4MoEE2ETests, OpenAPISpec, String, MLXLLMModule, String, URL
 
 ### Community 42 - "Community 42"
 Cohesion: 0.05
-Nodes (31): AthenaStoreTests, MLXLLMModuleEstimateTests, ModelHealthTests, AthenaStore, AuditRow, JobRow, JobSummary, ModelAllowlistRow (+23 more)
+Nodes (28): AthenaStoreTests, ModelHealthTests, AthenaStore, AuditRow, JobRow, JobSummary, ModelAllowlistRow, StoreError (+20 more)
 
 ### Community 43 - "Community 43"
 Cohesion: 0.13
@@ -474,15 +481,15 @@ Nodes (12): Session, Session, Bool, Date, String, TimeInterval, Bool, Data (+4 m
 
 ### Community 44 - "Community 44"
 Cohesion: 0.17
-Nodes (14): Bucket, ConcurrencyLimiter, ConcurrencyMiddleware, RateLimiter, RateLimitMiddleware, ResponseBody, AuthConfig, Bool (+6 more)
+Nodes (15): RouterMiddleware, Bucket, ConcurrencyLimiter, ConcurrencyMiddleware, RateLimiter, RateLimitMiddleware, ResponseBody, AuthConfig (+7 more)
 
 ### Community 45 - "Community 45"
 Cohesion: 0.20
 Nodes (9): 002 — Gemma4 MoE architecture support (26B-A4B; unblocks DFlash M63.5), Consequences, Context, Decision, Feasibility spike findings (M64.0, 2026-06-11), Implementation plan (sliced — conventions: substrate commit + Athena, References, Rejected alternatives (+1 more)
 
 ### Community 46 - "Community 46"
-Cohesion: 0.17
-Nodes (7): DFlashDraftBox, MLXLLMModule, DFlashDraftModel, LLMModule, ModelContainer, String, VocabBundle
+Cohesion: 0.09
+Nodes (24): AsyncStream, SpeculativeGateTests, GuidedMask, DFlashDraftBox, LLMGenerationParameters, MLXLLMModule, Chat, ChatTurn (+16 more)
 
 ### Community 47 - "Community 47"
 Cohesion: 0.30
@@ -509,12 +516,12 @@ Cohesion: 0.10
 Nodes (17): CpCmd, DefaultCmd, JobPoll, LoadCmd, LoadReq, RemoteModels, ResidentCmd, RmCmd (+9 more)
 
 ### Community 53 - "Community 53"
-Cohesion: 0.15
-Nodes (11): RouterMiddleware, AthenaMetrics, MetricsMiddleware, Snapshot, Bool, Context, Double, Int (+3 more)
+Cohesion: 0.16
+Nodes (10): AthenaMetrics, MetricsMiddleware, Snapshot, Bool, Context, Double, Int, Request (+2 more)
 
 ### Community 54 - "Community 54"
-Cohesion: 0.11
-Nodes (12): Actor, InferenceModule, ModelSelectable, StubTranscriptionModule, TranscriptionModule, Bool, Data, Int (+4 more)
+Cohesion: 0.12
+Nodes (11): Actor, InferenceModule, ModelSelectable, StubTranscriptionModule, Bool, Data, Int, MemoryReservation (+3 more)
 
 ### Community 55 - "Community 55"
 Cohesion: 0.16
@@ -525,15 +532,15 @@ Cohesion: 0.12
 Nodes (15): CommitResult, idlePrefix, jsonBody, jsonStart, unconstrained, GuidedDecoder, GuidedGreedy, Bool (+7 more)
 
 ### Community 57 - "Community 57"
-Cohesion: 0.08
-Nodes (32): DaemonOptions, FailableExit, HTTPClient, Caller, Hit, Stats, VectorError, capExceeded (+24 more)
+Cohesion: 0.14
+Nodes (14): DaemonOptions, FailableExit, HTTPClient, Any, Bool, Data, Error, Int (+6 more)
 
 ### Community 58 - "Community 58"
 Cohesion: 0.19
 Nodes (9): Config, ConfigGet, ConfigPath, ConfigSet, ConfigShow, Bool, Int32, String (+1 more)
 
 ### Community 59 - "Community 59"
-Cohesion: 0.14
+Cohesion: 0.15
 Nodes (14): Bucket, ConcurrencyLimiter, ConcurrencyMiddleware, RateLimiter, RateLimitMiddleware, ResponseBody, AuthConfig, Bool (+6 more)
 
 ### Community 60 - "Community 60"
@@ -553,8 +560,8 @@ Cohesion: 0.13
 Nodes (19): M30 audit log, FluentBit (recommended), Lighter-weight option: pull from /api/logs, Shipping Athena's logs off-box, syslog-ng / rsyslog (via `log stream` pipe), vector.dev, What does NOT get shipped, What gets shipped (+11 more)
 
 ### Community 64 - "Community 64"
-Cohesion: 0.07
-Nodes (26): InstallPlanTests, InstallPlan, Doctor, Level, fail, ok, warn, FsOwn (+18 more)
+Cohesion: 0.24
+Nodes (9): FsOwn, Install, isSafeToOwn(), gid_t, mode_t, Bool, String, URL (+1 more)
 
 ### Community 65 - "Community 65"
 Cohesion: 0.28
@@ -617,16 +624,16 @@ Cohesion: 0.12
 Nodes (17): AthenaError, audioSegmentInvalid, audioTooLong, inputTooLong, memoryBudgetExceeded, metalOutOfMemory, modelNotAvailable, moduleLoadFailed (+9 more)
 
 ### Community 82 - "Community 82"
-Cohesion: 0.12
-Nodes (9): Outcome, status, transport, RetryPolicy, RetryPolicyTests, Int, Set, String (+1 more)
+Cohesion: 0.27
+Nodes (8): Outcome, status, transport, RetryPolicy, Int, Set, String, TimeInterval
 
 ### Community 83 - "Community 83"
 Cohesion: 0.09
 Nodes (21): 10. Open questions, 1. Motivation, 2. Non-goals, 3. Design overview, 4.1 Entry tagging, 4.2 The shred method, 4.3 Refcount-safe tombstoning, 4.4 `invalidate` as the tier-complete seam (+13 more)
 
 ### Community 84 - "Community 84"
-Cohesion: 0.13
-Nodes (9): AudioDecodeTests, LogMelTests, StructuredShimTests, WhisperChunkingIntegrationTests, WhisperLoadIntegrationTests, WhisperMemoryRegressionTests, WhisperTranscribeIntegrationTests, WhisperWordTimestampIntegrationTests (+1 more)
+Cohesion: 0.11
+Nodes (9): StructuredShimTests, VersionGuardTests, WhisperChunkingIntegrationTests, WhisperLoadIntegrationTests, WhisperMemoryRegressionTests, WhisperSinusoidsTests, WhisperTranscribeIntegrationTests, WhisperWordTimestampIntegrationTests (+1 more)
 
 ### Community 86 - "Community 86"
 Cohesion: 0.17
@@ -637,8 +644,8 @@ Cohesion: 0.32
 Nodes (9): DiarizationOutput, DiarizationSegment, StreamingState, Double, Float, Int, MLXArray, StreamingState (+1 more)
 
 ### Community 88 - "Community 88"
-Cohesion: 0.21
-Nodes (5): SortformerIntegrationTests, SortformerMemoryRegressionTests, SortformerOfflineCapTests, Float, String
+Cohesion: 0.24
+Nodes (4): SortformerIntegrationTests, SortformerMemoryRegressionTests, SortformerOfflineCapTests, String
 
 ### Community 89 - "Community 89"
 Cohesion: 0.24
@@ -657,12 +664,12 @@ Cohesion: 0.31
 Nodes (4): DFlashGemma4CaptureTests, Int, MLXArray, URL
 
 ### Community 93 - "Community 93"
-Cohesion: 0.14
-Nodes (14): GovernorConfig, FinishReason, length, stop, GenChunk, error, finish, text (+6 more)
+Cohesion: 0.18
+Nodes (10): FinishReason, length, stop, GenChunk, error, finish, text, usage (+2 more)
 
 ### Community 94 - "Community 94"
-Cohesion: 0.22
-Nodes (9): Logging, AthenaLog, LogScope, OSUnifiedLogHandler, TerminalLogHandler, LogHandler, Bool, String (+1 more)
+Cohesion: 0.27
+Nodes (3): CommitResult, GuidedDecoderTests, Int
 
 ### Community 95 - "Community 95"
 Cohesion: 0.27
@@ -726,11 +733,11 @@ Nodes (4): TurboQuantE2ETests, KVCompression, String, URL
 
 ### Community 112 - "Community 112"
 Cohesion: 0.10
-Nodes (44): JSONValue, APIErrorBody, ChatChoice, ChatChunkChoice, ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse, ChatDelta (+36 more)
+Nodes (49): JSONValue, APIErrorBody, ChatChoice, ChatChunkChoice, ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse, ChatDelta (+41 more)
 
 ### Community 113 - "Community 113"
 Cohesion: 0.14
-Nodes (17): DecodeProgressCounter, ModuleSnapshot, ProcessInfo, HealthResponse, HeartbeatCounter, Snapshot, TLSConfigError, incomplete (+9 more)
+Nodes (18): CustomStringConvertible, DecodeProgressCounter, ModuleSnapshot, ProcessInfo, GenCollected, HealthResponse, HeartbeatCounter, Snapshot (+10 more)
 
 ### Community 114 - "Community 114"
 Cohesion: 0.20
@@ -749,12 +756,16 @@ Cohesion: 0.27
 Nodes (3): WhisperDecodeParseTests, Double, Int
 
 ### Community 119 - "Community 119"
-Cohesion: 0.17
-Nodes (10): KVCompression, none, triattention, turboquant, ResolutionError, CustomStringConvertible, KVQuantizationScheme, Bool (+2 more)
+Cohesion: 0.18
+Nodes (9): KVCompression, none, triattention, turboquant, ResolutionError, KVQuantizationScheme, Bool, Float (+1 more)
 
 ### Community 120 - "Community 120"
-Cohesion: 0.23
-Nodes (10): QueueJobSummary, QueueListResponse, TranscriptionResponse, VerboseSegment, VerboseTranscriptionResponse, WordTimestamp, Date, Request (+2 more)
+Cohesion: 0.15
+Nodes (8): HTTPServerBuilder, Logger, QueueWorkerService, Service, Date, Request, Response, RequestQueue
+
+### Community 121 - "Community 121"
+Cohesion: 0.14
+Nodes (8): AnyObject, SpeculativeAcceptanceObserver, SpeculativeStats, AcceptCounter, EffectiveMaxTokensTests, SeededSamplingReproducibilityTests, SpeculativeAcceptanceObserver, Bool
 
 ### Community 122 - "Community 122"
 Cohesion: 0.27
@@ -773,15 +784,15 @@ Cohesion: 0.32
 Nodes (5): GPUTelemetryProbe, SoCSampler, Bool, Double, TimeInterval
 
 ### Community 126 - "Community 126"
-Cohesion: 0.26
-Nodes (11): WhisperSinusoidsTests, WhisperAudioEncoder, WhisperBlock, WhisperConfig, WhisperModel, whisperSinusoids(), WhisperTextDecoder, Encoder (+3 more)
+Cohesion: 0.35
+Nodes (9): WhisperAudioEncoder, WhisperBlock, WhisperConfig, WhisperModel, whisperSinusoids(), WhisperTextDecoder, Conv1d, Embedding (+1 more)
 
 ### Community 127 - "Community 127"
 Cohesion: 0.38
 Nodes (3): CStatus, RemoteAdmin, DaemonOptions
 
 ### Community 128 - "Community 128"
-Cohesion: 0.31
+Cohesion: 0.30
 Nodes (5): AthenaProxy, ParsedProxy, Bool, Int, URLSession
 
 ### Community 129 - "Community 129"
@@ -797,16 +808,16 @@ Cohesion: 0.57
 Nodes (3): ModelHealth, String, URL
 
 ### Community 133 - "Community 133"
-Cohesion: 0.21
-Nodes (7): GuidedLogitProcessor, GuidedSubstrate, LogitProcessor, Int, LanguageModel, MLXArray, StructuredGuide
+Cohesion: 0.15
+Nodes (11): GuidedLogitProcessor, GuidedSubstrate, Logs, LanguageModel, LogitProcessor, DaemonOptions, Int, String (+3 more)
 
 ### Community 134 - "Community 134"
 Cohesion: 0.38
 Nodes (4): Rm, Show, DaemonOptions, String
 
 ### Community 135 - "Community 135"
-Cohesion: 0.14
-Nodes (15): AthenaLogLabel, MemoryReservation, ModuleID, diarization, llm, speakerEmbedding, textEmbedding, transcription (+7 more)
+Cohesion: 0.15
+Nodes (14): AthenaLogLabel, MemoryReservation, ModuleID, diarization, llm, speakerEmbedding, textEmbedding, transcription (+6 more)
 
 ### Community 136 - "Community 136"
 Cohesion: 0.29
@@ -865,8 +876,8 @@ Cohesion: 0.40
 Nodes (4): 003 — rust-shim FFI panic strategy: per-entry `catch_unwind`, Consequences, Context, Decision
 
 ### Community 151 - "Community 151"
-Cohesion: 0.53
-Nodes (3): LaunchdPlist, AthenaConfig, String
+Cohesion: 0.15
+Nodes (3): GuidedMaskTests, StructuredVocabTests, StructuredVocabulary
 
 ### Community 152 - "Community 152"
 Cohesion: 0.40
@@ -889,8 +900,8 @@ Cohesion: 0.33
 Nodes (4): Float, MLXArray, TriAttentionConfig, TriAttentionScorer
 
 ### Community 157 - "Community 157"
-Cohesion: 0.26
-Nodes (6): SpeculativeGateTests, LLMGenerationParameters, KVCompression, PrefixKVCache, Bool, Int
+Cohesion: 0.24
+Nodes (6): StructuredError, StructuredVocabulary, VocabToken, Error, String, UInt32
 
 ### Community 158 - "Community 158"
 Cohesion: 0.17
@@ -925,12 +936,12 @@ Cohesion: 0.40
 Nodes (3): AgglomerativeClustering, Float, Int
 
 ### Community 167 - "Community 167"
-Cohesion: 0.29
-Nodes (5): AnyObject, SpeculativeAcceptanceObserver, SpeculativeStats, AcceptanceCounter, Bool
+Cohesion: 0.21
+Nodes (7): Proxy, ProxyEnv, ProxyLogin, ProxyLogout, ProxyStatus, E, String
 
 ### Community 168 - "Community 168"
-Cohesion: 0.26
-Nodes (8): SpeculativeGeneration, AthenaQwen35Model, Int, MLXArray, PrefixKVCache, String, StructuredGuide, UInt8
+Cohesion: 0.39
+Nodes (5): SpeculativeGeneration, Int, MLXArray, StructuredGuide, UInt8
 
 ### Community 170 - "Community 170"
 Cohesion: 0.50
@@ -985,16 +996,16 @@ Cohesion: 0.31
 Nodes (6): DFlashGeneration, DFlashDraftModel, DFlashGemma4Backbone, Int, MLXArray, Set
 
 ### Community 185 - "Community 185"
-Cohesion: 0.39
-Nodes (3): AthenaConfig, LaunchdPlistTests, Int
+Cohesion: 0.21
+Nodes (4): AthenaConfig, LaunchdPlistTests, DFlashConfigTests, Int
 
 ### Community 186 - "Community 186"
 Cohesion: 0.24
 Nodes (9): AthenaConfig, ParseError, invalidBool, invalidInt, missingRequiredKey, Bool, Int, String (+1 more)
 
 ### Community 190 - "Community 190"
-Cohesion: 0.28
-Nodes (8): DFlashEngineParityTests, ModelContext, DFlashGemma4Backbone, Int, LanguageModel, Set, String, URL
+Cohesion: 0.21
+Nodes (10): AcceptanceCounter, DFlashEngineParityTests, ModelContext, Bool, DFlashGemma4Backbone, Int, LanguageModel, Set (+2 more)
 
 ### Community 195 - "Community 195"
 Cohesion: 0.12
@@ -1041,8 +1052,8 @@ Cohesion: 0.29
 Nodes (8): WhisperWordAlign, Int, MLXArray, MLXLMCommon, Range, String, WhisperModel, WordTiming
 
 ### Community 207 - "Community 207"
-Cohesion: 0.31
-Nodes (5): CountingObserver, SpeculativeStatsTests, Bool, SpeculativeAcceptanceObserver, Int
+Cohesion: 0.36
+Nodes (4): CountingObserver, SpeculativeStatsTests, Bool, Int
 
 ### Community 208 - "Community 208"
 Cohesion: 0.18
@@ -1057,8 +1068,8 @@ Cohesion: 0.25
 Nodes (7): Caddy, Daemon-derived constraints the proxy must honor, Fronting Athena with a TLS reverse proxy, nginx, Security: seed auth credentials, Topology, Verifying
 
 ### Community 211 - "Community 211"
-Cohesion: 0.31
-Nodes (6): AuthMiddleware, Session, Context, HTTPResponse, Request, Response
+Cohesion: 0.21
+Nodes (4): AudioDecodeTests, LogMelTests, MLXLLMModuleEstimateTests, UUID
 
 ### Community 212 - "Community 212"
 Cohesion: 0.28
@@ -1093,8 +1104,8 @@ Cohesion: 0.25
 Nodes (8): ADRs, Architecture, Athena, Build / run / test, Canonical pipelines, Dependencies (consumed by this repo), graphify, Public surface
 
 ### Community 221 - "Community 221"
-Cohesion: 0.33
-Nodes (4): Logs, DaemonOptions, Int, String
+Cohesion: 0.21
+Nodes (5): SplitMix64, Double, SystemRandomNumberGenerator, Float, UInt64
 
 ### Community 224 - "Community 224"
 Cohesion: 0.40
@@ -1132,9 +1143,9 @@ Nodes (7): extractMelFeatures(), preemphasisFilter(), trimSilence(), Float, Int,
 Cohesion: 0.43
 Nodes (6): AthenaMetrics, QueueJobSummary, UIState, GovernorSnapshot, StoreStatsResponse, VectorStatsResponse
 
-### Community 234 - "Community 234"
-Cohesion: 0.25
-Nodes (3): AthenaModelsConfigTests, TriAttentionScorerMemoryRegressionTests, SystemRandomNumberGenerator
+### Community 235 - "Community 235"
+Cohesion: 0.23
+Nodes (8): Doctor, Level, fail, ok, warn, Bool, String, URL
 
 ### Community 237 - "Community 237"
 Cohesion: 0.40
@@ -1143,6 +1154,10 @@ Nodes (3): Cp, DaemonOptions, String
 ### Community 238 - "Community 238"
 Cohesion: 0.40
 Nodes (3): Default, DaemonOptions, String
+
+### Community 241 - "Community 241"
+Cohesion: 0.29
+Nodes (5): InstallPlanTests, InstallPlan, FileManager, String, URL
 
 ### Community 242 - "Community 242"
 Cohesion: 0.50
@@ -1161,20 +1176,44 @@ Cohesion: 0.40
 Nodes (3): UsageCommand, DaemonOptions, String
 
 ### Community 246 - "Community 246"
-Cohesion: 0.09
-Nodes (36): AsyncParsableCommand, Athena, AuditCommand, Auth, AuthList, AuthRemove, AuthRole, AuthRoleGrant (+28 more)
+Cohesion: 0.11
+Nodes (32): AsyncParsableCommand, Athena, Athena, Auth, AuthList, AuthRemove, AuthRole, AuthRoleGrant (+24 more)
 
-### Community 247 - "Community 247"
-Cohesion: 0.40
-Nodes (3): QueueWorkerService, Service, RequestQueue
+### Community 248 - "Community 248"
+Cohesion: 0.33
+Nodes (5): StructuredGuide, os_unfair_lock, Bool, Int, UnsafeMutablePointer
+
+### Community 249 - "Community 249"
+Cohesion: 0.28
+Nodes (6): withDeadlineNanos(), withInferenceDeadline(), AthenaError, escaping, Int, T
+
+### Community 250 - "Community 250"
+Cohesion: 0.43
+Nodes (4): StructuredVocab, Int, Tokenizer, VocabToken
+
+### Community 251 - "Community 251"
+Cohesion: 0.29
+Nodes (5): AuditCommand, DaemonOptions, Double, Int, String
 
 ### Community 252 - "Community 252"
-Cohesion: 0.14
-Nodes (13): Engine, mlx, stub, Load, ExpressibleByArgument, GPUTelemetryProbe, Logger, AthenaStore (+5 more)
+Cohesion: 0.15
+Nodes (14): CaseIterable, Engine, mlx, stub, Load, ExpressibleByArgument, GPUTelemetryProbe, PrefixKVCache (+6 more)
+
+### Community 253 - "Community 253"
+Cohesion: 0.38
+Nodes (4): Uninstall, ParsableCommand, Int32, String
+
+### Community 254 - "Community 254"
+Cohesion: 0.47
+Nodes (5): VectorError, capExceeded, dimMismatch, ownerConflict, zeroLengthVector
 
 ### Community 255 - "Community 255"
 Cohesion: 0.67
 Nodes (3): CodingKeys, input, model
+
+### Community 256 - "Community 256"
+Cohesion: 0.60
+Nodes (3): GovernorConfig, Int, String
 
 ## Ambiguous Edges - Review These
 - `AthenaServer god-object structural seam gap` → `Invalid --label bypasses M43.1 root-daemon hard-fail (NB1)`  [AMBIGUOUS]
@@ -1183,9 +1222,9 @@ Nodes (3): CodingKeys, input, model
   docs/m46-plan.md · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **989 isolated node(s):** `Tokenizer`, `Int`, `Int`, `Principles`, `M65.1 — FFI hardening (rust-shim) ✅ v0.10.117` (+984 more)
+- **986 isolated node(s):** `LanguageModel`, `UInt8`, `Principles`, `M65.1 — FFI hardening (rust-shim) ✅ v0.10.117`, `M65.2 — WebUI & login surface — 5/6 ✅ v0.10.118 (A3 deferred)` (+981 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **28 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **27 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
@@ -1194,13 +1233,13 @@ _Questions this graph is uniquely positioned to answer:_
   _Edge tagged AMBIGUOUS (relation: conceptually_related_to) - confidence is low._
 - **What is the exact relationship between `Server/Commands executable targets have no unit-test coverage (NA2/NB4)` and `M46.6 embedder per-call buffer leak fix`?**
   _Edge tagged AMBIGUOUS (relation: conceptually_related_to) - confidence is low._
-- **Why does `String` connect `Community 32` to `Community 128`, `Community 36`, `Community 69`, `Community 135`, `Launchd Plist & Guided Decoder`, `Community 41`, `Whisper Encoder Config`, `Community 76`, `Memory Governor`, `Community 79`, `Rust Structured Shim (FFI)`, `Prefix KV Cache (Prompt Cache)`, `Community 53`, `Community 119`, `Community 185`, `Community 252`, `Community 93`, `Community 190`?**
-  _High betweenness centrality (0.101) - this node is a cross-community bridge._
+- **Why does `String` connect `Community 32` to `Community 128`, `Launchd Plist & Guided Decoder`, `Community 135`, `Whisper Encoder Config`, `Memory Governor`, `Rust Structured Shim (FFI)`, `Prefix KV Cache (Prompt Cache)`, `Community 168`, `Community 41`, `Community 53`, `Community 185`, `Community 190`, `Community 69`, `Community 76`, `Community 79`, `Community 93`, `Community 119`, `Community 250`, `Community 252`?**
+  _High betweenness centrality (0.115) - this node is a cross-community bridge._
 - **Why does `Load` connect `Community 252` to `Community 32`, `Community 246`?**
-  _High betweenness centrality (0.067) - this node is a cross-community bridge._
-- **Why does `Module` connect `Community 99` to `Community 66`, `Community 98`, `Community 100`, `OpenAI DTOs`, `Community 51`, `Sortformer Diarizer`, `Community 89`, `Community 126`, `Community 62`?**
-  _High betweenness centrality (0.045) - this node is a cross-community bridge._
-- **What connects `Tokenizer`, `Int`, `Int` to the rest of the system?**
-  _1008 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _High betweenness centrality (0.069) - this node is a cross-community bridge._
+- **Why does `Data` connect `Community 42` to `Community 64`, `Community 33`, `Community 58`, `Auth CLI Commands`, `Community 70`, `Community 235`, `Community 43`, `Metrics & Prometheus`, `Rust Structured Shim (FFI)`, `Community 241`, `Community 49`, `Community 211`, `Community 113`, `Community 246`, `Community 120`, `Community 218`?**
+  _High betweenness centrality (0.052) - this node is a cross-community bridge._
+- **What connects `LanguageModel`, `UInt8`, `Principles` to the rest of the system?**
+  _1005 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `AthenaStore (SQLite Persistence)` be split into smaller, more focused modules?**
-  _Cohesion score 0.0962566844919786 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.09243697478991597 - nodes in this community are weakly interconnected._
