@@ -1368,7 +1368,11 @@ public class SortformerModel: Module {
             let changes = padded[1...].asType(DType.int32) - padded[..<(-1)].asType(DType.int32)
             eval(changes)
 
-            let changesList: [Int32] = (0..<changes.dim(0)).map { changes[$0].item(Int32.self) }
+            // ND4 (M69.4) — realize the whole (already-eval'd) array in ONE
+            // host transfer instead of a per-frame `.item()` loop (~1500
+            // frames × up to 4 speakers ≈ 6000 serialized GPU→host round-trips
+            // per offline diarize, each stalling the pipeline). Identical values.
+            let changesList = changes.asArray(Int32.self)
 
             let starts = changesList.enumerated().compactMap { $0.element == 1 ? $0.offset : nil }
             let ends = changesList.enumerated().compactMap { $0.element == -1 ? $0.offset : nil }

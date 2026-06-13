@@ -136,7 +136,11 @@ public func trimSilence(
     let thresholdVal = energy.max().item(Float.self) * energyRatio
     let speech = energy .> thresholdVal
     eval(speech)
-    let speechList: [Bool] = (0..<numFrames).map { speech[$0].item(Bool.self) }
+    // ND4 (M69.4) — realize the (already-eval'd) per-frame speech mask in ONE
+    // host transfer instead of a `.item()` per 30 ms frame (~4000 round-trips
+    // for a 2-minute clip, ~7200 on the 1-hour streaming path), each stalling
+    // the GPU pipeline. Identical values.
+    let speechList = speech.asArray(Bool.self)
 
     var startFrame = 0
     for i in 0..<(numFrames - minSpeechFrames + 1) {

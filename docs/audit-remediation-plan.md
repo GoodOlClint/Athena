@@ -264,13 +264,13 @@ Re-verified across M67: F6 (createSSMMask alloc) → M69 perf; I7 (embed canonic
 
 > `VectorStore` upsert/delete/cap/owner logic is CI-testable (`VectorStoreTests` 8/0; H8 paths exercised by `testUpsertDeleteStatsCapCI`/`testConcurrentUpsertsRespectCapH4`); `query` (H3/H7) is MLX-gated, validated via Release build + e2e-rbac **561/0** (vector phases) + a stub-engine vector smoke (cosine ranking, cached-matrix determinism, H7 id-ordered ties, upsert/delete matrix invalidation). No decode/sampling change. **Memory note:** the cached matrix is ~the same size as the raw vectors it normalizes and is dropped on any mutation; the governor's vector `capBytes` still bounds the raw set.
 
-### M69.4 — Diarization & whisper hot paths
-- [ ] D3 (High) O(n²) clustering (NN-chain/PQ UPGMA)
-- [ ] D7 vDSP gram-matrix fill; union-find relabel
-- [ ] ND4 batch GPU→host syncs in predsToSegments/trimSilence
-- [ ] ND10 O(k²) subwordSplit re-decode
-- [ ] ND11 skip logprob syncs when avg_logprob unused
-- [ ] ND9 move heavy sync decode off the cooperative pool (DECISION-lite: executor strategy)
+### M69.4 — Diarization & whisper hot paths (measurement-gated, `say` fixture)
+- [x] ND4 (Med) batch GPU→host syncs in `predsToSegments`/`trimSilence` ✅ v0.10.143 — both per-frame `.item()` loops (`changes.dim(0)` × up to 4 speakers ≈ 6000 round-trips in `predsToSegments`; one per 30 ms frame in `trimSilence`) replaced with a single `.asArray()` on the already-`eval`'d array. **Measured: diarize 1.37 s → 1.10 s (~20%) on a 33 s 2-speaker `say` fixture, output semantically identical** (same speakers/segments/times; only JSON key-order noise). Scales with clip length (more frames = more round-trips eliminated). Zero correctness risk (pure realization change).
+- [ ] D3 (High) O(n³) clustering (full O(n²) rescan per merge) → O(n²) NN-chain/PQ UPGMA — **assessing via synthetic large-n benchmark** (clustering only runs on the >4-speaker path; the `say` fixture gives n=1, so audio can't stress it). Scale-gated: pays at n≈1–3k segments (hours of >4-speaker audio).
+- [ ] D7 (Med) vDSP gram-matrix fill; union-find relabel — pairs with D3 (same file).
+- [~] ND11 (Low) skip logprob syncs when `avg_logprob` unused — **DEFER (measured ~0 at typical clip size).** text 1.81 s ≈ verbose_json 1.80 s on the 33 s clip; the 2 extra per-token `.item()` syncs are ~hundreds for a short clip (below noise; ND4's ~10k≈0.27 s implies ~37 µs/sync). Only material on long-form transcription, and the fix needs `needLogprob` threaded through `transcribeResult`→`decodeWindow`→`step`. Revisit for long-form.
+- [~] ND10 (Low) O(k²) subwordSplit re-decode — DEFER (wordTimestamps-only + unresolved-multibyte-run-only; narrow).
+- [~] ND9 (Low, DECISION-lite) heavy sync decode off the cooperative pool — DEFER (liveness not throughput; an executor-strategy decision, not a hot-path win).
 
 ### M69.5 — Decode-path costs (benchmark-gated) — MEASURED → SKIP/DEFER (v0.10.142 measurement pass)
 Measured on the M5 Max against the Release binary (Qwen3.5-27B-4bit-mtp, `ATHENA_PERF_TRACE=1`). **Decode is backbone-bound** — confirms [[decode-throughput-characterization]] on current (M53 llguidance) code. Every item is <1% of the default decode path or gated behind an off-by-default knob, so per the milestone's own "skip any that don't pay" rule the whole milestone is skipped (no risky changes to the bit-identical-greedy decode path for no measurable gain).
