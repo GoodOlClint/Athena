@@ -425,8 +425,8 @@
     "semantic_hash": "d16404614855c59c2001089f41c5bd78"
   },
   "Sources/athena/Athena.swift": {
-    "mtime": 1781355171.745536,
-    "ast_hash": "c8a55f51b6fa121ed40bd02c325078c8",
+    "mtime": 1781355881.9100742,
+    "ast_hash": "bf1d33fc578d350a96ab03793bdbab75",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Audit.swift": {
@@ -700,8 +700,8 @@
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/StructuredGuideTests.swift": {
-    "mtime": 1781290061.7047648,
-    "ast_hash": "80b7b6ed08fbcc6b1811c4fa89160375",
+    "mtime": 1781355806.59317,
+    "ast_hash": "62b30ef7a23c02179090316b4c97e1e7",
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/StructuredSchemaTests.swift": {
@@ -1180,8 +1180,8 @@
     "semantic_hash": ""
   },
   "docs/audit-remediation-plan.md": {
-    "mtime": 1781355188.287834,
-    "ast_hash": "b421ad3ea8733977489599c068882255",
+    "mtime": 1781355895.0135832,
+    "ast_hash": "bf72d5f538b56e1e4a43a18a3055f37d",
     "semantic_hash": ""
   },
   "docs/decisions/003-rust-shim-panic-strategy.md": {
