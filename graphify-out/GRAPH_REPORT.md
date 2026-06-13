@@ -1,7 +1,7 @@
-# Graph Report - Athena  (2026-06-12)
+# Graph Report - Athena  (2026-06-13)
 
 ## Corpus Check
-- 247 files · ~329,331 words
+- 247 files · ~329,922 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `d19832c9`
+- Built from commit: `1657febc`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -1157,7 +1157,7 @@ Nodes (9): CaseIterable, Engine, mlx, stub, Load, ExpressibleByArgument, AthenaS
   docs/m46-plan.md · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **981 isolated node(s):** `ok`, `warn`, `fail`, `URL`, `Principles` (+976 more)
+- **981 isolated node(s):** `Principles`, `M65.1 — FFI hardening (rust-shim) ✅ v0.10.117`, `M65.2 — WebUI & login surface — 5/6 ✅ v0.10.118 (A3 deferred)`, `M65.3 — Untrusted input caps (DoS) ✅ v0.10.119`, `M65.4 — Path confinement (file ops on caller-influenced paths) ✅ v0.10.120` (+976 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **32 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -1169,12 +1169,12 @@ _Questions this graph is uniquely positioned to answer:_
 - **What is the exact relationship between `Server/Commands executable targets have no unit-test coverage (NA2/NB4)` and `M46.6 embedder per-call buffer leak fix`?**
   _Edge tagged AMBIGUOUS (relation: conceptually_related_to) - confidence is low._
 - **Why does `Load` connect `Community 252` to `Community 126`, `Community 246`, `Community 119`?**
-  _High betweenness centrality (0.074) - this node is a cross-community bridge._
+  _High betweenness centrality (0.075) - this node is a cross-community bridge._
 - **Why does `Data` connect `AthenaStore (SQLite Persistence)` to `Community 32`, `Community 33`, `Community 58`, `Auth CLI Commands`, `Community 133`, `Community 186`, `Community 169`, `Community 235`, `Community 111`, `Metrics & Prometheus`, `Community 49`, `Community 113`, `Community 246`, `Community 120`, `Community 218`, `Community 126`?**
-  _High betweenness centrality (0.072) - this node is a cross-community bridge._
+  _High betweenness centrality (0.066) - this node is a cross-community bridge._
 - **Why does `Module` connect `Community 99` to `Community 66`, `Community 100`, `MLX Speaker Embedding Module`, `Community 51`, `Sortformer Diarizer`, `Community 56`, `Community 89`, `Community 62`?**
   _High betweenness centrality (0.044) - this node is a cross-community bridge._
-- **What connects `ok`, `warn`, `fail` to the rest of the system?**
+- **What connects `Principles`, `M65.1 — FFI hardening (rust-shim) ✅ v0.10.117`, `M65.2 — WebUI & login surface — 5/6 ✅ v0.10.118 (A3 deferred)` to the rest of the system?**
   _1000 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `AthenaStore (SQLite Persistence)` be split into smaller, more focused modules?**
   _Cohesion score 0.05045083726921425 - nodes in this community are weakly interconnected._

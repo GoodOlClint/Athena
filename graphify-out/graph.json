@@ -94,556 +94,6 @@
   },
   "nodes": [
     {
-      "label": "ModelStoreOps.swift",
-      "file_type": "code",
-      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
-      "source_location": "L1",
-      "_origin": "ast",
-      "id": "athenallm_modelstoreops",
-      "community": 111,
-      "norm_label": "modelstoreops.swift"
-    },
-    {
-      "label": "ModelStoreOps",
-      "file_type": "code",
-      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
-      "source_location": "L8",
-      "_origin": "ast",
-      "id": "athenallm_modelstoreops_modelstoreops",
-      "community": 33,
-      "norm_label": "modelstoreops"
-    },
-    {
-      "label": "Entry",
-      "file_type": "code",
-      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
-      "source_location": "L9",
-      "_origin": "ast",
-      "id": "athenallm_modelstoreops_entry",
-      "community": 111,
-      "norm_label": "entry"
-    },
-    {
-      "label": "Sendable",
-      "file_type": "code",
-      "source_file": "",
-      "source_location": "",
-      "_origin": "ast",
-      "id": "sendable",
-      "community": 111,
-      "norm_label": "sendable"
-    },
-    {
-      "label": "String",
-      "file_type": "code",
-      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
-      "source_location": "L10",
-      "_origin": "ast",
-      "id": "sources_athenallm_modelstoreops_swift_string",
-      "community": 33,
-      "norm_label": "string"
-    },
-    {
-      "label": "Int",
-      "file_type": "code",
-      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
-      "source_location": "L11",
-      "_origin": "ast",
-      "id": "int",
-      "community": 111,
-      "norm_label": "int"
-    },
-    {
-      "label": "Date",
-      "file_type": "code",
-      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
-      "source_location": "L12",
-      "_origin": "ast",
-      "id": "date",
-      "community": 111,
-      "norm_label": "date"
-    },
-    {
-      "label": "Detail",
-      "file_type": "code",
-      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
-      "source_location": "L15",
-      "_origin": "ast",
-      "id": "athenallm_modelstoreops_detail",
-      "community": 111,
-      "norm_label": "detail"
-    },
-    {
-      "label": "Data",
-      "file_type": "code",
-      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
-      "source_location": "L20",
-      "_origin": "ast",
-      "id": "data",
-      "community": 0,
-      "norm_label": "data"
-    },
-    {
-      "label": "OpError",
-      "file_type": "code",
-      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
-      "source_location": "L27",
-      "_origin": "ast",
-      "id": "athenallm_modelstoreops_operror",
-      "community": 33,
-      "norm_label": "operror"
-    },
-    {
-      "label": "Error",
-      "file_type": "code",
-      "source_file": "",
-      "source_location": "",
-      "_origin": "ast",
-      "id": "error",
-      "community": 81,
-      "norm_label": "error"
-    },
-    {
-      "label": "CustomStringConvertible",
-      "file_type": "code",
-      "source_file": "",
-      "source_location": "",
-      "_origin": "ast",
-      "id": "customstringconvertible",
-      "community": 203,
-      "norm_label": "customstringconvertible"
-    },
-    {
-      "label": "invalidName",
-      "file_type": "code",
-      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
-      "source_location": "L28",
-      "_origin": "ast",
-      "id": "athenallm_modelstoreops_operror_invalidname",
-      "community": 33,
-      "norm_label": "invalidname"
-    },
-    {
-      "label": "notFound",
-      "file_type": "code",
-      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
-      "source_location": "L29",
-      "_origin": "ast",
-      "id": "athenallm_modelstoreops_operror_notfound",
-      "community": 33,
-      "norm_label": "notfound"
-    },
-    {
-      "label": "exists",
-      "file_type": "code",
-      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
-      "source_location": "L30",
-      "_origin": "ast",
-      "id": "athenallm_modelstoreops_operror_exists",
-      "community": 33,
-      "norm_label": "exists"
-    },
-    {
-      "label": "io",
-      "file_type": "code",
-      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
-      "source_location": "L31",
-      "_origin": "ast",
-      "id": "athenallm_modelstoreops_operror_io",
-      "community": 33,
-      "norm_label": "io"
-    },
-    {
-      "label": ".safetensorsSize()",
-      "file_type": "code",
-      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
-      "source_location": "L46",
-      "_origin": "ast",
-      "id": "athenallm_modelstoreops_modelstoreops_safetensorssize",
-      "community": 33,
-      "norm_label": ".safetensorssize()"
-    },
-    {
-      "label": "URL",
-      "file_type": "code",
-      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
-      "source_location": "L46",
-      "_origin": "ast",
-      "id": "sources_athenallm_modelstoreops_swift_url",
-      "community": 33,
-      "norm_label": "url"
-    },
-    {
-      "label": ".humanBytes()",
-      "file_type": "code",
-      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
-      "source_location": "L63",
-      "_origin": "ast",
-      "id": "athenallm_modelstoreops_modelstoreops_humanbytes",
-      "community": 33,
-      "norm_label": ".humanbytes()"
-    },
-    {
-      "label": ".isValidName()",
-      "file_type": "code",
-      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
-      "source_location": "L72",
-      "_origin": "ast",
-      "id": "athenallm_modelstoreops_modelstoreops_isvalidname",
-      "community": 33,
-      "norm_label": ".isvalidname()"
-    },
-    {
-      "label": "Bool",
-      "file_type": "code",
-      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
-      "source_location": "L72",
-      "_origin": "ast",
-      "id": "sources_athenallm_modelstoreops_swift_bool",
-      "community": 33,
-      "norm_label": "bool"
-    },
-    {
-      "label": ".list()",
-      "file_type": "code",
-      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
-      "source_location": "L79",
-      "_origin": "ast",
-      "id": "athenallm_modelstoreops_modelstoreops_list",
-      "community": 33,
-      "norm_label": ".list()"
-    },
-    {
-      "label": ".show()",
-      "file_type": "code",
-      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
-      "source_location": "L106",
-      "_origin": "ast",
-      "id": "athenallm_modelstoreops_modelstoreops_show",
-      "community": 33,
-      "norm_label": ".show()"
-    },
-    {
-      "label": "BrokenStoreEntry",
-      "file_type": "code",
-      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
-      "source_location": "L126",
-      "_origin": "ast",
-      "id": "athenallm_modelstoreops_brokenstoreentry",
-      "community": 111,
-      "norm_label": "brokenstoreentry"
-    },
-    {
-      "label": ".brokenEntries()",
-      "file_type": "code",
-      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
-      "source_location": "L142",
-      "_origin": "ast",
-      "id": "athenallm_modelstoreops_modelstoreops_brokenentries",
-      "community": 33,
-      "norm_label": ".brokenentries()"
-    },
-    {
-      "label": ".remove()",
-      "file_type": "code",
-      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
-      "source_location": "L189",
-      "_origin": "ast",
-      "id": "athenallm_modelstoreops_modelstoreops_remove",
-      "community": 33,
-      "norm_label": ".remove()"
-    },
-    {
-      "label": ".copy()",
-      "file_type": "code",
-      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
-      "source_location": "L211",
-      "_origin": "ast",
-      "id": "athenallm_modelstoreops_modelstoreops_copy",
-      "community": 33,
-      "norm_label": ".copy()"
-    },
-    {
-      "label": "Victim",
-      "file_type": "code",
-      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
-      "source_location": "L262",
-      "_origin": "ast",
-      "id": "athenallm_modelstoreops_victim",
-      "community": 111,
-      "norm_label": "victim"
-    },
-    {
-      "label": "PruneResult",
-      "file_type": "code",
-      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
-      "source_location": "L266",
-      "_origin": "ast",
-      "id": "athenallm_modelstoreops_pruneresult",
-      "community": 111,
-      "norm_label": "pruneresult"
-    },
-    {
-      "label": ".looksLikeModel()",
-      "file_type": "code",
-      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
-      "source_location": "L276",
-      "_origin": "ast",
-      "id": "athenallm_modelstoreops_modelstoreops_lookslikemodel",
-      "community": 33,
-      "norm_label": ".lookslikemodel()"
-    },
-    {
-      "label": ".prune()",
-      "file_type": "code",
-      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
-      "source_location": "L297",
-      "_origin": "ast",
-      "id": "athenallm_modelstoreops_modelstoreops_prune",
-      "community": 33,
-      "norm_label": ".prune()"
-    },
-    {
-      "label": "Athena.swift",
-      "file_type": "code",
-      "source_file": "Sources/athena/Athena.swift",
-      "source_location": "L1",
-      "_origin": "ast",
-      "id": "athena_athena",
-      "community": 246,
-      "norm_label": "athena.swift"
-    },
-    {
-      "label": "Athena",
-      "file_type": "code",
-      "source_file": "Sources/athena/Athena.swift",
-      "source_location": "L12",
-      "_origin": "ast",
-      "id": "athena_athena_athena",
-      "community": 246,
-      "norm_label": "athena"
-    },
-    {
-      "label": "AsyncParsableCommand",
-      "file_type": "code",
-      "source_file": "",
-      "source_location": "",
-      "_origin": "ast",
-      "id": "asyncparsablecommand",
-      "community": 246,
-      "norm_label": "asyncparsablecommand"
-    },
-    {
-      "label": "Doctor.swift",
-      "file_type": "code",
-      "source_file": "Sources/athena/Commands/Doctor.swift",
-      "source_location": "L1",
-      "_origin": "ast",
-      "id": "commands_doctor",
-      "community": 169,
-      "norm_label": "doctor.swift"
-    },
-    {
-      "label": "Doctor",
-      "file_type": "code",
-      "source_file": "Sources/athena/Commands/Doctor.swift",
-      "source_location": "L15",
-      "_origin": "ast",
-      "id": "commands_doctor_doctor",
-      "community": 169,
-      "norm_label": "doctor"
-    },
-    {
-      "label": "String",
-      "file_type": "code",
-      "source_file": "Sources/athena/Commands/Doctor.swift",
-      "source_location": "L20",
-      "_origin": "ast",
-      "id": "sources_athena_commands_doctor_swift_string",
-      "community": 169,
-      "norm_label": "string"
-    },
-    {
-      "label": "Level",
-      "file_type": "code",
-      "source_file": "Sources/athena/Commands/Doctor.swift",
-      "source_location": "L25",
-      "_origin": "ast",
-      "id": "commands_doctor_level",
-      "community": 169,
-      "norm_label": "level"
-    },
-    {
-      "label": "ok",
-      "file_type": "code",
-      "source_file": "Sources/athena/Commands/Doctor.swift",
-      "source_location": "L25",
-      "_origin": "ast",
-      "id": "commands_doctor_level_ok",
-      "community": 169,
-      "norm_label": "ok"
-    },
-    {
-      "label": "warn",
-      "file_type": "code",
-      "source_file": "Sources/athena/Commands/Doctor.swift",
-      "source_location": "L25",
-      "_origin": "ast",
-      "id": "commands_doctor_level_warn",
-      "community": 169,
-      "norm_label": "warn"
-    },
-    {
-      "label": "fail",
-      "file_type": "code",
-      "source_file": "Sources/athena/Commands/Doctor.swift",
-      "source_location": "L25",
-      "_origin": "ast",
-      "id": "commands_doctor_level_fail",
-      "community": 169,
-      "norm_label": "fail"
-    },
-    {
-      "label": ".run()",
-      "file_type": "code",
-      "source_file": "Sources/athena/Commands/Doctor.swift",
-      "source_location": "L27",
-      "_origin": "ast",
-      "id": "commands_doctor_doctor_run",
-      "community": 169,
-      "norm_label": ".run()"
-    },
-    {
-      "label": ".fileVaultOn()",
-      "file_type": "code",
-      "source_file": "Sources/athena/Commands/Doctor.swift",
-      "source_location": "L611",
-      "_origin": "ast",
-      "id": "commands_doctor_doctor_filevaulton",
-      "community": 169,
-      "norm_label": ".filevaulton()"
-    },
-    {
-      "label": "Bool",
-      "file_type": "code",
-      "source_file": "Sources/athena/Commands/Doctor.swift",
-      "source_location": "L611",
-      "_origin": "ast",
-      "id": "sources_athena_commands_doctor_swift_bool",
-      "community": 169,
-      "norm_label": "bool"
-    },
-    {
-      "label": ".writable()",
-      "file_type": "code",
-      "source_file": "Sources/athena/Commands/Doctor.swift",
-      "source_location": "L629",
-      "_origin": "ast",
-      "id": "commands_doctor_doctor_writable",
-      "community": 169,
-      "norm_label": ".writable()"
-    },
-    {
-      "label": "URL",
-      "file_type": "code",
-      "source_file": "Sources/athena/Commands/Doctor.swift",
-      "source_location": "L629",
-      "_origin": "ast",
-      "id": "sources_athena_commands_doctor_swift_url",
-      "community": 169,
-      "norm_label": "url"
-    },
-    {
-      "label": "ModelHealthTests.swift",
-      "file_type": "code",
-      "source_file": "Tests/AthenaCoreTests/ModelHealthTests.swift",
-      "source_location": "L1",
-      "_origin": "ast",
-      "id": "athenacoretests_modelhealthtests",
-      "community": 0,
-      "norm_label": "modelhealthtests.swift"
-    },
-    {
-      "label": "ModelHealthTests",
-      "file_type": "code",
-      "source_file": "Tests/AthenaCoreTests/ModelHealthTests.swift",
-      "source_location": "L11",
-      "_origin": "ast",
-      "id": "athenacoretests_modelhealthtests_modelhealthtests",
-      "community": 0,
-      "norm_label": "modelhealthtests"
-    },
-    {
-      "label": "XCTestCase",
-      "file_type": "code",
-      "source_file": "",
-      "source_location": "",
-      "_origin": "ast",
-      "id": "xctestcase",
-      "community": 84,
-      "norm_label": "xctestcase"
-    },
-    {
-      "label": ".writeSafetensors()",
-      "file_type": "code",
-      "source_file": "Tests/AthenaCoreTests/ModelHealthTests.swift",
-      "source_location": "L15",
-      "_origin": "ast",
-      "id": "athenacoretests_modelhealthtests_modelhealthtests_writesafetensors",
-      "community": 0,
-      "norm_label": ".writesafetensors()"
-    },
-    {
-      "label": "URL",
-      "file_type": "code",
-      "source_file": "Tests/AthenaCoreTests/ModelHealthTests.swift",
-      "source_location": "L15",
-      "_origin": "ast",
-      "id": "tests_athenacoretests_modelhealthtests_swift_url",
-      "community": 0,
-      "norm_label": "url"
-    },
-    {
-      "label": ".tmpDir()",
-      "file_type": "code",
-      "source_file": "Tests/AthenaCoreTests/ModelHealthTests.swift",
-      "source_location": "L26",
-      "_origin": "ast",
-      "id": "athenacoretests_modelhealthtests_modelhealthtests_tmpdir",
-      "community": 0,
-      "norm_label": ".tmpdir()"
-    },
-    {
-      "label": ".testBlobSymlinkShardIsHealthy()",
-      "file_type": "code",
-      "source_file": "Tests/AthenaCoreTests/ModelHealthTests.swift",
-      "source_location": "L35",
-      "_origin": "ast",
-      "id": "athenacoretests_modelhealthtests_modelhealthtests_testblobsymlinkshardishealthy",
-      "community": 0,
-      "norm_label": ".testblobsymlinkshardishealthy()"
-    },
-    {
-      "label": ".testTruncatedHeaderStillDetected()",
-      "file_type": "code",
-      "source_file": "Tests/AthenaCoreTests/ModelHealthTests.swift",
-      "source_location": "L62",
-      "_origin": "ast",
-      "id": "athenacoretests_modelhealthtests_modelhealthtests_testtruncatedheaderstilldetected",
-      "community": 0,
-      "norm_label": ".testtruncatedheaderstilldetected()"
-    },
-    {
-      "label": ".testBrokenStoreEntriesDetected()",
-      "file_type": "code",
-      "source_file": "Tests/AthenaCoreTests/ModelHealthTests.swift",
-      "source_location": "L84",
-      "_origin": "ast",
-      "id": "athenacoretests_modelhealthtests_modelhealthtests_testbrokenstoreentriesdetected",
-      "community": 0,
-      "norm_label": ".testbrokenstoreentriesdetected()"
-    },
-    {
       "label": "audit-remediation-plan.md",
       "file_type": "document",
       "source_file": "docs/audit-remediation-plan.md",
@@ -974,30 +424,30 @@
       "norm_label": "m69.3 \u2014 vector store \u2705 v0.10.141"
     },
     {
-      "label": "M69.4 \u2014 Diarization & whisper hot paths",
+      "label": "M69.4 \u2014 Diarization & whisper hot paths (measurement-gated, `say` fixture)",
       "file_type": "document",
       "source_file": "docs/audit-remediation-plan.md",
       "source_location": "L267",
       "_origin": "ast",
-      "id": "docs_audit_remediation_plan_m69_4_diarization_whisper_hot_paths",
+      "id": "docs_audit_remediation_plan_m69_4_diarization_whisper_hot_paths_measurement_gated_say_fixture",
       "community": 31,
-      "norm_label": "m69.4 \u2014 diarization & whisper hot paths"
+      "norm_label": "m69.4 \u2014 diarization & whisper hot paths (measurement-gated, `say` fixture)"
     },
     {
-      "label": "M69.5 \u2014 Decode-path costs (benchmark-gated; skip any that don't pay)",
+      "label": "M69.5 \u2014 Decode-path costs (benchmark-gated) \u2014 MEASURED \u2192 SKIP/DEFER (v0.10.142 measurement pass)",
       "file_type": "document",
       "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L275",
+      "source_location": "L274",
       "_origin": "ast",
-      "id": "docs_audit_remediation_plan_m69_5_decode_path_costs_benchmark_gated_skip_any_that_don_t_pay",
+      "id": "docs_audit_remediation_plan_m69_5_decode_path_costs_benchmark_gated_measured_skip_defer_v0_10_142_measurement_pass",
       "community": 31,
-      "norm_label": "m69.5 \u2014 decode-path costs (benchmark-gated; skip any that don't pay)"
+      "norm_label": "m69.5 \u2014 decode-path costs (benchmark-gated) \u2014 measured \u2192 skip/defer (v0.10.142 measurement pass)"
     },
     {
       "label": "M70 \u2014 Test debt (CI blindness)",
       "file_type": "document",
       "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L283",
+      "source_location": "L285",
       "_origin": "ast",
       "id": "docs_audit_remediation_plan_m70_test_debt_ci_blindness",
       "community": 31,
@@ -1007,7 +457,7 @@
       "label": "M70.1 \u2014 Make the executable target testable",
       "file_type": "document",
       "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L285",
+      "source_location": "L287",
       "_origin": "ast",
       "id": "docs_audit_remediation_plan_m70_1_make_the_executable_target_testable",
       "community": 31,
@@ -1017,7 +467,7 @@
       "label": "M70.2 \u2014 Re-arm the env-gated load-bearing invariants",
       "file_type": "document",
       "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L289",
+      "source_location": "L291",
       "_origin": "ast",
       "id": "docs_audit_remediation_plan_m70_2_re_arm_the_env_gated_load_bearing_invariants",
       "community": 31,
@@ -1027,7 +477,7 @@
       "label": "M70.3 \u2014 Remaining coverage gaps",
       "file_type": "document",
       "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L298",
+      "source_location": "L300",
       "_origin": "ast",
       "id": "docs_audit_remediation_plan_m70_3_remaining_coverage_gaps",
       "community": 31,
@@ -1037,7 +487,7 @@
       "label": "M71 \u2014 Conformance & polish tail (batch, low individual risk)",
       "file_type": "document",
       "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L307",
+      "source_location": "L309",
       "_origin": "ast",
       "id": "docs_audit_remediation_plan_m71_conformance_polish_tail_batch_low_individual_risk",
       "community": 31,
@@ -1047,7 +497,7 @@
       "label": "Standing decisions queue (blockers for their items, not for the program)",
       "file_type": "document",
       "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L317",
+      "source_location": "L319",
       "_origin": "ast",
       "id": "docs_audit_remediation_plan_standing_decisions_queue_blockers_for_their_items_not_for_the_program",
       "community": 31,
@@ -1057,11 +507,561 @@
       "label": "Tracking",
       "file_type": "document",
       "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L335",
+      "source_location": "L337",
       "_origin": "ast",
       "id": "docs_audit_remediation_plan_tracking",
       "community": 31,
       "norm_label": "tracking"
+    },
+    {
+      "label": "ModelStoreOps.swift",
+      "file_type": "code",
+      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
+      "source_location": "L1",
+      "_origin": "ast",
+      "community": 111,
+      "norm_label": "modelstoreops.swift",
+      "id": "athenallm_modelstoreops"
+    },
+    {
+      "label": "ModelStoreOps",
+      "file_type": "code",
+      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
+      "source_location": "L8",
+      "_origin": "ast",
+      "community": 33,
+      "norm_label": "modelstoreops",
+      "id": "athenallm_modelstoreops_modelstoreops"
+    },
+    {
+      "label": "Entry",
+      "file_type": "code",
+      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
+      "source_location": "L9",
+      "_origin": "ast",
+      "community": 111,
+      "norm_label": "entry",
+      "id": "athenallm_modelstoreops_entry"
+    },
+    {
+      "label": "Sendable",
+      "file_type": "code",
+      "source_file": "",
+      "source_location": "",
+      "_origin": "ast",
+      "community": 111,
+      "norm_label": "sendable",
+      "id": "sendable"
+    },
+    {
+      "label": "String",
+      "file_type": "code",
+      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
+      "source_location": "L10",
+      "_origin": "ast",
+      "community": 33,
+      "norm_label": "string",
+      "id": "sources_athenallm_modelstoreops_swift_string"
+    },
+    {
+      "label": "Int",
+      "file_type": "code",
+      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
+      "source_location": "L11",
+      "_origin": "ast",
+      "community": 111,
+      "norm_label": "int",
+      "id": "int"
+    },
+    {
+      "label": "Date",
+      "file_type": "code",
+      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
+      "source_location": "L12",
+      "_origin": "ast",
+      "community": 111,
+      "norm_label": "date",
+      "id": "date"
+    },
+    {
+      "label": "Detail",
+      "file_type": "code",
+      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
+      "source_location": "L15",
+      "_origin": "ast",
+      "community": 111,
+      "norm_label": "detail",
+      "id": "athenallm_modelstoreops_detail"
+    },
+    {
+      "label": "Data",
+      "file_type": "code",
+      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
+      "source_location": "L20",
+      "_origin": "ast",
+      "community": 0,
+      "norm_label": "data",
+      "id": "data"
+    },
+    {
+      "label": "OpError",
+      "file_type": "code",
+      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
+      "source_location": "L27",
+      "_origin": "ast",
+      "community": 33,
+      "norm_label": "operror",
+      "id": "athenallm_modelstoreops_operror"
+    },
+    {
+      "label": "Error",
+      "file_type": "code",
+      "source_file": "",
+      "source_location": "",
+      "_origin": "ast",
+      "community": 81,
+      "norm_label": "error",
+      "id": "error"
+    },
+    {
+      "label": "CustomStringConvertible",
+      "file_type": "code",
+      "source_file": "",
+      "source_location": "",
+      "_origin": "ast",
+      "community": 203,
+      "norm_label": "customstringconvertible",
+      "id": "customstringconvertible"
+    },
+    {
+      "label": "invalidName",
+      "file_type": "code",
+      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
+      "source_location": "L28",
+      "_origin": "ast",
+      "community": 33,
+      "norm_label": "invalidname",
+      "id": "athenallm_modelstoreops_operror_invalidname"
+    },
+    {
+      "label": "notFound",
+      "file_type": "code",
+      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
+      "source_location": "L29",
+      "_origin": "ast",
+      "community": 33,
+      "norm_label": "notfound",
+      "id": "athenallm_modelstoreops_operror_notfound"
+    },
+    {
+      "label": "exists",
+      "file_type": "code",
+      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
+      "source_location": "L30",
+      "_origin": "ast",
+      "community": 33,
+      "norm_label": "exists",
+      "id": "athenallm_modelstoreops_operror_exists"
+    },
+    {
+      "label": "io",
+      "file_type": "code",
+      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
+      "source_location": "L31",
+      "_origin": "ast",
+      "community": 33,
+      "norm_label": "io",
+      "id": "athenallm_modelstoreops_operror_io"
+    },
+    {
+      "label": ".safetensorsSize()",
+      "file_type": "code",
+      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
+      "source_location": "L46",
+      "_origin": "ast",
+      "community": 33,
+      "norm_label": ".safetensorssize()",
+      "id": "athenallm_modelstoreops_modelstoreops_safetensorssize"
+    },
+    {
+      "label": "URL",
+      "file_type": "code",
+      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
+      "source_location": "L46",
+      "_origin": "ast",
+      "community": 33,
+      "norm_label": "url",
+      "id": "sources_athenallm_modelstoreops_swift_url"
+    },
+    {
+      "label": ".humanBytes()",
+      "file_type": "code",
+      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
+      "source_location": "L63",
+      "_origin": "ast",
+      "community": 33,
+      "norm_label": ".humanbytes()",
+      "id": "athenallm_modelstoreops_modelstoreops_humanbytes"
+    },
+    {
+      "label": ".isValidName()",
+      "file_type": "code",
+      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
+      "source_location": "L72",
+      "_origin": "ast",
+      "community": 33,
+      "norm_label": ".isvalidname()",
+      "id": "athenallm_modelstoreops_modelstoreops_isvalidname"
+    },
+    {
+      "label": "Bool",
+      "file_type": "code",
+      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
+      "source_location": "L72",
+      "_origin": "ast",
+      "community": 33,
+      "norm_label": "bool",
+      "id": "sources_athenallm_modelstoreops_swift_bool"
+    },
+    {
+      "label": ".list()",
+      "file_type": "code",
+      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
+      "source_location": "L79",
+      "_origin": "ast",
+      "community": 33,
+      "norm_label": ".list()",
+      "id": "athenallm_modelstoreops_modelstoreops_list"
+    },
+    {
+      "label": ".show()",
+      "file_type": "code",
+      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
+      "source_location": "L106",
+      "_origin": "ast",
+      "community": 33,
+      "norm_label": ".show()",
+      "id": "athenallm_modelstoreops_modelstoreops_show"
+    },
+    {
+      "label": "BrokenStoreEntry",
+      "file_type": "code",
+      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
+      "source_location": "L126",
+      "_origin": "ast",
+      "community": 111,
+      "norm_label": "brokenstoreentry",
+      "id": "athenallm_modelstoreops_brokenstoreentry"
+    },
+    {
+      "label": ".brokenEntries()",
+      "file_type": "code",
+      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
+      "source_location": "L142",
+      "_origin": "ast",
+      "community": 33,
+      "norm_label": ".brokenentries()",
+      "id": "athenallm_modelstoreops_modelstoreops_brokenentries"
+    },
+    {
+      "label": ".remove()",
+      "file_type": "code",
+      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
+      "source_location": "L189",
+      "_origin": "ast",
+      "community": 33,
+      "norm_label": ".remove()",
+      "id": "athenallm_modelstoreops_modelstoreops_remove"
+    },
+    {
+      "label": ".copy()",
+      "file_type": "code",
+      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
+      "source_location": "L211",
+      "_origin": "ast",
+      "community": 33,
+      "norm_label": ".copy()",
+      "id": "athenallm_modelstoreops_modelstoreops_copy"
+    },
+    {
+      "label": "Victim",
+      "file_type": "code",
+      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
+      "source_location": "L262",
+      "_origin": "ast",
+      "community": 111,
+      "norm_label": "victim",
+      "id": "athenallm_modelstoreops_victim"
+    },
+    {
+      "label": "PruneResult",
+      "file_type": "code",
+      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
+      "source_location": "L266",
+      "_origin": "ast",
+      "community": 111,
+      "norm_label": "pruneresult",
+      "id": "athenallm_modelstoreops_pruneresult"
+    },
+    {
+      "label": ".looksLikeModel()",
+      "file_type": "code",
+      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
+      "source_location": "L276",
+      "_origin": "ast",
+      "community": 33,
+      "norm_label": ".lookslikemodel()",
+      "id": "athenallm_modelstoreops_modelstoreops_lookslikemodel"
+    },
+    {
+      "label": ".prune()",
+      "file_type": "code",
+      "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
+      "source_location": "L297",
+      "_origin": "ast",
+      "community": 33,
+      "norm_label": ".prune()",
+      "id": "athenallm_modelstoreops_modelstoreops_prune"
+    },
+    {
+      "label": "Athena.swift",
+      "file_type": "code",
+      "source_file": "Sources/athena/Athena.swift",
+      "source_location": "L1",
+      "_origin": "ast",
+      "community": 246,
+      "norm_label": "athena.swift",
+      "id": "athena_athena"
+    },
+    {
+      "label": "Athena",
+      "file_type": "code",
+      "source_file": "Sources/athena/Athena.swift",
+      "source_location": "L12",
+      "_origin": "ast",
+      "community": 246,
+      "norm_label": "athena",
+      "id": "athena_athena_athena"
+    },
+    {
+      "label": "AsyncParsableCommand",
+      "file_type": "code",
+      "source_file": "",
+      "source_location": "",
+      "_origin": "ast",
+      "community": 246,
+      "norm_label": "asyncparsablecommand",
+      "id": "asyncparsablecommand"
+    },
+    {
+      "label": "Doctor.swift",
+      "file_type": "code",
+      "source_file": "Sources/athena/Commands/Doctor.swift",
+      "source_location": "L1",
+      "_origin": "ast",
+      "community": 169,
+      "norm_label": "doctor.swift",
+      "id": "commands_doctor"
+    },
+    {
+      "label": "Doctor",
+      "file_type": "code",
+      "source_file": "Sources/athena/Commands/Doctor.swift",
+      "source_location": "L15",
+      "_origin": "ast",
+      "community": 169,
+      "norm_label": "doctor",
+      "id": "commands_doctor_doctor"
+    },
+    {
+      "label": "String",
+      "file_type": "code",
+      "source_file": "Sources/athena/Commands/Doctor.swift",
+      "source_location": "L20",
+      "_origin": "ast",
+      "community": 169,
+      "norm_label": "string",
+      "id": "sources_athena_commands_doctor_swift_string"
+    },
+    {
+      "label": "Level",
+      "file_type": "code",
+      "source_file": "Sources/athena/Commands/Doctor.swift",
+      "source_location": "L25",
+      "_origin": "ast",
+      "community": 169,
+      "norm_label": "level",
+      "id": "commands_doctor_level"
+    },
+    {
+      "label": "ok",
+      "file_type": "code",
+      "source_file": "Sources/athena/Commands/Doctor.swift",
+      "source_location": "L25",
+      "_origin": "ast",
+      "community": 169,
+      "norm_label": "ok",
+      "id": "commands_doctor_level_ok"
+    },
+    {
+      "label": "warn",
+      "file_type": "code",
+      "source_file": "Sources/athena/Commands/Doctor.swift",
+      "source_location": "L25",
+      "_origin": "ast",
+      "community": 169,
+      "norm_label": "warn",
+      "id": "commands_doctor_level_warn"
+    },
+    {
+      "label": "fail",
+      "file_type": "code",
+      "source_file": "Sources/athena/Commands/Doctor.swift",
+      "source_location": "L25",
+      "_origin": "ast",
+      "community": 169,
+      "norm_label": "fail",
+      "id": "commands_doctor_level_fail"
+    },
+    {
+      "label": ".run()",
+      "file_type": "code",
+      "source_file": "Sources/athena/Commands/Doctor.swift",
+      "source_location": "L27",
+      "_origin": "ast",
+      "community": 169,
+      "norm_label": ".run()",
+      "id": "commands_doctor_doctor_run"
+    },
+    {
+      "label": ".fileVaultOn()",
+      "file_type": "code",
+      "source_file": "Sources/athena/Commands/Doctor.swift",
+      "source_location": "L611",
+      "_origin": "ast",
+      "community": 169,
+      "norm_label": ".filevaulton()",
+      "id": "commands_doctor_doctor_filevaulton"
+    },
+    {
+      "label": "Bool",
+      "file_type": "code",
+      "source_file": "Sources/athena/Commands/Doctor.swift",
+      "source_location": "L611",
+      "_origin": "ast",
+      "community": 169,
+      "norm_label": "bool",
+      "id": "sources_athena_commands_doctor_swift_bool"
+    },
+    {
+      "label": ".writable()",
+      "file_type": "code",
+      "source_file": "Sources/athena/Commands/Doctor.swift",
+      "source_location": "L629",
+      "_origin": "ast",
+      "community": 169,
+      "norm_label": ".writable()",
+      "id": "commands_doctor_doctor_writable"
+    },
+    {
+      "label": "URL",
+      "file_type": "code",
+      "source_file": "Sources/athena/Commands/Doctor.swift",
+      "source_location": "L629",
+      "_origin": "ast",
+      "community": 169,
+      "norm_label": "url",
+      "id": "sources_athena_commands_doctor_swift_url"
+    },
+    {
+      "label": "ModelHealthTests.swift",
+      "file_type": "code",
+      "source_file": "Tests/AthenaCoreTests/ModelHealthTests.swift",
+      "source_location": "L1",
+      "_origin": "ast",
+      "community": 0,
+      "norm_label": "modelhealthtests.swift",
+      "id": "athenacoretests_modelhealthtests"
+    },
+    {
+      "label": "ModelHealthTests",
+      "file_type": "code",
+      "source_file": "Tests/AthenaCoreTests/ModelHealthTests.swift",
+      "source_location": "L11",
+      "_origin": "ast",
+      "community": 0,
+      "norm_label": "modelhealthtests",
+      "id": "athenacoretests_modelhealthtests_modelhealthtests"
+    },
+    {
+      "label": "XCTestCase",
+      "file_type": "code",
+      "source_file": "",
+      "source_location": "",
+      "_origin": "ast",
+      "community": 84,
+      "norm_label": "xctestcase",
+      "id": "xctestcase"
+    },
+    {
+      "label": ".writeSafetensors()",
+      "file_type": "code",
+      "source_file": "Tests/AthenaCoreTests/ModelHealthTests.swift",
+      "source_location": "L15",
+      "_origin": "ast",
+      "community": 0,
+      "norm_label": ".writesafetensors()",
+      "id": "athenacoretests_modelhealthtests_modelhealthtests_writesafetensors"
+    },
+    {
+      "label": "URL",
+      "file_type": "code",
+      "source_file": "Tests/AthenaCoreTests/ModelHealthTests.swift",
+      "source_location": "L15",
+      "_origin": "ast",
+      "community": 0,
+      "norm_label": "url",
+      "id": "tests_athenacoretests_modelhealthtests_swift_url"
+    },
+    {
+      "label": ".tmpDir()",
+      "file_type": "code",
+      "source_file": "Tests/AthenaCoreTests/ModelHealthTests.swift",
+      "source_location": "L26",
+      "_origin": "ast",
+      "community": 0,
+      "norm_label": ".tmpdir()",
+      "id": "athenacoretests_modelhealthtests_modelhealthtests_tmpdir"
+    },
+    {
+      "label": ".testBlobSymlinkShardIsHealthy()",
+      "file_type": "code",
+      "source_file": "Tests/AthenaCoreTests/ModelHealthTests.swift",
+      "source_location": "L35",
+      "_origin": "ast",
+      "community": 0,
+      "norm_label": ".testblobsymlinkshardishealthy()",
+      "id": "athenacoretests_modelhealthtests_modelhealthtests_testblobsymlinkshardishealthy"
+    },
+    {
+      "label": ".testTruncatedHeaderStillDetected()",
+      "file_type": "code",
+      "source_file": "Tests/AthenaCoreTests/ModelHealthTests.swift",
+      "source_location": "L62",
+      "_origin": "ast",
+      "community": 0,
+      "norm_label": ".testtruncatedheaderstilldetected()",
+      "id": "athenacoretests_modelhealthtests_modelhealthtests_testtruncatedheaderstilldetected"
+    },
+    {
+      "label": ".testBrokenStoreEntriesDetected()",
+      "file_type": "code",
+      "source_file": "Tests/AthenaCoreTests/ModelHealthTests.swift",
+      "source_location": "L84",
+      "_origin": "ast",
+      "community": 0,
+      "norm_label": ".testbrokenstoreentriesdetected()",
+      "id": "athenacoretests_modelhealthtests_modelhealthtests_testbrokenstoreentriesdetected"
     },
     {
       "label": "AthenaServer.swift",
@@ -41833,12 +41833,422 @@
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L1",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan",
+      "target": "docs_audit_remediation_plan_audit_remediation_program_m65_m71"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L17",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_audit_remediation_program_m65_m71",
+      "target": "docs_audit_remediation_plan_m65_remote_attack_surface_security"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L68",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_audit_remediation_program_m65_m71",
+      "target": "docs_audit_remediation_plan_m66_data_integrity_credential_lifecycle"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L110",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_audit_remediation_program_m65_m71",
+      "target": "docs_audit_remediation_plan_m67_inference_correctness_silent_wrong_output"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L155",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_audit_remediation_program_m65_m71",
+      "target": "docs_audit_remediation_plan_m68_concurrency_lifecycle"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L191",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_audit_remediation_program_m65_m71",
+      "target": "docs_audit_remediation_plan_m69_performance_operability"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L227",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_audit_remediation_program_m65_m71",
+      "target": "docs_audit_remediation_plan_m70_test_debt_ci_blindness"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L251",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_audit_remediation_program_m65_m71",
+      "target": "docs_audit_remediation_plan_m71_conformance_polish_tail_batch_low_individual_risk"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L7",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_audit_remediation_program_m65_m71",
+      "target": "docs_audit_remediation_plan_principles"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L261",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_audit_remediation_program_m65_m71",
+      "target": "docs_audit_remediation_plan_standing_decisions_queue_blockers_for_their_items_not_for_the_program"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L271",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_audit_remediation_program_m65_m71",
+      "target": "docs_audit_remediation_plan_tracking"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L21",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_m65_remote_attack_surface_security",
+      "target": "docs_audit_remediation_plan_m65_1_ffi_hardening_rust_shim_v0_10_117"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L30",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_m65_remote_attack_surface_security",
+      "target": "docs_audit_remediation_plan_m65_2_webui_login_surface_5_6_v0_10_118_a3_deferred"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L40",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_m65_remote_attack_surface_security",
+      "target": "docs_audit_remediation_plan_m65_3_untrusted_input_caps_dos_v0_10_119"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L47",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_m65_remote_attack_surface_security",
+      "target": "docs_audit_remediation_plan_m65_4_path_confinement_file_ops_on_caller_influenced_paths_v0_10_120"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L56",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_m65_remote_attack_surface_security",
+      "target": "docs_audit_remediation_plan_m65_5_authz_gaps_info_leaks_contained_items_v0_10_121_a5_a3_h6_m65_6"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L64",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_m65_remote_attack_surface_security",
+      "target": "docs_audit_remediation_plan_m65_6_auth_context_refactor_structural_v0_10_122"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L84",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_m66_data_integrity_credential_lifecycle",
+      "target": "docs_audit_remediation_plan_m66_1_store_integrity_v0_10_123"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L95",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_m66_data_integrity_credential_lifecycle",
+      "target": "docs_audit_remediation_plan_m66_2_token_user_lifecycle_v0_10_124"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L105",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_m66_data_integrity_credential_lifecycle",
+      "target": "docs_audit_remediation_plan_m66_3_install_client_store_safety_v0_10_125"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L115",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_m66_data_integrity_credential_lifecycle",
+      "target": "docs_audit_remediation_plan_m66_4_config_parsing_truth_athenadeploy_configeditor_v0_10_126"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L126",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_m66_data_integrity_credential_lifecycle",
+      "target": "docs_audit_remediation_plan_m66_5_remove_secrets_from_argv_adr_005_breaking_v0_10_127"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L130",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_m66_data_integrity_credential_lifecycle",
+      "target": "docs_audit_remediation_plan_m66_6_vector_store_owner_scoping_adr_006_audit_h5_v0_10_128"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L141",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_m67_inference_correctness_silent_wrong_output",
+      "target": "docs_audit_remediation_plan_m67_1_triattention_models_v0_10_129"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L150",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_m67_inference_correctness_silent_wrong_output",
+      "target": "docs_audit_remediation_plan_m67_2_embeddings_v0_10_130"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L158",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_m67_inference_correctness_silent_wrong_output",
+      "target": "docs_audit_remediation_plan_m67_3_sampling_structured_determinism_5_6_v0_10_131_c11_deferred"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L166",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_m67_inference_correctness_silent_wrong_output",
+      "target": "docs_audit_remediation_plan_m67_4_whisper_transcription_v0_10_132"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L176",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_m67_inference_correctness_silent_wrong_output",
+      "target": "docs_audit_remediation_plan_m67_5_llm_module_odds_v0_10_133"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L183",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_m67_inference_correctness_silent_wrong_output",
+      "target": "docs_audit_remediation_plan_m67_6_c11_seeded_sampling_substrate_seam_v0_10_134"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L194",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_m68_concurrency_lifecycle",
+      "target": "docs_audit_remediation_plan_m68_1_memorygovernor_v0_10_135"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L206",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_m68_concurrency_lifecycle",
+      "target": "docs_audit_remediation_plan_m68_2_llm_structured_guide_ownership_v0_10_136"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L214",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_m68_concurrency_lifecycle",
+      "target": "docs_audit_remediation_plan_m68_3_transcription_embedding_modules_v0_10_137"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L226",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_m68_concurrency_lifecycle",
+      "target": "docs_audit_remediation_plan_m68_4_cancellation_bridge_v0_10_138"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L243",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_m69_performance_operability",
+      "target": "docs_audit_remediation_plan_m69_1_queue_store_access_patterns_v0_10_139"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L253",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_m69_performance_operability",
+      "target": "docs_audit_remediation_plan_m69_2_admission_control_metrics_truth_on_streams_v0_10_140"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L260",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_m69_performance_operability",
+      "target": "docs_audit_remediation_plan_m69_3_vector_store_v0_10_141"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L267",
+      "weight": 1.0,
+      "source": "docs_audit_remediation_plan_m69_performance_operability",
+      "target": "docs_audit_remediation_plan_m69_4_diarization_whisper_hot_paths_measurement_gated_say_fixture",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L275",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_m69_performance_operability",
+      "target": "docs_audit_remediation_plan_m69_5_decode_path_costs_benchmark_gated_measured_skip_defer_v0_10_142_measurement_pass"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L229",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_m70_test_debt_ci_blindness",
+      "target": "docs_audit_remediation_plan_m70_1_make_the_executable_target_testable"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L233",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_m70_test_debt_ci_blindness",
+      "target": "docs_audit_remediation_plan_m70_2_re_arm_the_env_gated_load_bearing_invariants"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/audit-remediation-plan.md",
+      "source_location": "L242",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "docs_audit_remediation_plan_m70_test_debt_ci_blindness",
+      "target": "docs_audit_remediation_plan_m70_3_remaining_coverage_gaps"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
       "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
       "source_location": "L126",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "athenallm_modelstoreops",
-      "target": "athenallm_modelstoreops_brokenstoreentry",
-      "confidence_score": 1.0
+      "target": "athenallm_modelstoreops_brokenstoreentry"
     },
     {
       "relation": "contains",
@@ -41906,9 +42316,9 @@
       "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
       "source_location": "L142",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "athenallm_modelstoreops_modelstoreops",
-      "target": "athenallm_modelstoreops_modelstoreops_brokenentries",
-      "confidence_score": 1.0
+      "target": "athenallm_modelstoreops_modelstoreops_brokenentries"
     },
     {
       "relation": "method",
@@ -42007,9 +42417,9 @@
       "source_location": "L12",
       "weight": 1.0,
       "context": "field",
+      "confidence_score": 1.0,
       "source": "athenallm_modelstoreops_entry",
-      "target": "date",
-      "confidence_score": 1.0
+      "target": "date"
     },
     {
       "relation": "references",
@@ -42018,9 +42428,9 @@
       "source_location": "L11",
       "weight": 1.0,
       "context": "field",
+      "confidence_score": 1.0,
       "source": "athenallm_modelstoreops_entry",
-      "target": "int",
-      "confidence_score": 1.0
+      "target": "int"
     },
     {
       "relation": "implements",
@@ -42506,9 +42916,9 @@
       "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
       "source_location": "L126",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "athenallm_modelstoreops_brokenstoreentry",
-      "target": "sendable",
-      "confidence_score": 1.0
+      "target": "sendable"
     },
     {
       "relation": "implements",
@@ -43139,9 +43549,9 @@
       "source_location": "L128",
       "weight": 1.0,
       "context": "field",
+      "confidence_score": 1.0,
       "source": "athenallm_modelstoreops_brokenstoreentry",
-      "target": "sources_athenallm_modelstoreops_swift_string",
-      "confidence_score": 1.0
+      "target": "sources_athenallm_modelstoreops_swift_string"
     },
     {
       "relation": "references",
@@ -43238,9 +43648,9 @@
       "source_location": "L18",
       "weight": 1.0,
       "context": "field",
+      "confidence_score": 1.0,
       "source": "athenallm_modelstoreops_detail",
-      "target": "int",
-      "confidence_score": 1.0
+      "target": "int"
     },
     {
       "relation": "references",
@@ -43249,9 +43659,9 @@
       "source_location": "L63",
       "weight": 1.0,
       "context": "parameter_type",
+      "confidence_score": 1.0,
       "source": "athenallm_modelstoreops_modelstoreops_humanbytes",
-      "target": "int",
-      "confidence_score": 1.0
+      "target": "int"
     },
     {
       "relation": "references",
@@ -43260,9 +43670,9 @@
       "source_location": "L46",
       "weight": 1.0,
       "context": "return_type",
+      "confidence_score": 1.0,
       "source": "athenallm_modelstoreops_modelstoreops_safetensorssize",
-      "target": "int",
-      "confidence_score": 1.0
+      "target": "int"
     },
     {
       "relation": "references",
@@ -43271,9 +43681,9 @@
       "source_location": "L269",
       "weight": 1.0,
       "context": "field",
+      "confidence_score": 1.0,
       "source": "athenallm_modelstoreops_pruneresult",
-      "target": "int",
-      "confidence_score": 1.0
+      "target": "int"
     },
     {
       "relation": "references",
@@ -43304,9 +43714,9 @@
       "source_location": "L24",
       "weight": 1.0,
       "context": "field",
+      "confidence_score": 1.0,
       "source": "athenallm_modelstoreops_detail",
-      "target": "date",
-      "confidence_score": 1.0
+      "target": "date"
     },
     {
       "relation": "references",
@@ -44522,9 +44932,9 @@
       "source_location": "L142",
       "weight": 1.0,
       "context": "parameter_type",
+      "confidence_score": 1.0,
       "source": "athenallm_modelstoreops_modelstoreops_brokenentries",
-      "target": "sources_athenallm_modelstoreops_swift_url",
-      "confidence_score": 1.0
+      "target": "sources_athenallm_modelstoreops_swift_url"
     },
     {
       "relation": "references",
@@ -44698,9 +45108,9 @@
       "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
       "source_location": "L142",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "athenallm_modelstoreops_modelstoreops_brokenentries",
-      "target": "athenallm_modelstoreops_brokenstoreentry",
-      "confidence_score": 1.0
+      "target": "athenallm_modelstoreops_brokenstoreentry"
     },
     {
       "relation": "calls",
@@ -44709,9 +45119,9 @@
       "source_file": "Sources/AthenaLLM/ModelStoreOps.swift",
       "source_location": "L155",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "athenallm_modelstoreops_modelstoreops_brokenentries",
-      "target": "athenallm_modelstoreops_modelstoreops_lookslikemodel",
-      "confidence_score": 1.0
+      "target": "athenallm_modelstoreops_modelstoreops_lookslikemodel"
     },
     {
       "relation": "calls",
@@ -45855,9 +46265,9 @@
       "source_file": "Sources/athena/Commands/Doctor.swift",
       "source_location": "L6",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "commands_doctor",
-      "target": "athenastore",
-      "confidence_score": 1.0
+      "target": "athenastore"
     },
     {
       "relation": "contains",
@@ -46096,9 +46506,9 @@
       "source_file": "Tests/AthenaCoreTests/ModelHealthTests.swift",
       "source_location": "L84",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "athenacoretests_modelhealthtests_modelhealthtests",
-      "target": "athenacoretests_modelhealthtests_modelhealthtests_testbrokenstoreentriesdetected",
-      "confidence_score": 1.0
+      "target": "athenacoretests_modelhealthtests_modelhealthtests_testbrokenstoreentriesdetected"
     },
     {
       "relation": "method",
@@ -46858,9 +47268,9 @@
       "source_file": "Tests/AthenaCoreTests/ModelHealthTests.swift",
       "source_location": "L101",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "athenacoretests_modelhealthtests_modelhealthtests_testbrokenstoreentriesdetected",
-      "target": "athenacoretests_modelhealthtests_modelhealthtests_writesafetensors",
-      "confidence_score": 1.0
+      "target": "athenacoretests_modelhealthtests_modelhealthtests_writesafetensors"
     },
     {
       "relation": "references",
@@ -46902,9 +47312,9 @@
       "source_file": "Tests/AthenaCoreTests/ModelHealthTests.swift",
       "source_location": "L86",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "athenacoretests_modelhealthtests_modelhealthtests_testbrokenstoreentriesdetected",
-      "target": "athenacoretests_modelhealthtests_modelhealthtests_tmpdir",
-      "confidence_score": 1.0
+      "target": "athenacoretests_modelhealthtests_modelhealthtests_tmpdir"
     },
     {
       "relation": "calls",
@@ -46927,416 +47337,6 @@
       "weight": 1.0,
       "source": "athenacoretests_modelhealthtests_modelhealthtests_tmpdir",
       "target": "uuid"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L1",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan",
-      "target": "docs_audit_remediation_plan_audit_remediation_program_m65_m71"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L17",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_audit_remediation_program_m65_m71",
-      "target": "docs_audit_remediation_plan_m65_remote_attack_surface_security"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L68",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_audit_remediation_program_m65_m71",
-      "target": "docs_audit_remediation_plan_m66_data_integrity_credential_lifecycle"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L110",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_audit_remediation_program_m65_m71",
-      "target": "docs_audit_remediation_plan_m67_inference_correctness_silent_wrong_output"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L155",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_audit_remediation_program_m65_m71",
-      "target": "docs_audit_remediation_plan_m68_concurrency_lifecycle"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L191",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_audit_remediation_program_m65_m71",
-      "target": "docs_audit_remediation_plan_m69_performance_operability"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L227",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_audit_remediation_program_m65_m71",
-      "target": "docs_audit_remediation_plan_m70_test_debt_ci_blindness"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L251",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_audit_remediation_program_m65_m71",
-      "target": "docs_audit_remediation_plan_m71_conformance_polish_tail_batch_low_individual_risk"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L7",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_audit_remediation_program_m65_m71",
-      "target": "docs_audit_remediation_plan_principles"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L261",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_audit_remediation_program_m65_m71",
-      "target": "docs_audit_remediation_plan_standing_decisions_queue_blockers_for_their_items_not_for_the_program"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L271",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_audit_remediation_program_m65_m71",
-      "target": "docs_audit_remediation_plan_tracking"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L21",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_m65_remote_attack_surface_security",
-      "target": "docs_audit_remediation_plan_m65_1_ffi_hardening_rust_shim_v0_10_117"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L30",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_m65_remote_attack_surface_security",
-      "target": "docs_audit_remediation_plan_m65_2_webui_login_surface_5_6_v0_10_118_a3_deferred"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L40",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_m65_remote_attack_surface_security",
-      "target": "docs_audit_remediation_plan_m65_3_untrusted_input_caps_dos_v0_10_119"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L47",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_m65_remote_attack_surface_security",
-      "target": "docs_audit_remediation_plan_m65_4_path_confinement_file_ops_on_caller_influenced_paths_v0_10_120"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L56",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_m65_remote_attack_surface_security",
-      "target": "docs_audit_remediation_plan_m65_5_authz_gaps_info_leaks_contained_items_v0_10_121_a5_a3_h6_m65_6"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L64",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_m65_remote_attack_surface_security",
-      "target": "docs_audit_remediation_plan_m65_6_auth_context_refactor_structural_v0_10_122"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L84",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_m66_data_integrity_credential_lifecycle",
-      "target": "docs_audit_remediation_plan_m66_1_store_integrity_v0_10_123"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L95",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_m66_data_integrity_credential_lifecycle",
-      "target": "docs_audit_remediation_plan_m66_2_token_user_lifecycle_v0_10_124"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L105",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_m66_data_integrity_credential_lifecycle",
-      "target": "docs_audit_remediation_plan_m66_3_install_client_store_safety_v0_10_125"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L115",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_m66_data_integrity_credential_lifecycle",
-      "target": "docs_audit_remediation_plan_m66_4_config_parsing_truth_athenadeploy_configeditor_v0_10_126"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L126",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_m66_data_integrity_credential_lifecycle",
-      "target": "docs_audit_remediation_plan_m66_5_remove_secrets_from_argv_adr_005_breaking_v0_10_127"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L130",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_m66_data_integrity_credential_lifecycle",
-      "target": "docs_audit_remediation_plan_m66_6_vector_store_owner_scoping_adr_006_audit_h5_v0_10_128"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L141",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_m67_inference_correctness_silent_wrong_output",
-      "target": "docs_audit_remediation_plan_m67_1_triattention_models_v0_10_129"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L150",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_m67_inference_correctness_silent_wrong_output",
-      "target": "docs_audit_remediation_plan_m67_2_embeddings_v0_10_130"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L158",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_m67_inference_correctness_silent_wrong_output",
-      "target": "docs_audit_remediation_plan_m67_3_sampling_structured_determinism_5_6_v0_10_131_c11_deferred"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L166",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_m67_inference_correctness_silent_wrong_output",
-      "target": "docs_audit_remediation_plan_m67_4_whisper_transcription_v0_10_132"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L176",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_m67_inference_correctness_silent_wrong_output",
-      "target": "docs_audit_remediation_plan_m67_5_llm_module_odds_v0_10_133"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L183",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_m67_inference_correctness_silent_wrong_output",
-      "target": "docs_audit_remediation_plan_m67_6_c11_seeded_sampling_substrate_seam_v0_10_134"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L194",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_m68_concurrency_lifecycle",
-      "target": "docs_audit_remediation_plan_m68_1_memorygovernor_v0_10_135"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L206",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_m68_concurrency_lifecycle",
-      "target": "docs_audit_remediation_plan_m68_2_llm_structured_guide_ownership_v0_10_136"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L214",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_m68_concurrency_lifecycle",
-      "target": "docs_audit_remediation_plan_m68_3_transcription_embedding_modules_v0_10_137"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L226",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_m68_concurrency_lifecycle",
-      "target": "docs_audit_remediation_plan_m68_4_cancellation_bridge_v0_10_138"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L243",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_m69_performance_operability",
-      "target": "docs_audit_remediation_plan_m69_1_queue_store_access_patterns_v0_10_139"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L253",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_m69_performance_operability",
-      "target": "docs_audit_remediation_plan_m69_2_admission_control_metrics_truth_on_streams_v0_10_140"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L260",
-      "weight": 1.0,
-      "source": "docs_audit_remediation_plan_m69_performance_operability",
-      "target": "docs_audit_remediation_plan_m69_3_vector_store_v0_10_141",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L211",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_m69_performance_operability",
-      "target": "docs_audit_remediation_plan_m69_4_diarization_whisper_hot_paths"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L219",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_m69_performance_operability",
-      "target": "docs_audit_remediation_plan_m69_5_decode_path_costs_benchmark_gated_skip_any_that_don_t_pay"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L229",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_m70_test_debt_ci_blindness",
-      "target": "docs_audit_remediation_plan_m70_1_make_the_executable_target_testable"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L233",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_m70_test_debt_ci_blindness",
-      "target": "docs_audit_remediation_plan_m70_2_re_arm_the_env_gated_load_bearing_invariants"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/audit-remediation-plan.md",
-      "source_location": "L242",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "docs_audit_remediation_plan_m70_test_debt_ci_blindness",
-      "target": "docs_audit_remediation_plan_m70_3_remaining_coverage_gaps"
     },
     {
       "relation": "imports",
@@ -125317,5 +125317,5 @@
       "source_file": "docs/structured-rss-rootcause.md"
     }
   ],
-  "built_at_commit": "d19832c9e667c919355a377dc5519602a100bad4"
+  "built_at_commit": "1657febc53429bc6d8bf0bfbfc62374e3d0861c8"
 }
