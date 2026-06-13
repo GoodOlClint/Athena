@@ -110,6 +110,26 @@ struct Doctor: AsyncParsableCommand {
             }
         }
 
+        // 5b. Dangling / broken store entries (M69 operability). A
+        //     `pull`-created symlink whose HF-cache target was pruned (or any
+        //     entry missing config.json / *.safetensors) sits in the store but
+        //     500s only at REQUEST time — never at startup, `ls`, or `show`.
+        //     Surface it here so an operator can re-pull or remove it.
+        if isDir.boolValue {
+            let broken = ModelStoreOps.brokenEntries(root: root)
+            if broken.isEmpty {
+                say(.ok, "store entries all resolve (no dangling symlinks)")
+            } else {
+                for b in broken {
+                    say(
+                        .warn,
+                        "store entry '\(b.name)' won't load: "
+                            + b.problems.joined(separator: "; ")
+                            + " — re-pull or `athena rm \(b.name)`")
+                }
+            }
+        }
+
         // 6. Data dir writable (store + queue live here).
         let dataDir =
             parsed?.dataDir.map {

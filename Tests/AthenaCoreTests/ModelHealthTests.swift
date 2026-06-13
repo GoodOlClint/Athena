@@ -77,4 +77,63 @@ final class ModelHealthTests: XCTestCase {
                 $0.contains("corrupt header") || $0.contains("truncated")
             }, "expected a header problem, got \(problems)")
     }
+
+    /// M69 operability — `brokenEntries` flags a dangling `pull` symlink and a
+    /// symlink resolving to a dir missing config.json, but NOT a healthy
+    /// entry, an unrelated dir, or a non-LLM (tokenizer-less) model.
+    func testBrokenStoreEntriesDetected() throws {
+        let fm = FileManager.default
+        let store = try tmpDir()
+        // A separate "HF cache" outside the store root, so symlink targets
+        // aren't themselves enumerated as top-level store entries (mirrors
+        // the real `~/.cache/huggingface` layout).
+        let hfCache = try tmpDir()
+        defer {
+            try? fm.removeItem(at: store)
+            try? fm.removeItem(at: hfCache)
+        }
+
+        // (a) healthy LLM entry: real dir, config.json + a shard.
+        let good = store.appendingPathComponent("good", isDirectory: true)
+        try fm.createDirectory(at: good, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(
+            to: good.appendingPathComponent("config.json"))
+        try writeSafetensors(to: good.appendingPathComponent("model.safetensors"))
+
+        // (b) healthy NON-LLM entry (no tokenizer) — must NOT be flagged.
+        let whisper = store.appendingPathComponent("whisper", isDirectory: true)
+        try fm.createDirectory(at: whisper, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(
+            to: whisper.appendingPathComponent("config.json"))
+        try writeSafetensors(
+            to: whisper.appendingPathComponent("weights.safetensors"))
+
+        // (c) dangling symlink: target (in the HF cache) does not exist.
+        try fm.createSymbolicLink(
+            at: store.appendingPathComponent("dangling"),
+            withDestinationURL: hfCache.appendingPathComponent("nonexistent-snapshot"))
+
+        // (d) symlink to a real HF-cache dir that is missing config.json.
+        let empty = hfCache.appendingPathComponent("empty-snap", isDirectory: true)
+        try fm.createDirectory(at: empty, withIntermediateDirectories: true)
+        try writeSafetensors(to: empty.appendingPathComponent("w.safetensors"))
+        try fm.createSymbolicLink(
+            at: store.appendingPathComponent("noconfig"),
+            withDestinationURL: empty)
+
+        // (e) unrelated dir (not model-shaped) — must NOT be flagged.
+        let junk = store.appendingPathComponent("junk", isDirectory: true)
+        try fm.createDirectory(at: junk, withIntermediateDirectories: true)
+        try Data("hi".utf8).write(to: junk.appendingPathComponent("readme.txt"))
+
+        let broken = ModelStoreOps.brokenEntries(root: store)
+        let names = Set(broken.map(\.name))
+        XCTAssertEqual(names, ["dangling", "noconfig"], "got \(broken)")
+        XCTAssertTrue(
+            broken.first { $0.name == "dangling" }?.problems
+                .contains { $0.contains("dangling") } ?? false)
+        XCTAssertTrue(
+            broken.first { $0.name == "noconfig" }?.problems
+                .contains { $0.contains("config.json") } ?? false)
+    }
 }

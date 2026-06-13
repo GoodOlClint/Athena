@@ -122,6 +122,69 @@ public enum ModelStoreOps {
             bytes: safetensorsSize(dir), configJSON: data, modified: mod)
     }
 
+    /// A store entry that LOOKS like a model but can't actually load.
+    public struct BrokenStoreEntry: Sendable {
+        public let name: String
+        public let problems: [String]
+    }
+
+    /// M69 operability — every store entry that looks like a model (a `pull`
+    /// symlink, or a model-shaped directory) but is missing the bytes an
+    /// inference load needs (`config.json` + at least one `*.safetensors`).
+    /// The headline case is a `pull`-created symlink whose Hugging Face cache
+    /// target was pruned independently: the entry still sits in the store but
+    /// every request 500s with `module_load_failed` at REQUEST time — never
+    /// caught at startup, by `ls`/`show` (which silently drop it), or before
+    /// now by `doctor`. Architecture-agnostic on purpose (only config + a
+    /// weight shard, no tokenizer), so it doesn't false-positive on
+    /// whisper/diarization/speaker/embedding entries that ship no tokenizer.
+    /// Healthy/complete entries are omitted.
+    public static func brokenEntries(root: URL) -> [BrokenStoreEntry] {
+        let fm = FileManager.default
+        guard
+            let children = try? fm.contentsOfDirectory(
+                at: root, includingPropertiesForKeys: [.isSymbolicLinkKey])
+        else { return [] }
+        var out: [BrokenStoreEntry] = []
+        for child in children {
+            let name = child.lastPathComponent
+            if name.hasPrefix(".") { continue }
+            let isSymlink =
+                (try? child.resourceValues(forKeys: [.isSymbolicLinkKey]))?
+                .isSymbolicLink ?? false
+            guard looksLikeModel(child, isSymlink: isSymlink) else { continue }
+            let dir = child.resolvingSymlinksInPath()
+            var isDir: ObjCBool = false
+            guard
+                fm.fileExists(atPath: dir.path, isDirectory: &isDir),
+                isDir.boolValue
+            else {
+                let tgt =
+                    (try? fm.destinationOfSymbolicLink(atPath: child.path))
+                    .map { " → \($0)" } ?? ""
+                out.append(
+                    BrokenStoreEntry(
+                        name: name,
+                        problems: ["dangling symlink\(tgt) (target missing)"]))
+                continue
+            }
+            var problems: [String] = []
+            if !fm.fileExists(
+                atPath: dir.appendingPathComponent("config.json").path)
+            {
+                problems.append("no config.json")
+            }
+            let hasWeights =
+                ((try? fm.contentsOfDirectory(atPath: dir.path)) ?? [])
+                .contains { $0.hasSuffix(".safetensors") }
+            if !hasWeights { problems.append("no *.safetensors") }
+            if !problems.isEmpty {
+                out.append(BrokenStoreEntry(name: name, problems: problems))
+            }
+        }
+        return out.sorted { $0.name < $1.name }
+    }
+
     /// Delete a model directory (a direct child of the store root).
     public static func remove(root: URL, name: String) throws {
         guard isValidName(name) else {
