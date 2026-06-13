@@ -508,6 +508,58 @@ final class StructuredSpeculativeParityTests: XCTestCase {
     }
 }
 
+/// C11 — seeded sampling reproducibility. A per-request seed must make a
+/// temperature>0 generation byte-identical across runs (and the same seed
+/// twice must agree). Heavy: drives a real MLX model at temp>0, so gated on
+/// ATHENA_RUN_MODEL_TESTS=1. NOTE: on an MTP model this exercises the
+/// SpeculativeSampling SamplingRNG path; on a NON-MTP model it exercises the
+/// substrate seeded sampler (GenerateParameters.seed) — both must honor the
+/// seed. Point ATHENA_TEST_MODEL at a non-MTP model to cover the substrate
+/// path specifically.
+final class SeededSamplingReproducibilityTests: XCTestCase {
+
+    func testSameSeedTempPositiveIsReproducible() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard env["ATHENA_RUN_MODEL_TESTS"] == "1" else {
+            throw XCTSkip("set ATHENA_RUN_MODEL_TESTS=1 to run (heavy)")
+        }
+        let modelURL = ModelStore().resolve(env["ATHENA_TEST_MODEL"])
+        guard
+            FileManager.default.fileExists(
+                atPath: modelURL.appendingPathComponent("config.json").path)
+        else { throw XCTSkip("model not present at \(modelURL.path)") }
+
+        func run(seed: Int) async throws -> String {
+            let llm = MLXLLMModule(
+                modelDirectory: modelURL,
+                parameters: .init(maxTokens: 48, temperature: 0.8))
+            let gov = MemoryGovernor(totalBudgetBytes: Int(96) << 30)
+            await gov.register(llm, evictable: false)
+            try await gov.ensureLoaded(.llm)
+            var out = ""
+            let stream = llm.generateMetered(
+                messages: [
+                    ChatTurn(role: "user", content: "Write one short sentence.")
+                ],
+                schemaJSON: nil, tools: nil, maxTokens: nil,
+                temperature: 0.8, topP: nil, seed: seed,
+                speculative: true, chatTemplateKwargs: nil)
+            for await chunk in stream {
+                if case .text(let s) = chunk { out += s }
+            }
+            return out
+        }
+
+        let a = try await run(seed: 1234)
+        let b = try await run(seed: 1234)
+        XCTAssertFalse(a.isEmpty, "seeded temp>0 produced empty")
+        XCTAssertEqual(
+            a, b,
+            "same seed + same prompt + temp>0 must reproduce byte-for-byte "
+                + "(C11: per-request GenerateParameters.seed / SamplingRNG)")
+    }
+}
+
 /// NSLock-isolated accept/total counter for the M47.2 acceptance-rate
 /// test. The publish call (`recordIteration`) is on the synchronous
 /// decode loop — the reader (test assertion) runs after the stream

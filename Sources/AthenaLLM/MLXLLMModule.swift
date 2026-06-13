@@ -997,15 +997,26 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         let tp =
             topP.map { Float($0) }.flatMap { $0 > 0 && $0 < 1 ? $0 : nil }
             ?? params.topP
-        // M31.3: a per-request seed makes temp>0 sampling reproducible by
-        // pinning the substrate's global RNG before generation.
-        if let seed, seed >= 0 { MLXRandom.seed(UInt64(seed)) }
+        // C11: a per-request seed makes temp>0 sampling reproducible by
+        // seeding THIS request's sampler RNG (GenerateParameters.seed →
+        // TopPSampler/CategoricalSampler RandomState(seed:)), not the
+        // process-global `MLXRandom.seed`. The substrate samplers each hold
+        // a private RandomState and ignore the global state, so the old
+        // global seed was both ineffective for them AND a cross-request race
+        // (a concurrent temp>0 request reseeding the shared global between
+        // this request's seed-set and its sampler construction). Per-request
+        // GenerateParameters.seed is race-free by construction. Inert at
+        // temp==0 (argmax).
+        let requestSeed: UInt64? = seed.flatMap {
+            $0 >= 0 ? UInt64($0) : nil
+        }
         let gp = GenerateParameters(
             maxTokens: Self.effectiveMaxTokens(maxTokens, params.maxTokens),
             kvBits: gen.kvBits,
             kvQuantizationScheme: gen.scheme,
             temperature: temp,
-            topP: tp)
+            topP: tp,
+            seed: requestSeed)
         // NF2: the eviction policy is visible to the substrate's eager,
         // same-Task `newCache` call inside `generate`; the deferred decode
         // loop never needs it, so binding around this call is sufficient.
