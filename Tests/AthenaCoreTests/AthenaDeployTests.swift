@@ -423,6 +423,53 @@ final class DefaultConfigTests: XCTestCase {
         XCTAssertEqual(c.engine, "stub")
         XCTAssertEqual(c.logDir, "/var/log/x")
     }
+
+    // MARK: - M70.3 NJ4 — prompt_cache_* / kv_compression parse coverage
+
+    /// NJ4 — these keys are load-bearing (Doctor + ConfigEditor read them to
+    /// drive operator-visible behavior) but only their nil-default was tested,
+    /// which would pass even if `parse()` ignored the key. Feed every key and
+    /// assert each parsed field, so a mis-wired scalar or a renamed key fails.
+    func testPromptCacheAndKvCompressionKeysParse() throws {
+        let toml = """
+            listen_host = "127.0.0.1"
+            listen_port = 7447
+            engine = "mlx"
+            log_dir = "/var/log/athena"
+            kv_compression = "turboquant"
+            prompt_cache_enabled = true
+            prompt_cache_max_entries = 8
+            prompt_cache_max_bytes = 123456
+            prompt_cache_idle_ttl_secs = 900
+            prompt_cache_scope = "both"
+            """
+        let c = try AthenaConfig.parse(toml: toml)
+        XCTAssertEqual(c.kvCompression, "turboquant")
+        XCTAssertEqual(c.promptCacheEnabled, true)
+        XCTAssertEqual(c.promptCacheMaxEntries, 8)
+        XCTAssertEqual(c.promptCacheMaxBytes, 123_456)
+        XCTAssertEqual(c.promptCacheIdleTtlSecs, 900)
+        XCTAssertEqual(c.promptCacheScope, "both")
+    }
+
+    /// The contrast case: absent keys stay nil (built-in defaults apply at
+    /// runtime), so the positive test isn't masking a parser that silently
+    /// ignores the keys.
+    func testPromptCacheKeysAbsentAreNil() throws {
+        let c = try AthenaConfig.parse(
+            toml: """
+                listen_host = "127.0.0.1"
+                listen_port = 7447
+                engine = "mlx"
+                log_dir = "/var/log/athena"
+                """)
+        XCTAssertNil(c.promptCacheEnabled)
+        XCTAssertNil(c.promptCacheMaxEntries)
+        XCTAssertNil(c.promptCacheMaxBytes)
+        XCTAssertNil(c.promptCacheIdleTtlSecs)
+        XCTAssertNil(c.promptCacheScope)
+        XCTAssertNil(c.kvCompression)
+    }
 }
 
 final class LaunchdPlistTests: XCTestCase {
