@@ -882,7 +882,7 @@ public class SortformerModel: Module {
         let sendableModel = UncheckedSendableBox(self)
         let sendableAudio = UncheckedSendableBox(audio)
         return AsyncThrowingStream { continuation in
-            Task.detached {
+            let producer = Task.detached {
                 let model = sendableModel.value
                 let audio = sendableAudio.value
                 let proc = model.config.processorConfig
@@ -1026,6 +1026,14 @@ public class SortformerModel: Module {
 
                 continuation.finish()
             }
+            // ND8 — a detached task does NOT inherit the consumer's
+            // cancellation, so the `try Task.checkCancellation()` in the loop
+            // above only sees THIS producer's flag. Wire the consumer's
+            // teardown (client disconnect / deadline / `break`) to cancel the
+            // producer so it stops decoding the rest of the clip on the GPU
+            // (and releases the governor reservation) instead of running to
+            // completion unobserved.
+            continuation.onTermination = { _ in producer.cancel() }
         }
     }
 

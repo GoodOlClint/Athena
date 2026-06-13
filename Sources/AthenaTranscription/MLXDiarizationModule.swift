@@ -25,6 +25,17 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
     private let estimatedBytes: Int
     private var model: SortformerModel?
     private var residentId: String?
+    /// D1/D2 (M68.3) — the in-flight generate, if any. `diarize` chains new
+    /// generates after it (FIFO) so two never run concurrent forwards on the
+    /// shared `SortformerModel` — `generate`/`generateStream` each run on a
+    /// `Task.detached` that races the global `MLX.Memory.clearCache`, so two
+    /// concurrent diarize calls would corrupt each other's forward. And
+    /// `rebind`/`unload` await it before dropping the model, so a model swap
+    /// never lands mid-generate (no drain pre-fix). Token-keyed cleanup so a
+    /// newer generate isn't clobbered.
+    private var generateInFlight: Task<DiarizationResult, Error>?
+    private var generateSeq: UInt64 = 0
+    private var generateGateSeq: UInt64 = 0
     /// Model-store root (M54) — local-store-dir load when materialized,
     /// so bare name or full HF id both work. nil ⇒ Hub-by-id fallback.
     private let modelStoreRoot: URL?
@@ -100,6 +111,9 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
     }
 
     public func unload() async {
+        // D2 — drain an in-flight generate before dropping the model so the
+        // detached forward never runs against a torn-down model / freed slot.
+        if let t = generateInFlight { _ = try? await t.value }
         model = nil
         residentId = nil
     }
@@ -119,6 +133,8 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
                 requested: requested, available: allowedIds)
         }
         if residentId == target, model != nil { return }
+        // D2 — drain an in-flight generate before swapping the model.
+        if let t = generateInFlight { _ = try? await t.value }
         model = nil
         residentId = nil
         try await loadModel(id: target)
@@ -171,10 +187,27 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
         let durationSeconds =
             Double(pcm.count) / Double(AudioDecode.sampleRate)
 
-        if durationSeconds <= offlineMaxSeconds * 0.95 {
-            return try await Self.runOffline(Send((model, audio)))
+        let streaming = durationSeconds > offlineMaxSeconds * 0.95
+        // Box the non-Sendable model+audio once (the actor already serialises
+        // access) so the serialization Task below can capture it.
+        let send = Send((model, audio))
+
+        // D1 — serialize: chain this generate after any in-flight one so two
+        // never run concurrent forwards on the shared model (racing the global
+        // clearCache). Record it so rebind/unload can drain it (D2).
+        let prior = generateInFlight
+        generateSeq &+= 1
+        let mySeq = generateSeq
+        let task = Task { () async throws -> DiarizationResult in
+            _ = try? await prior?.value
+            return streaming
+                ? try await Self.runStreaming(send)
+                : try await Self.runOffline(send)
         }
-        return try await Self.runStreaming(Send((model, audio)))
+        generateInFlight = task
+        generateGateSeq = mySeq
+        defer { if generateGateSeq == mySeq { generateInFlight = nil } }
+        return try await task.value
     }
 
     /// nonisolated: the model/audio arrive boxed-Sendable and the

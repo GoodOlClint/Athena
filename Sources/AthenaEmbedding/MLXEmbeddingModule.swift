@@ -53,6 +53,27 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
     /// is several GB; the static estimate is sized for the bge-small
     /// default and lies by an order of magnitude for larger members).
     private var weightBytes: Int?
+    /// I2 (M68.3) — serializes `embed` so two concurrent calls can't
+    /// interleave their rebind + forward. Pre-fix, call A's `await
+    /// loadContainer` / `await container.perform` released the actor, letting
+    /// call B rebind the single slot to a DIFFERENT model; A then resumed,
+    /// re-read `self.container` (now B's model), and embedded A's texts
+    /// against the wrong model while reporting A's requested id (wrong-model
+    /// vectors). New embeds chain after the in-flight one (FIFO) so each
+    /// load→capture→forward runs atomically; the worker also captures its
+    /// container handle locally instead of re-reading `self.container` after
+    /// the await. Token-keyed cleanup so a newer embed isn't clobbered.
+    private var embedInFlight: Task<EmbeddingBatch, Error>?
+    private var embedSeq: UInt64 = 0
+    private var embedGateSeq: UInt64 = 0
+    /// I3 — only trim the MLX allocator pool after a LARGE bucket. A
+    /// `clearCache` after every short-query bucket drops warm buffers the next
+    /// call would reuse (and races concurrent global-pool users), turning the
+    /// common length-1 query into pool thrash; the big-batch case (the one
+    /// that actually drifts `residentBytes` into tens of GiB) is what needs
+    /// the reclaim. 16 384 ≈ half the per-bucket token budget: a length-1
+    /// query (work ≈ 1) skips; a real 32×512 / 13×2500 batch clears.
+    private static let clearCacheWorkThreshold = 16_384
 
     /// - Parameters:
     ///   - modelIds: the selectable set of embedding model HF ids; the
@@ -215,6 +236,30 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
             throw AthenaError.modelNotAvailable(
                 requested: requested, available: allowedIds)
         }
+        // I2 — serialize: chain after any in-flight embed so the rebind +
+        // forward for THIS request run atomically. Without it a concurrent
+        // embed for a different model swaps the single slot mid-request and
+        // the wrong model serves these texts.
+        let prior = embedInFlight
+        embedSeq &+= 1
+        let mySeq = embedSeq
+        let task = Task { () async throws -> EmbeddingBatch in
+            _ = try? await prior?.value
+            return try await self.embedSerialized(texts, target: target)
+        }
+        embedInFlight = task
+        embedGateSeq = mySeq
+        defer { if embedGateSeq == mySeq { embedInFlight = nil } }
+        return try await task.value
+    }
+
+    /// I2 — the serialized embed worker. Runs under the FIFO chain above, so
+    /// the rebind below is never concurrent with another embed; it also
+    /// captures the container handle locally (`liveContainer`) rather than
+    /// re-reading `self.container` after the load `await`.
+    private func embedSerialized(
+        _ texts: [String], target: String
+    ) async throws -> EmbeddingBatch {
         // NI3: a per-request selection is also an operator choice — stage it
         // so a governor evict→reload restores the last-served model.
         desiredName = target
@@ -224,7 +269,7 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
             weightBytes = nil
             try await loadContainer(target)
         }
-        guard let container else {
+        guard let liveContainer = container else {
             throw AthenaError.moduleLoadFailed(
                 .textEmbedding, reason: "embed called before load")
         }
@@ -232,7 +277,7 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
             return EmbeddingBatch(
                 vectors: [], promptTokens: 0, model: target)
         }
-        return try await container.perform { ctx in
+        return try await liveContainer.perform { ctx in
             let tokenizer = ctx.tokenizer
             let encoded = texts.map {
                 tokenizer.encode(text: $0, addSpecialTokens: true)
@@ -389,7 +434,11 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
                 // bucketVectors above is already a Swift [Float] copy
                 // before this line, so the clear cannot reclaim
                 // anything the caller still needs.
-                MLX.Memory.clearCache()
+                // I3 — only for a LARGE bucket: a per-bucket clear on every
+                // short query thrashes the warm pool the next call reuses.
+                if maxLength * bucket.count >= Self.clearCacheWorkThreshold {
+                    MLX.Memory.clearCache()
+                }
             }
             return EmbeddingBatch(
                 vectors: vectors, promptTokens: promptTokens,

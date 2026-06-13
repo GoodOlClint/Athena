@@ -22,6 +22,10 @@ public actor VectorStore {
         case dimMismatch(expected: Int, got: Int)
         case capExceeded(requestedBytes: Int, capBytes: Int)
         case ownerConflict(id: String)
+        /// H10 — a zero-length vector is always invalid: it carries no
+        /// embedding and, on an empty store, would silently become the
+        /// authoritative `dim` (0), making every later dim-check vacuous.
+        case zeroLengthVector
         public var description: String {
             switch self {
             case let .dimMismatch(e, g):
@@ -30,6 +34,8 @@ public actor VectorStore {
                 return "vector store cap: needs \(r) B, cap \(c) B"
             case let .ownerConflict(id):
                 return "vector '\(id)' is owned by another principal"
+            case .zeroLengthVector:
+                return "vector has zero length"
             }
         }
     }
@@ -58,6 +64,20 @@ public actor VectorStore {
     private var cache:
         [(id: String, vec: [Float], meta: Data?, owner: String?)] = []
     private var loaded = false
+    /// H4 (M68.3) — memoizes the one-time cache hydration as a Task so
+    /// concurrent first-touch callers COALESCE onto a single
+    /// `store.allVectors()` load instead of each running it and clobbering
+    /// the others' result (the nil-check + assignment below are actor-atomic,
+    /// no `await` between). Cleared once loaded.
+    private var loadTask: Task<Void, Never>?
+    /// H4 — count of NEW upserts whose `store.putVector` is in flight but not
+    /// yet reflected in `cache`. The cap check straddles the `putVector`
+    /// await, so two concurrent new upserts both saw the same `cache.count`
+    /// and both passed a per-row cap check that only one should have — the
+    /// store then overran `capBytes`. Reserving the slot synchronously (before
+    /// the await) makes a concurrent upsert see this in-flight count and be
+    /// rejected, so the cap holds without serializing every upsert.
+    private var pendingNew = 0
 
     public init(store: AthenaStore, capBytes: Int) {
         self.store = store
@@ -66,10 +86,21 @@ public actor VectorStore {
 
     private func ensureLoaded() async {
         if loaded { return }
-        cache = await store.allVectors().map {
-            (id: $0.id, vec: $0.vector, meta: $0.metadata, owner: $0.owner)
+        if let t = loadTask {
+            await t.value
+            return
         }
-        loaded = true
+        let t = Task { [self] in
+            let rows = await store.allVectors()
+            cache = rows.map {
+                (id: $0.id, vec: $0.vector, meta: $0.metadata,
+                    owner: $0.owner)
+            }
+            loaded = true
+        }
+        loadTask = t
+        await t.value
+        loadTask = nil
     }
 
     /// H5: may `caller` see a row owned by `rowOwner`? Admin / auth-off
@@ -88,6 +119,9 @@ public actor VectorStore {
         caller: Caller = .unscoped
     ) async throws {
         await ensureLoaded()
+        // H10 — reject a zero-length vector before the empty-cache path can
+        // silently adopt it as the authoritative store `dim` (0).
+        guard !vector.isEmpty else { throw VectorError.zeroLengthVector }
         if let d = cache.first?.vec.count, d != vector.count {
             throw VectorError.dimMismatch(expected: d, got: vector.count)
         }
@@ -100,23 +134,35 @@ public actor VectorStore {
         }
         let isNew = existing == nil
         if isNew {
-            let need = (cache.count + 1) * vector.count * 4
+            // H4 — count this row AND any new upserts already in flight
+            // (`pendingNew`), then reserve the slot synchronously (before the
+            // `putVector` await) so a concurrent new upsert sees the
+            // reservation and can't co-pass a cap check only one should.
+            let need = (cache.count + pendingNew + 1) * vector.count * 4
             if need > capBytes {
                 throw VectorError.capExceeded(
                     requestedBytes: need, capBytes: capBytes)
             }
+            pendingNew += 1
         }
         // Auth-off keeps NULL owner (legacy/shared); an enforced caller
         // stamps its principal.
         let owner = caller.enforced ? caller.principal : nil
-        try await store.putVector(
-            id: id, vector: vector, metadata: metadata, owner: owner)
+        do {
+            try await store.putVector(
+                id: id, vector: vector, metadata: metadata, owner: owner)
+        } catch {
+            if isNew { pendingNew -= 1 }  // H4 — release the reservation
+            throw error
+        }
         if let i = cache.firstIndex(where: { $0.id == id }) {
             cache[i] = (id, vector, metadata, owner)
         } else {
             cache.append((id, vector, metadata, owner))
             cache.sort { $0.id < $1.id }
         }
+        // H4 — the row is now reflected in `cache.count`; drop the reservation.
+        if isNew { pendingNew -= 1 }
     }
 
     @discardableResult

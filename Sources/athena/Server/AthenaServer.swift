@@ -2022,6 +2022,13 @@ struct AthenaServer {
                     status: .badRequest, message: e.description,
                     type: "invalid_request_error",
                     code: "dimension_mismatch")
+            case .zeroLengthVector:
+                // H10 — a zero-length vector is a client error (400), not a
+                // 500; mirrors the dim-mismatch shape.
+                return Self.error(
+                    status: .badRequest, message: e.description,
+                    type: "invalid_request_error",
+                    code: "zero_length_vector")
             case .ownerConflict:
                 // H5: another principal owns this id. Don't reveal more
                 // than "you can't write here".

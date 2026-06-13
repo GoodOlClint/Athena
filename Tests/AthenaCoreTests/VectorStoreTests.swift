@@ -64,6 +64,61 @@ final class VectorStoreTests: XCTestCase {
         XCTAssertNil(goneB)
     }
 
+    /// H10 (M68.3) — a zero-length vector is rejected (it would otherwise be
+    /// adopted as the authoritative store `dim` on an empty store). CI-safe.
+    func testZeroLengthVectorRejectedH10() async throws {
+        let (s, url) = try freshStore()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let vs = VectorStore(store: s, capBytes: 1 << 20)
+        // Empty store: an empty vector must NOT silently set dim=0.
+        do {
+            try await vs.upsert(id: "z", vector: [], metadata: nil)
+            XCTFail("expected zeroLengthVector")
+        } catch let e as VectorStore.VectorError {
+            guard case .zeroLengthVector = e else {
+                return XCTFail("wrong error \(e)")
+            }
+        }
+        // Nothing was stored, so the dim is still unset; a real vector works.
+        try await vs.upsert(id: "a", vector: [1, 0, 0], metadata: nil)
+        let st = await vs.stats()
+        XCTAssertEqual(st.count, 1)
+        XCTAssertEqual(st.dim, 3)
+    }
+
+    /// H4 (M68.3) — concurrent NEW upserts must not overrun the byte cap by
+    /// both passing a cap check that straddled the `putVector` await. With a
+    /// cap of exactly 2 rows (dim 3 × 4 B = 24 B), firing 8 distinct-id
+    /// upserts concurrently must admit at most 2 and reject the rest. CI-safe.
+    func testConcurrentUpsertsRespectCapH4() async throws {
+        let (s, url) = try freshStore()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let vs = VectorStore(store: s, capBytes: 24)  // exactly 2 dim-3 rows
+
+        let admitted = await withTaskGroup(of: Bool.self) { group in
+            for i in 0..<8 {
+                group.addTask {
+                    do {
+                        try await vs.upsert(
+                            id: "v\(i)", vector: [Float(i), 0, 0],
+                            metadata: nil)
+                        return true
+                    } catch { return false }
+                }
+            }
+            var n = 0
+            for await ok in group where ok { n += 1 }
+            return n
+        }
+
+        XCTAssertEqual(
+            admitted, 2,
+            "the reservation must let exactly cap-many new upserts in")
+        let st = await vs.stats()
+        XCTAssertEqual(st.count, 2, "store never exceeds the 2-row cap")
+        XCTAssertLessThanOrEqual(st.bytes, 24)
+    }
+
     /// H5 (M66.6 / ADR 006) — owner-scoping at the cache/stats/delete
     /// layer. CI-safe: exercises everything EXCEPT `query` (MLX), so no
     /// Metal needed; the gated `testQueryOwnerScopedGated` covers query.
