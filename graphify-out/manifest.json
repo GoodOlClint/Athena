@@ -30,9 +30,9 @@
     "semantic_hash": "0ca2f2508f375d0038786a3297d452be"
   },
   "Sources/AthenaCore/InferenceDeadline.swift": {
-    "mtime": 1780075896.9812574,
-    "ast_hash": "8bee4ba5e84a036bdad2a92d7feec80a",
-    "semantic_hash": "8bee4ba5e84a036bdad2a92d7feec80a"
+    "mtime": 1781319271.7789443,
+    "ast_hash": "be4bc1467a5c68ee42dc5c0bac29eef0",
+    "semantic_hash": ""
   },
   "Sources/AthenaCore/InferenceModule.swift": {
     "mtime": 1778930496.6143408,
@@ -270,8 +270,8 @@
     "semantic_hash": "634c250bdf5c6a23ea48b174ad4181ec"
   },
   "Sources/AthenaStore/AthenaStore.swift": {
-    "mtime": 1781301132.002342,
-    "ast_hash": "6d55920659f8e9718bc83d1f136e3dba",
+    "mtime": 1781319284.0628765,
+    "ast_hash": "bf0dfefa398674ecaec41a0ab2593232",
     "semantic_hash": ""
   },
   "Sources/AthenaStore/VectorStore.swift": {
@@ -425,8 +425,8 @@
     "semantic_hash": "d16404614855c59c2001089f41c5bd78"
   },
   "Sources/athena/Athena.swift": {
-    "mtime": 1781317829.8340762,
-    "ast_hash": "eb13f3c0768991c04fa97ecdb0b3dfac",
+    "mtime": 1781319505.4809923,
+    "ast_hash": "b2bd8c35029f8b4a84f18f649e59871f",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Audit.swift": {
@@ -555,8 +555,8 @@
     "semantic_hash": "7c80a2bc1e455e66ea2257556c63b805"
   },
   "Sources/athena/Server/AthenaServer.swift": {
-    "mtime": 1781317796.2812352,
-    "ast_hash": "04823626415ee1bb68e98df81169d7c0",
+    "mtime": 1781319393.3736784,
+    "ast_hash": "bf08015896cbcfe450f12870b5e735c1",
     "semantic_hash": ""
   },
   "Sources/athena/Server/Auth.swift": {
@@ -605,8 +605,8 @@
     "semantic_hash": "64b81f15a4b29bfbdf5918db9a84ceb2"
   },
   "Sources/athena/Server/RequestQueue.swift": {
-    "mtime": 1781294444.0173907,
-    "ast_hash": "dc55fd7ba403aab3ce7b69cda5e1cc11",
+    "mtime": 1781319291.547211,
+    "ast_hash": "f9010c786e2337756b7a49d325088f8a",
     "semantic_hash": ""
   },
   "Sources/athena/Server/Session.swift": {
@@ -640,8 +640,8 @@
     "semantic_hash": "c09b52ed8a99053473b9fa1984c76289"
   },
   "Tests/AthenaCoreTests/AthenaStoreTests.swift": {
-    "mtime": 1781301498.180402,
-    "ast_hash": "566fc12b53457e831fd237dfda3e30b3",
+    "mtime": 1781319431.4190056,
+    "ast_hash": "c8e0f91968adfc46c66a4d385002a1f7",
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/DecodeProgressTests.swift": {
@@ -650,9 +650,9 @@
     "semantic_hash": "bfa156d9d0c23fdf6f4b9c1b7ef560e2"
   },
   "Tests/AthenaCoreTests/InferenceDeadlineTests.swift": {
-    "mtime": 1779925249.39286,
-    "ast_hash": "ef7be6f0ecfaa0f3f325e85c3d822403",
-    "semantic_hash": "ef7be6f0ecfaa0f3f325e85c3d822403"
+    "mtime": 1781319478.1492724,
+    "ast_hash": "0bbe360d1fbcced36df3fd5f4a4148f4",
+    "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/KVCompressionTests.swift": {
     "mtime": 1779203573.1636467,
@@ -1210,8 +1210,8 @@
     "semantic_hash": ""
   },
   "docs/audit-remediation-plan.md": {
-    "mtime": 1781318607.6028085,
-    "ast_hash": "2489a6913447c7d994530f70218e56b5",
+    "mtime": 1781319872.6586223,
+    "ast_hash": "1f58375141d081d2d97dcbee52db6cb4",
     "semantic_hash": ""
   },
   "docs/decisions/003-rust-shim-panic-strategy.md": {
