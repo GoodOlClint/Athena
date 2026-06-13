@@ -24,14 +24,14 @@ import NIOCore
 /// The custom request context for the whole router. Adds the connected
 /// client's address to the core context so per-IP controls (the A3 login
 /// limiter) have a trustworthy key.
-struct AppRequestContext: RequestContext, RemoteAddressRequestContext {
-    var coreContext: CoreRequestContextStorage
+public struct AppRequestContext: RequestContext, RemoteAddressRequestContext {
+    public var coreContext: CoreRequestContextStorage
     /// The TCP peer address (nil for non-IP transports). This is the
     /// channel's real remote address — NOT a forwarded header — so it
     /// cannot be spoofed by a client that merely sets `X-Forwarded-For`.
-    let remoteAddress: SocketAddress?
+    public let remoteAddress: SocketAddress?
 
-    init(source: ApplicationRequestContextSource) {
+    public init(source: ApplicationRequestContextSource) {
         self.coreContext = .init(source: source)
         self.remoteAddress = source.channel.remoteAddress
     }
@@ -44,17 +44,25 @@ struct AppRequestContext: RequestContext, RemoteAddressRequestContext {
 /// every handler reached from `next()` observes it. Only bound on the
 /// enabled-auth paths (bearer + cookie); the auth-off (open) fast-paths in
 /// the readers don't consult it, so open mode leaves it nil by design.
-struct ResolvedCaller: Sendable {
+public struct ResolvedCaller: Sendable {
     /// Stable principal id: `u:<user>` (managed token or cookie session),
     /// `t:<hash>` (bootstrap key). Drives queue ownership + audit records.
-    let principal: String
+    public let principal: String
     /// The caller's effective permission set (role ∩ token-scope, already
     /// computed by the resolver).
-    let permissions: Set<Permission>
+    public let permissions: Set<Permission>
     /// The logged-in WebUI username when the caller authed via a session
     /// cookie; nil for a bearer caller. Lets `uiCaller` render RBAC-aware
     /// pages without a second session lookup.
-    let uiUser: String?
+    public let uiUser: String?
 
-    @TaskLocal static var current: ResolvedCaller?
+    public init(
+        principal: String, permissions: Set<Permission>, uiUser: String?
+    ) {
+        self.principal = principal
+        self.permissions = permissions
+        self.uiUser = uiUser
+    }
+
+    @TaskLocal public static var current: ResolvedCaller?
 }

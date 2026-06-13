@@ -217,6 +217,30 @@ let package = Package(
                 .linkedFramework("Foundation"),
             ]),
 
+        // M70.1 (audit NA2) — the daemon's HTTP server PRIMITIVES, split
+        // out of the `athena` executable target so they are unit-testable
+        // under `swift test` (the executable target is unreachable by the
+        // test bundle, and importing it would drag the whole MLX/Metal
+        // graph into CI). MLX-FREE by construction: only the pure,
+        // security-critical seams live here — bearer/RBAC auth
+        // (constant-time compare, token resolve/expiry, the route→permission
+        // map), the rate-limit + concurrency token buckets, the WebUI
+        // session/CSRF HMAC, the multipart reader, the Prometheus metrics +
+        // percentile math, the request context, and the logging bootstrap.
+        // The `AthenaServer` god-object and every MLX-linked handler stay in
+        // the executable; this target is its testable substrate. See
+        // docs/decisions/008-testable-server-seam.md.
+        .target(
+            name: "AthenaServerKit",
+            dependencies: [
+                "AthenaCore",
+                "AthenaStore",
+                .product(name: "Hummingbird", package: "hummingbird"),
+                .product(name: "Crypto", package: "swift-crypto"),
+                .product(name: "Logging", package: "swift-log"),
+            ],
+            path: "Sources/AthenaServerKit"),
+
         // M7: one embedded SQLite store backing the built-in vector DB
         // and the async request queue. Engine = vendored SQLCipher
         // (CSQLCipher) so the store can be encrypted at rest (M34.3);
@@ -260,6 +284,7 @@ let package = Package(
                 "AthenaCore",
                 "AthenaClient",
                 "AthenaDeploy",
+                "AthenaServerKit",
                 "AthenaLLM",
                 "AthenaStructured",
                 "AthenaTranscription",
@@ -293,6 +318,7 @@ let package = Package(
             name: "AthenaCoreTests",
             dependencies: [
                 "AthenaCore", "AthenaClient", "AthenaDeploy",
+                "AthenaServerKit",
                 "AthenaLLM", "AthenaModels", "AthenaStructured",
                 "AthenaTranscription", "AthenaEmbedding",
                 "AthenaStore",

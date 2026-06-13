@@ -5,26 +5,45 @@ import Hummingbird
 /// Swift, zero deps: counters + a bounded latency reservoir for
 /// percentiles. Health/UI/metrics paths are excluded so the numbers
 /// reflect real inference/admin work, not dashboard polling.
-actor AthenaMetrics {
-    struct Snapshot: Codable, Sendable {
-        let totalRequests: Int
-        let totalErrors: Int
-        let byKind: [String: Int]
-        let avgMs: Double
-        let p50Ms: Double
-        let p95Ms: Double
-        let llmTokens: Int
-        let sinceEpoch: Double
+public actor AthenaMetrics {
+    public struct Snapshot: Codable, Sendable {
+        public let totalRequests: Int
+        public let totalErrors: Int
+        public let byKind: [String: Int]
+        public let avgMs: Double
+        public let p50Ms: Double
+        public let p95Ms: Double
+        public let llmTokens: Int
+        public let sinceEpoch: Double
         /// Observations in the latency reservoir the quantiles/avg are
         /// computed over (bounded; M37 — backs the summary _count/_sum).
-        let latencyWindow: Int
+        public let latencyWindow: Int
         /// H14 (M66.1) — cumulative audit-log write failures. The M30 audit
         /// trail is a security record; a failed append is non-fatal to the
         /// mutation that triggered it but MUST be visible, so it surfaces
         /// here (scrapeable via /metrics) as well as in the error log.
         /// Non-zero ⇒ the trail has gaps; alert on any increase.
-        let auditWriteFailures: Int
+        public let auditWriteFailures: Int
+
+        public init(
+            totalRequests: Int, totalErrors: Int, byKind: [String: Int],
+            avgMs: Double, p50Ms: Double, p95Ms: Double, llmTokens: Int,
+            sinceEpoch: Double, latencyWindow: Int, auditWriteFailures: Int
+        ) {
+            self.totalRequests = totalRequests
+            self.totalErrors = totalErrors
+            self.byKind = byKind
+            self.avgMs = avgMs
+            self.p50Ms = p50Ms
+            self.p95Ms = p95Ms
+            self.llmTokens = llmTokens
+            self.sinceEpoch = sinceEpoch
+            self.latencyWindow = latencyWindow
+            self.auditWriteFailures = auditWriteFailures
+        }
     }
+
+    public init() {}
 
     private var total = 0
     private var errors = 0
@@ -54,7 +73,7 @@ actor AthenaMetrics {
     /// trail is observable, not silently swallowed.
     private var auditWriteFailures = 0
 
-    func record(kind: String, ms: Double, isError: Bool) {
+    public func record(kind: String, ms: Double, isError: Bool) {
         total += 1
         byKind[kind, default: 0] += 1
         if isError { errors += 1 }
@@ -62,56 +81,59 @@ actor AthenaMetrics {
         if lat.count > cap { lat.removeFirst(lat.count - cap) }
     }
 
-    func addTokens(_ n: Int) { tokens += n }
+    public func addTokens(_ n: Int) { tokens += n }
 
     /// H14 (M66.1) — record one failed audit-log write.
-    func recordAuditWriteFailure() { auditWriteFailures += 1 }
+    public func recordAuditWriteFailure() { auditWriteFailures += 1 }
 
     /// M43.1 — call on handler entry. Increments the live counter and
     /// stamps `lastRequestAt`.
-    func enter() {
+    public func enter() {
         inflight += 1
         lastRequestAt = Date().timeIntervalSince1970
     }
 
     /// M43.1 — call on handler exit (or throw). Never goes negative.
-    func leave() {
+    public func leave() {
         if inflight > 0 { inflight -= 1 }
     }
 
     /// M60.1 — record the live decode rate observed by the heartbeat.
     /// Called only while in the decode phase, so the value reflects real
     /// generation throughput (not a setup/prefill zero).
-    func recordDecodeRate(_ tps: Double) { lastDecodeTokensPerSec = tps }
+    public func recordDecodeRate(_ tps: Double) { lastDecodeTokensPerSec = tps }
 
     /// M43.1 — snapshot of the live signals the /healthz response
     /// surfaces. `lastRequestAt == 0` ⇒ never-served sentinel.
     /// M60.1 adds the most recent decode tok/s (0 ⇒ none since boot).
-    func healthFields()
+    public func healthFields()
         -> (inflight: Int, lastRequestAt: Double, decodeTokensPerSec: Double)
     {
         (inflight, lastRequestAt, lastDecodeTokensPerSec)
     }
 
-    func snapshot() -> Snapshot {
+    /// Nearest-rank percentile over an ascending-sorted sample (A25,
+    /// M69.2): rank = ceil(p·n), index = rank-1, clamped to [0, n-1]; an
+    /// empty sample is 0. Extracted from `snapshot()`'s former local `pct`
+    /// (byte-identical math) so the quantile logic is unit-testable without
+    /// the actor — M70.1 (NA2). `sorted` MUST already be ascending.
+    public static func percentile(_ sorted: [Double], _ p: Double) -> Double {
+        guard !sorted.isEmpty else { return 0 }
+        let rank = Int((Double(sorted.count) * p).rounded(.up))
+        let i = min(sorted.count - 1, max(0, rank - 1))
+        return sorted[i]
+    }
+
+    public func snapshot() -> Snapshot {
         let sorted = lat.sorted()
-        func pct(_ p: Double) -> Double {
-            guard !sorted.isEmpty else { return 0 }
-            // A25 — nearest-rank: rank = ceil(p·n), index = rank-1, clamped to
-            // [0, n-1]. The prior `floor(p·n)` under-counted the rank (e.g.
-            // p95 over 20 samples picked index 19 correctly but p50 over 10
-            // picked the 6th, not the 5th, value).
-            let rank = Int((Double(sorted.count) * p).rounded(.up))
-            let i = min(sorted.count - 1, max(0, rank - 1))
-            return sorted[i]
-        }
         let avg =
             sorted.isEmpty
             ? 0 : sorted.reduce(0, +) / Double(sorted.count)
         return Snapshot(
             totalRequests: total, totalErrors: errors,
-            byKind: byKind, avgMs: avg, p50Ms: pct(0.5),
-            p95Ms: pct(0.95), llmTokens: tokens,
+            byKind: byKind, avgMs: avg,
+            p50Ms: Self.percentile(sorted, 0.5),
+            p95Ms: Self.percentile(sorted, 0.95), llmTokens: tokens,
             sinceEpoch: started, latencyWindow: sorted.count,
             auditWriteFailures: auditWriteFailures)
     }
@@ -121,7 +143,7 @@ actor AthenaMetrics {
     /// recent bounded window; gauges report start/uptime. Metric names
     /// are namespaced `athena_` (the project/goddess name). Pure, so it
     /// is testable without the actor.
-    static func prometheus(_ s: Snapshot, now: Double) -> String {
+    public static func prometheus(_ s: Snapshot, now: Double) -> String {
         func esc(_ v: String) -> String {
             v.replacingOccurrences(of: "\\", with: "\\\\")
                 .replacingOccurrences(of: "\"", with: "\\\"")
@@ -176,8 +198,12 @@ actor AthenaMetrics {
 /// Times every routed request and records it by a coarse `kind`
 /// derived from the path. Dashboard/health/metrics traffic is not
 /// counted (returns nil ⇒ pass through untimed).
-struct MetricsMiddleware<Context: RequestContext>: RouterMiddleware {
+public struct MetricsMiddleware<Context: RequestContext>: RouterMiddleware {
     let metrics: AthenaMetrics
+
+    public init(metrics: AthenaMetrics) {
+        self.metrics = metrics
+    }
 
     static func kind(_ path: String) -> String? {
         if path == "/v1/chat/completions" { return "chat" }
@@ -192,7 +218,7 @@ struct MetricsMiddleware<Context: RequestContext>: RouterMiddleware {
         return nil  // /healthz, /ui*, /metrics, etc. — not work
     }
 
-    func handle(
+    public func handle(
         _ request: Request, context: Context,
         next: (Request, Context) async throws -> Response
     ) async throws -> Response {

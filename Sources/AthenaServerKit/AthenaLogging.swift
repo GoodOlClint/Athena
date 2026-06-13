@@ -42,7 +42,7 @@ public struct LogScope: Sendable {
     }
 }
 
-enum AthenaLog {
+public enum AthenaLog {
     /// Unified-logging subsystem. Simple, not reverse-DNS (Apple
     /// allows any string; this matches the binary/command name).
     static let subsystem = "athena"
@@ -52,7 +52,7 @@ enum AthenaLog {
     /// governor seam, dependency-free); the os.Logger `category` is
     /// derived by stripping the `athena.` prefix — anything else
     /// (Hummingbird's serverName "athena", NIO, etc.) ⇒ `daemon`.
-    static let daemonLabel = AthenaLogLabel.daemon
+    public static let daemonLabel = AthenaLogLabel.daemon
 
     static func category(forLabel label: String) -> String {
         let p = "athena."
@@ -64,7 +64,7 @@ enum AthenaLog {
 
     /// Parse a log-level string (case-insensitive). nil/invalid ⇒ nil
     /// so the caller can decide the default (and warn on invalid).
-    static func level(_ s: String?) -> Logging.Logger.Level? {
+    public static func level(_ s: String?) -> Logging.Logger.Level? {
         s.flatMap {
             Logging.Logger.Level(rawValue: $0.lowercased())
         }
@@ -84,7 +84,7 @@ enum AthenaLog {
     ///   `.trace`-permissive so historical `log show` queries
     ///   remain truthful regardless of what the operator picked at
     ///   the CLI.
-    static func bootstrap(
+    public static func bootstrap(
         background: Bool = false,
         terminalLevel: Logging.Logger.Level = .info
     ) {

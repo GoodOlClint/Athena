@@ -18,12 +18,17 @@ import NIOCore
 
 /// A resolved caller: a stable principal id (for queue ownership)
 /// plus the effective permission set.
-struct AuthSubject: Sendable {
-    let principal: String
-    let permissions: Set<Permission>
+public struct AuthSubject: Sendable {
+    public let principal: String
+    public let permissions: Set<Permission>
+
+    public init(principal: String, permissions: Set<Permission>) {
+        self.principal = principal
+        self.permissions = permissions
+    }
 }
 
-struct AuthConfig: Sendable {
+public struct AuthConfig: Sendable {
     /// Bootstrap token hashes from env/file → the role names they
     /// confer (admin key ⇒ `admin`, inference key ⇒ `member`). These
     /// are synthetic principals with NO DB user (no scoped
@@ -37,14 +42,14 @@ struct AuthConfig: Sendable {
     /// OR any DB user. Adding the FIRST credential to an already-
     /// running open daemon needs a restart to begin enforcing.
     private let enabled: Bool
-    var isEnabled: Bool { enabled }
+    public var isEnabled: Bool { enabled }
     /// Global upper bound on a managed token's age in days (M36.1), 0 ⇒
     /// no cap. Enforced at validation relative to the token's `created`,
     /// so lowering it retroactively shortens every token's lifetime.
     /// Bootstrap (env/file) hashes are unaffected — they have no row.
     private let tokenMaxAgeDays: Int
 
-    init(
+    public init(
         hashes: [[UInt8]: [String]] = [:],
         store: AthenaStore? = nil,
         enabled: Bool? = nil,
@@ -57,7 +62,7 @@ struct AuthConfig: Sendable {
     }
 
     /// Bind the DB and (re)compute `enabled` including DB rows.
-    func bound(
+    public func bound(
         to store: AthenaStore, dbHasCredentials: Bool,
         tokenMaxAgeDays: Int = 0
     ) -> AuthConfig {
@@ -67,7 +72,7 @@ struct AuthConfig: Sendable {
             tokenMaxAgeDays: tokenMaxAgeDays)
     }
 
-    static func sha(_ s: String) -> [UInt8] {
+    public static func sha(_ s: String) -> [UInt8] {
         Array(SHA256.hash(data: Data(s.utf8)))
     }
 
@@ -75,7 +80,7 @@ struct AuthConfig: Sendable {
     /// ONCE) plus its at-rest SHA-256. The single key-generation path,
     /// shared by `athena auth token add` (offline CLI) and
     /// `POST /api/tokens` (M16.4) — no secret is ever persisted.
-    static func mintToken() -> (key: String, hash: Data) {
+    public static func mintToken() -> (key: String, hash: Data) {
         let raw = SymmetricKey(size: .bits256).withUnsafeBytes {
             Data($0)
         }
@@ -88,13 +93,13 @@ struct AuthConfig: Sendable {
         return (key, Data(sha(key)))
     }
 
-    static func hex(_ bytes: [UInt8]) -> String {
+    public static func hex(_ bytes: [UInt8]) -> String {
         bytes.map { String(format: "%02x", $0) }.joined()
     }
 
     /// Decode a `sha256:<64-hex>` entry to its 32 bytes; nil if it
     /// isn't that form (⇒ caller treats the token as a raw key).
-    static func hashEntry(_ token: String) -> [UInt8]? {
+    public static func hashEntry(_ token: String) -> [UInt8]? {
         let p = "sha256:"
         guard token.hasPrefix(p) else { return nil }
         let hexStr = token.dropFirst(p.count)
@@ -119,7 +124,7 @@ struct AuthConfig: Sendable {
     /// comma-separated). Env augments the file. `admin` ⇒ the
     /// `admin` role, `inference` ⇒ the `member` role; a key listed
     /// twice gets the union of its roles.
-    static func load(
+    public static func load(
         file: String?, env: [String: String],
         log: Logger
     ) -> AuthConfig {
@@ -202,7 +207,7 @@ struct AuthConfig: Sendable {
     /// the lookup key is already a SHA-256, so byte-probing is
     /// infeasible) → owning user → user roles ∩ token scope. Unknown
     /// role names contribute nothing (fail-closed).
-    func resolve(bearer token: String) async -> AuthSubject? {
+    public func resolve(bearer token: String) async -> AuthSubject? {
         let presented = Self.sha(token)
         var bootRoles: Set<String> = []
         var matched = false
@@ -246,7 +251,7 @@ struct AuthConfig: Sendable {
 
     /// Effective permissions for a logged-in WebUI user (session
     /// cookie path). Roles drive access — no token scoping applies.
-    func permissions(forUser username: String) async
+    public func permissions(forUser username: String) async
         -> Set<Permission>
     {
         guard let store else { return [] }
@@ -254,7 +259,7 @@ struct AuthConfig: Sendable {
         return RBAC.permissions(forRoles: roles)
     }
 
-    static func constantTimeEqual(_ a: [UInt8], _ b: [UInt8]) -> Bool {
+    public static func constantTimeEqual(_ a: [UInt8], _ b: [UInt8]) -> Bool {
         guard a.count == b.count else { return false }
         var diff: UInt8 = 0
         for i in 0..<a.count { diff |= a[i] ^ b[i] }
@@ -262,7 +267,7 @@ struct AuthConfig: Sendable {
     }
 
     /// Fail-safe: refuse to run wide-open on a non-loopback bind.
-    func validateStartup(listenHost: String) throws {
+    public func validateStartup(listenHost: String) throws {
         let loopback: Set<String> = [
             "127.0.0.1", "::1", "localhost",
         ]
@@ -272,9 +277,9 @@ struct AuthConfig: Sendable {
     }
 }
 
-enum AuthStartupError: Error, CustomStringConvertible {
+public enum AuthStartupError: Error, CustomStringConvertible {
     case openOnNonLoopback(String)
-    var description: String {
+    public var description: String {
         switch self {
         case .openOnNonLoopback(let h):
             return
@@ -293,8 +298,8 @@ enum AuthStartupError: Error, CustomStringConvertible {
 /// fails closed to `.inference` (the minimum authenticated
 /// capability). Per-owner queue isolation is still enforced in the
 /// handlers (M12.6) on top of the `.queueSubmit` gate.
-enum AuthPolicy {
-    static func required(method: String, path: String)
+public enum AuthPolicy {
+    public static func required(method: String, path: String)
         -> Permission?
     {
         if path == "/healthz" || path == "/openapi.json"
@@ -362,11 +367,16 @@ enum AuthPolicy {
     }
 }
 
-struct AuthMiddleware<Context: RequestContext>: RouterMiddleware {
+public struct AuthMiddleware<Context: RequestContext>: RouterMiddleware {
     let config: AuthConfig
     let session: Session
 
-    func handle(
+    public init(config: AuthConfig, session: Session) {
+        self.config = config
+        self.session = session
+    }
+
+    public func handle(
         _ request: Request, context: Context,
         next: (Request, Context) async throws -> Response
     ) async throws -> Response {

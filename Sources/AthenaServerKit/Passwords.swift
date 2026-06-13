@@ -6,13 +6,13 @@ import Foundation
 /// tokens (plain SHA-256 is fine there). CommonCrypto = macOS system,
 /// zero new dependency. Only salt+hash+iters are persisted (SQLite);
 /// the password is never stored.
-enum Passwords {
+public enum Passwords {
     /// OWASP-floor iteration count for PBKDF2-HMAC-SHA256 (2023+).
-    static let defaultIterations = 210_000
-    static let saltLen = 16
-    static let hashLen = 32
+    public static let defaultIterations = 210_000
+    public static let saltLen = 16
+    public static let hashLen = 32
 
-    static func randomSalt() -> Data {
+    public static func randomSalt() -> Data {
         var b = Data(count: saltLen)
         _ = b.withUnsafeMutableBytes {
             SecRandomCopyBytes(
@@ -21,7 +21,7 @@ enum Passwords {
         return b
     }
 
-    static func derive(
+    public static func derive(
         password: String, salt: Data, iters: Int
     ) -> Data {
         let pw = Array(password.utf8)
@@ -44,7 +44,7 @@ enum Passwords {
     }
 
     /// Constant-time verify against a stored salt/hash/iters.
-    static func verify(
+    public static func verify(
         password: String, salt: Data, hash: Data, iters: Int
     ) -> Bool {
         let got = Array(derive(
@@ -58,7 +58,7 @@ enum Passwords {
     /// otherwise let an attacker enumerate valid usernames (A10). All
     /// accounts are hashed at `defaultIterations`, so the cost matches.
     /// The result is intentionally discarded.
-    static func dummyVerify(password: String) {
+    public static func dummyVerify(password: String) {
         let dummySalt = Data(repeating: 0, count: saltLen)
         _ = derive(
             password: password, salt: dummySalt,

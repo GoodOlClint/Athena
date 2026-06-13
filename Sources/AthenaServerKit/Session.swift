@@ -5,14 +5,14 @@ import Foundation
 /// `user:expiry` token, HMAC-SHA256 with a per-process random
 /// secret (sessions invalidate on daemon restart — acceptable for
 /// an appliance, and a security plus). No server-side session store.
-struct Session: Sendable {
-    static let cookieName = "athena_session"
+public struct Session: Sendable {
+    public static let cookieName = "athena_session"
     /// 12h default lifetime.
-    static let ttl: TimeInterval = 12 * 3600
+    public static let ttl: TimeInterval = 12 * 3600
 
     private let secret: SymmetricKey
 
-    init() { secret = SymmetricKey(size: .bits256) }
+    public init() { secret = SymmetricKey(size: .bits256) }
 
     private static func b64url(_ d: Data) -> String {
         d.base64EncodedString()
@@ -28,7 +28,7 @@ struct Session: Sendable {
     }
 
     /// `<b64url(payload)>.<b64url(hmac)>`, payload = `user:expiry`.
-    func mint(user: String, now: Date = Date()) -> String {
+    public func mint(user: String, now: Date = Date()) -> String {
         let exp = Int(now.addingTimeInterval(Self.ttl)
             .timeIntervalSince1970)
         let payload = Data("\(user):\(exp)".utf8)
@@ -38,7 +38,7 @@ struct Session: Sendable {
     }
 
     /// Constant-time verify (HMAC + unexpired). Returns the user.
-    func validate(_ token: String, now: Date = Date()) -> String? {
+    public func validate(_ token: String, now: Date = Date()) -> String? {
         let parts = token.split(
             separator: ".", maxSplits: 1,
             omittingEmptySubsequences: false)
@@ -69,14 +69,14 @@ struct Session: Sendable {
     /// read, no CORS) so it cannot forge the field. Bound to the
     /// per-process secret (rotates on restart, like the session) and
     /// to the user (a different account's token won't validate).
-    func csrf(user: String) -> String {
+    public func csrf(user: String) -> String {
         let mac = HMAC<SHA256>.authenticationCode(
             for: Data("csrf:\(user)".utf8), using: secret)
         return Self.b64url(Data(mac))
     }
 
     /// Constant-time CSRF check (HMAC verify on the fixed digest).
-    func validateCSRF(_ token: String?, user: String) -> Bool {
+    public func validateCSRF(_ token: String?, user: String) -> Bool {
         guard let token, let mac = Self.unb64url(token) else {
             return false
         }
@@ -86,7 +86,7 @@ struct Session: Sendable {
     }
 
     /// Read our cookie out of a `Cookie:` header value.
-    static func token(fromCookieHeader header: String?) -> String? {
+    public static func token(fromCookieHeader header: String?) -> String? {
         guard let header else { return nil }
         for pair in header.split(separator: ";") {
             let kv = pair.split(
@@ -106,12 +106,12 @@ struct Session: Sendable {
     /// daemon itself serves TLS; behind a TLS-terminating reverse proxy
     /// the daemon speaks plaintext, so either enable daemon TLS too or
     /// have the proxy add `Secure` on the way out.
-    static func setCookie(_ value: String, secure: Bool) -> String {
+    public static func setCookie(_ value: String, secure: Bool) -> String {
         "\(cookieName)=\(value); HttpOnly; SameSite=Strict; "
             + "Path=/; Max-Age=\(Int(ttl))"
             + (secure ? "; Secure" : "")
     }
-    static func clearCookie(secure: Bool) -> String {
+    public static func clearCookie(secure: Bool) -> String {
         "\(cookieName)=; HttpOnly; SameSite=Strict; Path=/; "
             + "Max-Age=0"
             + (secure ? "; Secure" : "")

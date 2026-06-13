@@ -63,6 +63,7 @@ Read `docs/decisions/` before architectural changes — particularly anything th
 - [`005-remove-secrets-from-argv.md`](docs/decisions/005-remove-secrets-from-argv.md) — hard-remove `--password` from argv; prompt / `--password-stdin` / env only (breaking CLI change). M66 (audit B2/K7/K13).
 - [`006-vector-store-owner-scoping.md`](docs/decisions/006-vector-store-owner-scoping.md) — add a nullable `owner` column to the vector store; query/get/delete owner-filtered, admin sees all, legacy NULL rows admin-only (additive migration). M66 (audit H5).
 - [`007-api-metering-and-quotas.md`](docs/decisions/007-api-metering-and-quotas.md) — bring native `/api` metering (#8) + token-budget quotas (#9) into the program as their own milestone; NA8 single-resolution folds in. M69+ (audit NA8).
+- [`008-testable-server-seam.md`](docs/decisions/008-testable-server-seam.md) — extract the daemon's pure HTTP-server primitives (auth/ratelimit/concurrency/session/multipart/metrics/logging) into a new MLX-free `AthenaServerKit` library so they're unit-testable under `swift test`; chosen over `@testable import` of the `@main` executable (which would co-link the whole MLX/Metal graph). Pure refactor. Implemented M70.1 v0.10.144 (audit NA2/NB4).
 
 ## Build / run / test
 

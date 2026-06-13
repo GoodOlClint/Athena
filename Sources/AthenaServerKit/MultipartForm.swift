@@ -4,23 +4,29 @@ import Foundation
 /// `/v1/audio/transcriptions` (one binary `file` part + a few short
 /// text fields). Not a general RFC 7578 implementation: no nested
 /// multipart, no transfer-encoding. Hand-rolled to avoid a dependency.
-struct MultipartForm {
-    struct Part {
-        let name: String
-        let filename: String?
-        let data: Data
+public struct MultipartForm {
+    public struct Part {
+        public let name: String
+        public let filename: String?
+        public let data: Data
+
+        public init(name: String, filename: String?, data: Data) {
+            self.name = name
+            self.filename = filename
+            self.data = data
+        }
     }
-    let parts: [Part]
+    public let parts: [Part]
 
     /// Cap on the number of inter-boundary segments parsed from one body.
     /// A real transcription form is one `file` part plus a handful of
     /// short text fields; this bounds a body packed with boundaries from
     /// spawning unbounded segment/part work (A9).
-    static let maxParts = 256
+    public static let maxParts = 256
 
     /// `boundary` is the value from the `Content-Type` header
     /// (`multipart/form-data; boundary=...`).
-    init?(body: Data, boundary: String) {
+    public init?(body: Data, boundary: String) {
         let dashBoundary = Data("--\(boundary)".utf8)
         let crlf = Data("\r\n".utf8)
         let headerSep = Data("\r\n\r\n".utf8)
@@ -95,18 +101,18 @@ struct MultipartForm {
         return v
     }
 
-    func first(_ name: String) -> Part? {
+    public func first(_ name: String) -> Part? {
         parts.first { $0.name == name }
     }
 
-    func text(_ name: String) -> String? {
+    public func text(_ name: String) -> String? {
         first(name).flatMap { String(data: $0.data, encoding: .utf8) }
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
     }
 
     /// All values supplied for a (possibly repeated) field, e.g.
     /// `timestamp_granularities[]`.
-    func texts(_ name: String) -> [String] {
+    public func texts(_ name: String) -> [String] {
         parts.filter { $0.name == name }.compactMap {
             String(data: $0.data, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -114,7 +120,7 @@ struct MultipartForm {
     }
 
     /// Parse the boundary token out of a Content-Type header value.
-    static func boundary(fromContentType ct: String) -> String? {
+    public static func boundary(fromContentType ct: String) -> String? {
         for token in ct.split(separator: ";") {
             let t = token.trimmingCharacters(in: .whitespaces)
             if t.lowercased().hasPrefix("boundary=") {

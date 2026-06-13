@@ -18,25 +18,25 @@ import NIOCore
 /// empty bucket is rejected with the whole seconds until the next token
 /// (the Retry-After hint). Buckets are created lazily and bounded by the
 /// distinct-principal count (finite: the seeded users + bootstrap keys).
-actor RateLimiter {
+public actor RateLimiter {
     private struct Bucket {
         var tokens: Double
         var last: Double
     }
     /// Sustained admitted rate (tokens refilled per second).
-    let rate: Double
+    public let rate: Double
     /// Bucket capacity — the largest instantaneous burst above `rate`.
-    let burst: Double
+    public let burst: Double
     private var buckets: [String: Bucket] = [:]
 
-    init(rate: Double, burst: Double) {
+    public init(rate: Double, burst: Double) {
         self.rate = rate
         self.burst = max(1, burst)
     }
 
     /// Consume one token for `principal`. Returns nil when admitted, or
     /// the Retry-After (whole seconds, ≥1) when the bucket is empty.
-    func take(_ principal: String, now: Double) -> Int? {
+    public func take(_ principal: String, now: Double) -> Int? {
         var b = buckets[principal] ?? Bucket(tokens: burst, last: now)
         let elapsed = max(0, now - b.last)
         b.tokens = min(burst, b.tokens + elapsed * rate)
@@ -51,11 +51,16 @@ actor RateLimiter {
     }
 }
 
-struct RateLimitMiddleware<Context: RequestContext>: RouterMiddleware {
+public struct RateLimitMiddleware<Context: RequestContext>: RouterMiddleware {
     let limiter: RateLimiter
     let auth: AuthConfig
 
-    func handle(
+    public init(limiter: RateLimiter, auth: AuthConfig) {
+        self.limiter = limiter
+        self.auth = auth
+    }
+
+    public func handle(
         _ request: Request, context: Context,
         next: (Request, Context) async throws -> Response
     ) async throws -> Response {
@@ -95,7 +100,7 @@ struct RateLimitMiddleware<Context: RequestContext>: RouterMiddleware {
     /// Paths subject to rate limiting: the inference + admin API
     /// surface. `/healthz`, `/metrics`, and the WebUI (`/ui*`) are exempt
     /// — operator/dashboard traffic, not billable work.
-    static func throttled(_ path: String) -> Bool {
+    public static func throttled(_ path: String) -> Bool {
         if path == "/healthz" || path == "/metrics" { return false }
         if path == "/ui" || path.hasPrefix("/ui/") { return false }
         return true
@@ -131,24 +136,24 @@ struct RateLimitMiddleware<Context: RequestContext>: RouterMiddleware {
 /// reserves a slot in BOTH dimensions atomically (so a per-principal
 /// rejection never burns a global slot); the caller MUST `release`
 /// exactly once for every successful `acquire`.
-actor ConcurrencyLimiter {
+public actor ConcurrencyLimiter {
     /// Max simultaneous in-flight requests across all principals
     /// (0 = unlimited).
-    let global: Int
+    public let global: Int
     /// Max simultaneous in-flight requests for any single principal
     /// (0 = unlimited).
-    let perPrincipal: Int
+    public let perPrincipal: Int
     private var globalInFlight = 0
     private var perPrincipalInFlight: [String: Int] = [:]
 
-    init(global: Int, perPrincipal: Int) {
+    public init(global: Int, perPrincipal: Int) {
         self.global = global
         self.perPrincipal = perPrincipal
     }
 
     /// Reserve one slot for `principal`. Returns true if admitted (the
     /// caller owns a slot it must release); false if either cap is full.
-    func acquire(_ principal: String) -> Bool {
+    public func acquire(_ principal: String) -> Bool {
         if global > 0, globalInFlight >= global { return false }
         if perPrincipal > 0,
             (perPrincipalInFlight[principal] ?? 0) >= perPrincipal
@@ -160,7 +165,7 @@ actor ConcurrencyLimiter {
         return true
     }
 
-    func release(_ principal: String) {
+    public func release(_ principal: String) {
         globalInFlight = max(0, globalInFlight - 1)
         if let n = perPrincipalInFlight[principal] {
             if n <= 1 { perPrincipalInFlight[principal] = nil } else {
@@ -170,11 +175,16 @@ actor ConcurrencyLimiter {
     }
 }
 
-struct ConcurrencyMiddleware<Context: RequestContext>: RouterMiddleware {
+public struct ConcurrencyMiddleware<Context: RequestContext>: RouterMiddleware {
     let limiter: ConcurrencyLimiter
     let auth: AuthConfig
 
-    func handle(
+    public init(limiter: ConcurrencyLimiter, auth: AuthConfig) {
+        self.limiter = limiter
+        self.auth = auth
+    }
+
+    public func handle(
         _ request: Request, context: Context,
         next: (Request, Context) async throws -> Response
     ) async throws -> Response {

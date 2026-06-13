@@ -2,6 +2,7 @@ import AthenaCore
 import AthenaDeploy
 import AthenaEmbedding
 import AthenaLLM
+import AthenaServerKit
 import AthenaStore
 import AthenaStructured
 import AthenaTranscription
