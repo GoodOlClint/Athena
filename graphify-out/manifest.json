@@ -155,8 +155,8 @@
     "semantic_hash": "169720298367b5f17aca7c47f87e2b54"
   },
   "Sources/AthenaLLM/MLXLLMModule.swift": {
-    "mtime": 1781311417.462309,
-    "ast_hash": "890984ab9908cb1142fdbf4acafb2493",
+    "mtime": 1781313824.5871406,
+    "ast_hash": "ff32ad160e9e2275c4ab87066cc7595e",
     "semantic_hash": ""
   },
   "Sources/AthenaLLM/ModelConfigInfo.swift": {
@@ -425,8 +425,8 @@
     "semantic_hash": "d16404614855c59c2001089f41c5bd78"
   },
   "Sources/athena/Athena.swift": {
-    "mtime": 1781311506.3407853,
-    "ast_hash": "84b407beb0b1dace71903fbe710cf9db",
+    "mtime": 1781313894.8370166,
+    "ast_hash": "8d4ac92590d198d1745d83b19b170f21",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Audit.swift": {
@@ -670,8 +670,8 @@
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/MLXLLMModuleTests.swift": {
-    "mtime": 1781311493.646688,
-    "ast_hash": "00d082dba3880e2c6ff4f737c827d37f",
+    "mtime": 1781313887.2577662,
+    "ast_hash": "b1550eba5a8456d322e6a78ae22a7547",
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/MemoryGovernorTests.swift": {
@@ -1210,8 +1210,8 @@
     "semantic_hash": ""
   },
   "docs/audit-remediation-plan.md": {
-    "mtime": 1781311729.37234,
-    "ast_hash": "f3113d5c2ef0cf5ad0d4341a8f08eaaf",
+    "mtime": 1781314585.7448967,
+    "ast_hash": "13a7c5342bbff1d3b71402f2535e72a2",
     "semantic_hash": ""
   },
   "docs/decisions/003-rust-shim-panic-strategy.md": {
