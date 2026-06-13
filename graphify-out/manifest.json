@@ -15,9 +15,9 @@
     "semantic_hash": ""
   },
   "Sources/AthenaCore/AthenaProxy.swift": {
-    "mtime": 1779575765.3178856,
-    "ast_hash": "d51f2929e03c0d496cf051fc19d8176c",
-    "semantic_hash": "d51f2929e03c0d496cf051fc19d8176c"
+    "mtime": 1781360996.6981468,
+    "ast_hash": "d49f8cadc242b965e49d1f488a8bcc59",
+    "semantic_hash": ""
   },
   "Sources/AthenaCore/DecodeProgress.swift": {
     "mtime": 1780419005.9695058,
@@ -425,8 +425,8 @@
     "semantic_hash": "d16404614855c59c2001089f41c5bd78"
   },
   "Sources/athena/Athena.swift": {
-    "mtime": 1781360720.8157907,
-    "ast_hash": "3a4c6876e2f091593f971027a3b6511c",
+    "mtime": 1781361115.446682,
+    "ast_hash": "e1beb8ff71516eb543dc55997e76a736",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Audit.swift": {
@@ -605,9 +605,9 @@
     "semantic_hash": "5b0c2d121ead13336a5df89cc8681417"
   },
   "Tests/AthenaCoreTests/AthenaProxyTests.swift": {
-    "mtime": 1779117413.459096,
-    "ast_hash": "c09b52ed8a99053473b9fa1984c76289",
-    "semantic_hash": "c09b52ed8a99053473b9fa1984c76289"
+    "mtime": 1781361091.5357902,
+    "ast_hash": "5f645606c5f9c0c6394e913ac4d16444",
+    "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/AthenaStoreTests.swift": {
     "mtime": 1781320414.5114894,
@@ -645,8 +645,8 @@
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/MemoryGovernorTests.swift": {
-    "mtime": 1781360664.8098328,
-    "ast_hash": "949cf096fd52a0acaa6f7c75739f37b2",
+    "mtime": 1781361048.0975156,
+    "ast_hash": "3254c75fbb476d874af4c4e2e79c96e2",
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/ModelAllowlistTests.swift": {
@@ -675,9 +675,9 @@
     "semantic_hash": "e437ef03d79b49e31e1f33443d9ef06c"
   },
   "Tests/AthenaCoreTests/RBACTests.swift": {
-    "mtime": 1779127113.3888972,
-    "ast_hash": "58c5194382554802f403f5ff87e51ea7",
-    "semantic_hash": "58c5194382554802f403f5ff87e51ea7"
+    "mtime": 1781361073.703128,
+    "ast_hash": "1fb95ece458e04d81d2778c80ac2afef",
+    "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/RetryPolicyTests.swift": {
     "mtime": 1779194251.2887614,
@@ -1180,8 +1180,8 @@
     "semantic_hash": ""
   },
   "docs/audit-remediation-plan.md": {
-    "mtime": 1781360733.3624997,
-    "ast_hash": "d9e55edeb647467e5b66c475a04395b6",
+    "mtime": 1781361145.204742,
+    "ast_hash": "356e1db885b35b8bb9580974fa9c4125",
     "semantic_hash": ""
   },
   "docs/decisions/003-rust-shim-panic-strategy.md": {
