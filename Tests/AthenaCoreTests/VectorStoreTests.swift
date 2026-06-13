@@ -298,4 +298,74 @@ final class VectorStoreTests: XCTestCase {
             "MLX cache pool drifted \(after - baseline) bytes "
             + "above baseline after 32 vector queries (M50.5 leak)")
     }
+
+    // MARK: - M70.2 L3/L4 — ranking + dim-mismatch on a CI path
+    //
+    // The cosine SCORING is MLX (gated above). The H5 owner-filter + H7
+    // id-tie-break ranking is pure Swift, extracted to `rankTopK`, so its
+    // contract is unit-testable on CI without a Metal device.
+
+    /// L3 — owner-scoping + the H7 stable id tie-break + top-k, over fixture
+    /// scores (no MLX). CI-safe.
+    func testRankTopKTieBreakAndScopingCI() {
+        typealias Row = (id: String, vec: [Float], meta: Data?, owner: String?)
+        let rows: [Row] = [
+            ("b", [], nil, "u:alice"),
+            ("a", [], nil, "u:alice"),
+            ("c", [], nil, "u:bob"),
+            ("d", [], nil, nil),  // legacy NULL-owner row
+        ]
+        // a and b tie at 0.5 → ascending-id tie-break (a before b); c highest.
+        let scores: [Float] = [/*b*/ 0.5, /*a*/ 0.5, /*c*/ 0.9, /*d*/ 0.7]
+
+        let admin = VectorStore.Caller(
+            principal: "u:x", isAdmin: true, enforced: true)
+        let all = VectorStore.rankTopK(
+            rows: rows, scores: scores, k: 10, caller: admin)
+        XCTAssertEqual(
+            all.map(\.id), ["c", "d", "a", "b"],
+            "score desc, equal scores broken by ascending id")
+        // Stable: a second identical call yields the identical order.
+        let all2 = VectorStore.rankTopK(
+            rows: rows, scores: scores, k: 10, caller: admin)
+        XCTAssertEqual(all2.map(\.id), all.map(\.id))
+        // Top-k is a prefix of the full ranking.
+        let top2 = VectorStore.rankTopK(
+            rows: rows, scores: scores, k: 2, caller: admin)
+        XCTAssertEqual(top2.map(\.id), ["c", "d"])
+
+        // Scoped tenant (alice) sees only her rows — bob's and the NULL-owner
+        // row are filtered out; her two tie at 0.5 → id asc.
+        let alice = VectorStore.Caller(
+            principal: "u:alice", isAdmin: false, enforced: true)
+        let aliceHits = VectorStore.rankTopK(
+            rows: rows, scores: scores, k: 10, caller: alice)
+        XCTAssertEqual(aliceHits.map(\.id), ["a", "b"])
+        XCTAssertEqual(aliceHits.first?.score, 0.5)
+
+        // Auth-off (.unscoped) sees everything, including the NULL-owner row.
+        let un = VectorStore.rankTopK(
+            rows: rows, scores: scores, k: 10, caller: .unscoped)
+        XCTAssertEqual(Set(un.map(\.id)), ["a", "b", "c", "d"])
+    }
+
+    /// L4 — `query` short-circuits to `[]` on a dim mismatch / k<=0 / empty
+    /// store, BEFORE constructing any MLXArray, so it is CI-safe (no Metal).
+    func testQueryDimMismatchReturnsEmptyCI() async throws {
+        let (s, url) = try freshStore()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let vs = VectorStore(store: s, capBytes: 1 << 20)
+        try await vs.upsert(id: "a", vector: [1, 0, 0], metadata: nil)  // dim 3
+
+        let mismatch = await vs.query(vector: [1, 0], k: 5)  // dim 2 ≠ 3
+        XCTAssertTrue(mismatch.isEmpty, "wrong-dim query returns []")
+        let zeroK = await vs.query(vector: [1, 0, 0], k: 0)
+        XCTAssertTrue(zeroK.isEmpty, "k<=0 returns []")
+
+        let (s2, url2) = try freshStore()
+        defer { try? FileManager.default.removeItem(at: url2) }
+        let empty = VectorStore(store: s2, capBytes: 1 << 20)
+        let none = await empty.query(vector: [1, 0, 0], k: 5)
+        XCTAssertTrue(none.isEmpty, "empty store returns []")
+    }
 }

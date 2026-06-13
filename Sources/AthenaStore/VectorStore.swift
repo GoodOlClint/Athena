@@ -130,10 +130,33 @@ public actor VectorStore {
     /// H5: may `caller` see a row owned by `rowOwner`? Admin / auth-off
     /// see all; a scoped caller sees only its own rows; a legacy NULL-owner
     /// row is admin-only (never matches a scoped caller).
-    private func canSee(_ rowOwner: String?, _ caller: Caller) -> Bool {
+    static func canSee(_ rowOwner: String?, _ caller: Caller) -> Bool {
         if !caller.enforced || caller.isAdmin { return true }
         guard let rowOwner else { return false }
         return rowOwner == caller.principal
+    }
+
+    /// H5 + H7 ranking core (pure, no MLX): owner-filter the scored rows, sort
+    /// by score DESC with an ascending-id tie-break so equal-score ties are
+    /// STABLE (the pre-H7 `sorted` was unstable → ties reordered run-to-run),
+    /// then take the top `k`. Extracted from `query` so the
+    /// ranking/tie-break/owner-scoping contract is unit-testable on CI without
+    /// a Metal device (M70.2 L3); `query` calls it with the MLX-computed
+    /// `scores` (one per cache row, in cache order).
+    static func rankTopK(
+        rows: [(id: String, vec: [Float], meta: Data?, owner: String?)],
+        scores: [Float], k: Int, caller: Caller
+    ) -> [Hit] {
+        var hits: [Hit] = []
+        hits.reserveCapacity(rows.count)
+        for i in rows.indices where canSee(rows[i].owner, caller) {
+            hits.append(
+                Hit(id: rows[i].id, score: scores[i], metadata: rows[i].meta))
+        }
+        hits.sort {
+            $0.score != $1.score ? $0.score > $1.score : $0.id < $1.id
+        }
+        return Array(hits.prefix(k))
     }
 
     private var dim: Int { cache.first?.vec.count ?? 0 }
@@ -155,7 +178,7 @@ public actor VectorStore {
         // in O(1) via `idIndex` instead of an O(n) scan.
         let existingIndex = idIndex[id]
         let existing = existingIndex.map { cache[$0] }
-        if let existing, !canSee(existing.owner, caller) {
+        if let existing, !Self.canSee(existing.owner, caller) {
             throw VectorError.ownerConflict(id: id)
         }
         let isNew = existing == nil
@@ -206,7 +229,7 @@ public actor VectorStore {
         // H5: a non-owner gets the same false (⇒ 404) as a missing id, so
         // existence of another tenant's vector isn't revealed.
         if let existing = cache.first(where: { $0.id == id }),
-            !canSee(existing.owner, caller)
+            !Self.canSee(existing.owner, caller)
         {
             return false
         }
@@ -263,17 +286,9 @@ public actor VectorStore {
         MLX.Memory.clearCache()
         // H5 + H7 — keep only the caller's visible rows, ranked by score with
         // an id tie-break so equal-score ties are stable (the prior `sorted`
-        // was unstable, so ties reordered run-to-run).
-        var hits: [Hit] = []
-        hits.reserveCapacity(n)
-        for i in 0..<n where canSee(cache[i].owner, caller) {
-            hits.append(
-                Hit(id: cache[i].id, score: s[i], metadata: cache[i].meta))
-        }
-        hits.sort {
-            $0.score != $1.score ? $0.score > $1.score : $0.id < $1.id
-        }
-        return Array(hits.prefix(k))
+        // was unstable, so ties reordered run-to-run). Pure ranking core,
+        // extracted for CI testability (M70.2 L3).
+        return Self.rankTopK(rows: cache, scores: s, k: k, caller: caller)
     }
 
     /// Age-based retention (M34.2): delete persisted vectors whose
@@ -297,7 +312,7 @@ public actor VectorStore {
     /// the shared global cap.
     public func stats(caller: Caller = .unscoped) async -> Stats {
         await ensureLoaded()
-        let visible = cache.filter { canSee($0.owner, caller) }
+        let visible = cache.filter { Self.canSee($0.owner, caller) }
         let d = dim
         return Stats(
             count: visible.count, dim: d,
