@@ -147,12 +147,13 @@ Re-verify while here: B6*, B7*, B8*, B10–B13, B15*, B18–B23, H6*, H14*, J5, 
 - [x] NF7 `gatedDeltaUpdate` routes a non-multiple-of-32 `Dk` (linear_key_head_dim) to the `gatedDeltaOps` fallback (correct for any Dk) instead of the kernel, whose `n_per_t = Dk/32` over 32 simd lanes would silently truncate the trailing `Dk % 32` state dims. Stock Qwen3.5 Dk=192 (÷32) keeps the kernel path. (Finding said ÷32, not ÷8 — kernel reality.) (v0.10.129)
 - Re-verified while here: **F6** (createSSMMask per-call alloc incl. n==1) — confirmed still valid; it's a substrate-side perf item (not an AthenaModels function), correctly deferred to M69 (perf), not a correctness fix.
 
-### M67.2 — Embeddings
-- [ ] NI1 (High) pass attention mask to pooling (subsumes baseline I1's id==pad case — mask from real row lengths)
-- [ ] I4 reject empty input (NaN vector today)
-- [ ] NI3 governor reload honors the rebound model, not the default
-- [ ] NI2 stub/MLX model-id resolution parity
-- [ ] I5/I6 pooling flags from model config; produced-dim validation
+### M67.2 — Embeddings ✅ v0.10.130
+- [x] NI1 (High) + I1 + I4: the per-bucket mask is now built from each row's REAL token length (floored to ≥1 so an empty input can't make mean-pool divide by zero → NaN), not pad-equality — and the SAME mask is passed to `ctx.pooling(mask:)`, not just the forward. Fixes: pooling over pad positions on any mixed-length batch (mean) / selecting the final PADDED token (last-token), and a real token whose id==pad (id 0 when eos nil) no longer being masked (v0.10.130)
+- [x] NI3 added a `desiredName` staging field to `MLXEmbeddingModule` (+ stub parity), set by rebind/embed and honored by `load(reservation:)` as `desiredName ?? residentId ?? defaultId` (survives `unload()`); a governor evict→reload no longer silently reverts the slot to the default model. Mirrors the LLM module's M62 cold-load seam (v0.10.130)
+- [x] NI2 `StubEmbeddingModule` now resolves the request `model` via `canonicalByStoreIdentity` (bare basename OR full HF id), identical to `MLXEmbeddingModule` — a bare store-dir name no longer 400s under `--engine stub` while succeeding under `--engine mlx`. New CI-safe `testBareStoreNameResolvesForParityWithMLX` (v0.10.130)
+- [x] I5 stopped hardcoding `applyLayerNorm: true` (now `false`): the substrate's parameterless `MLXFast.layerNorm` is not part of canonical sentence-transformers pooling for the configured models (bge-small, Qwen3-Embedding), so Athena was producing non-canonical vectors. `normalize: true` kept (L2 contract). **Output change**: every produced vector differs vs ≤v0.10.129 → persisted `/v1/vectors` indexes must be re-embedded (user-approved) (v0.10.130)
+- [x] I6 produced-vector width is validated against `ctx.pooling.dimension` (when configured) and rejected if zero-length, before storing — a wrong/mis-sanitized model fails loudly instead of silently storing wrong-width vectors (v0.10.130)
+- Re-verified while here: NI4 per-input token ceiling already shipped (M65.3, the `maxInputTokens` guard); I7 (canonicalization-before-resident-fast-path, perf) and I8 (stub empty-string all-zero vector) remain open Low items, deferred (I8 is stub-only cosmetic; I7 is perf → M69-class).
 
 ### M67.3 — Sampling & structured determinism
 - [ ] C1 (High) stable top_k/top_p sort (index tie-break) — seed reproducibility

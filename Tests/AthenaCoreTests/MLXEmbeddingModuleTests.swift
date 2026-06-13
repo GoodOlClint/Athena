@@ -48,6 +48,22 @@ final class StubEmbeddingModuleTests: XCTestCase {
             XCTAssertEqual(e.httpStatus, 400)
         }
     }
+
+    /// NI2: the stub now resolves a request's `model` by store-dir identity
+    /// (bare basename OR full HF id), exactly like the real MLX module, so
+    /// stub-validated tests exercise the same id-acceptance as production.
+    /// Previously the bare name 400'd under --engine stub but succeeded
+    /// under --engine mlx.
+    func testBareStoreNameResolvesForParityWithMLX() async throws {
+        let m = StubEmbeddingModule(
+            modelIds: ["BAAI/bge-small-en-v1.5", "Qwen/Qwen3-Embedding-4B"])
+        // Naming the model by its bare store-dir basename now resolves to
+        // the configured full HF id (was modelNotAvailable pre-NI2).
+        let batch = try await m.embed(["hi"], model: "Qwen3-Embedding-4B")
+        XCTAssertEqual(batch.model, "Qwen/Qwen3-Embedding-4B")
+        let r = await m.residentModelId()
+        XCTAssertEqual(r, "Qwen/Qwen3-Embedding-4B")
+    }
 }
 
 /// MLX module — construction/accounting only (loading downloads a model,

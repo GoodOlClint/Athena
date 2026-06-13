@@ -40,6 +40,12 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
     private var container: EmbedderModelContainer?
     /// The id currently resident in `container` (nil ⇒ nothing loaded).
     private var residentId: String?
+    /// NI3 — the operator's last selection (rebind/embed), staged so a
+    /// governor evict→reload restores it instead of silently reverting the
+    /// slot to the default. Survives `unload()`; `load(reservation:)`
+    /// honors `desiredName ?? residentId ?? defaultId`, mirroring the LLM
+    /// module's M62 cold-load-binds-requested-model seam.
+    private var desiredName: String?
     /// Real weight footprint, summed at load by walking
     /// `model.parameters().flattened()`. Surfaced via `residentBytes` so
     /// `/healthz` reports what the loaded model actually holds instead
@@ -86,7 +92,8 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
 
     public func load(reservation: MemoryReservation) async throws {
         if container != nil { return }
-        try await loadContainer(defaultId)
+        // NI3: honor the staged selection on a cold/reload, not the default.
+        try await loadContainer(desiredName ?? residentId ?? defaultId)
     }
 
     public func unload() async {
@@ -114,6 +121,8 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
             throw AthenaError.modelNotAvailable(
                 requested: requested, available: allowedIds)
         }
+        // NI3: remember the selection so a later evict→reload restores it.
+        desiredName = target
         if residentId == target, container != nil { return }
         container = nil
         residentId = nil
@@ -124,6 +133,7 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
     public func setAllowedModelIds(_ ids: [String]) {
         allowedIds = ids
         defaultId = ids.first ?? defaultId
+        if let d = desiredName, !ids.contains(d) { desiredName = nil }
         if let r = residentId, !ids.contains(r) {
             container = nil
             residentId = nil
@@ -205,6 +215,9 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
             throw AthenaError.modelNotAvailable(
                 requested: requested, available: allowedIds)
         }
+        // NI3: a per-request selection is also an operator choice — stage it
+        // so a governor evict→reload restores the last-served model.
+        desiredName = target
         if residentId != target || container == nil {
             container = nil
             residentId = nil
@@ -299,17 +312,64 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
                                     repeating: pad,
                                     count: maxLength - $0.count))
                     })
-                let mask = padded .!= pad
+                // I1/NI1/I4: derive the attention mask from each row's REAL
+                // token length (floored to ≥1 so an empty input can't make
+                // mean-pooling divide by zero → NaN), NOT pad-equality. A
+                // real token whose id == pad (id 0 when eos is nil) is no
+                // longer masked, and — critically — the SAME mask is now
+                // handed to pooling, so padded positions can't pollute a
+                // mean vector or be selected as the "last" token. Without it
+                // the substrate defaults the pooling mask to all-ones and
+                // pools over pad (corrupt vectors on any mixed-length batch).
+                let lengths = MLXArray(
+                    bucketEncoded.map { Int32(max(1, $0.count)) })
+                let positions = MLXArray(0 ..< maxLength)
+                let mask =
+                    positions.expandedDimensions(axis: 0)
+                    .< lengths.expandedDimensions(axis: 1)
                 let tokenTypes = MLXArray.zeros(like: padded)
                 let out = ctx.model(
                     padded, positionIds: nil,
                     tokenTypeIds: tokenTypes,
                     attentionMask: mask)
+                // I5: do NOT apply the substrate's parameterless layerNorm.
+                // Canonical sentence-transformers pooling for the configured
+                // models (bge-small mean→normalize, Qwen3-Embedding
+                // lasttoken→normalize) has no such step; forcing it on
+                // produced non-canonical vectors (a spurious standardization
+                // that changes direction, not just scale). PoolingConfiguration
+                // carries no layernorm flag, so `false` is the model-faithful
+                // value. `normalize: true` stays — Athena's documented
+                // L2-normalized-vector contract, and both configured models
+                // ship a Normalize module. NOTE: this changes every produced
+                // vector vs ≤v0.10.129; persisted /v1/vectors indexes must be
+                // re-embedded to stay comparable with new queries.
                 let result = ctx.pooling(
-                    out, normalize: true, applyLayerNorm: true)
+                    out, mask: mask, normalize: true, applyLayerNorm: false)
                 result.eval()
                 let bucketVectors = result.map {
                     $0.asArray(Float.self)
+                }
+                // I6: the produced vector width must match the model's
+                // configured output dimension; a mismatch (or a zero-length
+                // vector) means a wrong/mis-sanitized model and would
+                // silently store wrong-width vectors. Fail loudly instead.
+                if let bad = bucketVectors.first(where: { $0.isEmpty }) {
+                    throw AthenaError.moduleLoadFailed(
+                        .textEmbedding,
+                        reason:
+                            "model produced a zero-length embedding vector "
+                            + "(\(bad.count))")
+                }
+                if let expected = ctx.pooling.dimension,
+                    let bad = bucketVectors.first(where: {
+                        $0.count != expected
+                    })
+                {
+                    throw AthenaError.moduleLoadFailed(
+                        .textEmbedding,
+                        reason: "produced embedding dim \(bad.count) != "
+                            + "model output dim \(expected)")
                 }
                 for (k, idx) in bucket.enumerated() {
                     vectors[idx] = bucketVectors[k]

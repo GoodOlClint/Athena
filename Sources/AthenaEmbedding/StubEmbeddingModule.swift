@@ -48,6 +48,9 @@ public actor StubEmbeddingModule: EmbeddingModule, ModelSelectable {
     /// nil ⇒ unloaded. The stub has no real container; the value tracks
     /// which id is "resident" for M39/M41 selection + rebind semantics.
     private var residentId: String?
+    /// NI3 parity — staged selection honored on (re)load, mirroring the MLX
+    /// module so the stub reflects production evict→reload behavior.
+    private var desiredName: String?
 
     /// - Parameters:
     ///   - modelIds: the selectable set (first = default). The stub
@@ -68,7 +71,7 @@ public actor StubEmbeddingModule: EmbeddingModule, ModelSelectable {
     public var residentBytes: Int { residentId == nil ? 0 : reserveBytes }
     public func memoryEstimate() -> Int { reserveBytes }
     public func load(reservation: MemoryReservation) async throws {
-        if residentId == nil { residentId = defaultId }
+        if residentId == nil { residentId = desiredName ?? defaultId }
     }
     public func unload() async { residentId = nil }
 
@@ -77,19 +80,23 @@ public actor StubEmbeddingModule: EmbeddingModule, ModelSelectable {
     public func residentModelId() -> String? { residentId }
     public func rebind(to id: String?) async throws {
         let requested = id ?? defaultId
-        // M46.4 — case-insensitive lookup; canonical id from storage.
+        // NI2 — resolve by store-dir identity (bare name OR full HF id),
+        // identical to MLXEmbeddingModule, so id acceptance matches across
+        // --engine stub and --engine mlx (the stub is the CI/e2e surface).
         guard let target =
-            allowedIds.canonicalCaseInsensitive(requested)
+            allowedIds.canonicalByStoreIdentity(requested)
         else {
             throw AthenaError.modelNotAvailable(
                 requested: requested, available: allowedIds)
         }
+        desiredName = target
         residentId = target
     }
 
     public func setAllowedModelIds(_ ids: [String]) {
         allowedIds = ids
         defaultId = ids.first ?? defaultId
+        if let d = desiredName, !ids.contains(d) { desiredName = nil }
         if let r = residentId, !ids.contains(r) { residentId = nil }
     }
 
@@ -107,16 +114,18 @@ public actor StubEmbeddingModule: EmbeddingModule, ModelSelectable {
         -> EmbeddingBatch
     {
         let requested = model ?? defaultId
-        // M46.4 — case-insensitive lookup; canonical id from storage.
+        // NI2 — resolve by store-dir identity, identical to the MLX module
+        // (bare name OR full HF id), so stub and mlx accept the same ids.
         guard let served =
-            allowedIds.canonicalCaseInsensitive(requested)
+            allowedIds.canonicalByStoreIdentity(requested)
         else {
             throw AthenaError.modelNotAvailable(
                 requested: requested, available: allowedIds)
         }
         // M41: per-request selection rebinds the slot's "resident" id in the
         // stub too, so /api/models/resident reflects what an embed call
-        // would actually serve.
+        // would actually serve. NI3 parity: also stage it for reload.
+        desiredName = served
         residentId = served
         let vectors = texts.map { text in
             var h: UInt64 = 1_469_598_103_934_665_603
