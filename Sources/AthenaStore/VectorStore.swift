@@ -64,6 +64,21 @@ public actor VectorStore {
     private var cache:
         [(id: String, vec: [Float], meta: Data?, owner: String?)] = []
     private var loaded = false
+    /// H8 (M69.3) — id → its index in `cache`, so `upsert` resolves an
+    /// existing row in O(1) instead of two O(n) `firstIndex`/`first` scans.
+    /// Rebuilt on load and on any structural mutation (`cache` is no longer
+    /// kept id-sorted — query ranks by score with an id tie-break, so cache
+    /// order is irrelevant to results; this drops the per-upsert O(n log n)
+    /// `cache.sort`).
+    private var idIndex: [String: Int] = [:]
+    /// H3 (M69.3) — the resident ROW-NORMALIZED `n × dim` matrix (in `cache`
+    /// order), cached so a query doesn't rebuild a full `n × dim` MLXArray via
+    /// `flatMap` and re-normalize every row on EVERY call (~1 GB/query at
+    /// 100k×2560). Invalidated (set nil) on any cache mutation and rebuilt
+    /// lazily by the next query. Owner-scoping (H5) is applied AFTER scoring
+    /// in Swift, so one matrix serves every caller (the common
+    /// admin/auth-off/single-owner case scores nothing it can't see anyway).
+    private var normMatrix: MLXArray?
     /// H4 (M68.3) — memoizes the one-time cache hydration as a Task so
     /// concurrent first-touch callers COALESCE onto a single
     /// `store.allVectors()` load instead of each running it and clobbering
@@ -96,11 +111,20 @@ public actor VectorStore {
                 (id: $0.id, vec: $0.vector, meta: $0.metadata,
                     owner: $0.owner)
             }
+            rebuildIdIndex()
+            normMatrix = nil  // H3 — rebuilt lazily by the next query
             loaded = true
         }
         loadTask = t
         await t.value
         loadTask = nil
+    }
+
+    /// H8 — rebuild `idIndex` from the current `cache` order (after a load or
+    /// a structural mutation that shifted indices, e.g. a delete).
+    private func rebuildIdIndex() {
+        idIndex.removeAll(keepingCapacity: true)
+        for (i, row) in cache.enumerated() { idIndex[row.id] = i }
     }
 
     /// H5: may `caller` see a row owned by `rowOwner`? Admin / auth-off
@@ -127,8 +151,10 @@ public actor VectorStore {
         }
         // H5: an upsert to an id another principal owns must NOT silently
         // re-own / overwrite it (the cross-principal-overwrite half of the
-        // finding). Reject; a fresh id is fine.
-        let existing = cache.first { $0.id == id }
+        // finding). Reject; a fresh id is fine. H8 — resolve the existing row
+        // in O(1) via `idIndex` instead of an O(n) scan.
+        let existingIndex = idIndex[id]
+        let existing = existingIndex.map { cache[$0] }
         if let existing, !canSee(existing.owner, caller) {
             throw VectorError.ownerConflict(id: id)
         }
@@ -155,12 +181,20 @@ public actor VectorStore {
             if isNew { pendingNew -= 1 }  // H4 — release the reservation
             throw error
         }
-        if let i = cache.firstIndex(where: { $0.id == id }) {
+        // H8 — re-resolve via `idIndex` AFTER the `putVector` await (a
+        // concurrent same-id upsert may have inserted it while we were
+        // suspended; the pre-await `existingIndex` could be stale). O(1) vs
+        // the prior post-await O(n) `firstIndex` re-scan.
+        if let i = idIndex[id] {
             cache[i] = (id, vector, metadata, owner)
         } else {
+            // Append at the end (cache is no longer kept id-sorted; the
+            // per-upsert `cache.sort` was O(n log n) and order doesn't affect
+            // query results, which rank by score + an id tie-break).
             cache.append((id, vector, metadata, owner))
-            cache.sort { $0.id < $1.id }
+            idIndex[id] = cache.count - 1
         }
+        normMatrix = nil  // H3 — the resident matrix is now stale
         // H4 — the row is now reflected in `cache.count`; drop the reservation.
         if isNew { pendingNew -= 1 }
     }
@@ -184,7 +218,11 @@ public actor VectorStore {
         // NH2 (M66.1): only drop the row from the resident cache when the
         // persisted delete actually succeeded — else a real SQLite failure
         // would desync the cache from the store for the actor's lifetime.
-        if ok { cache.removeAll { $0.id == id } }
+        if ok {
+            cache.removeAll { $0.id == id }
+            rebuildIdIndex()  // H8 — indices shifted
+            normMatrix = nil  // H3 — resident matrix is now stale
+        }
         return ok
     }
 
@@ -195,32 +233,47 @@ public actor VectorStore {
         vector q: [Float], k: Int, caller: Caller = .unscoped
     ) async -> [Hit] {
         await ensureLoaded()
-        let visible = cache.filter { canSee($0.owner, caller) }
-        guard !visible.isEmpty, q.count == dim, k > 0 else { return [] }
-        let n = visible.count
-        let flat = visible.flatMap { $0.vec }
-        let m = MLXArray(flat, [n, dim])
-        let qv = MLXArray(q, [dim, 1])
-        let mNorm =
-            m
-            / MLX.sqrt(
-                (m * m).sum(axis: 1, keepDims: true) + 1e-12)
-        let qNorm =
-            qv / MLX.sqrt((qv * qv).sum() + 1e-12)
+        let d = dim
+        guard !cache.isEmpty, q.count == d, k > 0 else { return [] }
+        let n = cache.count
+        // H3 — build the ROW-NORMALIZED matrix ONCE over the full cache and
+        // keep it resident; reuse it across queries until a mutation
+        // invalidates it. Owner-scoping (H5) is applied AFTER scoring so one
+        // cached matrix serves every caller.
+        let mNorm: MLXArray
+        if let cached = normMatrix {
+            mNorm = cached
+        } else {
+            let flat = cache.flatMap { $0.vec }
+            let m = MLXArray(flat, [n, d])
+            mNorm =
+                m / MLX.sqrt((m * m).sum(axis: 1, keepDims: true) + 1e-12)
+            mNorm.eval()
+            normMatrix = mNorm
+        }
+        let qv = MLXArray(q, [d, 1])
+        let qNorm = qv / MLX.sqrt((qv * qv).sum() + 1e-12)
         let scores = MLX.matmul(mNorm, qNorm).reshaped([n])
         scores.eval()
         let s = scores.asArray(Float.self)
-        // End-of-query allocator-pool flush (M50.5). Each query builds
-        // an N×dim resident matrix + norms + matmul intermediates; over
-        // sustained search load those accumulate in MLX's pool exactly
-        // like the embedder did pre-M46.6. `s` is already a Swift
-        // [Float] so the ranking below doesn't need the MLXArrays.
+        // M50.5 — trim only the per-query transients (q-norm + matmul output);
+        // the resident `mNorm` is held by `normMatrix` (a live reference), so
+        // `clearCache` cannot reclaim it — that's the H3 win over rebuilding +
+        // re-normalizing the whole matrix on every call.
         MLX.Memory.clearCache()
-        return zip(visible, s)
-            .map { Hit(id: $0.0.id, score: $0.1, metadata: $0.0.meta) }
-            .sorted { $0.score > $1.score }
-            .prefix(k)
-            .map { $0 }
+        // H5 + H7 — keep only the caller's visible rows, ranked by score with
+        // an id tie-break so equal-score ties are stable (the prior `sorted`
+        // was unstable, so ties reordered run-to-run).
+        var hits: [Hit] = []
+        hits.reserveCapacity(n)
+        for i in 0..<n where canSee(cache[i].owner, caller) {
+            hits.append(
+                Hit(id: cache[i].id, score: s[i], metadata: cache[i].meta))
+        }
+        hits.sort {
+            $0.score != $1.score ? $0.score > $1.score : $0.id < $1.id
+        }
+        return Array(hits.prefix(k))
     }
 
     /// Age-based retention (M34.2): delete persisted vectors whose
@@ -233,6 +286,8 @@ public actor VectorStore {
         let removed = (try? await store.pruneVectors(olderThan: cutoff)) ?? 0
         if removed > 0 {
             cache = []
+            idIndex.removeAll(keepingCapacity: true)
+            normMatrix = nil
             loaded = false
         }
         return removed

@@ -257,10 +257,12 @@ Re-verified across M67: F6 (createSSMMask alloc) → M69 perf; I7 (embed canonic
 
 > Server middleware/metrics aren't unit-testable until M70 (NA2). Validated via Release build + e2e-rbac **561/0** (metrics-quantile + concurrency phases) + a live streaming smoke (inflight held 1→0 across a real 9B decode, p95 captures the decode time). NA3 is the M29.2 admission-control truth fix; it makes the concurrency caps actually bound streams.
 
-### M69.3 — Vector store
-- [ ] H3 (High) cache resident normalized matrix (no per-query rebuild)
-- [ ] H7 tie-break top-k on id
-- [ ] H8 min-heap top-k; binary-insert; id→index map
+### M69.3 — Vector store ✅ v0.10.141
+- [x] H3 (High) `query` caches the resident ROW-NORMALIZED `n × dim` matrix (`normMatrix`) and reuses it across queries instead of rebuilding a full `n × dim` MLXArray via `flatMap` + re-normalizing every row on EVERY call (~1 GB/query at 100k×2560). Built once over the full cache; owner-scoping (H5) applied AFTER scoring so one matrix serves every caller. Invalidated (nil) on upsert/delete/sweep/load and rebuilt lazily; the per-query `clearCache` still trims the transient q-norm + matmul output but can't reclaim the live `normMatrix`. **Verified live:** 3 repeated queries byte-identical (cached), and the matrix correctly rebuilds when an upsert (`aa` appears) or a delete (`c` drops) invalidates it (v0.10.141)
+- [x] H7 top-k ranking now tie-breaks equal scores on ascending id (`$0.score != $1.score ? $0.score > $1.score : $0.id < $1.id`) — the prior `sorted { $0.score > $1.score }` was unstable, so equal-score ties reordered run-to-run. **Verified:** three identical-vector rows (`a`,`aa`,`b`, all score 1.0) return in id order, stable across runs (v0.10.141)
+- [x] H8 `idIndex` (`[id: Int]`) resolves an existing row in O(1) (was two O(n) `first`/`firstIndex` scans per upsert — one pre-await for the owner check, one post-await for the update); the post-await update re-reads `idIndex` so a concurrent same-id upsert can't double-append. Dropped the per-upsert O(n log n) `cache.sort` entirely (cache order doesn't affect results now that ranking has the H7 id tie-break); `idIndex` rebuilt on delete/load. **The min-heap top-k half is deferred (not worth it):** with `normMatrix` cached, the per-query cost is the O(n·dim) matmul; the O(n log n) score sort is sub-millisecond and not the bottleneck — per the M69 "skip any that don't pay" guidance (v0.10.141)
+
+> `VectorStore` upsert/delete/cap/owner logic is CI-testable (`VectorStoreTests` 8/0; H8 paths exercised by `testUpsertDeleteStatsCapCI`/`testConcurrentUpsertsRespectCapH4`); `query` (H3/H7) is MLX-gated, validated via Release build + e2e-rbac **561/0** (vector phases) + a stub-engine vector smoke (cosine ranking, cached-matrix determinism, H7 id-ordered ties, upsert/delete matrix invalidation). No decode/sampling change. **Memory note:** the cached matrix is ~the same size as the raw vectors it normalizes and is dropped on any mutation; the governor's vector `capBytes` still bounds the raw set.
 
 ### M69.4 — Diarization & whisper hot paths
 - [ ] D3 (High) O(n²) clustering (NN-chain/PQ UPGMA)
