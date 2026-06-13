@@ -72,7 +72,7 @@ enum GuidedSubstrate {
         var out: [Int] = []
         while let token = iterator.next() {
             // M60.5 — abort early on request cancellation (disconnect/deadline).
-            if DecodeProgress.counter?.isCancelled == true { break }
+            if DecodeLoopControl.isCancelled() { break }
             if let eosTokenId, token == eosTokenId { break }
             out.append(token)
             // M46.8 — per-iteration progress for the heartbeat. See the

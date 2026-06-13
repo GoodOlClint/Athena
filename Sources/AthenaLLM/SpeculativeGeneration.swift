@@ -254,7 +254,7 @@ enum SpeculativeGeneration {
             // M60.5 — stop early if the request was cancelled (client gone or
             // the M33 deadline) so we free the GPU instead of decoding all the
             // way to maxTokens for a request no one is waiting on.
-            if DecodeProgress.counter?.isCancelled == true { break }
+            if DecodeLoopControl.isCancelled() { break }
             let inp = MLXArray([Int32(prev), Int32(draft)], [1, 2])
             var t0 = trace ? now() : 0
             let (logits2, hidden2) = model.logitsAndHidden(
