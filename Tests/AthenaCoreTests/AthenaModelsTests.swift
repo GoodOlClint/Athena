@@ -6,22 +6,31 @@ import XCTest
 
 /// Parity guard for the vendored Qwen3.5: the substrate's config Codable
 /// was copied + type-renamed, so this asserts it still decodes a real
-/// Qwen3.5 `config.json`. Pure (no MLX); skips when the model isn't on
-/// this machine so CI without a local model stays green.
+/// Qwen3.5 `config.json`. Pure (no MLX).
+///
+/// L11 (M70.3): this used to SKIP whenever no local mtp model was present, so
+/// on a vanilla CI host the parity guard never ran and a Codable drift would
+/// ship green. A real (weights-free) `config.json` is now checked in under
+/// `Fixtures/`, so the guard always RUNS; a local checkpoint, if present, is
+/// still preferred (catches a real-model drift the fixture wouldn't).
 final class AthenaModelsConfigTests: XCTestCase {
 
-    func testVendoredConfigDecodesRealQwen35() throws {
-        // The default checkpoint (MTP-preserving, coherent after the
-        // norm-shift fix). Looks for a small local mtp model under
-        // `~/mlx-models/`; skips when absent so CI on a vanilla host
-        // stays green.
-        let configURL = FileManager.default.homeDirectoryForCurrentUser
+    /// Prefer a local mtp checkpoint; else the checked-in fixture (a real,
+    /// weights-free dense `qwen3_5` config with an MTP head). Source-relative
+    /// path — `Fixtures/` is excluded from the bundle, mirroring the other
+    /// fixture tests (DFlashDraftParityTests etc.).
+    private func qwen35ConfigURL() -> URL {
+        let local = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(
                 "mlx-models/Qwen3.5-2B-4bit-mtp/config.json")
-        guard FileManager.default.fileExists(atPath: configURL.path) else {
-            throw XCTSkip("no Qwen3.5 mtp model present on this machine")
-        }
-        let data = try Data(contentsOf: configURL)
+        if FileManager.default.fileExists(atPath: local.path) { return local }
+        return URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .appending(path: "Fixtures/qwen3_5_config.json")
+    }
+
+    func testVendoredConfigDecodesRealQwen35() throws {
+        let data = try Data(contentsOf: qwen35ConfigURL())
 
         let cfg = try JSONDecoder().decode(
             AthenaQwen35Configuration.self, from: data)

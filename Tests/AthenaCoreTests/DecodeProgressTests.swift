@@ -188,18 +188,31 @@ private final class TestCounter: @unchecked Sendable, DecodeProgressCounter {
 final class DecodeProgressPrefillTests: XCTestCase {
 
     func testDefaultRecordPrefillChunkIsNoOp() {
-        // A conformer that DOES NOT implement recordPrefillChunk picks
-        // up the protocol-extension default and silently no-ops, which
-        // is what HeartbeatCounter relied on before M48.4 shipped.
+        // A conformer that implements ONLY incrementToken picks up the
+        // protocol-extension defaults for the rest (recordPrefillChunk /
+        // setSetupStage / cancelGeneration / isCancelled), which is what
+        // HeartbeatCounter relied on before M48.4 shipped.
         final class TokenOnly:
             @unchecked Sendable, DecodeProgressCounter
         {
-            func incrementToken() {}
+            private(set) var tokens = 0
+            func incrementToken() { tokens += 1 }
         }
         let c = TokenOnly()
+        // L11 (M70.3): observe the contract instead of `XCTAssertTrue(true)`.
+        // The defaults must be GENUINE no-ops: calling them mutates no
+        // observable state, and the default isCancelled is false (so a
+        // conformer that doesn't care about cancellation never spuriously
+        // aborts a decode).
         c.recordPrefillChunk(completed: 5, total: 10)
-        // No throw, no crash — that IS the contract.
-        XCTAssertTrue(true)
+        c.setSetupStage("compile-dfa")
+        c.cancelGeneration()
+        XCTAssertEqual(c.tokens, 0, "no default touched the conformer's state")
+        XCTAssertFalse(c.isCancelled, "default isCancelled is false")
+        // The one method it DID implement still works, proving the object is
+        // live (not that the assertions above passed vacuously).
+        c.incrementToken()
+        XCTAssertEqual(c.tokens, 1)
     }
 
     func testRecordPrefillChunkPropagatesLatestValues() {
