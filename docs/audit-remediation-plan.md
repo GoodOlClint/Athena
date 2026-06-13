@@ -250,10 +250,12 @@ Re-verified across M67: F6 (createSSMMask alloc) → M69 perf; I7 (embed canonic
 
 > Pure-perf slice — identical results, fewer/cheaper queries; no decode/sampling/inference change. `AthenaStore` job-query helpers ARE CI-testable: `testQueueAccessQueriesM69_1` (FIFO head incl. running, queued COUNT, newest-first blob-free summaries) + existing job tests, `AthenaStoreTests` 22/0. Binding gate: Release build + e2e-rbac **561/0** (queue submit/poll, /healthz depth, /ui state, /v1/models/:id phases).
 
-### M69.2 — Admission-control & metrics truth on streams
-- [ ] NA3 concurrency slot + inflight gauge + latency timer live until the streamed body terminates (M29.2 currently doesn't bound streams; /healthz lies during decode)
-- [ ] NA8 reuse resolved principal for metering (drop second auth resolution)
-- [ ] A25 nearest-rank percentile
+### M69.2 — Admission-control & metrics truth on streams ✅ v0.10.140
+- [x] NA3 both `ConcurrencyMiddleware` (slot release) and `MetricsMiddleware` (inflight `leave()` + latency `record`) now fire on the RESPONSE BODY's completion, not when the handler returns its lazy `AsyncStream` body. A new public `ResponseBody.onBodyComplete { … }` (replicates Hummingbird's `package` `withPostWriteClosure` via public API — runs on success OR throw of the body write) is attached to the response; a streamed inference response returns its body almost immediately but the GPU decode happens while the body drains. Pre-fix the concurrency caps didn't bound streamed generations at all (one key → unbounded concurrent streams) and `/healthz inflight` + p50/p95 read ~0 during decode. Composes with M68.4 A8: a disconnect throws the body write → `onBodyComplete` still fires → slot/timer released. **Verified live:** `/healthz inflight` stays 1 for a streamed request's whole decode then returns to 0, and the p95 latency now reflects the real ~49 s generation (was the ~0.4 ms lazy-return) (v0.10.140)
+- [x] NA8 the substantive double-resolution was already closed by **M65.6** — `usagePrincipal`→`queuePrincipal` reads the `ResolvedCaller.current` task-local (no second SHA-256 + DB lookups). The chat handler now reuses the `principal` it already bound at the top (was a redundant `usagePrincipal(request)` in the `meter` call — also removes the audit's drift seam); `/v1/embeddings` already resolves once. So NA8's cost is gone and the call site is single-source (v0.10.140)
+- [x] A25 `pct()` is now nearest-rank: `rank = ceil(p·n)`, `index = rank-1` clamped to `[0, n-1]` (was `floor(p·n)`, which over-counted the rank). Verified: with n=2 the p95 picks the larger sample, p50 the smaller (v0.10.140)
+
+> Server middleware/metrics aren't unit-testable until M70 (NA2). Validated via Release build + e2e-rbac **561/0** (metrics-quantile + concurrency phases) + a live streaming smoke (inflight held 1→0 across a real 9B decode, p95 captures the decode time). NA3 is the M29.2 admission-control truth fix; it makes the concurrency caps actually bound streams.
 
 ### M69.3 — Vector store
 - [ ] H3 (High) cache resident normalized matrix (no per-query rebuild)

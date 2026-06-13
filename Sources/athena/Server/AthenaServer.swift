@@ -1022,8 +1022,10 @@ struct AthenaServer {
         // M27.1/.2: real token counts feed the response `usage` object,
         // the global metrics counter, and the persisted per-principal
         // counter (keyed by the caller's auth principal).
-        await meter(
-            principal: usagePrincipal(request), usage: usage)
+        // NA8 — reuse the principal already resolved at the top of this
+        // handler instead of a second full bearer resolution (SHA-256 +
+        // two SQLite lookups) per request.
+        await meter(principal: principal, usage: usage)
 
         return Self.json(
             Self.chatCompletionResponse(

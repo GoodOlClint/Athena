@@ -197,8 +197,16 @@ struct ConcurrencyMiddleware<Context: RequestContext>: RouterMiddleware {
         // `defer` can't await, so release explicitly on BOTH the success
         // and the throwing path — a slot must never leak.
         do {
-            let response = try await next(request, context)
-            await limiter.release(subject.principal)
+            var response = try await next(request, context)
+            // NA3 — hold the slot until the (possibly streamed) body has been
+            // fully written, not just until the handler returns its lazy
+            // AsyncStream body. Otherwise the concurrency caps don't bound
+            // streamed generations at all (one key could open unbounded
+            // concurrent streams).
+            let principal = subject.principal
+            response.body = response.body.onBodyComplete {
+                await limiter.release(principal)
+            }
             return response
         } catch {
             await limiter.release(subject.principal)
@@ -222,5 +230,30 @@ struct ConcurrencyMiddleware<Context: RequestContext>: RouterMiddleware {
         return Response(
             status: .tooManyRequests, headers: headers,
             body: ResponseBody(byteBuffer: buf))
+    }
+}
+
+extension ResponseBody {
+    /// NA3 (M69.2) — run `postWrite` once this body has been FULLY written to
+    /// the channel (success OR throw), not when the handler returns. A
+    /// streaming inference handler returns a lazy `AsyncStream` body almost
+    /// immediately; the GPU decode that fills it happens later, while the body
+    /// is drained. Replicates Hummingbird's `package` `withPostWriteClosure`
+    /// using only public `ResponseBody` API so the concurrency slot + the
+    /// inflight/latency metrics can be held for the streamed body's whole
+    /// lifetime. Idempotent at the call site: `postWrite` fires exactly once.
+    func onBodyComplete(
+        _ postWrite: @escaping @Sendable () async -> Void
+    ) -> ResponseBody {
+        let body = self
+        return ResponseBody(contentLength: self.contentLength) { writer in
+            do {
+                try await body.write(writer)
+                await postWrite()
+            } catch {
+                await postWrite()
+                throw error
+            }
+        }
     }
 }

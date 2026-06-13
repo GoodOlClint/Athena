@@ -97,9 +97,12 @@ actor AthenaMetrics {
         let sorted = lat.sorted()
         func pct(_ p: Double) -> Double {
             guard !sorted.isEmpty else { return 0 }
-            let i = min(
-                sorted.count - 1,
-                Int((Double(sorted.count) * p).rounded(.down)))
+            // A25 — nearest-rank: rank = ceil(p·n), index = rank-1, clamped to
+            // [0, n-1]. The prior `floor(p·n)` under-counted the rank (e.g.
+            // p95 over 20 samples picked index 19 correctly but p50 over 10
+            // picked the 6th, not the 5th, value).
+            let rank = Int((Double(sorted.count) * p).rounded(.up))
+            let i = min(sorted.count - 1, max(0, rank - 1))
             return sorted[i]
         }
         let avg =
@@ -197,16 +200,28 @@ struct MetricsMiddleware<Context: RequestContext>: RouterMiddleware {
             return try await next(request, context)
         }
         let t0 = DispatchTime.now().uptimeNanoseconds
-        func ms() -> Double {
+        // `@Sendable` so it can be called from the body-completion closure
+        // (NA3) as well as the synchronous error path; it captures only the
+        // Sendable `t0`.
+        @Sendable func ms() -> Double {
             Double(DispatchTime.now().uptimeNanoseconds - t0) / 1e6
         }
         await metrics.enter()
         do {
-            let resp = try await next(request, context)
-            await metrics.record(
-                kind: kind, ms: ms(),
-                isError: resp.status.code >= 400)
-            await metrics.leave()
+            var resp = try await next(request, context)
+            let isError = resp.status.code >= 400
+            // NA3 — record latency + drop the inflight gauge at body
+            // COMPLETION (which, for a streamed response, is after the GPU
+            // decode that fills it), not when the handler returns its lazy
+            // body. Otherwise /healthz `inflight` and p50/p95 read ~0 while
+            // the daemon is actively streaming — defeating the "is it hung or
+            // working" legibility goal — and the latency window misses the
+            // decode entirely.
+            let metrics = self.metrics
+            resp.body = resp.body.onBodyComplete {
+                await metrics.record(kind: kind, ms: ms(), isError: isError)
+                await metrics.leave()
+            }
             return resp
         } catch {
             await metrics.record(kind: kind, ms: ms(), isError: true)
