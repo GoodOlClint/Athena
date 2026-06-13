@@ -288,4 +288,78 @@ final class SpeculativeSamplingTests: XCTestCase {
         for i in 0..<3 { XCTAssertEqual(d[i], 1.0 / 3, accuracy: 1e-6) }
         for i in 3..<6 { XCTAssertEqual(d[i], 0, "index \(i) truncated") }
     }
+
+    // MARK: - L7 (M70.3): multi-seed PROPERTY, not a single-seed snapshot
+    //
+    // The audit (L7) flagged testSampleHitsExpectedMassFromSeed above as a
+    // single-seed statistical snapshot. The load-bearing speculative-sampling
+    // invariant is distributional: the draft/accept-or-reject/residual loop
+    // must yield the TARGET marginal `p` regardless of the draft `q` — that's
+    // what makes speculation a speedup, not a quality knob. Pin it as a
+    // property over several independent seeds.
+
+    /// Re-implements the speculative-sampling acceptance loop over the pure
+    /// algebra exactly as the wired MTP loop composes it (sample draft from q,
+    /// accept with min(1,p/q), else resample from the residual), drawing every
+    /// random decision from ONE seeded stream — and asserts the emitted token
+    /// histogram matches the TARGET distribution `p` for every seed.
+    func testSpeculativeSamplingReproducesTargetMarginalAcrossSeeds() {
+        let p: [Float] = [0.5, 0.3, 0.2]   // target
+        let q: [Float] = [0.2, 0.2, 0.6]   // a deliberately-wrong draft
+        let trials = 12000
+        for seed in [1, 7, 42, 2026, 999_983] {
+            var rng = SamplingRNG(seed: seed)
+            var counts = [0, 0, 0]
+            for _ in 0..<trials {
+                let draft =
+                    SpeculativeSampling.sampleFromDistribution(q, rng: &rng)
+                let token: Int
+                if SpeculativeSampling.acceptOrReject(
+                    token: draft, pDistribution: p, qDistribution: q,
+                    rng: &rng)
+                {
+                    token = draft
+                } else {
+                    let r = SpeculativeSampling.residual(p: p, q: q)
+                    token = SpeculativeSampling.sampleFromDistribution(
+                        r, rng: &rng)
+                }
+                counts[token] += 1
+            }
+            for i in 0..<3 {
+                XCTAssertEqual(
+                    Double(counts[i]) / Double(trials), Double(p[i]),
+                    accuracy: 0.03,
+                    "seed \(seed): bin \(i) must match the TARGET marginal, "
+                        + "not the draft q")
+            }
+        }
+    }
+
+    /// Each of K seeds reproduces its own stream byte-for-byte, and the
+    /// streams are pairwise distinct — the determinism contract holds as a
+    /// property, not just for the one seed the snapshot test happened to use.
+    func testMultipleSeedsAreEachReproducibleAndPairwiseDistinct() {
+        let p: [Float] = [0.1, 0.2, 0.3, 0.4]
+        func draw(_ seed: Int) -> [Int] {
+            var rng = SamplingRNG(seed: seed)
+            return (0..<64).map { _ in
+                SpeculativeSampling.sampleFromDistribution(p, rng: &rng)
+            }
+        }
+        let seeds = [0, 1, 2, 3, 100_003]
+        var streams: [[Int]] = []
+        for s in seeds {
+            let a = draw(s)
+            XCTAssertEqual(a, draw(s), "seed \(s) must reproduce itself")
+            streams.append(a)
+        }
+        for i in 0..<streams.count {
+            for j in (i + 1)..<streams.count {
+                XCTAssertNotEqual(
+                    streams[i], streams[j],
+                    "seeds \(seeds[i]) and \(seeds[j]) must diverge")
+            }
+        }
+    }
 }

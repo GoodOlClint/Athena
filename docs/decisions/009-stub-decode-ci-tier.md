@@ -1,0 +1,119 @@
+# 009 — Stub decode CI tier: pure-Swift control-flow seams, not a fake MLX device
+
+**Status:** Accepted — Implementing (M70.2/.3, from v0.10.151)
+**Date:** 2026-06-13
+**Milestone:** M70 (audit-remediation; resolves the L-cross-cutting "stub-model CI
+tier" keystone + L1/L2/L5/L7/L8, NC4/NC5/NC6 — "CI blindness")
+
+## Context
+
+ADR 008 made the daemon's *server* boundary unit-testable by extracting an
+MLX-free `AthenaServerKit`. The *inference* boundary — the decode loops
+(`GuidedGreedy`, `GuidedSubstrate`, `SpeculativeGeneration`,
+`SpeculativeSampling`), the structured-output guide/vocab, the prompt-prefix KV
+cache, and the vector cosine path — is still validated only by env-gated manual
+`xcodebuild`/Release-binary runs (`ATHENA_RUN_MODEL_TESTS=1`) plus the host-bound
+`e2e-rbac.sh`. The audit calls this out as the dominant remaining test-debt
+cluster (baseline L1–L11; re-audit NC4/NC5/NC6). A regression that broadened a
+prompt-cache scope key (cross-principal KV leak), inverted LRU eviction
+(unbounded growth → OOM), dropped a decode loop's cancellation early-break
+(M60.5 wedge), corrupted the structured token→byte mapping, or broke same-seed
+sampling reproducibility would ship green.
+
+The task as originally framed was a "fake/stub model + decode loop that runs the
+control flow in pure Swift with no Metal kernels." **An empirical probe settled
+the shape of that.** Under `swift test` / `./deploy/test.sh`, even a bare
+`argMax(MLXArray([...])).item()` — no model weights — aborts the process with:
+
+```
+MLX error: Failed to load the default metallib. library not found …
+  at .../mlx-swift/Source/Cmlx/mlx-c/mlx/c/array.cpp:232
+```
+
+The default `metallib` is a resource that `xcodebuild` bundles and SPM's test
+bundle never locates; MLX requires it to materialize **any** array, on CPU or
+GPU. So **no `MLXArray` can be evaluated in the CI tier at all.** The four decode
+loops thread `MLXArray` end-to-end (`model.logitsAndHidden` → `MLXArray` logits →
+`decoder.pick(slice)` → `argMax` → `.item`), so they cannot run there as written.
+
+Two structural options to get past that:
+
+- **(a)** Extract each decode path's MLX-free *decision logic* (operating on
+  `[Int]`/`[Float]`/`[UInt8]`/`Bool`) into static seams co-located with the
+  loops, test those + the seams that are already pure, and provide a pure-Swift
+  scripted-logits/stub-counter harness. The `MLXArray` math stays in `AthenaLLM`,
+  byte-unchanged; the loop bodies call the extracted seam where they decided
+  inline before.
+- **(b)** Abstract the hot path behind a tensor protocol so the *real* loops run
+  on a pure-Swift logit source in CI.
+
+## Decision
+
+**Option (a).** The stub decode tier is a **control-flow / decision-algebra
+tier, not a numeric tier.** It follows the same extract-pure-seam pattern this
+program already used for `rankTopK`/`lengthBuckets`/`AthenaMetrics.percentile`/
+`AthenaProxy.describe`: the seams that decide *what* the loop does are pulled
+into MLX-free Swift and pinned by `./deploy/test.sh`; the `MLXArray` numerics
+that compute the values stay in the MLX-linked targets and remain the province
+of the env-gated manual tier + `e2e-rbac.sh`.
+
+Option (b) was rejected: it touches the **bit-identical-greedy decode path** —
+the most load-bearing, highest-risk surface in the codebase (the M20/M21/M59
+contracts) — purely for test reachability, which violates the M70 rule that this
+milestone *re-arms invariants as tests, it does not modify them*. A fake MLX
+device is not even available as a fallback: MLX won't initialize without the
+metallib, so (b) would still require a non-MLX tensor type threaded through the
+hot path.
+
+Co-location, not a new target (per the lengthBuckets/rankTopK/`SpeculativeSampling`
+precedent — those live in MLX-linked targets but never call MLX in-body, so they
+run fine under `swift test`): the new seams live beside their loops in
+`AthenaLLM`, except the cross-loop cancellation predicate, which lives in
+`AthenaCore` beside `DecodeProgress` (all four loops already import it). No
+`Package.swift` change.
+
+### What each invariant gets
+
+Every invariant splits into a **CI-covered mechanism half** and a
+**gated-numeric half**, and BOTH are documented (no silent caps — a green CI
+tier must not read as "the numerics are covered"):
+
+| Invariant | CI (this tier) | Gated / manual (unchanged) |
+|---|---|---|
+| **L2** acceptance-rate floor | `SpeculativeStats` observer + accept/reject algebra (already MLX-free) | real-model accept rate |
+| **L7 / C1** seeded sampling | `SpeculativeSampling` distribution/RNG/tie-break + multi-seed property (already MLX-free) | real-model sampled tokens |
+| **NC6** StructuredVocab | pure `build(vocabSize:eos:decode:)` core — C12 eos-sentinel, UTF-8 byte map | real tokenizer |
+| **NC6** GuidedDecoder | IDLE→ENFORCING phase machine via a real `byteVocab` guide (`commit`/`forceEnforce`/idleBudget/jsonStart) | `pick` (MLX argmax) |
+| **L5** schema mask | `maskedArgmax([Float],[UInt8])` seam — scripted off-schema logits | the `MLXArray` mask-add (delegates to the seam) |
+| **NC4** prefix cache | `scopeKey`/`commonPrefixLength`/eviction policy over scalar descriptors | KV-tensor clone/restore bit-identity |
+| **NC5** cancellation | `DecodeLoopControl.shouldStop` predicate the 4 loops consult | the live disconnect bridge (M68.4 A8, e2e) |
+| **L1** greedy parity | accept/commit algebra: committed-seq == greedy-seq property | real-model bit-identity (`ATHENA_RUN_MODEL_TESTS`) |
+| **L8** stub vectors | model-distinguishable stub embedding (stub-only behavior tweak) | real embedding numerics |
+| **NF3** TriAttention | geometry/eviction already CI-tested (NF1/NF9) | compress/`gatedDeltaOps` numeric parity stays gated |
+
+## Consequences
+
+- The new seams are MLX-free static functions/structs co-located with their
+  loops; they compile and link into the MLX-linked targets and, being MLX-free
+  in body, run under `./deploy/test.sh` exactly as `lengthBuckets`/`rankTopK`/
+  `SpeculativeSampling` already do. `AthenaCoreTests` gains a small
+  `StubDecodeHarness` (scripted logits/tokens + a controllable
+  `DecodeProgressCounter` whose `isCancelled` can flip).
+- The extractions are **behavior-preserving refactors**: each loop calls the
+  seam where it made the decision inline before, so the bit-identical-greedy /
+  structured-output / TurboQuant / TriAttention contracts are unchanged. The
+  `e2e-rbac.sh` gate (561/0) + the real-model smokes prove no drift on every
+  slice.
+- The numeric half of each invariant (real-model bit-identity, cosine scoring,
+  `gatedDeltaOps` parity) stays env-gated; this is recorded per item in the
+  tracker and in the table above so a green `deploy/test.sh` is never mistaken
+  for numeric coverage. The two tiers are complementary: CI covers the
+  *mechanism*, the manual/e2e tier covers the *numbers*.
+- One genuine production change is in scope and isolated: **L8** makes the
+  `--engine stub` embedding vectors model-distinguishable (stub-only — never the
+  real model path), gated by e2e.
+- `AthenaServerKit` (ADR 008) and `AthenaDecodeKit`-style new targets are NOT
+  introduced — the co-location precedent keeps `Package.swift` stable. NB4
+  (Commands/ testability) is its own slice with its own target relocation
+  (`Engine`/`KVCompression` → MLX-free target), tracked separately per ADR 008's
+  Consequences; it does not depend on this tier.
