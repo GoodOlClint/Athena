@@ -100,16 +100,37 @@ public actor StubEmbeddingModule: EmbeddingModule, ModelSelectable {
         if let r = residentId, !ids.contains(r) { residentId = nil }
     }
 
-    /// Deterministic 8-dim pseudo-embedding (FNV-1a byte folds). Not
-    /// semantically meaningful — only stable per input so the endpoint
-    /// and clients work end-to-end under `--engine stub`. Token count is
-    /// a whitespace-delimited estimate (≥1 per non-empty input) so
-    /// `usage` is non-zero without a real tokenizer.
+    /// Deterministic 8-dim pseudo-embedding (FNV-1a byte folds), MLX-free.
+    /// Not semantically meaningful — only stable per (model, text) so the
+    /// endpoint and clients work end-to-end under `--engine stub`.
     ///
-    /// M39: `model` selects from the configured set (the stub ignores the
-    /// id for the actual math — every model yields the same fixed 8-dim
-    /// fold — but it validates membership and echoes the served id
-    /// truthfully, so selection/400 behavior matches the real module).
+    /// L8 (M70.3): the served model id is folded into the hash BEFORE the
+    /// text, so distinct models yield distinct vectors — mirroring the real
+    /// module (where different models genuinely produce different vectors) and
+    /// making "the vector actually depends on the model, not just the echoed
+    /// label" CI-testable. A separator byte after the id keeps the
+    /// model/text boundary unambiguous. (A `nil`/empty text still folds to a
+    /// zero vector regardless of model — the I8 stub-empty-string item,
+    /// deferred; non-empty inputs are model-distinguishable.)
+    static func stubVector(text: String, model: String) -> [Float] {
+        var h: UInt64 = 1_469_598_103_934_665_603
+        for b in model.utf8 { h = (h ^ UInt64(b)) &* 1_099_511_628_211 }
+        h = (h ^ 0x1) &* 1_099_511_628_211  // model/text separator
+        var v = [Float](repeating: 0, count: 8)
+        for (i, b) in Array(text.utf8).enumerated() {
+            h = (h ^ UInt64(b)) &* 1_099_511_628_211
+            v[i & 7] += Float(h % 1000) / 1000.0
+        }
+        let n = max(1e-12, sqrt(v.reduce(0) { $0 + $1 * $1 }))
+        return v.map { $0 / n }
+    }
+
+    /// Token count is a whitespace-delimited estimate (≥1 per non-empty
+    /// input) so `usage` is non-zero without a real tokenizer.
+    ///
+    /// M39: `model` selects from the configured set; it validates membership
+    /// and echoes the served id truthfully (so selection/400 behavior matches
+    /// the real module) AND, per L8, drives the vector math.
     public func embed(_ texts: [String], model: String? = nil) async throws
         -> EmbeddingBatch
     {
@@ -127,16 +148,7 @@ public actor StubEmbeddingModule: EmbeddingModule, ModelSelectable {
         // would actually serve. NI3 parity: also stage it for reload.
         desiredName = served
         residentId = served
-        let vectors = texts.map { text in
-            var h: UInt64 = 1_469_598_103_934_665_603
-            var v = [Float](repeating: 0, count: 8)
-            for (i, b) in Array(text.utf8).enumerated() {
-                h = (h ^ UInt64(b)) &* 1_099_511_628_211
-                v[i & 7] += Float(h % 1000) / 1000.0
-            }
-            let n = max(1e-12, sqrt(v.reduce(0) { $0 + $1 * $1 }))
-            return v.map { $0 / n }
-        }
+        let vectors = texts.map { Self.stubVector(text: $0, model: served) }
         let tokens = texts.reduce(0) { acc, t in
             let n = t.split(whereSeparator: { $0.isWhitespace }).count
             return acc + (t.isEmpty ? 0 : max(1, n))
