@@ -18,6 +18,10 @@ public enum ModelStoreOps {
         public let bytes: Int
         /// Raw `config.json` bytes (the caller parses/embeds it).
         public let configJSON: Data
+        /// A16 (M69.1) — the model directory's mtime, stat'd for THIS entry
+        /// so a single-model retrieve (`/v1/models/:id`) doesn't re-`list()`
+        /// (stat-walk) the whole store just to find one `modified` time.
+        public let modified: Date
     }
 
     public enum OpError: Error, CustomStringConvertible {
@@ -107,9 +111,15 @@ public enum ModelStoreOps {
         guard let data = try? Data(contentsOf: cfg) else {
             return nil
         }
+        // A16 — stat this one directory's mtime (matches `list`'s per-entry
+        // `contentModificationDate`) instead of leaving the caller to walk
+        // the whole store for it.
+        let mod =
+            (try? dir.resourceValues(forKeys: [.contentModificationDateKey]))?
+            .contentModificationDate ?? .distantPast
         return Detail(
             name: name, path: dir.path,
-            bytes: safetensorsSize(dir), configJSON: data)
+            bytes: safetensorsSize(dir), configJSON: data, modified: mod)
     }
 
     /// Delete a model directory (a direct child of the store root).

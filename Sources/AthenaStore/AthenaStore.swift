@@ -17,6 +17,19 @@ public struct JobRow: Sendable {
     public let owner: String?
 }
 
+/// NA5 (M69.1) — a blob-free job summary for list/dashboard views that
+/// only need the metadata (never the request/result BLOBs). Backs the /ui
+/// dashboard's recent-jobs panel so polling it doesn't materialize every
+/// row's payload.
+public struct JobSummary: Sendable {
+    public let id: String
+    public let kind: String
+    public let status: String
+    public let created: Double
+    public let updated: Double
+    public let owner: String?
+}
+
 /// One principal's cumulative token usage (M27.2).
 public struct UsageRow: Sendable, Equatable {
     public let principal: String
@@ -218,6 +231,8 @@ public actor AthenaStore {
               action TEXT NOT NULL, target TEXT,
               result TEXT NOT NULL, detail TEXT);
             CREATE INDEX IF NOT EXISTS audit_ts ON audit_log(ts);
+            CREATE INDEX IF NOT EXISTS jobs_status_created
+              ON jobs(status, created);
             CREATE TABLE IF NOT EXISTS model_allowlist(
               module TEXT NOT NULL, id TEXT NOT NULL,
               is_default INTEGER NOT NULL DEFAULT 0,
@@ -722,6 +737,64 @@ public actor AthenaStore {
         }
         var out: [JobRow] = []
         while sqlite3_step(st) == SQLITE_ROW { out.append(rowToJob(st)) }
+        return out
+    }
+
+    /// A4/A24 (M69.1) — the single oldest job still needing work (queued or
+    /// running, FIFO by `created`), fetched in ONE indexed `LIMIT 1` query
+    /// rather than materializing EVERY row's request/result BLOBs just to pick
+    /// the head (the worker drain ran `listJobs().first { … }`). The
+    /// `ORDER BY created ASC` is explicit, so FIFO no longer rides on an
+    /// unstated default ordering, and `jobs_status_created` (H9) serves it.
+    public func nextPendingJob() -> JobRow? {
+        let sql =
+            "SELECT \(Self.jobCols) FROM jobs "
+            + "WHERE status IN ('queued','running') "
+            + "ORDER BY created ASC LIMIT 1;"
+        guard let st = try? Self.prepared(db, sql) else { return nil }
+        defer { sqlite3_finalize(st) }
+        return sqlite3_step(st) == SQLITE_ROW ? rowToJob(st) : nil
+    }
+
+    /// A15 (M69.1) — count of `queued` rows via `COUNT(*)` (no blob
+    /// materialization). Backs the `/healthz` queue depth. Uses
+    /// `jobs_status_created` (H9).
+    public func queuedJobCount() -> Int {
+        guard
+            let st = try? Self.prepared(db,
+                "SELECT COUNT(*) FROM jobs WHERE status='queued';")
+        else { return 0 }
+        defer { sqlite3_finalize(st) }
+        return sqlite3_step(st) == SQLITE_ROW
+            ? Int(sqlite3_column_int(st, 0)) : 0
+    }
+
+    /// NA5 (M69.1) — the most recent `limit` job summaries (blob-free),
+    /// newest first. Backs the /ui dashboard's recent-jobs panel so a polled
+    /// `/ui/api/state` doesn't load every row's request/result BLOBs to show
+    /// the last few. `limit <= 0` ⇒ empty.
+    public func recentJobSummaries(limit: Int) -> [JobSummary] {
+        guard limit > 0 else { return [] }
+        let sql =
+            "SELECT id,kind,status,created,updated,owner FROM jobs "
+            + "ORDER BY created DESC LIMIT ?;"
+        guard let st = try? Self.prepared(db, sql) else { return [] }
+        defer { sqlite3_finalize(st) }
+        sqlite3_bind_int(st, 1, Int32(limit))
+        var out: [JobSummary] = []
+        while sqlite3_step(st) == SQLITE_ROW {
+            let owner: String? =
+                sqlite3_column_type(st, 5) == SQLITE_NULL
+                ? nil : String(cString: sqlite3_column_text(st, 5))
+            out.append(
+                JobSummary(
+                    id: String(cString: sqlite3_column_text(st, 0)),
+                    kind: String(cString: sqlite3_column_text(st, 1)),
+                    status: String(cString: sqlite3_column_text(st, 2)),
+                    created: sqlite3_column_double(st, 3),
+                    updated: sqlite3_column_double(st, 4),
+                    owner: owner))
+        }
         return out
     }
 

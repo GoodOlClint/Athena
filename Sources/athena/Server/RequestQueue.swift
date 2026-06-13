@@ -97,11 +97,16 @@ actor RequestQueue {
         await store.listJobs(status: status, owner: owner)
     }
 
-    /// M43.1 — count rows in `queued` for `/healthz`. /healthz is not a
-    /// hot path; reusing `listJobs(status:).count` keeps the code
-    /// trivial without a dedicated COUNT query.
+    /// A15 (M69.1) — queued depth via a `COUNT(*)` query (no blob
+    /// materialization), not `listJobs(status:).count`.
     func depth() async -> Int {
-        await store.listJobs(status: "queued").count
+        await store.queuedJobCount()
+    }
+
+    /// NA5 (M69.1) — the most recent `limit` job summaries (blob-free) for
+    /// the /ui dashboard, newest first.
+    func recentSummaries(limit: Int) async -> [JobSummary] {
+        await store.recentJobSummaries(limit: limit)
     }
 
     /// Remove a job row entirely (cancel-if-queued is implicit — a
@@ -142,12 +147,11 @@ actor RequestQueue {
             // M33.2: on graceful shutdown, stop before picking up new
             // work (a job already running below still completes).
             if stopping { return }
-            // Oldest job still needing work (a prior run may have left
-            // one in `running`).
-            let pending = await store.listJobs().first {
-                $0.status == "queued" || $0.status == "running"
-            }
-            guard let job = pending else {
+            // A4/A24 (M69.1) — the oldest job still needing work (a prior
+            // run may have left one in `running`), via a single indexed
+            // LIMIT-1 query instead of loading every row's BLOBs to pick the
+            // head.
+            guard let job = await store.nextPendingJob() else {
                 // Queue idle: bound retained results before sleeping
                 // (M34.1). Runs on startup and each time the worker
                 // drains empty after a wake.

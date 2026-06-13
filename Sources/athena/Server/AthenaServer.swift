@@ -3368,12 +3368,10 @@ struct AthenaServer {
                 status: .notFound, message: "no model '\(name)'",
                 type: "invalid_request_error", code: "not_found")
         }
-        // `show` does not carry mtime; read it back from `list` (cheap —
-        // a directory scan) so `created` matches the list projection.
-        let created =
-            ModelStoreOps.list(root: modelStoreRoot)
-            .first { $0.name == d.name }?.modified ?? Date()
-        return Self.json(Self.openAIModel(d.name, created))
+        // A16 — `show` now carries this entry's own mtime, so a single-model
+        // retrieve no longer stat-walks the entire store via `list` just to
+        // find one `created` time.
+        return Self.json(Self.openAIModel(d.name, d.modified))
     }
 
     private static func openAIModel(_ name: String, _ modified: Date)

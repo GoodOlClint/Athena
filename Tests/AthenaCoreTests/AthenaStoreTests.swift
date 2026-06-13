@@ -175,6 +175,56 @@ final class AthenaStoreTests: XCTestCase {
         XCTAssertFalse(okMissing)
     }
 
+    /// M69.1 — the blob-free queue access paths: `nextPendingJob` (FIFO,
+    /// queued OR running), `queuedJobCount`, and `recentJobSummaries`.
+    func testQueueAccessQueriesM69_1() async throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("athena-m691-\(UUID()).sqlite")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let s = try AthenaStore(path: url)
+
+        // Insert with strictly increasing created times so FIFO is
+        // unambiguous (a small gap so the Date()-derived `created` differs).
+        for (i, id) in ["a", "b", "c"].enumerated() {
+            try await s.insertJob(
+                id: id, kind: "conversation",
+                request: Data("p\(i)".utf8), owner: nil)
+            try await Task.sleep(nanoseconds: 3_000_000)
+        }
+        // A4/A24 — oldest still-pending job is the head, FIFO by created.
+        let head = await s.nextPendingJob()
+        XCTAssertEqual(head?.id, "a")
+
+        // A15 — queued count via COUNT(*).
+        let count0 = await s.queuedJobCount()
+        XCTAssertEqual(count0, 3)
+
+        // Move the head to done; it drops out of queued count AND nextPending.
+        try await s.updateJob(
+            id: "a", status: "done", result: Data(), error: nil)
+        let count1 = await s.queuedJobCount()
+        XCTAssertEqual(count1, 2)
+        let head1 = await s.nextPendingJob()
+        XCTAssertEqual(head1?.id, "b")
+
+        // A running job is still "pending work" (re-picked after a restart).
+        try await s.updateJob(
+            id: "b", status: "running", result: nil, error: nil)
+        let head2 = await s.nextPendingJob()
+        XCTAssertEqual(
+            head2?.id, "b",
+            "a running job is still the head until it finishes")
+        let count2 = await s.queuedJobCount()
+        XCTAssertEqual(count2, 1, "running is not queued")
+
+        // NA5 — recent summaries are newest-first, blob-free, limit-bounded.
+        let recent = await s.recentJobSummaries(limit: 2)
+        XCTAssertEqual(recent.map(\.id), ["c", "b"])
+        XCTAssertEqual(recent.first?.kind, "conversation")
+        let none = await s.recentJobSummaries(limit: 0)
+        XCTAssertEqual(none.count, 0)
+    }
+
     /// H6 (M65.6) — the optional store-layer owner filter on
     /// getJob/listJobs/allUsage. nil keeps the legacy unfiltered behavior;
     /// a non-nil owner confines the result, and an ownerless (NULL) row

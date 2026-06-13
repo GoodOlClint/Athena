@@ -38,7 +38,10 @@ extension AthenaServer {
             jobs: await store.jobCount(),
             bytes: storeBytes(),
             path: store.dbPath.path)
-        let jobs = await queue.list(status: nil).suffix(25).map {
+        // NA5 (M69.1) — the recent-jobs panel only needs summaries; fetch the
+        // newest 25 blob-free (DESC) and reverse to the prior oldest-first
+        // display order, instead of loading the whole jobs table with BLOBs.
+        let jobs = await queue.recentSummaries(limit: 25).reversed().map {
             QueueJobSummary(
                 id: $0.id, kind: $0.kind, status: $0.status,
                 created: $0.created, updated: $0.updated)

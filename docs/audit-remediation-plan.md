@@ -240,13 +240,15 @@ Re-verified across M67: F6 (createSSMMask alloc) → M69 perf; I7 (embed canonic
 
 > **Follow-up discovered during M67.6 (not from the audits) — dangling HF-cache store symlinks.** `athena pull` lands a model as a symlink into the HF cache (`~/.cache/huggingface/hub/.../snapshots/<rev>/`). If the cache is pruned independently, the store symlink dangles: the entry still shows in `athena ls`, but every inference 500s with `module_load_failed — "missing config.json"` at REQUEST time — not caught at startup, by `doctor`, or by `ls`/`show`. **Add a doctor/startup validation** that resolves each allowlisted store entry and confirms `config.json` (+ a `*.safetensors`) exists, reporting dangling entries. (Real-dir/converted models are unaffected; only `pull`-created symlinks.)
 
-### M69.1 — Queue/store access patterns
-- [ ] A4 (High) `nextPending()` minimal-column query (drain stops loading all blobs)
-- [ ] H9 `INDEX jobs(status, created)`
-- [ ] A15 `depth()` = `SELECT COUNT(*)`
-- [ ] NA5 /ui state uses a no-blob recent-N summary query
-- [ ] A24 explicit `ORDER BY created ASC`
-- [ ] A16 `/v1/models/:id` returns mtime without full-store walk
+### M69.1 — Queue/store access patterns ✅ v0.10.139
+- [x] A4 (High) the worker drain now calls `AthenaStore.nextPendingJob()` — ONE indexed `SELECT … WHERE status IN ('queued','running') ORDER BY created ASC LIMIT 1` — instead of `listJobs().first { … }`, which materialized EVERY row's (≤8 MB) request/result BLOBs just to pick the head (O(n²) churn as the never-pruned table grows) (v0.10.139)
+- [x] H9 `CREATE INDEX IF NOT EXISTS jobs_status_created ON jobs(status, created)` (additive migration) — serves the drain pick, the queued COUNT, and the status-filtered list without a full scan (v0.10.139)
+- [x] A15 `RequestQueue.depth()` → `AthenaStore.queuedJobCount()` (`SELECT COUNT(*) FROM jobs WHERE status='queued'`), not `listJobs(status:).count` which loaded blobs to count (v0.10.139)
+- [x] NA5 `/ui/api/state` (polled on a timer) now uses `recentJobSummaries(limit:25)` — `SELECT id,kind,status,created,updated,owner … ORDER BY created DESC LIMIT 25`, blob-free — reversed to the prior oldest-first display order, instead of `queue.list(nil)` loading the whole jobs table with payloads (v0.10.139)
+- [x] A24 the drain's FIFO order is now an explicit `ORDER BY created ASC` in `nextPendingJob` (no longer riding on `listJobs`'s unstated default ordering) (v0.10.139)
+- [x] A16 `ModelStoreOps.Detail` carries the entry's own `modified` mtime (stat'd for that one dir in `show`), so `GET /v1/models/:id` reads `d.modified` directly instead of re-running `ModelStoreOps.list` (a full-store stat-walk) to find one model's `created` time (v0.10.139)
+
+> Pure-perf slice — identical results, fewer/cheaper queries; no decode/sampling/inference change. `AthenaStore` job-query helpers ARE CI-testable: `testQueueAccessQueriesM69_1` (FIFO head incl. running, queued COUNT, newest-first blob-free summaries) + existing job tests, `AthenaStoreTests` 22/0. Binding gate: Release build + e2e-rbac **561/0** (queue submit/poll, /healthz depth, /ui state, /v1/models/:id phases).
 
 ### M69.2 — Admission-control & metrics truth on streams
 - [ ] NA3 concurrency slot + inflight gauge + latency timer live until the streamed body terminates (M29.2 currently doesn't bound streams; /healthz lies during decode)
