@@ -33,11 +33,10 @@ enum GuidedSubstrate {
         func process(logits: MLXArray) -> MLXArray {
             var mask: [UInt8] = []
             _ = guide.allowedMask(into: &mask)
-            var add = [Float](repeating: -.infinity, count: vocab)
-            for i in 0..<vocab
-            where (mask[i >> 3] >> UInt8(i & 7)) & 1 == 1 {
-                add[i] = 0
-            }
+            // M70.3 (L5): same shared MLX-free seam as
+            // SpeculativeGeneration.guidedArgmax — one source for the
+            // bit→additive-mask unpack so the two guided paths can't drift.
+            let add = GuidedMask.additiveMask(allowed: mask, vocab: vocab)
             // `logits` is the last-position slice, shape (1, vocab);
             // the (vocab,) additive mask broadcasts over it.
             return logits + MLXArray(add)

@@ -30,10 +30,10 @@ enum SpeculativeGeneration {
             return argMax(slice, axis: -1).item(Int.self)
         }
         _ = guide.allowedMask(into: &maskBuf)
-        var add = [Float](repeating: -.infinity, count: vocab)
-        for i in 0..<vocab where (maskBuf[i >> 3] >> UInt8(i & 7)) & 1 == 1 {
-            add[i] = 0
-        }
+        // M70.3 (L5): shared MLX-free seam builds the additive mask; the
+        // argMax stays here on the MLXArray. `GuidedMask.maskedArgmax` is the
+        // CI-testable pure equivalent of `argMax(slice + add)`.
+        let add = GuidedMask.additiveMask(allowed: maskBuf, vocab: vocab)
         let masked = slice + MLXArray(add)
         return argMax(masked, axis: -1).item(Int.self)
     }
