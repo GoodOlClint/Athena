@@ -1,6 +1,10 @@
 import CAthenaStructured
 import Foundation
 
+#if DEBUG
+import os
+#endif
+
 public struct StructuredError: Error, CustomStringConvertible {
     public let message: String
     init(_ stage: String) {
@@ -153,6 +157,26 @@ public final class StructuredIndex: @unchecked Sendable {
 /// bitmask, `advance`, and bounded `rollback` (the 32-entry ring in the
 /// Rust shim) — the structured-decoding counterpart to the MTP
 /// speculative loop's KV/Mamba rollback.
+///
+/// SINGLE-OWNER INVARIANT (G5). A `StructuredGuide` wraps a MUTABLE,
+/// non-reentrant Rust parser: `advance`/`rollback` mutate FSM state and the
+/// 32-entry rollback ring, and `allowedMask` recomputes against the live
+/// state. Exactly ONE task may own a guide for its lifetime — every decode
+/// loop builds its OWN guide from the shared (immutable, `Arc`-based)
+/// `StructuredIndex` via `oc_guide_new`. Touching one guide from two tasks
+/// concurrently is a data race with undefined behaviour (a corrupted mask =
+/// a silently wrong structured constraint).
+///
+/// This type is DELIBERATELY NOT `Sendable` so the compiler forbids sharing
+/// it across isolation domains — that non-conformance is the primary guard
+/// and **must never be weakened**: do NOT add `Sendable` or
+/// `@unchecked Sendable` to `StructuredGuide`. (The shared, immutable
+/// `StructuredVocabulary`/`StructuredIndex` factories ARE `@unchecked
+/// Sendable` — that is correct and intentional; the per-request mutable
+/// guide spun from them is not.) A DEBUG-only `os_unfair_lock` backstop
+/// below trips an assertion if a raw-pointer escape ever drives one guide
+/// from two threads at once; Release carries no sentinel, so the
+/// bit-identical decode path is byte-unchanged.
 public final class StructuredGuide {
     let ptr: OpaquePointer
     let index: StructuredIndex  // keep alive
@@ -162,6 +186,18 @@ public final class StructuredGuide {
     /// `StructuredVocabulary.openerAliases`; empty ⇒ plain advance.
     public var openerAlias: [UInt32: UInt32] = [:]
 
+    #if DEBUG
+    /// G5 — single-owner sentinel. Held across each mutating FFI op; a
+    /// concurrent thread's `trylock` fails and trips the assertion, surfacing
+    /// a shared-guide misuse the non-`Sendable` type guard would normally
+    /// prevent at compile time. Heap-allocated so its address is stable.
+    private let ownerLock: UnsafeMutablePointer<os_unfair_lock> = {
+        let p = UnsafeMutablePointer<os_unfair_lock>.allocate(capacity: 1)
+        p.initialize(to: os_unfair_lock())
+        return p
+    }()
+    #endif
+
     public init(index: StructuredIndex) throws {
         guard let p = oc_guide_new(index.ptr) else {
             throw StructuredError("guide new")
@@ -170,7 +206,13 @@ public final class StructuredGuide {
         self.index = index
     }
 
-    deinit { oc_guide_free(ptr) }
+    deinit {
+        oc_guide_free(ptr)
+        #if DEBUG
+        ownerLock.deinitialize(count: 1)
+        ownerLock.deallocate()
+        #endif
+    }
 
     /// Bitmask length in bytes (`ceil(vocabSize / 8)`).
     public var maskLength: Int { oc_guide_mask_len(ptr) }
@@ -178,6 +220,11 @@ public final class StructuredGuide {
     /// Fill `buffer` (≥ `maskLength`) with allowed tokens: bit `i` of
     /// byte `i>>3` set ⇒ token `i` permitted from the current state.
     public func allowedMask(into buffer: inout [UInt8]) -> Bool {
+        #if DEBUG
+        let locked = os_unfair_lock_trylock(ownerLock)
+        assert(locked, "StructuredGuide concurrent use — single-owner invariant (never @unchecked Sendable)")
+        defer { if locked { os_unfair_lock_unlock(ownerLock) } }
+        #endif
         if buffer.count < maskLength { buffer = [UInt8](repeating: 0, count: maskLength) }
         return buffer.withUnsafeMutableBufferPointer {
             oc_guide_allowed_mask(ptr, $0.baseAddress, $0.count) == 0
@@ -188,7 +235,12 @@ public final class StructuredGuide {
     /// should not record it — mirrors mlx-lm `_try_advance`).
     @discardableResult
     public func advance(_ token: UInt32) -> Bool {
-        oc_guide_advance(ptr, token)
+        #if DEBUG
+        let locked = os_unfair_lock_trylock(ownerLock)
+        assert(locked, "StructuredGuide concurrent use — single-owner invariant (never @unchecked Sendable)")
+        defer { if locked { os_unfair_lock_unlock(ownerLock) } }
+        #endif
+        return oc_guide_advance(ptr, token)
     }
 
     /// Like `advance`, but if `token` has no transition AND it is a
@@ -212,6 +264,11 @@ public final class StructuredGuide {
     /// `_sync` port).
     @discardableResult
     public func rollback(_ n: Int) -> Bool {
-        oc_guide_rollback(ptr, n)
+        #if DEBUG
+        let locked = os_unfair_lock_trylock(ownerLock)
+        assert(locked, "StructuredGuide concurrent use — single-owner invariant (never @unchecked Sendable)")
+        defer { if locked { os_unfair_lock_unlock(ownerLock) } }
+        #endif
+        return oc_guide_rollback(ptr, n)
     }
 }

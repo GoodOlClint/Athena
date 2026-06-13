@@ -108,20 +108,38 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     /// kicked off. nil ⇒ bind the default. Only consulted while the slot is
     /// unloaded; a warm swap goes through `rebind`.
     private var desiredName: String?
-    /// Cached structured-output vocabulary tokens (the ~150k
-    /// `tokenizer.decode` calls are model-fixed and schema-independent —
-    /// build once, reuse every structured request). Sendable, so it
-    /// crosses into the `container.perform` closure safely. M41.2:
-    /// invalidated on rebind — different models have different vocabs.
-    private var cachedVocabTokens:
-        (tokens: [VocabToken], eos: UInt32, opener: [UInt32: UInt32])?
+    /// Structured-output vocabulary tokens: the model's full token set with
+    /// decoded bytes (the ~150k `tokenizer.decode` calls are model-fixed and
+    /// schema-independent), plus the eos id and the opener-alias table.
+    typealias VocabBundle = (
+        tokens: [VocabToken], eos: UInt32, opener: [UInt32: UInt32]
+    )
+    /// C3 (M68.2) — the per-model structured-vocab build, memoized as a Task.
+    /// The build is tens of seconds (the 150k decodes), so concurrent
+    /// first-of-model structured requests must COALESCE onto ONE build. The
+    /// pre-fix code did an actor-reentrant check-then-act
+    /// (`cachedVocabTokens == nil` → `await container.perform { … }` → write):
+    /// two requests both saw nil and both built, and worse, a rebind landing
+    /// in the `await` window nil'd the cache and changed the tokenizer while
+    /// the in-flight build then wrote a STALE-tokenizer result back — a wrong
+    /// structured guide (silent corruption). Memoizing as a Task makes the
+    /// check-then-create actor-atomic (no `await` between the nil-check and
+    /// the assignment), so exactly one build runs and concurrent callers
+    /// await the same Task. The Task captures THIS model's `container`, so a
+    /// rebind mid-build still yields the correct vocab for the request that
+    /// started it; the field is invalidated (cancel+nil) wherever the model
+    /// changes, so the next request after a rebind builds fresh. nil ⇒ no
+    /// build started yet for the resident model.
+    private var vocabBuild: Task<VocabBundle?, Error>?
 
     /// M53 — cached per-model structured-output vocabulary + parser
     /// factory (the llguidance token trie + vocab slicer). Building it
     /// (~0.24 s) is the only non-trivial structured-output cost and is
-    /// schema-independent, so it is built once from `cachedVocabTokens`
-    /// and reused for every schema and every request. Invalidated
-    /// wherever `cachedVocabTokens` is — a rebind changes the vocabulary.
+    /// schema-independent, so it is built once from the `vocabBuild` bundle
+    /// and reused for every schema and every request. Invalidated alongside
+    /// `vocabBuild` (in `resetStructuredCaches`) — a rebind changes the
+    /// vocabulary. Its build is synchronous (no `await`), so the
+    /// check-then-set below is actor-atomic and needs no Task memoization.
     /// `@unchecked Sendable`, so it crosses into the `container.perform`
     /// closure. The per-schema `StructuredIndex` is now ~1 ms (vs the old
     /// ~60 s outlines DFA compile), so it is NOT cached — built fresh per
@@ -293,6 +311,89 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
 
     public func memoryEstimate() -> Int { estimatedBytes }
 
+    /// C10 (M68.2) — invalidate every per-model DERIVED structured-output
+    /// cache in ONE place. The vocab build (C3) and the parser-factory share
+    /// the resident model's tokenizer, so they must die together whenever the
+    /// model changes; centralizing it stops a new cache field from being
+    /// added to some invalidation sites and missed at others (the M53 drift
+    /// that left `cachedStructuredVocabulary` nil'd at only some of the five
+    /// former copy-pasted sites). Idempotent. NOTE: the DFlash drafter is also
+    /// per-model but has its own reset on the load path (it carries governor
+    /// byte accounting), so it is intentionally not folded in here.
+    private func resetStructuredCaches() {
+        vocabBuild?.cancel()
+        vocabBuild = nil
+        cachedStructuredVocabulary = nil  // M53 — mirror the vocab lifecycle
+    }
+
+    /// C10 — drop the resident container and all derived per-model state in
+    /// one place (unload / load-failure / rebind / allowlist-drop). Idempotent.
+    private func dropResidentModel() {
+        container = nil
+        residentName = nil
+        resetStructuredCaches()
+    }
+
+    /// C3 (M68.2) — the resident model's structured-output vocab bundle, built
+    /// at most once (coalesced) against the resident container. Returns nil
+    /// when no model is resident or the model's vocab size can't be resolved
+    /// (the caller then fails the structured request closed — G4/NC2). The
+    /// memoized `vocabBuild` Task is BOTH the cache (held until the model
+    /// changes) and the coalescer (concurrent callers await the same Task).
+    /// The nil-check and the assignment below are actor-atomic — there is no
+    /// `await` between them — so exactly one build is ever started per model;
+    /// the Task captures `container`, so a rebind landing mid-build still
+    /// yields the correct vocab for the request that started it.
+    private func structuredVocab() async throws -> VocabBundle? {
+        if let existing = vocabBuild {
+            return try await existing.value
+        }
+        guard let container else { return nil }
+        let cfgVocab = configVocabSize
+        let builtForName = residentName
+        let task = Task<VocabBundle?, Error> {
+            DecodeProgress.counter?.setSetupStage("build-vocab")
+            defer { DecodeProgress.counter?.setSetupStage(nil) }
+            let vocabT0 = Date()
+            let built = try await container.perform {
+                (ctx: ModelContext) -> ([VocabToken], UInt32)? in
+                // Qwen3.5 exposes vocabularySize directly; any other
+                // architecture uses config.json's vocab_size, so guided
+                // structured output is available everywhere (M23 fork A).
+                guard
+                    let vocabSize =
+                        (ctx.model as? AthenaQwen35Model)?.vocabularySize
+                        ?? cfgVocab
+                else { return nil }
+                let (t, e) = StructuredVocab.tokens(
+                    tokenizer: ctx.tokenizer, vocabSize: vocabSize)
+                return (t, e)
+            }
+            guard let built else { return nil }
+            Self.log.notice(
+                """
+                structured-vocab built elapsed=\
+                \(String(format: "%.1f", Date().timeIntervalSince(vocabT0)))s \
+                tokens=\(built.0.count)
+                """,
+                metadata: ["function": "structuredVocab"])
+            return (
+                built.0, built.1,
+                StructuredVocabulary.openerAliases(tokens: built.0))
+        }
+        vocabBuild = task  // actor-atomic with the nil-check (no await between)
+        do {
+            return try await task.value
+        } catch {
+            // A throwing build (e.g. the container faulted) must not stick as
+            // the cached result and wedge every later request on the same
+            // throw — drop it so a retry rebuilds. Only if no rebind replaced
+            // it while we awaited (a rebind already invalidated `vocabBuild`).
+            if residentName == builtForName { vocabBuild = nil }
+            throw error
+        }
+    }
+
     public func load(reservation: MemoryReservation) async throws {
         if container != nil { return }
         // M62 — bind the requested cold-load target (set via
@@ -303,10 +404,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     }
 
     public func unload() async {
-        container = nil
-        residentName = nil
-        cachedVocabTokens = nil
-        cachedStructuredVocabulary = nil  // M53 — mirror vocabTokens lifecycle
+        dropResidentModel()  // C10
     }
 
     /// M41.2 — load `name`'s directory into `container` and (re)seed the
@@ -359,10 +457,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                         using: #huggingFaceTokenizerLoader())
                 }
         } catch {
-            container = nil
-            residentName = nil
-            cachedVocabTokens = nil
-        cachedStructuredVocabulary = nil  // M53 — mirror vocabTokens lifecycle
+            dropResidentModel()  // C10
             throw error
         }
         // Refresh per-model geometry: vocab size + KV per-token bound
@@ -376,9 +471,8 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         case .none, .triattention: perTokenKVBytes = fp16PerToken
         }
         // Different model ⇒ a fresh structured-vocab cache; the old
-        // tokens belong to the previous tokenizer.
-        cachedVocabTokens = nil
-        cachedStructuredVocabulary = nil  // M53 — mirror vocabTokens lifecycle
+        // tokens belong to the previous tokenizer (C3/C10).
+        resetStructuredCaches()
         // M63.3b — the drafter is target-specific; drop it on rebind so the
         // next DFlash request reloads the one registered for the new model.
         dflashDraft = nil
@@ -458,11 +552,8 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         if residentName == target, container != nil { return }
         // Drop the current container (and its caches) before swapping
         // so the substrate's working set is released before the new
-        // load — same fixed governor reservation either way.
-        container = nil
-        residentName = nil
-        cachedVocabTokens = nil
-        cachedStructuredVocabulary = nil  // M53 — mirror vocabTokens lifecycle
+        // load — same fixed governor reservation either way (C10).
+        dropResidentModel()
         try await loadModel(name: target)
     }
 
@@ -495,10 +586,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         }
         defaultName = modelDirectories.first?.name ?? defaultName
         if let r = residentName, !ids.contains(r) {
-            container = nil
-            residentName = nil
-            cachedVocabTokens = nil
-        cachedStructuredVocabulary = nil  // M53 — mirror vocabTokens lifecycle
+            dropResidentModel()  // C10
         }
         // M62 — drop a stale cold-load target no longer in the allowlist.
         if let d = desiredName, !ids.contains(d) { desiredName = nil }
@@ -710,45 +798,13 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         // inert under the Guide / speculative greedy).
         let maxTokens = Self.effectiveMaxTokens(maxTokens, params.maxTokens)
 
-        // Build (or reuse) the structured vocabulary tokens once per
-        // model. The ~150k tokenizer.decode calls are the dominant
-        // structured-request cost and are schema-independent.
-        // M49.3: annotate the setup stage so the heartbeat reports
-        // `phase=setup:build-vocab` while this runs — first-of-model
-        // requests can sit here for tens of seconds.
-        if schemaJSON != nil, cachedVocabTokens == nil {
-            let cfgVocab = configVocabSize
-            DecodeProgress.counter?.setSetupStage("build-vocab")
-            let vocabT0 = Date()
-            let built = try await container.perform {
-                (ctx: ModelContext) -> ([VocabToken], UInt32)? in
-                // Qwen3.5 exposes vocabularySize directly; any other
-                // architecture uses config.json's vocab_size, so guided
-                // structured output is available everywhere (M23 fork A).
-                guard
-                    let vocabSize =
-                        (ctx.model as? AthenaQwen35Model)?.vocabularySize
-                        ?? cfgVocab
-                else { return nil }
-                let (t, e) = StructuredVocab.tokens(
-                    tokenizer: ctx.tokenizer, vocabSize: vocabSize)
-                return (t, e)
-            }
-            if let built {
-                cachedVocabTokens = (
-                    built.0, built.1,
-                    StructuredVocabulary.openerAliases(tokens: built.0))
-            }
-            DecodeProgress.counter?.setSetupStage(nil)
-            Self.log.notice(
-                """
-                structured-vocab built elapsed=\
-                \(String(format: "%.1f", Date().timeIntervalSince(vocabT0)))s \
-                tokens=\(built?.0.count ?? 0)
-                """,
-                metadata: ["function": "runSpeculative"])
-        }
-        let vocabTokens = cachedVocabTokens
+        // Build (or reuse) the structured vocabulary tokens once per model.
+        // The ~150k tokenizer.decode calls are the dominant structured-request
+        // cost and are schema-independent. C3 (M68.2): the build is memoized
+        // as a Task (`structuredVocab()`) so concurrent first-of-model
+        // requests coalesce onto ONE build and a rebind can't clobber an
+        // in-flight build's result with a stale tokenizer.
+        let vocabTokens = schemaJSON != nil ? try await structuredVocab() : nil
         // NC2/G4 fail-closed: a structured request whose guide cannot be
         // built must 400 — never stream unconstrained text with a 200. If
         // the resident model's vocabulary can't be resolved (e.g. a

@@ -481,16 +481,33 @@ pub extern "C" fn oc_version() -> *const c_char {
 pub unsafe extern "C" fn oc_last_error(buf: *mut c_char, len: usize) -> usize {
     ffi_guard("oc_last_error", 0, move || {
         LAST_ERR.with(|e| {
-            let e = e.borrow();
-            let bytes = e.as_bytes_with_nul();
-            if !buf.is_null() && len > 0 {
-                let n = bytes.len().min(len);
-                std::ptr::copy_nonoverlapping(bytes.as_ptr() as *const c_char, buf, n);
-                if n == len {
-                    *buf.add(len - 1) = 0;
+            // G8: copy-and-CLEAR ("take") when the caller passes a buffer.
+            // The recorded error then belongs to exactly one read — the
+            // failing call's own caller — so it cannot bleed into a LATER
+            // call on a reused pool thread that returned a failure sentinel
+            // WITHOUT calling `set_err` (which would otherwise read this
+            // stale message and mis-attribute it), nor be misread
+            // cross-thread post-await with the wrong attribution. The
+            // length-sizing probe (`buf == null` / `len == 0`) does NOT
+            // clear, so the standard read-length-then-copy two-call protocol
+            // still works.
+            let needed = {
+                let slot = e.borrow();
+                let bytes = slot.as_bytes_with_nul();
+                if !buf.is_null() && len > 0 {
+                    let n = bytes.len().min(len);
+                    std::ptr::copy_nonoverlapping(bytes.as_ptr() as *const c_char, buf, n);
+                    if n == len {
+                        *buf.add(len - 1) = 0;
+                    }
                 }
+                bytes.len()
+            };
+            if !buf.is_null() && len > 0 {
+                // The immutable borrow above is dropped; take the message.
+                *e.borrow_mut() = CString::default();
             }
-            bytes.len()
+            needed
         })
     })
 }
@@ -929,5 +946,39 @@ mod tests {
         let got = StructuredShimErr::last();
         assert!(got.starts_with("before"), "message not truncated at NUL: {got:?}");
         assert!(got.contains("after"), "tail after the NUL survives: {got:?}");
+    }
+
+    /// G8: a buffered `oc_last_error` read TAKES (clears) the message, so a
+    /// later call on a reused thread that fails WITHOUT `set_err` can't read
+    /// the stale message and mis-attribute it; the sizing probe does not
+    /// clear.
+    #[test]
+    fn oc_last_error_takes_and_clears_g8() {
+        set_err("first failure detail");
+        // Sizing probe: returns the needed length, does NOT clear.
+        let needed = unsafe { oc_last_error(std::ptr::null_mut(), 0) };
+        assert!(needed > 1, "sizing probe reports the length");
+        assert_eq!(
+            StructuredShimErr::last(),
+            "first failure detail",
+            "sizing probe must not clear the slot"
+        );
+        // Buffered read: copies the message AND clears the slot.
+        let mut buf = vec![0 as c_char; needed];
+        let n = unsafe { oc_last_error(buf.as_mut_ptr(), needed) };
+        assert_eq!(n, needed);
+        let msg = unsafe { CStr::from_ptr(buf.as_ptr()) }
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(msg, "first failure detail", "the read returns the message");
+        // The slot is now empty — a second read (a later, set_err-less call)
+        // sees no stale detail.
+        assert_eq!(
+            StructuredShimErr::last(),
+            "",
+            "a buffered read clears the slot (take semantics)"
+        );
+        let needed2 = unsafe { oc_last_error(std::ptr::null_mut(), 0) };
+        assert_eq!(needed2, 1, "only the trailing NUL remains after a take");
     }
 }
