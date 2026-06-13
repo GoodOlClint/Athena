@@ -140,13 +140,13 @@
     "semantic_hash": "58f3cec0c060727e72abe1fbb08bafae"
   },
   "Sources/AthenaLLM/GuidedGreedy.swift": {
-    "mtime": 1780419068.9716203,
-    "ast_hash": "485055df6c860264f916d546594e50db",
-    "semantic_hash": "485055df6c860264f916d546594e50db"
+    "mtime": 1781369295.149111,
+    "ast_hash": "973e6bcee196d65825a8ade3cefa81ac",
+    "semantic_hash": ""
   },
   "Sources/AthenaLLM/GuidedSubstrate.swift": {
-    "mtime": 1781368678.0203137,
-    "ast_hash": "58e7510820c07cadd76c1164812e45fb",
+    "mtime": 1781369302.2126336,
+    "ast_hash": "0538a395c078f02bdf9aedd702d0b6f7",
     "semantic_hash": ""
   },
   "Sources/AthenaLLM/KVCompression.swift": {
@@ -195,8 +195,8 @@
     "semantic_hash": ""
   },
   "Sources/AthenaLLM/SpeculativeGeneration.swift": {
-    "mtime": 1781368670.3656347,
-    "ast_hash": "114e38b3cd779235dd062b16fe387b12",
+    "mtime": 1781369284.0954843,
+    "ast_hash": "8d0b7063b7f14057fa82d9d988ce788b",
     "semantic_hash": ""
   },
   "Sources/AthenaLLM/SpeculativeSampling.swift": {
@@ -205,9 +205,9 @@
     "semantic_hash": ""
   },
   "Sources/AthenaLLM/SpeculativeSamplingGenerate.swift": {
-    "mtime": 1780419076.0518448,
-    "ast_hash": "ef0ccd6f987ed846166dc14eeae92dbc",
-    "semantic_hash": "ef0ccd6f987ed846166dc14eeae92dbc"
+    "mtime": 1781369289.9251902,
+    "ast_hash": "27d9ec4a6febae5e927477a4944305db",
+    "semantic_hash": ""
   },
   "Sources/AthenaLLM/StopStreamFilter.swift": {
     "mtime": 1781309811.3877409,
@@ -425,8 +425,8 @@
     "semantic_hash": "d16404614855c59c2001089f41c5bd78"
   },
   "Sources/athena/Athena.swift": {
-    "mtime": 1781369079.1848972,
-    "ast_hash": "07c73fb02662d65055161f3816bf4f1a",
+    "mtime": 1781369367.9494548,
+    "ast_hash": "3da194a5e92da0402c3bbe1f991e7668",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Audit.swift": {
@@ -1180,8 +1180,8 @@
     "semantic_hash": ""
   },
   "docs/audit-remediation-plan.md": {
-    "mtime": 1781369090.2487435,
-    "ast_hash": "1a82de2539e29301a446a962dc12765c",
+    "mtime": 1781369376.8617392,
+    "ast_hash": "a3eb72dccd4a8e0203dce3bd1461542a",
     "semantic_hash": ""
   },
   "docs/decisions/003-rust-shim-panic-strategy.md": {
@@ -1302,6 +1302,16 @@
   "Tests/AthenaCoreTests/PrefixKVCacheTests.swift": {
     "mtime": 1781369045.8051395,
     "ast_hash": "e84be2640194ac3d4c50bf124bb21d18",
+    "semantic_hash": ""
+  },
+  "Sources/AthenaCore/DecodeLoopControl.swift": {
+    "mtime": 1781369278.5628939,
+    "ast_hash": "ee1ec61fcb984f124a6a2a390fdf82f1",
+    "semantic_hash": ""
+  },
+  "Tests/AthenaCoreTests/DecodeLoopControlTests.swift": {
+    "mtime": 1781369333.5477254,
+    "ast_hash": "dd825e980cb6adc8c6c51685163b46f2",
     "semantic_hash": ""
   }
 }
