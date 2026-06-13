@@ -299,7 +299,7 @@ Measured on the M5 Max against the Release binary (Qwen3.5-27B-4bit-mtp, `ATHENA
 - [ ] NC6 StructuredVocab + GuidedDecoder unit tests
 
 ### M70.3 — Remaining coverage gaps
-- [ ] L5–L11 (schema-mask seam, stop-filter cases, multi-seed sampling, embed-vector asserts, governor coalesce count, basename-collision, tautological asserts)
+- [~] L5–L11 — **L6 / L9 / L10 ✅ v0.10.147** (test-only): L6 — three `StopStreamFilter` streaming cases (false-prefix-release: a held-back tail that can't complete a stop is emitted not dropped; earliest-of-multiple-stops in a stream; a multi-char stop fed one char at a time). L9 — `testConcurrentLoadsInvokeLoadExactlyOnceL9`: a counting `InferenceModule` stub proves 8 concurrent first-touch `ensureLoaded` coalesce into EXACTLY ONE `module.load()` (the prior test only asserted bytes reserved once). L10 — `testBasenameCollisionPinsFirstEntry`: two allowlist rows sharing a basename resolve deterministically to the FIRST row (`canonicalByStoreIdentity` uses `first`), and reversing the allowlist flips the pinned winner. StopStreamFilter 11/0 + MemoryGovernor 23/0 + ModelAllowlist 11/0; e2e 561/0. **Remaining: L5** (schema-mask seam — needs scripted logits through the guided seam, MLX/stub-tier), **L7** (multi-seed sampling — `SpeculativeSampling`, MLX), **L8** (embed model-distinguishable stub vectors — stub-tier), **L11** (tautological-assert cleanups — Low).
 - [ ] NL1 governor load-transition/coalescing; NL4 Counter race in test harness
 - [ ] NF3 TriAttention compress + gatedDeltaOps parity CI coverage
 - [ ] ND14/ND15 whisper language round-trip; RMS gate; clustering branches

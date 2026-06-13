@@ -82,4 +82,46 @@ final class StopStreamFilterTests: XCTestCase {
         XCTAssertTrue(f.stopped, "multi-scalar stop matched across chunks")
         XCTAssertEqual(out, "", "stop suppressed; nothing surfaced")
     }
+
+    // MARK: - M70.3 L6 — false-prefix release, streaming multi-stop, 1-char split
+
+    /// A held-back tail that turns out NOT to complete a stop must be RELEASED,
+    /// not swallowed: when no stop ever matches, the concatenated output equals
+    /// the full input exactly (the " ST" held after the first chunk flows out
+    /// once "STX" proves it can't become "STOP").
+    func testStreamingFalsePrefixIsReleased() {
+        var f = StopStreamFilter(stops: ["STOP"])
+        var out = ""
+        out += f.push("alpha ST")  // " ST" looks like a STOP prefix → held back
+        out += f.push("X more")  // "STX" can't be STOP → the prefix releases
+        out += f.flush()
+        XCTAssertFalse(f.stopped, "no stop ever completed")
+        XCTAssertEqual(
+            out, "alpha STX more", "a false prefix is emitted, never dropped")
+    }
+
+    /// Streaming with several stops: the EARLIEST match in the reassembled
+    /// stream wins, even when a later stop also appears.
+    func testStreamingMultipleStopsEarliestWins() {
+        var f = StopStreamFilter(stops: ["END", "X"])
+        var out = ""
+        out += f.push("aa")  // shorter than the hold-back ⇒ nothing yet
+        out += f.push("bb X cc END")  // both X and END present; X is earlier
+        out += f.flush()
+        XCTAssertTrue(f.stopped)
+        XCTAssertEqual(out, "aabb ", "cut at the earliest stop (X), not END")
+    }
+
+    /// Fed one character at a time, a multi-char stop straddling many pushes is
+    /// still caught and the prefix before it surfaces exactly once.
+    func testStreamingOneCharAtATime() {
+        var f = StopStreamFilter(stops: ["STOP"])
+        var out = ""
+        for ch in "abSTOPcd" {
+            out += f.push(String(ch))
+        }
+        out += f.flush()
+        XCTAssertTrue(f.stopped)
+        XCTAssertEqual(out, "ab", "everything before STOP, nothing after")
+    }
 }

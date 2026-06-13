@@ -43,4 +43,29 @@ final class ModelAllowlistTests: XCTestCase {
             allow.canonicalByStoreIdentity("Qwen3-Embedding-4B"),
             "Qwen3-Embedding-4B")
     }
+
+    // MARK: - M70.3 L10 — basename-collision is resolved deterministically
+
+    /// Two allowlist entries share a basename (`modelStoreIdentity` is the last
+    /// path component) but differ by org. `canonicalByStoreIdentity` resolves by
+    /// `first`, so the EARLIER allowlist row deterministically wins for a bare
+    /// query AND for either org-qualified query (both alias to the same
+    /// basename) — pinning the winner so the resolution can't silently flip with
+    /// row ordering / dedup churn.
+    func testBasenameCollisionPinsFirstEntry() {
+        let allow = ["OrgA/Model", "OrgB/Model"]
+        // Bare query → the first matching row.
+        XCTAssertEqual(allow.canonicalByStoreIdentity("Model"), "OrgA/Model")
+        // BOTH org-qualified forms collide on basename "model" → still OrgA.
+        XCTAssertEqual(
+            allow.canonicalByStoreIdentity("OrgA/Model"), "OrgA/Model")
+        XCTAssertEqual(
+            allow.canonicalByStoreIdentity("OrgB/Model"), "OrgA/Model",
+            "collision aliases to the first allowlist row (deterministic pin)")
+        // Reversing the allowlist flips the pinned winner — proves it's the
+        // ordering, not the org string, that decides.
+        let reversed = ["OrgB/Model", "OrgA/Model"]
+        XCTAssertEqual(
+            reversed.canonicalByStoreIdentity("Model"), "OrgB/Model")
+    }
 }

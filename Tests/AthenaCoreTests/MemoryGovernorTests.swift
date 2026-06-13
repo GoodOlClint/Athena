@@ -592,4 +592,52 @@ final class MemoryGovernorTests: XCTestCase {
             "reconcile should bill the self-reported footprint")
         XCTAssertEqual(s.residentBytes, 600)
     }
+
+    // MARK: - M70.3 L9 — coalescing invokes module.load exactly once
+
+    /// A module that counts its `load()` invocations and sleeps briefly so
+    /// concurrent first-touch callers pile up on the in-flight load Task.
+    private actor CountingModule: InferenceModule {
+        nonisolated let id: ModuleID
+        private let bytes: Int
+        private(set) var loadCount = 0
+        private var isLoaded = false
+        init(id: ModuleID, bytes: Int) {
+            self.id = id
+            self.bytes = bytes
+        }
+        var residentBytes: Int { isLoaded ? bytes : 0 }
+        func memoryEstimate() -> Int { bytes }
+        func load(reservation: MemoryReservation) async throws {
+            loadCount += 1
+            // Widen the window so all concurrent callers coalesce on one Task.
+            try? await Task.sleep(nanoseconds: 10_000_000)
+            isLoaded = true
+        }
+        func unload() async { isLoaded = false }
+        func count() -> Int { loadCount }
+    }
+
+    /// L9 — `testConcurrentLoadsCoalesce` asserts the BYTES reserve once; this
+    /// pins the stronger invariant the coalescing exists for: the underlying
+    /// `module.load()` runs EXACTLY ONCE even under 8 concurrent first-touch
+    /// `ensureLoaded` calls (they await the same in-flight Task), so a load is
+    /// never duplicated.
+    func testConcurrentLoadsInvokeLoadExactlyOnceL9() async throws {
+        let gov = MemoryGovernor(totalBudgetBytes: 1_000)
+        let m = CountingModule(id: .llm, bytes: 400)
+        await gov.register(m, evictable: false)
+
+        await withThrowingTaskGroup(of: Void.self) { group in
+            for _ in 0..<8 {
+                group.addTask { try await gov.ensureLoaded(.llm) }
+            }
+        }
+
+        let n = await m.count()
+        XCTAssertEqual(
+            n, 1, "concurrent first-touch loads coalesce into ONE module.load()")
+        let reserved = await gov.snapshot().residentBytes
+        XCTAssertEqual(reserved, 400, "reserved once, not 8×")
+    }
 }
