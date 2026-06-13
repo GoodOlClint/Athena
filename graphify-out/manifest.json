@@ -295,9 +295,9 @@
     "semantic_hash": "2a65a46b395638d1e5620a34acc2d787"
   },
   "Sources/AthenaTranscription/AgglomerativeClustering.swift": {
-    "mtime": 1779463028.877727,
-    "ast_hash": "5fa1da314b09a2116d8135f928a0def6",
-    "semantic_hash": "5fa1da314b09a2116d8135f928a0def6"
+    "mtime": 1781310656.293041,
+    "ast_hash": "bfc4ca03eeb7fe5d593783a195cbc844",
+    "semantic_hash": ""
   },
   "Sources/AthenaTranscription/AudioDecode.swift": {
     "mtime": 1781292334.1551948,
@@ -315,19 +315,19 @@
     "semantic_hash": "0cffb5385307049bdacb79404a864fee"
   },
   "Sources/AthenaTranscription/MLXDiarizationModule.swift": {
-    "mtime": 1780239486.3837996,
-    "ast_hash": "7393ca3f029f08ae1f4903a768e81373",
-    "semantic_hash": "7393ca3f029f08ae1f4903a768e81373"
+    "mtime": 1781310605.072733,
+    "ast_hash": "ccb304c7e60edf9a26ba8ab756d147ec",
+    "semantic_hash": ""
   },
   "Sources/AthenaTranscription/MLXSpeakerEmbeddingModule.swift": {
-    "mtime": 1781292299.0884593,
-    "ast_hash": "68fa1e2a33bf9012521609273c533baf",
+    "mtime": 1781310617.1772428,
+    "ast_hash": "5ad72f59a9bb2524b0eacfebda891087",
     "semantic_hash": ""
   },
   "Sources/AthenaTranscription/MLXTranscriptionModule.swift": {
-    "mtime": 1780239470.1620011,
-    "ast_hash": "161e84945eba097643016d6629475bd2",
-    "semantic_hash": "161e84945eba097643016d6629475bd2"
+    "mtime": 1781310593.4018207,
+    "ast_hash": "f6432dae27dbdb112fe74f54de05aa38",
+    "semantic_hash": ""
   },
   "Sources/AthenaTranscription/Sortformer/Sortformer.swift": {
     "mtime": 1780025944.8396578,
@@ -365,9 +365,9 @@
     "semantic_hash": "f6933ca0707ffabce490cc6eaa42d379"
   },
   "Sources/AthenaTranscription/TranscriptionResult.swift": {
-    "mtime": 1779464342.906564,
-    "ast_hash": "0a3e5497904e692e86612da01d5fe545",
-    "semantic_hash": "0a3e5497904e692e86612da01d5fe545"
+    "mtime": 1781310634.631527,
+    "ast_hash": "1c979dab04a670936166c3cf31c5fc1f",
+    "semantic_hash": ""
   },
   "Sources/AthenaTranscription/WeSpeaker/WeSpeakerFeatures.swift": {
     "mtime": 1779462240.2636847,
@@ -390,9 +390,9 @@
     "semantic_hash": "0fe0f8bb699f67cfc3189d73defe9c32"
   },
   "Sources/AthenaTranscription/WhisperDecode.swift": {
-    "mtime": 1780025285.0426967,
-    "ast_hash": "f02852d8bf4ffcf5b9ba408d8d6e0a15",
-    "semantic_hash": "f02852d8bf4ffcf5b9ba408d8d6e0a15"
+    "mtime": 1781310553.4085476,
+    "ast_hash": "abd52e3b57fb745deec11019303c6015",
+    "semantic_hash": ""
   },
   "Sources/AthenaTranscription/WhisperLoader.swift": {
     "mtime": 1780206341.8742805,
@@ -425,8 +425,8 @@
     "semantic_hash": "d16404614855c59c2001089f41c5bd78"
   },
   "Sources/athena/Athena.swift": {
-    "mtime": 1781310131.26488,
-    "ast_hash": "4e3e7434c831ff7187a56661b36ad468",
+    "mtime": 1781310785.2040026,
+    "ast_hash": "702e3922a9ab83f2e265ac7566a9b2bd",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Audit.swift": {
@@ -750,9 +750,9 @@
     "semantic_hash": "72fd4c4858bf40e732b90fc8f9d748e8"
   },
   "Tests/AthenaCoreTests/TranscriptionFormatTests.swift": {
-    "mtime": 1779002232.7328346,
-    "ast_hash": "3243835a17590f8dd7f496f4b729272b",
-    "semantic_hash": "3243835a17590f8dd7f496f4b729272b"
+    "mtime": 1781310741.690963,
+    "ast_hash": "bbabf8bbfba8fd64070074890e52e121",
+    "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/TriAttentionCacheTests.swift": {
     "mtime": 1781306261.981322,
@@ -785,14 +785,14 @@
     "semantic_hash": "508683d80f7f083e0188f765918903c4"
   },
   "Tests/AthenaCoreTests/WeSpeakerTests.swift": {
-    "mtime": 1780026025.0949275,
-    "ast_hash": "4d4f1f48abfb497b2202f03061f0edd0",
-    "semantic_hash": "4d4f1f48abfb497b2202f03061f0edd0"
+    "mtime": 1781310773.345747,
+    "ast_hash": "deea8226276b12ff0694f86e679d498c",
+    "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/WhisperDecodeParseTests.swift": {
-    "mtime": 1779463932.3052306,
-    "ast_hash": "201ffcf3b2b093c38f9f7159f825a6dc",
-    "semantic_hash": "201ffcf3b2b093c38f9f7159f825a6dc"
+    "mtime": 1781310720.8431184,
+    "ast_hash": "c89819fd9412c54f1f96a6b933a6c030",
+    "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/WhisperTests.swift": {
     "mtime": 1780025437.1592538,
@@ -1210,8 +1210,8 @@
     "semantic_hash": ""
   },
   "docs/audit-remediation-plan.md": {
-    "mtime": 1781310275.9626708,
-    "ast_hash": "0c6b6e26f568d38cfc8b4f50d769f1cc",
+    "mtime": 1781310932.8599646,
+    "ast_hash": "92338840a318a4b67fa60b6e948696b5",
     "semantic_hash": ""
   },
   "docs/decisions/003-rust-shim-panic-strategy.md": {
