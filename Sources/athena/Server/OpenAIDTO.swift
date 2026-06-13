@@ -149,6 +149,7 @@ struct ChatCompletionRequest: Codable {
         for (k, v) in raw {
             switch v {
             case .string(let s): out[k] = s
+            case .integer(let i): out[k] = i
             case .number(let n): out[k] = n
             case .bool(let b): out[k] = b
             case .null, .array, .object: continue
@@ -180,6 +181,7 @@ struct ChatCompletionRequest: Codable {
         if let n, n > 1 { return "n" }
         switch logprobs {
         case .bool(true): return "logprobs"
+        case .integer(let i) where i > 0: return "logprobs"
         case .number(let d) where d > 0: return "logprobs"
         default: break
         }

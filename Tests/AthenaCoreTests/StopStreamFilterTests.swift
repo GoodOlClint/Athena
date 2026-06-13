@@ -66,4 +66,20 @@ final class StopStreamFilterTests: XCTestCase {
         XCTAssertEqual(f.push("anything goes"), "anything goes")
         XCTAssertEqual(f.flush(), "")
     }
+
+    /// C13: a ZWJ family emoji is ONE grapheme but FIVE unicode scalars.
+    /// A grapheme-count hold-back (maxLen=1 ⇒ keep 0) would surface the
+    /// first chunk and miss the stop; the scalar-count hold-back retains
+    /// every partial scalar until the full stop can be matched.
+    func testMultiScalarStopSplitAcrossChunks() {
+        let stop = "👨‍👩‍👧"
+        var f = StopStreamFilter(stops: [stop])
+        var out = ""
+        for scalar in stop.unicodeScalars {
+            out += f.push(String(scalar))
+        }
+        out += f.flush()
+        XCTAssertTrue(f.stopped, "multi-scalar stop matched across chunks")
+        XCTAssertEqual(out, "", "stop suppressed; nothing surfaced")
+    }
 }

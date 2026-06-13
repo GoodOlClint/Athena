@@ -125,7 +125,16 @@ public enum SpeculativeSampling {
 
         // top_k: keep the K largest, zero the rest, renormalize.
         if let k = topK, k > 0, k < probs.count {
-            let kept = Set(probs.indices.sorted { probs[$0] > probs[$1] }.prefix(k))
+            // C1: total-order comparator with an index tie-break. Swift's
+            // `sorted` is NOT stable, so equal-probability ties would
+            // otherwise reorder run-to-run and change WHICH ids survive
+            // truncation — breaking same-seed reproducibility. The `$0 < $1`
+            // tie-break keeps the lower id deterministically.
+            let kept = Set(
+                probs.indices.sorted {
+                    probs[$0] != probs[$1]
+                        ? probs[$0] > probs[$1] : $0 < $1
+                }.prefix(k))
             var newSum: Float = 0
             for i in 0..<probs.count {
                 if !kept.contains(i) { probs[i] = 0 }
@@ -140,7 +149,12 @@ public enum SpeculativeSampling {
         // probability ≥ p, zero the rest, renormalize. At p == 1 (or
         // ≥ 1) the truncation is inert — every token survives.
         if let p = topP, p > 0, p < 1 {
-            let sortedIdx = probs.indices.sorted { probs[$0] > probs[$1] }
+            // C1: same total-order tie-break as top_k — a stable nucleus
+            // boundary under equal-probability ties is required for
+            // same-seed reproducibility.
+            let sortedIdx = probs.indices.sorted {
+                probs[$0] != probs[$1] ? probs[$0] > probs[$1] : $0 < $1
+            }
             var keep = Set<Int>()
             var cum: Float = 0
             for i in sortedIdx {

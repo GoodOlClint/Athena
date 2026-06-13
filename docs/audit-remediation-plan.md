@@ -155,13 +155,13 @@ Re-verify while here: B6*, B7*, B8*, B10–B13, B15*, B18–B23, H6*, H14*, J5, 
 - [x] I6 produced-vector width is validated against `ctx.pooling.dimension` (when configured) and rejected if zero-length, before storing — a wrong/mis-sanitized model fails loudly instead of silently storing wrong-width vectors (v0.10.130)
 - Re-verified while here: NI4 per-input token ceiling already shipped (M65.3, the `maxInputTokens` guard); I7 (canonicalization-before-resident-fast-path, perf) and I8 (stub empty-string all-zero vector) remain open Low items, deferred (I8 is stub-only cosmetic; I7 is perf → M69-class).
 
-### M67.3 — Sampling & structured determinism
-- [ ] C1 (High) stable top_k/top_p sort (index tie-break) — seed reproducibility
-- [ ] C11 per-request sampler RNG instead of global `MLXRandom.seed`
-- [ ] C12 nil-EOS fabricated id no longer drops a real token
-- [ ] C13 StopStreamFilter matches on unicode scalars across chunk splits
-- [ ] G7 `JSONValue.integer` preserves >2^53 schema constants
-- [ ] G9 distinguish out-of-range vs disallowed in FFI `advance`
+### M67.3 — Sampling & structured determinism — 5/6 ✅ v0.10.131 (C11 deferred)
+- [x] C1 (High) `SpeculativeSampling.distribution` top_k AND top_p sorts now use a total-order comparator with an `$0 < $1` index tie-break. Swift's `sorted` is not stable, so equal-probability ties reordered run-to-run and changed which ids survived truncation — breaking same-seed reproducibility. Inert at temp=0 (the greedy one-hot returns before truncation). New CI-safe `testTopKTieBreakKeepsLowestIndices`/`testTopPTieBreakKeepsLowestIndices` (v0.10.131)
+- [x] C12 `StructuredVocab.tokens` no longer fabricates `vocabSize-1` (a real token) as the eos when the tokenizer has none — it would `continue` past it, dropping that token from the guide's allowed set. Uses a sentinel one past the real range (`vocabSize`): the loop never hits it (drops no real token) and the shim's `build_words` adds a single never-emitted control slot. Real-model behavior (tokenizers WITH eos) byte-unchanged (v0.10.131)
+- [x] C13 `StopStreamFilter` measures the hold-back in UNICODE SCALARS, not graphemes. A multi-scalar grapheme stop (ZWJ emoji, combining sequence) counted 1 grapheme → hold-back 0 → the stop could split across a chunk boundary and slip through. New CI-safe `testMultiScalarStopSplitAcrossChunks`; ASCII stops unchanged (v0.10.131)
+- [x] G7 added `JSONValue.integer(Int64)`, decoded BEFORE Double, threaded through encode/foundationValue + the two `OpenAIDTO` switches. A schema integer constant >2^53 (`const`/`enum`/`minimum`/`maximum`) was decoded as Double and silently corrupted to its even neighbor. New CI-safe `testIntegerConstantAbove2to53RoundTripsExactly` (v0.10.131)
+- [x] G9 rust-shim `advance` now `set_err`s the out-of-range case (a caller contract violation) so it is distinguishable from a legitimate schema rejection (a clean errorless `false`). New rust `advance_distinguishes_out_of_range_from_disallowed_g9` (cargo 10/0). Staticlib rebuilt (v0.10.131)
+- [ ] **C11 DEFERRED** — the substrate's `TopPSampler`/`CategoricalSampler` each seed a private `RandomState` from `DispatchTime.now()` and consult neither the global `MLXRandom.seed` nor the task-local; and `container.generate` exposes no sampler-injection seam. So Athena cannot make the substrate non-speculative sampling path per-request-reproducible without a substrate fork (custom seedable `LogitSampler`). The load-bearing reproducible path — MTP speculative sampling — ALREADY uses a per-request `SamplingRNG`, so the exposure is narrow (seeded temp>0 on a NON-MTP model). Tracked for a substrate-seam workstream; the existing global `MLXRandom.seed` call is harmless (NSLock-guarded, sampler-ignored) and left in place.
 
 ### M67.4 — Whisper / transcription
 - [ ] D5 + ND3 full 99-language table (forced language AND auto-detect reporting)

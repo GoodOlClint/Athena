@@ -263,4 +263,29 @@ final class SpeculativeSamplingTests: XCTestCase {
             XCTAssertEqual(r[i], 0, accuracy: 1e-6)
         }
     }
+
+    // MARK: - C1: stable truncation tie-break (seed reproducibility)
+
+    /// All-equal logits ⇒ every prob ties. top_k must deterministically keep
+    /// the LOWEST indices via the index tie-break; Swift's sort is unstable,
+    /// so without it the surviving set would vary run-to-run and break
+    /// same-seed reproducibility.
+    func testTopKTieBreakKeepsLowestIndices() {
+        let logits = [Float](repeating: 1.0, count: 6)
+        let d = SpeculativeSampling.distribution(
+            logits: logits, temperature: 1.0, topP: nil, topK: 2)
+        XCTAssertEqual(d[0], 0.5, accuracy: 1e-6)
+        XCTAssertEqual(d[1], 0.5, accuracy: 1e-6)
+        for i in 2..<6 { XCTAssertEqual(d[i], 0, "index \(i) truncated") }
+    }
+
+    /// Same total-order tie-break for the nucleus boundary: p=0.5 over 6
+    /// equal probs keeps exactly the three lowest indices.
+    func testTopPTieBreakKeepsLowestIndices() {
+        let logits = [Float](repeating: 1.0, count: 6)
+        let d = SpeculativeSampling.distribution(
+            logits: logits, temperature: 1.0, topP: 0.5, topK: nil)
+        for i in 0..<3 { XCTAssertEqual(d[i], 1.0 / 3, accuracy: 1e-6) }
+        for i in 3..<6 { XCTAssertEqual(d[i], 0, "index \(i) truncated") }
+    }
 }

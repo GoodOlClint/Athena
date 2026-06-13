@@ -6,6 +6,11 @@ import Foundation
 public indirect enum JSONValue: Codable, Sendable, Equatable {
     case null
     case bool(Bool)
+    /// G7: a JSON integer is captured as `Int64` so schema constants
+    /// (`const`/`enum`/`minimum`/`maximum`) above 2^53 survive the
+    /// round-trip exactly. Decoded as `Double` they would be silently
+    /// corrupted — a 64-bit integer is not representable in a Double.
+    case integer(Int64)
     case number(Double)
     case string(String)
     case array([JSONValue])
@@ -17,6 +22,11 @@ public indirect enum JSONValue: Codable, Sendable, Equatable {
             self = .null
         } else if let b = try? c.decode(Bool.self) {
             self = .bool(b)
+        } else if let i = try? c.decode(Int64.self) {
+            // G7: try Int64 BEFORE Double — an integral value keeps full
+            // precision; a fractional value fails the Int64 decode and
+            // falls through to `.number`.
+            self = .integer(i)
         } else if let d = try? c.decode(Double.self) {
             self = .number(d)
         } else if let s = try? c.decode(String.self) {
@@ -33,6 +43,7 @@ public indirect enum JSONValue: Codable, Sendable, Equatable {
         switch self {
         case .null: try c.encodeNil()
         case .bool(let b): try c.encode(b)
+        case .integer(let i): try c.encode(i)
         case .number(let n): try c.encode(n)
         case .string(let s): try c.encode(s)
         case .array(let a): try c.encode(a)
@@ -48,6 +59,7 @@ public indirect enum JSONValue: Codable, Sendable, Equatable {
         switch self {
         case .null: return NSNull()
         case .bool(let b): return b
+        case .integer(let i): return i
         case .number(let n): return n
         case .string(let s): return s
         case .array(let a): return a.map { $0.foundationValue() }

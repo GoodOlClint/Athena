@@ -120,4 +120,18 @@ final class StructuredSchemaTests: XCTestCase {
                     tokens: tokens, eosTokenId: 10)))
         XCTAssertGreaterThan(guide.maskLength, 0)
     }
+
+    /// G7: a schema integer constant above 2^53 must round-trip exactly.
+    /// Decoded as a Double (2^53 + 1) it would collapse to its even
+    /// neighbor; the `.integer(Int64)` case preserves it.
+    func testIntegerConstantAbove2to53RoundTripsExactly() throws {
+        let src = #"{"const":9007199254740993}"#  // 2^53 + 1
+        let v = try JSONDecoder().decode(JSONValue.self, from: Data(src.utf8))
+        guard case .object(let o) = v,
+            case .integer(let i)? = o["const"]
+        else { return XCTFail("expected .object with an .integer const") }
+        XCTAssertEqual(i, 9_007_199_254_740_993)
+        // Re-serialized exactly — no Double rounding to 9007199254740992.
+        XCTAssertEqual(v.jsonString(), src)
+    }
 }

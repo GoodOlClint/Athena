@@ -327,13 +327,24 @@ impl OcGuide {
     /// `consume_token` would otherwise error on a disallowed token.
     fn advance(&mut self, token: u32) -> bool {
         if token as usize >= self.vocab_size {
+            // G9: an out-of-range token id is a CALLER contract violation,
+            // distinct from a token the schema merely disallows. Record it
+            // on the error channel so it is not silently conflated with a
+            // normal guide rejection (the disallowed case below returns a
+            // clean `false` with NO error set, so the two are separable).
+            set_err(format!(
+                "advance: token {} out of range (vocab_size {})",
+                token, self.vocab_size
+            ));
             return false;
         }
         if !self.ensure_mask() {
-            return false;
+            return false; // ensure_mask sets its own error on failure
         }
         let allowed = self.cached_mask.as_ref().unwrap().is_allowed(token);
         if !allowed {
+            // Legitimate schema rejection: a clean false, error channel
+            // left untouched (G9) — the IDLE-probe caller relies on this.
             return false;
         }
         match self.parser.consume_token(token) {
@@ -729,6 +740,28 @@ mod tests {
         // A letter has no transition and must not mutate state.
         assert!(!g.advance(b'a' as u32), "letter rejected, no transition");
         assert!(g.is_final(), "state unchanged after rejected advance");
+    }
+
+    /// G9: `advance` must distinguish an out-of-range token id (a caller
+    /// contract violation → error channel set) from a token the schema
+    /// merely disallows (clean false, no error).
+    #[test]
+    fn advance_distinguishes_out_of_range_from_disallowed_g9() {
+        let (mut g, _eos) = guide_for(r#"{"type":"integer"}"#);
+        // In-range but disallowed ('a' for an integer): reject WITHOUT
+        // recording an out-of-range error.
+        set_err("");
+        assert!(!g.advance(b'a' as u32), "letter disallowed");
+        assert!(
+            !StructuredShimErr::last().contains("out of range"),
+            "a disallowed token must not set the out-of-range error"
+        );
+        // Out-of-range id (>= vocab_size): a caller bug → distinct error.
+        assert!(!g.advance(g.vocab_size as u32), "out-of-range rejected");
+        assert!(
+            StructuredShimErr::last().contains("out of range"),
+            "out-of-range token sets the distinct error channel (G9)"
+        );
     }
 
     #[test]

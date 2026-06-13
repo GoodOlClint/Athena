@@ -13,7 +13,12 @@ public struct StopStreamFilter: Sendable {
 
     public init(stops: [String]) {
         self.stops = stops.filter { !$0.isEmpty }
-        self.maxLen = self.stops.map(\.count).max() ?? 0
+        // C13: measure the hold-back in UNICODE SCALARS, not graphemes.
+        // `.count` (Character/grapheme count) under-counts a stop that
+        // contains a multi-scalar grapheme (e.g. a ZWJ emoji, a combining
+        // sequence), so the grapheme-sized hold-back could surface part of
+        // it and let the stop split across a chunk boundary slip through.
+        self.maxLen = self.stops.map { $0.unicodeScalars.count }.max() ?? 0
     }
 
     /// Whether any stop sequences are active.
@@ -29,13 +34,16 @@ public struct StopStreamFilter: Sendable {
             buffer = ""
             return out
         }
-        // Hold back the last (maxLen-1) chars: they could be the prefix of
-        // a stop sequence completed by the next chunk.
+        // Hold back the last (maxLen-1) UNICODE SCALARS: they could be the
+        // prefix of a stop sequence completed by the next chunk. Counting
+        // in scalars (not graphemes) guarantees a multi-scalar stop is never
+        // partially surfaced before it can be matched (C13).
         let keep = maxLen - 1
-        guard buffer.count > keep else { return "" }
-        let cut = buffer.index(buffer.endIndex, offsetBy: -keep)
-        let out = String(buffer[buffer.startIndex..<cut])
-        buffer = String(buffer[cut...])
+        let scalars = buffer.unicodeScalars
+        guard scalars.count > keep else { return "" }
+        let cut = scalars.index(scalars.endIndex, offsetBy: -keep)
+        let out = String(buffer.unicodeScalars[scalars.startIndex..<cut])
+        buffer = String(buffer.unicodeScalars[cut...])
         return out
     }
 

@@ -12,7 +12,15 @@ enum StructuredVocab {
     static func tokens(
         tokenizer: any Tokenizer, vocabSize: Int
     ) -> (tokens: [VocabToken], eos: UInt32) {
-        let eos = tokenizer.eosTokenId ?? (vocabSize - 1)
+        // C12: when the tokenizer has no eos, DON'T fabricate `vocabSize-1`
+        // — that is a real token, and skipping it below would drop it from
+        // the guide's allowed set (it could then never be generated under a
+        // schema). Use a sentinel one past the real range: the loop never
+        // hits it (so no real token is skipped), and the shim's build_words
+        // sizes the trie to `max_id+1`, adding a single never-emitted
+        // control slot. The decode loop's stop token is the tokenizer's own
+        // eos (separate), so a phantom eos here can't affect stopping.
+        let eos = tokenizer.eosTokenId ?? vocabSize
         var out: [VocabToken] = []
         out.reserveCapacity(vocabSize)
         for id in 0..<vocabSize {
