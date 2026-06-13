@@ -137,6 +137,14 @@ public enum AthenaProxy {
     /// (NEVER prints the password). nil ⇒ no proxy configured.
     public static func describe() -> String? {
         guard let p = effective() else { return nil }
+        return describe(p)
+    }
+
+    /// Pure formatter for the redacted one-line description, extracted from
+    /// `describe()` so the password-redaction contract is CI-testable without
+    /// touching `*_PROXY` env (NE8 / M70.3). An authenticated proxy renders
+    /// `user:***`; the password is NEVER included.
+    static func describe(_ p: ParsedProxy) -> String {
         let scheme = p.isSOCKS ? "socks" : "http(s)"
         let auth = (p.user != nil) ? " (auth: \(p.user!):***)" : ""
         return "\(scheme)://\(p.host):\(p.port)\(auth)"

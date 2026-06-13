@@ -48,4 +48,28 @@ final class AthenaProxyTests: XCTestCase {
         XCTAssertTrue(b.contains("::1"))
         XCTAssertTrue(b.contains("localhost"))
     }
+
+    // MARK: - M70.3 NE8 — describe() redacts the proxy password
+
+    /// `describe` is the `proxy status` / `doctor` one-liner; it must NEVER
+    /// surface the password. Tested via the extracted pure formatter so no
+    /// `*_PROXY` env is touched (the redaction logic is identical to the
+    /// env-reading `describe()`).
+    func testDescribeRedactsPassword() throws {
+        let authed = try XCTUnwrap(
+            AthenaProxy.parse("https://alice:s3cr3t@gw.corp:8443"))
+        let line = AthenaProxy.describe(authed)
+        XCTAssertTrue(line.contains("gw.corp"))
+        XCTAssertTrue(line.contains("8443"))
+        XCTAssertTrue(
+            line.contains("(auth: alice:***)"), "username shown, secret masked")
+        XCTAssertFalse(
+            line.contains("s3cr3t"), "the password must NEVER appear")
+
+        // A no-auth proxy carries no auth suffix at all.
+        let bare = try XCTUnwrap(AthenaProxy.parse("http://proxy:3128"))
+        let bareLine = AthenaProxy.describe(bare)
+        XCTAssertFalse(bareLine.contains("auth:"))
+        XCTAssertEqual(bareLine, "http(s)://proxy:3128")
+    }
 }

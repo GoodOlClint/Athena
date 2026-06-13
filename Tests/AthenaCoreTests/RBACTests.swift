@@ -87,4 +87,25 @@ final class RBACTests: XCTestCase {
             RBAC.canGrant(
                 role: "root", grantorPermissions: adminPerms))
     }
+
+    // MARK: - M70.3 NE8 — explicitly-empty token scope is the empty set
+
+    /// A token whose scope is an EXPLICITLY empty role list must confer NO
+    /// permissions (it is the deauthorized-token boundary): the effective set
+    /// is the intersection of the user's perms with `permissions(forRoles:[])`
+    /// == ∅. A nil scope, by contrast, inherits the user's full set. Pinning
+    /// this guards against a future `[] coalesced with nil` refactor silently
+    /// widening an emptied token back to the user's full permissions.
+    func testEmptyTokenScopeYieldsNoPermissions() {
+        let empty = RBAC.effectivePermissions(
+            userRoles: ["admin"], tokenScopedRoles: [])
+        XCTAssertTrue(
+            empty.isEmpty,
+            "an explicitly empty scope narrows to ∅, never the user's perms")
+        // nil scope inherits the user's full set (the contrast case).
+        let inherited = RBAC.effectivePermissions(
+            userRoles: ["admin"], tokenScopedRoles: nil)
+        XCTAssertEqual(inherited, RBAC.permissions(forRoles: ["admin"]))
+        XCTAssertFalse(inherited.isEmpty)
+    }
 }

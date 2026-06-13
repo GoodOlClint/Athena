@@ -1,6 +1,7 @@
 import AthenaEmbedding
 import AthenaLLM
 import AthenaTranscription
+import Foundation
 import XCTest
 
 @testable import AthenaCore
@@ -179,9 +180,23 @@ final class MemoryGovernorTests: XCTestCase {
 
     // MARK: - M5.2 unload hook (trim substrate cache)
 
+    /// NL4 — the `onUnloaded` hook fires from a DETACHED Task in
+    /// `performEviction` (off-actor), while the test thread polls `n`. The
+    /// previous unsynchronized `n += 1` / read was a genuine data race (TSan
+    /// would flag it); guard with an NSLock like the suite's other counters.
     private final class Counter: @unchecked Sendable {
-        private(set) var n = 0
-        func bump() { n += 1 }
+        private let lock = NSLock()
+        private var _n = 0
+        var n: Int {
+            lock.lock()
+            defer { lock.unlock() }
+            return _n
+        }
+        func bump() {
+            lock.lock()
+            _n += 1
+            lock.unlock()
+        }
     }
 
     func testUnloadHookFiresOnEvictionAndExplicitUnload() async throws {
@@ -639,5 +654,55 @@ final class MemoryGovernorTests: XCTestCase {
             n, 1, "concurrent first-touch loads coalesce into ONE module.load()")
         let reserved = await gov.snapshot().residentBytes
         XCTAssertEqual(reserved, 400, "reserved once, not 8×")
+    }
+
+    // MARK: - M70.3 NL1 — beginLoadIfNeeded success transition + coalescing
+
+    /// NL1 — the only prior `beginLoadIfNeeded` CI test drove the FAILURE path
+    /// (FailingModule). Pin the success path the M62 non-blocking serving
+    /// entrypoint exists for: the first call returns `.loading` and starts a
+    /// detached background load, a concurrent call also returns `.loading`
+    /// WITHOUT a second load (in-flight coalescing), and once the background
+    /// load completes a later call returns `.loaded`.
+    func testBeginLoadIfNeededLoadingThenLoadedNL1() async throws {
+        let gov = MemoryGovernor(totalBudgetBytes: 1_000)
+        let m = CountingModule(id: .llm, bytes: 400)
+        await gov.register(m, evictable: false)
+
+        let first = try await gov.beginLoadIfNeeded(.llm)
+        XCTAssertEqual(first, .loading, "cold first touch starts a bg load")
+        // A concurrent re-request joins the in-flight load (no 2nd load).
+        let concurrent = try await gov.beginLoadIfNeeded(.llm)
+        XCTAssertEqual(concurrent, .loading, "in-flight coalesces")
+
+        // Poll until the detached load lands and the slot reports .loaded.
+        var landed: MemoryGovernor.LoadStatus = .loading
+        for _ in 0..<100 {
+            landed = try await gov.beginLoadIfNeeded(.llm)
+            if landed == .loaded { break }
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTAssertEqual(landed, .loaded, "slot becomes .loaded after the bg load")
+        let n = await m.count()
+        XCTAssertEqual(n, 1, "exactly one background load ran")
+    }
+
+    /// NL1/NE8 — while an operator-action pull is marked in flight,
+    /// `beginLoadIfNeeded` returns `.loading` WITHOUT attempting a load (the
+    /// weights aren't local yet); clearing the pull lets the load proceed.
+    func testSetPullingShortCircuitsBeginLoad() async throws {
+        let gov = MemoryGovernor(totalBudgetBytes: 1_000)
+        let m = CountingModule(id: .llm, bytes: 400)
+        await gov.register(m, evictable: false)
+
+        await gov.setPulling(.llm, true)
+        let pulling = try await gov.beginLoadIfNeeded(.llm)
+        XCTAssertEqual(pulling, .loading, "pull-in-flight ⇒ .loading")
+        let duringPull = await m.count()
+        XCTAssertEqual(duringPull, 0, "no load is attempted while pulling")
+
+        await gov.setPulling(.llm, false)
+        let after = try await gov.beginLoadIfNeeded(.llm)
+        XCTAssertEqual(after, .loading, "clearing the pull starts the load")
     }
 }
