@@ -2,58 +2,137 @@ import XCTest
 
 @testable import AthenaStructured
 
-/// Model-free (no MLX/SSD): mirrors the Rust `cargo test` digit-vocab
-/// walk through the safe Swift wrapper, exercising the full FFI
-/// lifecycle (vocab → index → guide → mask/advance/rollback/free).
+/// Model-free (no MLX/SSD): mirrors the Rust `cargo test` vocab walk through
+/// the safe Swift wrapper, exercising the full FFI lifecycle (vocab → index →
+/// guide → mask/advance/is_final/free).
+///
+/// M70.2 (audit NG1): these walks used to compile a raw `regex:` index and
+/// assert a 32-entry rollback ring, but since M53 the engine is llguidance
+/// (grammar/JSON-schema-only) — `StructuredIndex(regex:)` always throws
+/// (`oc_index_from_regex` is an ABI-symmetry stub), and the rollback ring is
+/// GONE (Athena only ever advances the guide on COMMITTED tokens, so
+/// `allowedRollback` is a no-op that always returns 0 and `rollback(n)`
+/// succeeds only for n==0). The walks are rebuilt here onto REAL JSON-schema
+/// compilation against a 256-byte vocab (token id == byte value), mirroring
+/// the shim's own `integer_schema_masks_and_advances` /
+/// `object_schema_accepts_valid_doc_and_rejects_invalid` cargo tests so the
+/// mask/advance/isFinal contract is pinned against the production engine.
 final class StructuredGuideTests: XCTestCase {
 
-    private func digitVocab() throws -> StructuredVocabulary {
-        // single-char byte tokens '0'..'9' → ids 0..9, eos id 10
-        let tokens = (0..<10).map {
-            VocabToken(id: UInt32($0), bytes: [UInt8(0x30 + $0)])
+    // ASCII byte ids (token id == byte value in this vocab).
+    private let lbrace: UInt32 = 0x7B  // {
+    private let rbrace: UInt32 = 0x7D  // }
+    private let quote: UInt32 = 0x22  // "
+    private let colon: UInt32 = 0x3A  // :
+    private let comma: UInt32 = 0x2C  // ,
+    private let nByte: UInt32 = 0x6E  // n
+    private let aByte: UInt32 = 0x61  // a
+    private let eos: UInt32 = 256
+    private func digit(_ d: Int) -> UInt32 { UInt32(0x30 + d) }
+
+    /// 256 single-byte tokens (id == byte) + eos at id 256 — the Swift mirror
+    /// of the shim's `byte_vocab()`.
+    private func byteVocab() throws -> StructuredVocabulary {
+        let tokens = (0..<256).map {
+            VocabToken(id: UInt32($0), bytes: [UInt8($0)])
         }
-        return try StructuredVocabulary(tokens: tokens, eosTokenId: 10)
+        return try StructuredVocabulary(tokens: tokens, eosTokenId: 256)
     }
 
-    func testRegexGuideWalkMaskAndRollback() throws {
+    /// True if token `id`'s bit is set in a freshly filled allowed-mask.
+    private func maskAllows(_ guide: StructuredGuide, _ id: UInt32) -> Bool {
+        var mask = [UInt8]()
+        guard guide.allowedMask(into: &mask) else { return false }
+        let byte = Int(id) >> 3
+        guard byte < mask.count else { return false }
+        return (mask[byte] & (1 << (Int(id) & 7))) != 0
+    }
+
+    // MARK: - integer schema: mask + advance + final
+
+    func testIntegerSchemaMaskAndAdvance() throws {
         let guide = try StructuredGuide(
             index: StructuredIndex(
-                regex: "[0-9][0-9]", vocabulary: digitVocab()))
+                jsonSchema: #"{"type":"integer"}"#, vocabulary: byteVocab()))
+        XCTAssertFalse(guide.isFinal, "no digits yet: not accepting")
 
-        XCTAssertFalse(guide.isFinal)
-        var mask = [UInt8]()
-        XCTAssertTrue(guide.allowedMask(into: &mask))
-        XCTAssertTrue(mask.contains { $0 != 0 }, "start allows digits")
-        XCTAssertEqual(guide.allowedRollback, 0)
+        // Opening mask allows a digit, never a letter.
+        XCTAssertTrue(maskAllows(guide, digit(4)), "digit allowed at start")
+        XCTAssertFalse(maskAllows(guide, aByte), "letter not allowed")
 
-        XCTAssertTrue(guide.advance(3))
-        XCTAssertFalse(guide.isFinal)        // need two digits
-        XCTAssertEqual(guide.allowedRollback, 1)
-
-        XCTAssertTrue(guide.advance(7))
-        XCTAssertTrue(guide.isFinal)         // "37" complete
-        XCTAssertEqual(guide.allowedRollback, 2)
-
-        XCTAssertTrue(guide.rollback(2))
-        XCTAssertFalse(guide.isFinal)
-        XCTAssertEqual(guide.allowedRollback, 0)
-        XCTAssertFalse(guide.rollback(1), "past recorded history")
+        XCTAssertTrue(guide.advance(digit(4)), "'4' accepted")
+        XCTAssertTrue(guide.advance(digit(2)), "'2' accepted")
+        XCTAssertTrue(guide.isFinal, "\"42\" is a complete integer")
+        // A letter has no transition and must NOT mutate state.
+        XCTAssertFalse(guide.advance(aByte), "letter rejected, no transition")
+        XCTAssertTrue(guide.isFinal, "state unchanged after rejected advance")
     }
 
     func testInvalidTokenNotAdvanced() throws {
         let guide = try StructuredGuide(
             index: StructuredIndex(
-                regex: "[0-9]", vocabulary: digitVocab()))
-        // eos id (10) has no transition from the start state.
-        XCTAssertFalse(guide.advance(10))
+                jsonSchema: #"{"type":"integer"}"#, vocabulary: byteVocab()))
+        // A letter (in-range but disallowed) and eos (no value yet) both fail.
+        XCTAssertFalse(guide.advance(aByte), "letter has no start transition")
+        XCTAssertFalse(guide.advance(eos), "eos disallowed before any digit")
+        XCTAssertFalse(guide.isFinal, "rejected advances left state at start")
+        // The valid token still works afterward (process/parser is alive).
+        XCTAssertTrue(guide.advance(digit(3)))
+        XCTAssertTrue(guide.isFinal)
+    }
+
+    // MARK: - object schema: bounded walk + additionalProperties:false
+
+    func testObjectSchemaWalkAndRejectsExtra() throws {
+        let schema = """
+            {"type":"object","properties":{"n":{"type":"integer"}},\
+            "required":["n"],"additionalProperties":false}
+            """
+        let guide = try StructuredGuide(
+            index: StructuredIndex(jsonSchema: schema, vocabulary: byteVocab()))
+        // Every byte of {"n":7} must be permitted by the mask in turn, and the
+        // parser ends accepting with eos then allowed.
+        let doc: [UInt32] = [lbrace, quote, nByte, quote, colon, digit(7), rbrace]
+        for b in doc {
+            XCTAssertTrue(maskAllows(guide, b), "byte \(b) permitted in sequence")
+            XCTAssertTrue(guide.advance(b), "advance \(b)")
+        }
+        XCTAssertTrue(guide.isFinal, "complete object is accepting")
+        XCTAssertTrue(maskAllows(guide, eos), "eos allowed once object complete")
+
+        // additionalProperties:false — after {"n":7 the only continuations are
+        // more digits or }, never a comma.
+        let g2 = try StructuredGuide(
+            index: StructuredIndex(jsonSchema: schema, vocabulary: byteVocab()))
+        for b in [lbrace, quote, nByte, quote, colon, digit(7)] {
+            XCTAssertTrue(g2.advance(b), "prefix advance \(b)")
+        }
+        XCTAssertFalse(g2.advance(comma), "additionalProperties:false rejects ,")
+    }
+
+    // MARK: - rollback is a retired no-op (llguidance, M53)
+
+    func testRollbackIsNoOp() throws {
+        let guide = try StructuredGuide(
+            index: StructuredIndex(
+                jsonSchema: #"{"type":"integer"}"#, vocabulary: byteVocab()))
         XCTAssertEqual(guide.allowedRollback, 0)
+        XCTAssertTrue(guide.advance(digit(4)))
+        XCTAssertTrue(guide.advance(digit(2)))
+        // Monotonic guide: the ring is gone, so allowedRollback stays 0…
+        XCTAssertEqual(
+            guide.allowedRollback, 0, "rollback ring is a no-op under llguidance")
+        // …and only the no-op rollback(0) "succeeds".
+        XCTAssertTrue(guide.rollback(0))
+        XCTAssertFalse(guide.rollback(1))
+        XCTAssertFalse(guide.rollback(2))
     }
 
     func testJSONSchemaCompilesToGuide() throws {
         let guide = try StructuredGuide(
             index: StructuredIndex(
                 jsonSchema: #"{"type":"integer"}"#,
-                vocabulary: digitVocab()))
+                vocabulary: byteVocab()))
         XCTAssertGreaterThan(guide.maskLength, 0)
     }
 
@@ -64,16 +143,14 @@ final class StructuredGuideTests: XCTestCase {
     // from it). After the G1/G3 hardening, a hostile schema must come back as
     // a thrown `StructuredError` — which the server boundary turns into the
     // standard `{"error":{message,type,code}}` envelope — rather than panic
-    // across the C ABI and abort the daemon. We can't drive the full HTTP
-    // handler until the Server target is testable (M70), so this pins the
-    // throw at the structured-compile layer the handler delegates to, and
-    // proves the process survives by compiling a valid schema afterwards.
+    // across the C ABI and abort the daemon. We pin the throw at the
+    // structured-compile layer the handler delegates to, and prove the process
+    // survives by compiling a valid schema afterwards.
 
     func testHostileSchemaThrowsInsteadOfCrashing() throws {
-        let vocab = try digitVocab()
+        let vocab = try byteVocab()
 
-        // Repetition bound past the shim cap (would be a pathological
-        // grammar; rejected before compile).
+        // Repetition bound past the shim cap (pathological grammar).
         let hugeRepetition =
             #"{"type":"array","items":{"type":"integer"},"maxItems":100001}"#
         XCTAssertThrowsError(
@@ -96,12 +173,27 @@ final class StructuredGuideTests: XCTestCase {
             try StructuredIndex(jsonSchema: #"{"type":"#, vocabulary: vocab))
 
         // The daemon path is still alive: a normal schema compiles after the
-        // hostile ones (a panic-across-FFI would have aborted the process and
-        // we'd never reach here).
+        // hostile ones (a panic-across-FFI would have aborted the process).
         let guide = try StructuredGuide(
             index: StructuredIndex(
                 jsonSchema: #"{"type":"integer"}"#, vocabulary: vocab))
         XCTAssertGreaterThan(guide.maskLength, 0)
+    }
+
+    // MARK: - the raw-regex constructor is a retired ABI stub
+    //
+    // llguidance has no raw-regex compile path; `StructuredIndex(regex:)` is
+    // retained only for ABI symmetry and must throw, never silently produce an
+    // unconstrained guide. Pin that so a future engine swap can't quietly
+    // re-enable a half-working regex path.
+
+    func testRegexConstructorThrows() throws {
+        let vocab = try byteVocab()
+        XCTAssertThrowsError(
+            try StructuredIndex(regex: "[0-9][0-9]", vocabulary: vocab)
+        ) { err in
+            XCTAssertTrue(err is StructuredError)
+        }
     }
 
     // MARK: - Issue #2 opener realignment
@@ -130,114 +222,93 @@ final class StructuredGuideTests: XCTestCase {
         XCTAssertEqual(a.count, 3)
     }
 
-    func testAdvanceOpenerTolerantHonorsSpacePrefixedOpener() throws {
-        // bytes: 0={ 1=" {" 2..11=0..9 12=}
-        var toks = [
-            VocabToken(id: 0, bytes: [0x7B]),
-            VocabToken(id: 1, bytes: [0x20, 0x7B]),
-        ]
-        toks += (0..<10).map {
-            VocabToken(id: UInt32(2 + $0), bytes: [UInt8(0x30 + $0)])
-        }
-        toks.append(VocabToken(id: 12, bytes: [0x7D]))
-        let vocab = try StructuredVocabulary(tokens: toks, eosTokenId: 13)
-        let alias = StructuredVocabulary.openerAliases(tokens: toks)
-        XCTAssertEqual(alias[1], 0, " { must alias to {")
-
+    func testAdvanceOpenerTolerantFallsBackViaAlias() throws {
+        // A synthetic alias ('a' → '4') exercises the realignment branch
+        // deterministically: 'a' is in-range but disallowed for an integer (no
+        // native transition), and advanceOpenerTolerant retries with the
+        // aliased '4', which IS allowed. (Under llguidance a real
+        // space-prefixed opener advances natively — leading whitespace is
+        // in-grammar — so this fallback is the defensive inert path the
+        // IDLE→ENFORCING probe keeps; here we drive it directly.)
         let guide = try StructuredGuide(
             index: StructuredIndex(
-                regex: #"\{[0-9]\}"#, vocabulary: vocab))
-        // Raw space-prefixed opener has no start transition…
-        XCTAssertFalse(guide.advance(1))
-        // …but the tolerant advance realigns via the alias.
-        guide.openerAlias = alias
-        XCTAssertTrue(guide.advanceOpenerTolerant(1))
-        XCTAssertTrue(guide.advance(7))  // digit '5'
-        XCTAssertTrue(guide.advance(12))  // }
-        XCTAssertTrue(guide.isFinal)
+                jsonSchema: #"{"type":"integer"}"#, vocabulary: byteVocab()))
+        XCTAssertFalse(guide.advance(aByte), "'a' has no native transition")
+        guide.openerAlias = [aByte: digit(4)]
+        XCTAssertTrue(
+            guide.advanceOpenerTolerant(aByte), "realigned to the bare '4'")
+        XCTAssertTrue(guide.isFinal, "\"4\" is a complete integer")
     }
 
     func testAdvanceOpenerTolerantNoAliasStillStrict() throws {
         let guide = try StructuredGuide(
             index: StructuredIndex(
-                regex: "[0-9][0-9]", vocabulary: digitVocab()))
+                jsonSchema: #"{"type":"integer"}"#, vocabulary: byteVocab()))
         // No openerAlias set ⇒ behaves exactly like `advance`.
-        XCTAssertFalse(guide.advanceOpenerTolerant(99))
-        XCTAssertTrue(guide.advanceOpenerTolerant(3))
-        XCTAssertEqual(guide.allowedRollback, 1)
+        XCTAssertFalse(guide.advanceOpenerTolerant(aByte))
+        XCTAssertTrue(guide.advanceOpenerTolerant(digit(4)))
+        XCTAssertTrue(guide.isFinal)
     }
 
-    // MARK: - M49.1 — shared-index, independent-walker contract
+    // MARK: - shared-index, independent-walker contract
     //
-    // The M49.1 cache reuses one compiled `StructuredIndex` across many
-    // requests. Correctness depends on the contract that each
-    // `StructuredGuide(index:)` instance has its OWN walker state —
-    // advance/rollback on one walker MUST NOT affect another walker
-    // built from the same index. These tests pin that contract.
+    // The structured-output hot path reuses one compiled `StructuredIndex`
+    // across many requests. Correctness depends on the contract that each
+    // `StructuredGuide(index:)` instance has its OWN walker state — advancing
+    // one walker MUST NOT affect another walker built from the same index.
 
     func testSharedIndexProducesIndependentWalkers() throws {
         let index = try StructuredIndex(
-            regex: "[0-9][0-9]", vocabulary: digitVocab())
+            jsonSchema: #"{"type":"integer"}"#, vocabulary: byteVocab())
         let a = try StructuredGuide(index: index)
         let b = try StructuredGuide(index: index)
 
-        // Drive guide A forward; guide B must stay at the start.
-        XCTAssertTrue(a.advance(3))
-        XCTAssertEqual(a.allowedRollback, 1)
-        XCTAssertEqual(
-            b.allowedRollback, 0,
-            "advancing one walker must NOT mutate the shared index in a "
-                + "way that affects sibling walkers built from it")
-
-        // Drive A to the final state — B is still at start.
-        XCTAssertTrue(a.advance(7))
+        // Drive guide A to a complete value; guide B must stay at the start.
+        XCTAssertTrue(a.advance(digit(4)))
+        XCTAssertTrue(a.advance(digit(2)))
         XCTAssertTrue(a.isFinal)
-        XCTAssertFalse(b.isFinal)
+        XCTAssertFalse(
+            b.isFinal,
+            "advancing one walker must NOT mutate a sibling built from the "
+                + "same shared index")
 
         // B can independently walk its own path.
-        XCTAssertTrue(b.advance(5))
-        XCTAssertTrue(b.advance(9))
+        XCTAssertTrue(b.advance(digit(5)))
+        XCTAssertTrue(b.advance(digit(9)))
         XCTAssertTrue(b.isFinal)
-        XCTAssertEqual(b.allowedRollback, 2)
     }
 
     func testSharedIndexSurvivesWalkerDeinit() throws {
-        // Build the index, then build and drop multiple walkers off
-        // it. The DFA must remain valid for the next walker — i.e.
-        // walker deinit must NOT invalidate the shared compiled index.
+        // Build the index, then build and drop multiple walkers off it. The
+        // grammar must remain valid for the next walker — walker deinit must
+        // NOT invalidate the shared compiled index.
         let index = try StructuredIndex(
-            regex: "[0-9]", vocabulary: digitVocab())
+            jsonSchema: #"{"type":"integer"}"#, vocabulary: byteVocab())
         for _ in 0..<8 {
             let g = try StructuredGuide(index: index)
-            XCTAssertTrue(g.advance(5))
+            XCTAssertTrue(g.advance(digit(5)))
             XCTAssertTrue(g.isFinal)
             // g drops at end of scope
         }
-        // After many walker deinits, a fresh walker on the same index
-        // must still work — this is the M49.1 hot path.
+        // After many walker deinits, a fresh walker on the same index must
+        // still work — this is the shared-index hot path.
         let g = try StructuredGuide(index: index)
-        XCTAssertTrue(g.advance(0))
+        XCTAssertTrue(g.advance(digit(7)))
         XCTAssertTrue(g.isFinal)
     }
 
-    // Compile-time check: M49.1 requires `StructuredIndex` to cross
-    // actor boundaries (the cached DFA is captured into a
-    // `container.perform` Sendable closure). If this stops compiling,
-    // someone removed the @unchecked Sendable annotation and the
-    // cache will stop working.
+    // Compile-time check: the shared-index hot path requires `StructuredIndex`
+    // to cross actor boundaries (the cached factory is captured into a
+    // `container.perform` Sendable closure). If this stops compiling, someone
+    // removed the @unchecked Sendable annotation and the cache will break.
     func testStructuredIndexIsSendableForCrossActorCapture() async throws {
         let index = try StructuredIndex(
-            regex: "[0-9]", vocabulary: digitVocab())
+            jsonSchema: #"{"type":"integer"}"#, vocabulary: byteVocab())
         let isSendable: @Sendable () -> StructuredIndex = { index }
-        // If StructuredIndex weren't Sendable, the closure capture
-        // above would fail at compile time. Smoke-test the captured
-        // value still works after crossing into a Task.
-        let detached = Task {
-            isSendable()
-        }
+        let detached = Task { isSendable() }
         let recovered = await detached.value
         let g = try StructuredGuide(index: recovered)
-        XCTAssertTrue(g.advance(3))
+        XCTAssertTrue(g.advance(digit(3)))
         XCTAssertTrue(g.isFinal)
     }
 }
