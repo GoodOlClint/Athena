@@ -301,36 +301,41 @@ public final class PrefixKVCache: @unchecked Sendable {
 
     // MARK: - Eviction (count + bytes + idle-TTL, refcount-protected)
 
+    /// Metadata-only view of `entries` (same order) for the pure eviction
+    /// policy — no `MLXArray`/`KVCache` crosses into `PrefixCachePolicy`.
+    private func entryMetas() -> [PrefixCachePolicy.Meta] {
+        entries.map {
+            PrefixCachePolicy.Meta(
+                byteEstimate: $0.byteEstimate, lastUsed: $0.lastUsed,
+                refcount: $0.refcount)
+        }
+    }
+
     /// Drop entries idle longer than `idleTTL` (skipping in-use ones). Lazy:
     /// driven from `acquire`/`store`/`stats`, so an idle pool drains without a
-    /// background timer. No-op when `idleTTL == 0`.
+    /// background timer. No-op when `idleTTL == 0`. Decision is
+    /// `PrefixCachePolicy.idleVictimIndices` (NC4); this applies it.
     private func sweepIdle(now: Date) {
         guard idleTTL > 0 else { return }
+        let victims = Set(
+            PrefixCachePolicy.idleVictimIndices(
+                entryMetas(), now: now, idleTTL: idleTTL))
+        guard !victims.isEmpty else { return }
         let before = entries.count
-        entries.removeAll {
-            $0.refcount == 0 && now.timeIntervalSince($0.lastUsed) > idleTTL
-        }
+        entries = entries.enumerated()
+            .filter { !victims.contains($0.offset) }.map { $0.element }
         evictions += before - entries.count
     }
 
     /// Evict LRU entries until under BOTH the count cap and the byte cap,
     /// skipping any a live generation still holds (refcount > 0). Bytes cap is
-    /// inert when `maxBytes == 0`.
+    /// inert when `maxBytes == 0`. Victim selection is
+    /// `PrefixCachePolicy.lruVictimIndex` (NC4), looped one-at-a-time exactly
+    /// as before.
     private func evictIfNeeded() {
-        func overCap() -> Bool {
-            if entries.count > maxEntries { return true }
-            if maxBytes > 0 {
-                return entries.reduce(0) { $0 + $1.byteEstimate } > maxBytes
-            }
-            return false
-        }
-        while overCap() {
-            guard
-                let victimIdx = entries.enumerated()
-                    .filter({ $0.element.refcount == 0 })
-                    .min(by: { $0.element.lastUsed < $1.element.lastUsed })?
-                    .offset
-            else { break }  // all remaining entries are in use
+        while let victimIdx = PrefixCachePolicy.lruVictimIndex(
+            entryMetas(), maxEntries: maxEntries, maxBytes: maxBytes)
+        {
             entries.remove(at: victimIdx)
             evictions += 1
         }
@@ -344,8 +349,10 @@ public final class PrefixKVCache: @unchecked Sendable {
     public func flushIdle() -> Int {
         lock.lock()
         defer { lock.unlock() }
+        let victims = Set(PrefixCachePolicy.flushIdleIndices(entryMetas()))
         let before = entries.count
-        entries.removeAll { $0.refcount == 0 }
+        entries = entries.enumerated()
+            .filter { !victims.contains($0.offset) }.map { $0.element }
         let freed = before - entries.count
         evictions += freed
         return freed
