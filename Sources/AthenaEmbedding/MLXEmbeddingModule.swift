@@ -253,6 +253,45 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
         return try await task.value
     }
 
+    /// NI6 — greedy length-bucketing packer (pure index/length bookkeeping, no
+    /// MLX). Given each input's token length, return buckets of ORIGINAL
+    /// indices: sort by length, then greedy-pack under `tokenBudget`
+    /// (`count × bucket-maxLen`) and `maxItemsPerBucket`. A single item always
+    /// fits its own bucket even if it alone exceeds the budget (it still has to
+    /// be embedded; the NI4 ceiling rejects truly-oversized inputs upstream).
+    /// Extracted from `embedSerialized` so the pack invariant (every index
+    /// exactly once; per-bucket caps honored) is unit-testable on CI without a
+    /// Metal device; the forward then reassembles `vectors[idx]` in input
+    /// order, so this is the order-preservation seam too.
+    static func lengthBuckets(
+        tokenLengths: [Int], tokenBudget: Int, maxItemsPerBucket: Int
+    ) -> [[Int]] {
+        let order = (0..<tokenLengths.count).sorted {
+            tokenLengths[$0] < tokenLengths[$1]
+        }
+        var buckets: [[Int]] = []
+        var current: [Int] = []
+        var currentMaxLen = 0
+        for idx in order {
+            let L = max(1, tokenLengths[idx])
+            let nextMaxLen = max(currentMaxLen, L)
+            let nextWork = (current.count + 1) * nextMaxLen
+            if !current.isEmpty
+                && (nextWork > tokenBudget
+                    || current.count >= maxItemsPerBucket)
+            {
+                buckets.append(current)
+                current = [idx]
+                currentMaxLen = L
+            } else {
+                current.append(idx)
+                currentMaxLen = nextMaxLen
+            }
+        }
+        if !current.isEmpty { buckets.append(current) }
+        return buckets
+    }
+
     /// I2 — the serialized embed worker. Runs under the FIFO chain above, so
     /// the rebind below is never concurrent with another embed; it also
     /// captures the container handle locally (`liveContainer`) rather than
@@ -313,34 +352,14 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
             // per-batch, no item is ever padded by more than the
             // span of its own bucket. Results are reassembled in
             // input order so the EmbeddingBatch contract is unchanged.
-            let order = (0..<encoded.count).sorted {
-                encoded[$0].count < encoded[$1].count
-            }
-            // 32 768 ≈ batch=64 × L=512 (typical embedding workload).
-            // A bucket with L=2500 packs ~13 items; one with L=200
-            // packs 64 (hard cap below).
-            let tokenBudget = 32_768
-            let maxItemsPerBucket = 64
-            var buckets: [[Int]] = []
-            var current: [Int] = []
-            var currentMaxLen = 0
-            for idx in order {
-                let L = max(1, encoded[idx].count)
-                let nextMaxLen = max(currentMaxLen, L)
-                let nextWork = (current.count + 1) * nextMaxLen
-                if !current.isEmpty
-                    && (nextWork > tokenBudget
-                        || current.count >= maxItemsPerBucket)
-                {
-                    buckets.append(current)
-                    current = [idx]
-                    currentMaxLen = L
-                } else {
-                    current.append(idx)
-                    currentMaxLen = nextMaxLen
-                }
-            }
-            if !current.isEmpty { buckets.append(current) }
+            // NI6: greedy length-bucketing — pure index/length bookkeeping,
+            // extracted to `lengthBuckets` so the pack/reassembly invariant is
+            // CI-testable. 32 768 ≈ batch=64 × L=512 (typical embedding
+            // workload): a bucket with L=2500 packs ~13 items; one with L=200
+            // packs 64 (the hard per-bucket cap).
+            let buckets = Self.lengthBuckets(
+                tokenLengths: encoded.map(\.count),
+                tokenBudget: 32_768, maxItemsPerBucket: 64)
 
             var vectors = [[Float]](
                 repeating: [], count: texts.count)

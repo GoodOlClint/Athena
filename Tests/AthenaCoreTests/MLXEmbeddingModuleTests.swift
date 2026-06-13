@@ -110,3 +110,68 @@ final class MLXEmbeddingIntegrationTests: XCTestCase {
         XCTAssertNotEqual(v[0], v[1])
     }
 }
+
+/// NI6 — the greedy length-bucketing packer, extracted from the embedding
+/// forward so its pack/reassembly invariant is CI-testable without a model.
+/// (The gated integration test only ever fed 2 short inputs that fit one
+/// bucket, so multi-bucket / budget-split / order-preservation were never
+/// exercised.) Pure index/length bookkeeping — no MLX.
+final class EmbeddingBucketingTests: XCTestCase {
+
+    private func buckets(
+        _ lens: [Int], budget: Int = 32_768, maxItems: Int = 64
+    ) -> [[Int]] {
+        MLXEmbeddingModule.lengthBuckets(
+            tokenLengths: lens, tokenBudget: budget,
+            maxItemsPerBucket: maxItems)
+    }
+
+    func testEveryIndexAppearsExactlyOnce() {
+        let lens = [400, 2500, 30, 30, 1200, 7, 900, 50, 50, 4000]
+        let bs = buckets(lens)
+        let all = bs.flatMap { $0 }.sorted()
+        XCTAssertEqual(
+            all, Array(0..<lens.count),
+            "every original index packed exactly once (reassembly safety)")
+    }
+
+    func testNoBucketExceedsItemCap() {
+        let lens = Array(repeating: 10, count: 200)
+        let bs = buckets(lens, maxItems: 64)
+        XCTAssertEqual(bs.flatMap { $0 }.count, 200)
+        for b in bs {
+            XCTAssertLessThanOrEqual(b.count, 64, "per-bucket item cap honored")
+        }
+        XCTAssertGreaterThanOrEqual(bs.count, 4, "200 / 64 ⇒ ≥4 buckets")
+    }
+
+    func testTokenBudgetSplitsLongItems() {
+        // 9 items of length 300, budget 1000: 3×300=900≤1000 but 4×300=1200>1000.
+        let bs = buckets(Array(repeating: 300, count: 9), budget: 1000)
+        for b in bs {
+            // all items are length 300, so the bucket's max length is 300.
+            XCTAssertLessThanOrEqual(
+                b.count * 300, 1000, "bucket stays within the token budget")
+        }
+        XCTAssertEqual(bs.count, 3, "9 items, 3 per bucket")
+    }
+
+    func testSingletonOversizedItemGetsOwnBucket() {
+        // One item alone exceeds the budget → still admitted in its own bucket
+        // (it must be embedded; NI4 rejects truly-oversized inputs upstream).
+        let bs = buckets([50, 5000, 50], budget: 1000)
+        let big = bs.first { $0.contains(1) }
+        XCTAssertEqual(big, [1], "oversized item is its own singleton bucket")
+    }
+
+    func testPackedAscendingByLength() {
+        // Huge budget ⇒ one bucket; indices ordered by ascending token length.
+        let bs = buckets([100, 5, 50], budget: 1_000_000)
+        XCTAssertEqual(bs.count, 1)
+        XCTAssertEqual(bs[0], [1, 2, 0], "sorted by ascending length")
+    }
+
+    func testEmptyInputYieldsNoBuckets() {
+        XCTAssertTrue(buckets([]).isEmpty)
+    }
+}
