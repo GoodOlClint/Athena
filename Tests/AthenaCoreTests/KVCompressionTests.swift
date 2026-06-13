@@ -1,6 +1,7 @@
 import XCTest
 
-@testable import AthenaLLM
+import AthenaCore  // NB4 (M70.1b): the KVCompression enum + resolve moved here.
+@testable import AthenaLLM  // the MLX-coupled .generation/.eviction/.servesArch extension
 
 /// The shared `kv_compression` knob: precedence (env > TOML > none),
 /// fail-closed validation, and the codec→scheme mapping. Pure logic —

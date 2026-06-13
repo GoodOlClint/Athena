@@ -117,6 +117,7 @@ let package = Package(
         // install` command is a thin imperative shell over this.
         .target(
             name: "AthenaDeploy",
+            dependencies: ["AthenaCore"],
             path: "Sources/AthenaDeploy"),
 
         // Athena-owned Qwen3.5 model, vendored from the pristine

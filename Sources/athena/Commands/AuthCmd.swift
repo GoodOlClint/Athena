@@ -390,26 +390,9 @@ struct AuthToken: AsyncParsableCommand {
         subcommands: [AuthTokenAdd.self, AuthTokenRotate.self])
 }
 
-/// Parse a TTL like `30d`, `12h`, `90m`, `3600s`, or a bare integer
-/// (seconds) into whole seconds. nil ⇒ malformed or non-positive.
-/// Shared by the offline CLI; the wire/remote path carries bare seconds.
-func parseTTLSeconds(_ s: String) -> Int? {
-    let t = s.trimmingCharacters(in: .whitespaces)
-    guard !t.isEmpty else { return nil }
-    let mult: Int
-    let numPart: Substring
-    switch t.last {
-    case "s": mult = 1; numPart = t.dropLast()
-    case "m": mult = 60; numPart = t.dropLast()
-    case "h": mult = 3600; numPart = t.dropLast()
-    case "d": mult = 86400; numPart = t.dropLast()
-    default: mult = 1; numPart = t[...]  // bare integer ⇒ seconds
-    }
-    guard let n = Int(numPart), n > 0 else { return nil }
-    let (secs, overflow) = n.multipliedReportingOverflow(by: mult)
-    guard !overflow else { return nil }
-    return secs
-}
+// `parseTTLSeconds` moved to AthenaDeploy (NB4 / M70.1b) so it is
+// unit-testable under `swift test`; the call sites below are unchanged
+// (AuthCmd imports AthenaDeploy).
 
 struct AuthTokenAdd: AsyncParsableCommand {
     static let configuration = CommandConfiguration(

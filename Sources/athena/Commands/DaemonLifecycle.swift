@@ -198,16 +198,9 @@ struct Start: AsyncParsableCommand {
     }
 }
 
-/// A launchd label is reverse-DNS-ish: ASCII letters/digits and the
-/// separators `.`, `-`, `_`. We pass it to `launchctl` as argv (never a
-/// shell string), but validate defensively so a malformed `--label`
-/// fails fast rather than reaching launchctl.
-private func isValidLabel(_ s: String) -> Bool {
-    guard !s.isEmpty, s.count <= 255 else { return false }
-    let allowed = Set(
-        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_")
-    return s.allSatisfy { allowed.contains($0) }
-}
+// `isValidLabel` moved to AthenaDeploy (NB4 / M70.1b) so it is unit-testable
+// under `swift test`; the call sites here are unchanged (DaemonLifecycle
+// imports AthenaDeploy).
 
 /// Run `/bin/launchctl` with `args` as argv (no shell), returning its
 /// exit status. Output is discarded — callers only need the status.

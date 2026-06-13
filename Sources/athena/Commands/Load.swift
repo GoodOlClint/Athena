@@ -13,10 +13,12 @@ import Foundation
 import Logging
 import MLX
 
-enum Engine: String, CaseIterable, ExpressibleByArgument {
-    case mlx
-    case stub
-}
+// `Engine` lives in AthenaCore (NB4 / M70.1b) so ConfigEditor's
+// `engine ∈ Engine.allCases` validation could move to the MLX-free
+// AthenaDeploy. The ArgumentParser conformance (for the `--engine`
+// @Option) needs ArgumentParser, so it stays here as an extension. The
+// default RawRepresentable init satisfies the protocol.
+extension Engine: ExpressibleByArgument {}
 
 /// Run the governed HTTP surface in the foreground. This is the
 /// launchd-able daemon body. (Was `serve`; renamed for symmetry with
