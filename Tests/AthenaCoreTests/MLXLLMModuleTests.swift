@@ -204,6 +204,36 @@ final class EffectiveMaxTokensTests: XCTestCase {
     }
 }
 
+/// Stub LLM model selection + governor-accounting discipline. Pure,
+/// CI-safe (no MLX / model).
+final class StubLLMModuleSelectionTests: XCTestCase {
+
+    /// NE5: a full HF org/name id resolves to the bare store-dir allowlist
+    /// row (uniform with the embedding/audio modules) instead of 400ing —
+    /// pre-fix the LLM path used a full-string case-insensitive match.
+    func testFullHFIdResolvesToBareAllowlistRow() async throws {
+        let m = StubLLMModule(
+            modelIds: ["Qwen3.5-2B-4bit", "Phi-3.5-mini-instruct-4bit"])
+        try await m.rebind(to: "mlx-community/Qwen3.5-2B-4bit")
+        let r = await m.residentModelId()
+        XCTAssertEqual(r, "Qwen3.5-2B-4bit")
+    }
+
+    /// NC13: load() against an emptied allowlist must NOT bind a stale
+    /// default — residentBytes stays 0 so refreshAllowlist releases the
+    /// governor slot rather than holding a reservation for no models.
+    func testEmptyAllowlistLoadReservesNothing() async throws {
+        let m = StubLLMModule(modelIds: ["a", "b"])
+        await m.setAllowedModelIds([])
+        try await m.load(
+            reservation: MemoryReservation(module: .llm, bytes: 0))
+        let bytes = await m.residentBytes
+        XCTAssertEqual(bytes, 0, "no reservation for an empty allowlist")
+        let resident = await m.residentModelId()
+        XCTAssertNil(resident)
+    }
+}
+
 /// Real end-to-end generation through the governor. Gated: loading a 27B
 /// model is far too heavy for CI, so it runs only when the model is present
 /// AND opted in via ATHENA_RUN_MODEL_TESTS=1.

@@ -173,14 +173,16 @@ Re-verify while here: B6*, B7*, B8*, B10–B13, B15*, B18–B23, H6*, H14*, J5, 
 - [x] D10 `AgglomerativeClustering.cluster` clamps `threshold` to the valid cosine-distance range [0, 2] and adds a `minClusters` floor (default 1 = prior behavior) so a permissive threshold can't over-merge distinct speakers into one. New CI-safe `testMinClustersFloorPreventsOverMerge` (v0.10.132)
 - Re-verified while here: ND6 (`num_speakers` silently ignored on the default Sortformer path) is a contract/threading change (needs `diarize(...)` signature + OpenAPI reconcile) — left for M71 API-surface; ND4 (per-frame GPU→host `.item()` syncs) is perf → M69.4.
 
-### M67.5 — LLM module odds
-- [ ] NC1 (High) remove/lock `currentModelDirectory` global (queued convert vs cold-load race)
-- [ ] NC3 preflight OOM guard tokenizes the same input as generation
-- [ ] NC11 `residentDirectory` no longer traps on empty `modelDirectories`
-- [ ] NC13 stub governor reservation released on allowlist empty
-- [ ] NE5 LLM accepts full HF org/name ids like the aux modules (canonicalization parity)
+### M67.5 — LLM module odds ✅ v0.10.133
+- [x] NC1 (High) `AthenaModelRegistration.currentModelDirectory` is now a `@TaskLocal`, bound per-load via `$currentModelDirectory.withValue(url)` around `loadModelContainer` (in both `MLXLLMModule.loadModel` and the free `ModelConvert.convert`). The substrate's `loadModelContainer → load{ loadContainer }` is a plain `await` chain (no detached hop before the registry creator), so the creator reads THIS load's directory. A queued `model_convert` and a serve cold-load can no longer clobber a shared global → no wrong-checkpoint MTP-suppression / keyNotFound (v0.10.133)
+- [x] NC3 `preflightPromptCache(messages:tools:chatTemplateKwargs:)` now renders the SAME prompt generation will (tools + chat-template kwargs), so the governed prompt-cache cap check matches the real prefill size — a tool/kwargs-bearing request no longer passes preflight and then exceeds the cap mid-prefill. Threaded at the sync `/v1/chat` + queued-chat callsites; native `/api/chat` carries none (nil) (v0.10.133)
+- [x] NC11 `residentDirectory` returns `URL?` via `.first?.url`, never a literal `[0]` subscript — `setAllowedModelIds([])` (empty DB allowlist) no longer leaves a property that would trap if wired up (v0.10.133)
+- [x] NC13 `StubLLMModule.load` refuses to bind against an empty allowlist (`guard !modelIds.isEmpty`), so `residentBytes` stays 0 and `refreshAllowlist` releases the governor slot instead of holding a reservation for no models. New CI-safe `testEmptyAllowlistLoadReservesNothing` (v0.10.133)
+- [x] NE5 the LLM rebind / `selectColdLoadModel` / `/api/models/load` lookups (+ the stub) now use `canonicalByStoreIdentity` (bare name OR full HF org/name id), uniform with the embedding/audio modules — `model:"Qwen/Qwen3-4B"` to `/v1/chat/completions` against a bare-name allowlist no longer 400s while the same form works on `/v1/embeddings`. New CI-safe `testFullHFIdResolvesToBareAllowlistRow` (v0.10.133)
 
-Re-verify while here: C16–C19, C21, C23, F6, I7, I8, NE-uncertains.
+**M67 COMPLETE (M67.1–.5, v0.10.129–133).** One item deferred: **C11** (substrate sampler-injection seam — see M67.3).
+
+Re-verified across M67: F6 (createSSMMask alloc) → M69 perf; I7 (embed canonicalize-before-resident) → M69 perf; I8 (stub empty-string vector) deferred (stub cosmetic); C16–C19/C21/C23 (dead-code/dedup Lows) → M71 tail; NE-uncertains adjudicated in their slices (NE5 done; NE6 deadline-cancel callback → M68.4). NC2 (structured silent-unconstrained on unresolvable vocab) already closed in M65.3 (G4/NC2).
 
 ---
 

@@ -887,7 +887,12 @@ struct AthenaServer {
         // Brief 4b: refuse an over-cap prompt up front as a governed
         // 503, before any KV cache is allocated.
         do {
-            try await llm.preflightPromptCache(messages: turns)
+            // NC3: preflight the prompt generation will actually render
+            // (tools + chat-template kwargs included), so the cap check
+            // matches the real prefill size.
+            try await llm.preflightPromptCache(
+                messages: turns, tools: body.toolSpecs(),
+                chatTemplateKwargs: body.chatTemplateKwargsContext())
         } catch let e as AthenaError {
             return Self.error(
                 status: HTTPResponse.Status(code: e.httpStatus),
@@ -2865,7 +2870,10 @@ struct AthenaServer {
                 if let m = req.model, !m.isEmpty {
                     try await selectable(.llm).rebind(to: m)
                 }
-                try await llm.preflightPromptCache(messages: turns)
+                // NC3: same tools + kwargs the queued decode renders.
+                try await llm.preflightPromptCache(
+                    messages: turns, tools: req.toolSpecs(),
+                    chatTemplateKwargs: req.chatTemplateKwargsContext())
             } catch let e as AthenaError {
                 return (nil, e.message)
             } catch {
@@ -3063,7 +3071,9 @@ struct AthenaServer {
             return err
         }
         do {
-            try await llm.preflightPromptCache(messages: messages)
+            // Native /api/chat carries no tools / chat-template kwargs.
+            try await llm.preflightPromptCache(
+                messages: messages, tools: nil, chatTemplateKwargs: nil)
             return nil
         } catch let e as AthenaError {
             return Self.error(
@@ -3624,10 +3634,11 @@ struct AthenaServer {
         let allowed = await sel.allowedModelIds()
         let def = await sel.defaultModelId()
         let requested = body.id ?? def
-        // M46.4 — case-insensitive lookup; the canonical id from
-        // storage drives the load so persisted casing wins.
+        // NE5 — store-identity lookup (bare name OR full HF id), uniform
+        // with the LLM rebind/select path and the embedding/audio modules;
+        // the canonical stored id drives the load.
         guard let target =
-            allowed.canonicalCaseInsensitive(requested)
+            allowed.canonicalByStoreIdentity(requested)
         else {
             await audit(
                 request, action: "model.load",

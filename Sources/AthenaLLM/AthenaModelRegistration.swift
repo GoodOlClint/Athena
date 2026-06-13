@@ -18,12 +18,22 @@ import MLXLMCommon
 /// directory is passed via `currentModelDirectory`).
 enum AthenaModelRegistration {
 
-    /// Set by `MLXLLMModule.load()` immediately before
-    /// `loadModelContainer`. Safe as `nonisolated(unsafe)`: LLM loads are
-    /// serialized (one governed `ensureLoaded(.llm)` at a time, driven
-    /// from the `MLXLLMModule` actor), so there is never a concurrent
-    /// creator invocation racing this.
-    nonisolated(unsafe) static var currentModelDirectory: URL?
+    /// The checkpoint directory the in-flight load is about to read, bound
+    /// per-load via `$currentModelDirectory.withValue(url)` around
+    /// `loadModelContainer` and read by the creator closures below when the
+    /// substrate constructs the model (same Task — `loadModelContainer` is a
+    /// plain `await` chain with no detached hop before the creator).
+    ///
+    /// NC1: this was a `nonisolated(unsafe) static var` whose safety comment
+    /// assumed LLM loads are serialized from the `MLXLLMModule` actor — but
+    /// `ModelConvert.convert` is a free `static func` that ALSO writes it and
+    /// runs on the request-queue worker, NOT serialized against the actor's
+    /// cold-load. A convert interleaving with a serve load let one read the
+    /// directory the other wrote → `checkpointHasMTP` evaluated the wrong
+    /// checkpoint → MTP head wrongly enabled/disabled → keyNotFound / a
+    /// structurally wrong model. A `@TaskLocal` is request-scoped by
+    /// construction, so the two loads can no longer clobber each other.
+    @TaskLocal static var currentModelDirectory: URL?
 
     /// True iff the checkpoint at `dir` actually contains `mtp.*` weights.
     /// nil dir ⇒ true (defer to config; Athena always sets the dir).

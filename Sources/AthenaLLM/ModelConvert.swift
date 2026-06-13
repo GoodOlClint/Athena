@@ -65,11 +65,16 @@ public enum ModelConvert {
             })
 
         // Same vendored-model route `serve` uses, so the converted
-        // checkpoint loads back through the identical path.
-        AthenaModelRegistration.currentModelDirectory = snapshot
+        // checkpoint loads back through the identical path. NC1: bind the
+        // directory request-scoped (this runs on the queue worker, NOT
+        // serialized against a serve cold-load) so the two can't clobber a
+        // shared global and mis-decide MTP suppression.
         await AthenaModelRegistration.install()
-        let container = try await loadModelContainer(
-            from: snapshot, using: #huggingFaceTokenizerLoader())
+        let container = try await AthenaModelRegistration
+            .$currentModelDirectory.withValue(snapshot) {
+                try await loadModelContainer(
+                    from: snapshot, using: #huggingFaceTokenizerLoader())
+            }
 
         let base = id.split(separator: "/").last.map(String.init) ?? id
         let outName =

@@ -234,9 +234,14 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         modelDirectories.first { $0.name == name }?.url
     }
 
-    private var residentDirectory: URL {
+    /// NC11: returns `URL?` and falls back via `.first?.url`, never a
+    /// literal `[0]` subscript — `setAllowedModelIds([])` (empty DB
+    /// allowlist) leaves `modelDirectories` empty while `defaultName` is
+    /// stale, so a `[0]` access would trap. (Currently uncalled; this keeps
+    /// it from becoming an allowlist-API-reachable crash if it is wired up.)
+    private var residentDirectory: URL? {
         directoryURL(for: residentName ?? defaultName)
-            ?? modelDirectories[0].url
+            ?? modelDirectories.first?.url
     }
 
     /// Brief 4b: refuse a prompt whose KV/prompt-cache would exceed the
@@ -246,10 +251,21 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             messages: [ChatTurn(role: "user", content: prompt)])
     }
 
-    public func preflightPromptCache(messages: [ChatTurn]) async throws {
+    public func preflightPromptCache(
+        messages: [ChatTurn],
+        tools: [[String: any Sendable]]? = nil,
+        chatTemplateKwargs: [String: any Sendable]? = nil
+    ) async throws {
         guard promptCacheCapBytes > 0, let container else { return }
+        // NC3: render the SAME prompt generation will — tools + chat-template
+        // kwargs included. Counting only the bare messages undercounts a
+        // tool/kwargs-bearing request, so it could pass the cap here and then
+        // exceed it during the real prefill, defeating the OOM guard for
+        // exactly the large tool-augmented requests it exists to protect.
         let lmInput = try await container.prepare(
-            input: UserInput(chat: Self.chatMessages(messages)))
+            input: UserInput(
+                chat: Self.chatMessages(messages), tools: tools,
+                additionalContext: chatTemplateKwargs))
         let tokens = lmInput.text.tokens.size
         let needed = tokens * perTokenKVBytes
         if needed > promptCacheCapBytes {
@@ -311,9 +327,10 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         if ProcessInfo.processInfo.environment[
             "ATHENA_DISABLE_VENDORED_MODEL"] != "1"
         {
-            // Tell the registry which checkpoint is about to load so it
-            // can suppress the MTP head when the weights lack mtp.*.
-            AthenaModelRegistration.currentModelDirectory = url
+            // Register the vendored creators (idempotent). The checkpoint
+            // directory is conveyed to them per-load via the `withValue`
+            // binding around `loadModelContainer` below (NC1), not a shared
+            // global — so a concurrent queued convert can't clobber it.
             await AthenaModelRegistration.install()
         }
         guard
@@ -332,9 +349,15 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         // models are real dirs and were unaffected; every pulled model was.
         let loaded: ModelContainer
         do {
-            loaded = try await loadModelContainer(
-                from: url.resolvingSymlinksInPath(),
-                using: #huggingFaceTokenizerLoader())
+            // NC1: bind the checkpoint directory for the registry creators,
+            // request-scoped, so the MTP-suppression decision reads THIS
+            // load's directory even if a queued convert loads concurrently.
+            loaded = try await AthenaModelRegistration.$currentModelDirectory
+                .withValue(url) {
+                    try await loadModelContainer(
+                        from: url.resolvingSymlinksInPath(),
+                        using: #huggingFaceTokenizerLoader())
+                }
         } catch {
             container = nil
             residentName = nil
@@ -421,12 +444,13 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     public func rebind(to id: String?) async throws {
         let requested = id ?? defaultName
         let allowed = modelDirectories.map { $0.name }
-        // M46.4 — case-insensitive lookup so a request asking for
-        // `foo-4b` against an allowlist storing `foo-4B` doesn't
-        // 400. The CANONICAL id from storage drives every downstream
-        // step so the persisted casing stays the source of truth.
+        // NE5 — resolve by store-dir identity so a request naming the model
+        // by either its bare store-dir name OR its full HF org/name id
+        // resolves uniformly, matching the embedding/transcription modules
+        // (and case-insensitive, so `foo-4b` still finds `foo-4B`). The
+        // CANONICAL stored id drives every downstream step.
         guard let target =
-            allowed.canonicalCaseInsensitive(requested)
+            allowed.canonicalByStoreIdentity(requested)
         else {
             throw AthenaError.modelNotAvailable(
                 requested: requested, available: allowed)
@@ -445,8 +469,8 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     public func selectColdLoadModel(_ id: String?) async throws {
         guard let id, !id.isEmpty else { desiredName = nil; return }
         let allowed = modelDirectories.map { $0.name }
-        // Same case-insensitive, canonical-id discipline as rebind (M46.4).
-        guard let target = allowed.canonicalCaseInsensitive(id) else {
+        // Same store-identity discipline as rebind (NE5).
+        guard let target = allowed.canonicalByStoreIdentity(id) else {
             throw AthenaError.modelNotAvailable(
                 requested: id, available: allowed)
         }

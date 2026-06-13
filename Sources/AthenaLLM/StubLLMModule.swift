@@ -79,7 +79,14 @@ public protocol LLMModule: InferenceModule {
     func preflightPromptCache(prompt: String) async throws
 
     /// Role-aware preflight (M24.1). Default bridges to the prompt path.
-    func preflightPromptCache(messages: [ChatTurn]) async throws
+    /// NC3: `tools` + `chatTemplateKwargs` are included so the cap check
+    /// renders the SAME prompt generation will (a tool/kwargs-bearing
+    /// request otherwise undercounts and can exceed the cap mid-prefill).
+    func preflightPromptCache(
+        messages: [ChatTurn],
+        tools: [[String: any Sendable]]?,
+        chatTemplateKwargs: [String: any Sendable]?
+    ) async throws
 
     /// M62 — choose the model the NEXT governor cold-load will bind, WITHOUT
     /// loading now: the non-blocking cold-load path (`beginLoadIfNeeded`)
@@ -100,7 +107,13 @@ extension LLMModule {
 
     public func selectColdLoadModel(_ id: String?) async throws {}
 
-    public func preflightPromptCache(messages: [ChatTurn]) async throws {
+    public func preflightPromptCache(
+        messages: [ChatTurn],
+        tools: [[String: any Sendable]]? = nil,
+        chatTemplateKwargs: [String: any Sendable]? = nil
+    ) async throws {
+        // Default conformers have no governed cap; the bridge ignores tools/
+        // kwargs (only the real MLX cap renders them into the token count).
         try await preflightPromptCache(prompt: messages.flattenedPrompt())
     }
 
@@ -260,6 +273,11 @@ public actor StubLLMModule: LLMModule, ModelSelectable {
     public func load(reservation: MemoryReservation) async throws {
         // M62 — bind the requested cold-load target (set via
         // selectColdLoadModel), else the default.
+        // NC13: but never bind against an EMPTY allowlist — a stale
+        // defaultId would make residentBytes report non-zero, so
+        // refreshAllowlist never releases the governor slot (a stuck
+        // reservation for an allowlist with no models). Leave residentId nil.
+        guard !modelIds.isEmpty else { return }
         if residentId == nil { residentId = desiredId ?? defaultId }
     }
 
@@ -272,9 +290,11 @@ public actor StubLLMModule: LLMModule, ModelSelectable {
     public func residentModelId() -> String? { residentId }
     public func rebind(to id: String?) async throws {
         let requested = id ?? defaultId
-        // M46.4 — case-insensitive lookup; canonical id from storage.
+        // NE5 — resolve by store-dir identity (bare name OR full HF id),
+        // matching the real LLM module + the embedding/audio modules so id
+        // acceptance is uniform across engines and endpoints.
         guard let target =
-            modelIds.canonicalCaseInsensitive(requested)
+            modelIds.canonicalByStoreIdentity(requested)
         else {
             throw AthenaError.modelNotAvailable(
                 requested: requested, available: modelIds)
@@ -284,7 +304,7 @@ public actor StubLLMModule: LLMModule, ModelSelectable {
 
     public func selectColdLoadModel(_ id: String?) async throws {
         guard let id, !id.isEmpty else { desiredId = nil; return }
-        guard let target = modelIds.canonicalCaseInsensitive(id) else {
+        guard let target = modelIds.canonicalByStoreIdentity(id) else {
             throw AthenaError.modelNotAvailable(
                 requested: id, available: modelIds)
         }
