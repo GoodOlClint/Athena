@@ -131,6 +131,26 @@ public actor MemoryGovernor {
     private var residentBytes: Int = 0
     /// Coalesces concurrent `ensureLoaded` callers onto one load.
     private var inFlight: [ModuleID: Task<Void, Error>] = [:]
+    /// M68.1 (E2) — generation token for the in-flight load currently
+    /// registered under each id. `Task` is a non-identity value type, so a
+    /// detached cleanup can't compare itself by reference to decide whether
+    /// it still owns `inFlight[id]`; the token lets `clearInFlight` wipe the
+    /// slot ONLY when it still holds the same generation it was spawned for,
+    /// instead of clobbering a newer in-flight task that replaced it.
+    private var inFlightToken: [ModuleID: UInt64] = [:]
+    /// Monotonic source for `inFlightToken` (and, transitively, an ordering
+    /// witness for load generations). Wraps with `&+=`; collisions across a
+    /// 2^64 wrap are not reachable in any real lifetime.
+    private var loadSeq: UInt64 = 0
+    /// M68.1 (NE1) — in-flight teardown (`module.unload()`) tasks, keyed by
+    /// module. A slot moves to `.unloading` and runs `unload()` in a task; a
+    /// concurrent reload of the SAME slot must await this teardown before it
+    /// calls `module.load()`, or load() and unload() race on the module actor
+    /// with undefined order (load lands first, the still-pending unload tears
+    /// it down → the governor records `.loaded` over an empty container and
+    /// `/healthz` lies). Mirror of the `inFlight` load handle, for the unload
+    /// direction. Cleared in `markUnloaded` when the teardown completes.
+    private var teardown: [ModuleID: Task<Void, Never>] = [:]
     /// M62 — the error from the most recent FAILED load, kept so the
     /// non-blocking `beginLoadIfNeeded` path can surface the real reason to
     /// the next caller instead of silently kicking another doomed load and
@@ -163,12 +183,13 @@ public actor MemoryGovernor {
         promptCachePoolProbe: PromptCachePoolProbe? = nil,
         promptCacheRelief: PromptCacheReliefHook? = nil
     ) {
-        self.totalBudgetBytes = totalBudgetBytes
+        let budget = Self.safeBudget(totalBudgetBytes)
+        self.totalBudgetBytes = budget
         self.memoryProbe = memoryProbe
         self.onUnloaded = onUnloaded
         self.onEvent = onEvent
         self.promptCacheCapBytes =
-            promptCacheCapBytes ?? (totalBudgetBytes / 4)
+            promptCacheCapBytes ?? (budget / 4)
         self.promptCachePoolProbe = promptCachePoolProbe
         self.promptCacheRelief = promptCacheRelief
     }
@@ -180,13 +201,30 @@ public actor MemoryGovernor {
         promptCachePoolProbe: PromptCachePoolProbe? = nil,
         promptCacheRelief: PromptCacheReliefHook? = nil
     ) {
-        self.totalBudgetBytes = config.totalBudgetBytes
+        let budget = Self.safeBudget(config.totalBudgetBytes)
+        self.totalBudgetBytes = budget
         self.memoryProbe = memoryProbe
         self.onUnloaded = onUnloaded
         self.onEvent = onEvent
-        self.promptCacheCapBytes = config.promptCacheCapBytes
+        // E5 — derive the cap off the clamped budget too, so a non-positive
+        // configured budget doesn't leak a non-positive prompt-cache cap.
+        self.promptCacheCapBytes =
+            config.promptCacheCapBytes > 0
+            ? config.promptCacheCapBytes : (budget / 4)
         self.promptCachePoolProbe = promptCachePoolProbe
         self.promptCacheRelief = promptCacheRelief
+    }
+
+    /// M68.1 (E5) — a non-positive budget (a misconfigured `totalBudgetBytes`,
+    /// or an overflowed/garbage value) would make `makeRoom` refuse EVERY load
+    /// (`residentBytes + estimate <= 0` is never true for a real model) and
+    /// give `relievePressure` a nonsense high-water mark — a daemon that 503s
+    /// every inference. Clamp to the physical-memory-derived default so a bad
+    /// config degrades to the standard budget instead of total refusal.
+    private static func safeBudget(_ b: Int) -> Int {
+        b > 0
+            ? b
+            : Int(Double(ProcessInfo.processInfo.physicalMemory) * 0.75)
     }
 
     /// Register a module instance under its id. `evictable` controls whether
@@ -221,11 +259,13 @@ public actor MemoryGovernor {
     /// semantics — used by the queue worker and the preload-on-start
     /// path, both legitimately off the request thread).
     public func beginLoadIfNeeded(_ id: ModuleID) throws -> LoadStatus {
-        guard let entry = entries[id] else {
+        guard entries[id] != nil else {
             throw AthenaError.moduleNotRegistered(id)
         }
         relievePressure(except: id)
-        if entry.state == .loaded {
+        // E1 — read the slot's CURRENT state, not a value-copy captured
+        // before `relievePressure` (which can mutate this actor's state).
+        if entries[id]?.state == .loaded {
             entries[id]?.lastUsed = Date()
             return .loaded
         }
@@ -236,23 +276,35 @@ public actor MemoryGovernor {
         // M62 — a prior load FAILED and nothing is in flight: surface the
         // real error to THIS caller instead of silently launching another
         // doomed load (which would just 503 `module_loading` forever — e.g. a
-        // model dir missing config.json). Cleared as we surface it so the
-        // next request retries fresh rather than wedging on a transient.
+        // model dir missing config.json). NE2 (M68.1) widens this to also
+        // capture admission (makeRoom) failures, so a too-large model 503s
+        // with the real `memory_budget_exceeded` instead of perpetual
+        // `module_loading`. Cleared as we surface it so the next request
+        // retries fresh rather than wedging on a transient.
         if let err = lastLoadError[id] {
             lastLoadError[id] = nil
             throw err
         }
+        loadSeq &+= 1
+        let token = loadSeq
         let task = Task<Void, Error> { try await self.performLoad(id) }
         inFlight[id] = task
+        inFlightToken[id] = token
         Task { [weak self] in
             _ = try? await task.value
-            await self?.clearInFlight(id)
+            await self?.clearInFlight(id, token: token)
         }
         return .loading
     }
 
-    private func clearInFlight(_ id: ModuleID) {
-        inFlight[id] = nil
+    /// E2 — clear the in-flight slot ONLY if it still holds the generation
+    /// this cleanup was spawned for; a newer load that already replaced it
+    /// (after this one finished) must not be wiped.
+    private func clearInFlight(_ id: ModuleID, token: UInt64) {
+        if inFlightToken[id] == token {
+            inFlight[id] = nil
+            inFlightToken[id] = nil
+        }
     }
 
     /// M54.3 — mark/clear an operator-action pull in flight for `id`. While
@@ -265,11 +317,14 @@ public actor MemoryGovernor {
     /// for the same module await a single shared load. Throws
     /// `AthenaError.memoryBudgetExceeded` (→ 503) when admission fails.
     public func ensureLoaded(_ id: ModuleID) async throws {
-        guard let entry = entries[id] else {
+        guard entries[id] != nil else {
             throw AthenaError.moduleNotRegistered(id)
         }
         relievePressure(except: id)
-        if entry.state == .loaded {
+        // E1 — decide on the slot's CURRENT state, re-read after the
+        // (synchronous, but state-mutating) `relievePressure` above rather
+        // than a value-copy taken before it.
+        if entries[id]?.state == .loaded {
             entries[id]?.lastUsed = Date()
             return
         }
@@ -277,9 +332,19 @@ public actor MemoryGovernor {
             try await existing.value
             return
         }
+        loadSeq &+= 1
+        let token = loadSeq
         let task = Task<Void, Error> { try await self.performLoad(id) }
         inFlight[id] = task
-        defer { inFlight[id] = nil }
+        inFlightToken[id] = token
+        // E2 — clear only our own generation; a load that replaced us while
+        // we awaited must survive this defer.
+        defer {
+            if inFlightToken[id] == token {
+                inFlight[id] = nil
+                inFlightToken[id] = nil
+            }
+        }
         try await task.value
     }
 
@@ -330,19 +395,45 @@ public actor MemoryGovernor {
     }
 
     private func performLoad(_ id: ModuleID) async throws {
-        guard let entry = entries[id] else {
+        guard let module = entries[id]?.module else {
             throw AthenaError.moduleNotRegistered(id)
         }
-        if entry.state == .loaded { return }
+        if entries[id]?.state == .loaded { return }
+
+        // NE1 (M68.1) — if this slot is mid-teardown (just evicted or
+        // explicitly unloaded), wait for the pending `module.unload()` to
+        // finish before re-loading. Otherwise load() and the detached
+        // unload() race on the module actor with undefined order. After the
+        // wait, re-read state (E1): a concurrent path may have loaded it.
+        if let pending = teardown[id] {
+            await pending.value
+            if entries[id]?.state == .loaded { return }
+        }
 
         // M5.4: prefer a previously-observed real footprint.
         let estimate: Int
         if let learned = learnedFootprint[id] {
             estimate = learned
         } else {
-            estimate = await entry.module.memoryEstimate()
+            estimate = await module.memoryEstimate()
+            // E1 — re-read after the `memoryEstimate()` suspension.
+            if entries[id]?.state == .loaded { return }
         }
-        try makeRoom(for: estimate, requestedBy: id)
+        // NE2 (M68.1) — admission can fail (model larger than the budget, or
+        // the budget perpetually over after eviction). Record it in
+        // `lastLoadError` exactly like a `module.load()` throw, so the
+        // non-blocking `beginLoadIfNeeded` path surfaces the real
+        // `memory_budget_exceeded` 503 to the next caller instead of kicking
+        // another doomed background load and 503-ing `module_loading` forever
+        // (the detached cleanup swallows this throw via `try?`).
+        do {
+            try makeRoom(for: estimate, requestedBy: id)
+        } catch {
+            let classified = AthenaError.classify(error, module: id)
+            lastLoadError[id] = classified
+            entries[id]?.unloadedReason = .loadFailed
+            throw classified
+        }
 
         let reservation = MemoryReservation(module: id, bytes: estimate)
         residentBytes += estimate
@@ -353,11 +444,23 @@ public actor MemoryGovernor {
         let started = Date()
         onEvent?(id, "loading (estimate \(Self.fmtBytes(estimate)))")
         do {
-            try await entry.module.load(reservation: reservation)
+            try await module.load(reservation: reservation)
         } catch {
-            residentBytes -= estimate
-            entries[id]?.state = .unloaded
-            entries[id]?.reservation = nil
+            // E6 (M68.1) — return the bytes ONLY if our reservation is still
+            // on the books. A concurrent `releaseSlot` (allowlist drop) during
+            // the load `await` may have already reclaimed it; a second
+            // subtract here would corrupt `residentBytes` downward. Subtract
+            // the reservation's own bytes, then clear it.
+            if let res = entries[id]?.reservation {
+                residentBytes -= res.bytes
+                entries[id]?.reservation = nil
+            }
+            // Don't clobber a state another path set (e.g. `releaseSlot` →
+            // `.unloaded`); only fall back to `.unloaded` if we still own the
+            // `.loading` transition.
+            if entries[id]?.state == .loading {
+                entries[id]?.state = .unloaded
+            }
             entries[id]?.unloadedReason = .loadFailed
             onEvent?(id, "load failed after \(Self.ms(since: started)): \(error)")
             // A Metal/MLX OOM during load is classified to 503, not a
@@ -382,10 +485,23 @@ public actor MemoryGovernor {
         // module (the governor keys by module class); bytes from the same
         // probe the reconcile uses.
         let after = memoryProbe?()
-        let observed: Int =
+        var observed: Int =
             (before != nil && after != nil) ? max(after! - before!, 0) : 0
+        // E12 (M68.1) — the process-global probe delta UNDERCOUNTS when a
+        // concurrent teardown (another module's eviction) freed bytes between
+        // `before` and `after`: the delta can fall below this module's real
+        // footprint, even to ≤0, so reconcile is skipped and
+        // `learnedFootprint[id]` is never recorded → the next admission keeps
+        // using the static estimate. When the delta lands below the estimate
+        // (the tell-tale of a deflated probe), fall back to the module's OWN
+        // resident self-report so the reconcile still fires. `max(...)` keeps
+        // the normal single-load case (delta ≥ estimate) byte-unchanged, and a
+        // module that self-reports 0 leaves `observed` as the probe delta.
+        if observed < estimate {
+            observed = max(observed, await module.residentBytes)
+        }
         let modelId =
-            await (entry.module as? any ModelSelectable)?.residentModelId()
+            await (module as? any ModelSelectable)?.residentModelId()
         onEvent?(
             id,
             "loaded \(modelId ?? id.rawValue) "
@@ -490,7 +606,10 @@ public actor MemoryGovernor {
         onEvent?(id, "evicted (budget pressure)")
         let module = entry.module
         let hook = onUnloaded
-        Task { [weak self] in
+        // NE1 (M68.1) — register the teardown so a concurrent reload of THIS
+        // slot (`performLoad`) awaits `module.unload()` before calling
+        // `module.load()`, instead of racing it on the module actor.
+        teardown[id] = Task { [weak self] in
             await module.unload()
             hook?()
             await self?.markUnloaded(id)
@@ -501,6 +620,10 @@ public actor MemoryGovernor {
         if entries[id]?.state == .unloading {
             entries[id]?.state = .unloaded
         }
+        // NE1 — the teardown for this slot is done; drop the handle so the
+        // next reload doesn't await a completed task (harmless) and so the
+        // map doesn't leak entries.
+        teardown[id] = nil
     }
 
     /// M43.1 — reconcile the governor when a module drops its resident
@@ -532,13 +655,29 @@ public actor MemoryGovernor {
         }
         entries[id]?.state = .unloading
         entries[id]?.reservation = nil
-        await entry.module.unload()
-        onUnloaded?()
-        onEvent?(id, "unloaded")
-        entries[id]?.state = .unloaded
         // M46.5 — `unload(_:)` is reached only from operator paths
         // (`/api/models/unload` + the `athena models unload` CLI).
         entries[id]?.unloadedReason = .operatorUnload
+        onEvent?(id, "unloaded")
+        // NE1 (M68.1) — route the teardown through the same handle as
+        // `evictSync`, then await it. Two wins over the pre-fix inline
+        // `await entry.module.unload(); state = .unloaded`:
+        //   1. a concurrent reload (`performLoad`) awaits this teardown
+        //      before calling `module.load()`, so load() can't race the
+        //      still-pending unload() on the module actor; and
+        //   2. the final `.unloaded` write is state-guarded inside
+        //      `markUnloaded` (`if state == .unloading`), so a reload that
+        //      already moved the slot to `.loaded` between `module.unload()`
+        //      and the state write is no longer clobbered back to `.unloaded`.
+        let module = entry.module
+        let hook = onUnloaded
+        let task = Task { [weak self] in
+            await module.unload()
+            hook?()
+            await self?.markUnloaded(id)
+        }
+        teardown[id] = task
+        await task.value
     }
 
     public func snapshot() -> GovernorSnapshot {

@@ -419,4 +419,177 @@ final class MemoryGovernorTests: XCTestCase {
         }
         func unload() async {}
     }
+
+    // MARK: - M68.1 concurrency & lifecycle
+
+    /// A module with a deliberately SLOW `unload()`, so the teardown window
+    /// stays open while a concurrent reload runs — the NE1 race condition.
+    /// `isLoaded` is the ground truth the test asserts against: if `load()`
+    /// and the pending slow `unload()` race, the unload lands last and leaves
+    /// `isLoaded == false` while the governor records `.loaded`.
+    private actor SlowUnloadModule: InferenceModule {
+        nonisolated let id: ModuleID
+        private let bytes: Int
+        private let unloadDelayNs: UInt64
+        private(set) var isLoaded = false
+        init(id: ModuleID, bytes: Int, unloadDelayNs: UInt64) {
+            self.id = id
+            self.bytes = bytes
+            self.unloadDelayNs = unloadDelayNs
+        }
+        var residentBytes: Int { isLoaded ? bytes : 0 }
+        func memoryEstimate() -> Int { bytes }
+        func load(reservation: MemoryReservation) async throws {
+            isLoaded = true
+        }
+        func unload() async {
+            try? await Task.sleep(nanoseconds: unloadDelayNs)
+            isLoaded = false
+        }
+        func loaded() -> Bool { isLoaded }
+    }
+
+    /// NE1 — a slot re-requested DURING its eviction teardown must wait for
+    /// the pending `unload()` before re-loading, so `load()` doesn't race the
+    /// still-running `unload()` on the module actor and end up torn down while
+    /// the governor records it `.loaded`.
+    func testReloadDuringTeardownWaitsForUnloadNE1() async throws {
+        let gov = MemoryGovernor(totalBudgetBytes: 100)
+        let a = SlowUnloadModule(
+            id: .transcription, bytes: 60, unloadDelayNs: 80_000_000)
+        let b = SlowUnloadModule(
+            id: .textEmbedding, bytes: 60, unloadDelayNs: 80_000_000)
+        await gov.register(a, evictable: true)
+        await gov.register(b, evictable: true)
+
+        try await gov.ensureLoaded(.transcription)  // A loaded (60)
+        try await gov.ensureLoaded(.textEmbedding)  // evicts A (slow), B loaded
+        // Re-request A while A's slow unload is still in flight. With the fix
+        // performLoad awaits A's teardown before A.load(); without it, A.load
+        // runs first and the trailing unload flips isLoaded back to false.
+        try await gov.ensureLoaded(.transcription)  // evicts B, reloads A
+
+        let aLoaded = await a.loaded()
+        XCTAssertTrue(
+            aLoaded,
+            "A must be genuinely loaded — the teardown must have completed "
+                + "before the reload")
+        let s = await gov.snapshot()
+        XCTAssertEqual(
+            s.modules.first { $0.id == .transcription }?.state, .loaded)
+        XCTAssertEqual(
+            s.modules.first { $0.id == .transcription }?.residentBytes, 60)
+    }
+
+    /// NE1 (mirror) — an explicit `unload(_:)` racing a reload must not clobber
+    /// the freshly-loaded slot back to `.unloaded`. The reload awaits the
+    /// unload teardown, then loads; the final state is `.loaded`.
+    func testExplicitUnloadThenReloadEndsLoadedNE1() async throws {
+        let gov = MemoryGovernor(totalBudgetBytes: 1_000)
+        let m = SlowUnloadModule(
+            id: .llm, bytes: 100, unloadDelayNs: 60_000_000)
+        await gov.register(m, evictable: false)
+
+        try await gov.ensureLoaded(.llm)
+        // Kick the slow unload, then wait until the slot has actually entered
+        // its teardown (`.unloading`) before reloading — otherwise the reload
+        // could take the `.loaded` fast path and never exercise the drain.
+        async let unloadDone: Void = gov.unload(.llm)
+        for _ in 0..<500 {
+            let st = await gov.snapshot().modules
+                .first { $0.id == .llm }?.state
+            if st == .unloading { break }
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        // Reload while the slow `unload()` is mid-flight: the reload must drain
+        // the teardown, then load — and the trailing markUnloaded must NOT
+        // clobber the freshly-loaded slot back to `.unloaded`.
+        try await gov.ensureLoaded(.llm)
+        _ = await unloadDone
+
+        let mLoaded = await m.loaded()
+        XCTAssertTrue(mLoaded, "reload must win the final state")
+        let s = await gov.snapshot()
+        XCTAssertEqual(s.modules.first { $0.id == .llm }?.state, .loaded)
+        XCTAssertEqual(s.residentBytes, 100)
+    }
+
+    /// NE2 — an admission (makeRoom) failure on the non-blocking path must be
+    /// surfaced to the next caller as the real `memory_budget_exceeded`, not a
+    /// perpetual `module_loading` 503 (pre-fix, only `module.load()` throws
+    /// were recorded in `lastLoadError`; the makeRoom throw was swallowed).
+    func testAdmissionFailureSurfacedNotPerpetualLoadingNE2() async throws {
+        let gov = MemoryGovernor(totalBudgetBytes: 50)
+        await gov.register(StubLLMModule(reserveBytes: 100), evictable: false)
+
+        let first = try await gov.beginLoadIfNeeded(.llm)
+        guard case .loading = first else {
+            return XCTFail("first cold-load should be .loading")
+        }
+        var surfaced: Error?
+        for _ in 0..<100 {
+            do {
+                let s = try await gov.beginLoadIfNeeded(.llm)
+                guard case .loading = s else {
+                    return XCTFail("unexpected non-loading status")
+                }
+                try await Task.sleep(nanoseconds: 5_000_000)
+            } catch {
+                surfaced = error
+                break
+            }
+        }
+        let e = try XCTUnwrap(
+            surfaced as? AthenaError,
+            "admission failure must surface, not loop on module_loading")
+        guard case .memoryBudgetExceeded = e else {
+            return XCTFail("expected memoryBudgetExceeded, got \(e)")
+        }
+    }
+
+    /// E5 — a non-positive configured budget must clamp to the physical-memory
+    /// default rather than refuse every load (a daemon that 503s everything).
+    func testNonPositiveBudgetClampsToDefaultE5() async throws {
+        for bad in [0, -1, Int.min] {
+            let gov = MemoryGovernor(totalBudgetBytes: bad)
+            let budget = await gov.snapshot().totalBudgetBytes
+            XCTAssertGreaterThan(
+                budget, 0, "budget \(bad) should clamp to a positive default")
+            await gov.register(
+                StubLLMModule(reserveBytes: 100), evictable: false)
+            try await gov.ensureLoaded(.llm)
+            let state = await gov.snapshot().modules
+                .first { $0.id == .llm }?.state
+            XCTAssertEqual(state, .loaded)
+        }
+    }
+
+    /// E12 — when the process-global probe delta is deflated below the static
+    /// estimate (a concurrent teardown freed bytes between before/after), the
+    /// reconcile must fall back to the module's own resident self-report so
+    /// `learnedFootprint` is still recorded — not skipped, leaving the slot
+    /// billed at the under-counted estimate.
+    func testReconcileFallsBackToSelfReportE12() async throws {
+        // relief=0, before=500, after=500 ⇒ probe delta 0 (< estimate 100).
+        let probe = FakeProbe([0, 500, 500])
+        let gov = MemoryGovernor(
+            totalBudgetBytes: 1_000, memoryProbe: { probe.next() })
+        // Static estimate 100, but the module self-reports 600 resident.
+        await gov.register(
+            AllocatingModule(
+                id: .transcription, estimate: 100, footprint: 600,
+                box: MemBox()),
+            evictable: true)
+
+        try await gov.ensureLoaded(.transcription)
+
+        let s = await gov.snapshot()
+        // Without the E12 fallback, observed==0 ⇒ reconcile skipped ⇒
+        // reservation stays at the 100 estimate. With it, the self-report
+        // (600) drives the reconcile.
+        XCTAssertEqual(
+            s.modules.first { $0.id == .transcription }?.residentBytes, 600,
+            "reconcile should bill the self-reported footprint")
+        XCTAssertEqual(s.residentBytes, 600)
+    }
 }

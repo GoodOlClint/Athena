@@ -191,14 +191,17 @@ Re-verified across M67: F6 (createSSMMask alloc) → M69 perf; I7 (embed canonic
 
 ## M68 — Concurrency & lifecycle
 
-### M68.1 — MemoryGovernor
-- [ ] NE1 (High) `.unloading` slot blocks concurrent reload (drain before load)
-- [ ] E1 re-read state after suspension in `ensureLoaded`
-- [ ] E2 task-keyed `inFlight` cleanup
-- [ ] E6 no double-subtract on failure path
-- [ ] NE2 admission failure recorded in `lastLoadError` (no perpetual 503)
-- [ ] E5 validate budget > 0
-- [ ] E12 learned-footprint reconcile under concurrent teardown
+### M68.1 — MemoryGovernor ✅ v0.10.135
+- [x] NE1 (High) `.unloading` teardown now tracked in a per-id `teardown` Task handle (mirror of `inFlight`); `performLoad` awaits it before re-loading so `load()` can't race the still-pending detached `unload()` on the module actor. Both the eviction path (`evictSync`) and the explicit `unload(_:)` route through it; `unload(_:)`'s final `.unloaded` write is now state-guarded in `markUnloaded` (`if state == .unloading`) so a reload that already moved the slot to `.loaded` isn't clobbered back. `testReloadDuringTeardownWaitsForUnloadNE1` + `testExplicitUnloadThenReloadEndsLoadedNE1` (v0.10.135)
+- [x] E1 `ensureLoaded`/`beginLoadIfNeeded` decide on `entries[id]?.state` read FRESH (not a value-copy of the `Entry` struct taken before the state-mutating `relievePressure`); `performLoad` re-reads `.loaded` after each suspension (teardown drain + `memoryEstimate()`) and early-returns (v0.10.135)
+- [x] E2 in-flight cleanup is generation-token-keyed (`inFlightToken`/`loadSeq`): the detached `clearInFlight(_:token:)` and the `ensureLoaded` defer wipe the slot ONLY if it still holds the same generation, so a newer load that replaced it survives (`Task` is a non-identity value type — a token, not `===`) (v0.10.135)
+- [x] E6 the load-failure path returns bytes ONLY if our reservation is still on the books (subtracts `reservation.bytes`, then nils it) — a concurrent `releaseSlot` during the load `await` can't trigger a double-subtract that corrupts `residentBytes`; the `.unloaded` fallback is guarded to the `.loading` transition we own (v0.10.135)
+- [x] NE2 admission (`makeRoom`) failure now records `lastLoadError[id]` exactly like a `module.load()` throw, so the non-blocking `beginLoadIfNeeded` path surfaces the real `memory_budget_exceeded` 503 to the next caller instead of kicking another doomed load and 503-ing `module_loading` forever. `testAdmissionFailureSurfacedNotPerpetualLoadingNE2` (v0.10.135)
+- [x] E5 both governor inits clamp a non-positive `totalBudgetBytes` (and the derived prompt-cache cap) to the physical-memory-derived default via `safeBudget`, so a misconfigured budget degrades to the standard budget instead of a daemon that 503s every load. `testNonPositiveBudgetClampsToDefaultE5` (v0.10.135)
+- [x] E12 when the process-global probe delta lands below the static estimate (a concurrent teardown deflated it, possibly to ≤0 → reconcile skipped), the reconcile falls back to the module's own `residentBytes` self-report so `learnedFootprint` is still recorded; `max(...)` keeps the normal delta-≥-estimate case byte-unchanged. `testReconcileFallsBackToSelfReportE12` (v0.10.135)
+
+> AthenaCore governor tests ARE CI-runnable (Stub modules, no MLX kernels): `MemoryGovernorTests` 22/0 incl. the 5 new M68.1 cases. Binding gate: Release build + e2e-rbac **561/0** (no route/spec change). Real-model concurrency smoke (Qwen3.5-9B-mlx): 4-way concurrent cold-load reserves the right bytes + reconciles to `loaded`, 4-way hot `ensureLoaded` fast-path all 200, and greedy temp=0 stays byte-identical across runs (bit-identical contract intact — the changes are admission/lifecycle accounting only, no decode/sampling/cache touch).
+> Re-verified while here: **E17** (resident-id one-off downcast in the load-event log path) — confirmed a Low arch nicety (cache on `Entry`), NOT a concurrency defect; the downcast is on the post-load log path only, deferred to the M71 polish tail. **E15** (RBAC rawString golden tests) is RBAC.swift, not governor — left for M70 test-debt.
 
 ### M68.2 — LLM & structured guide ownership
 - [ ] C3 (High) memoize vocab/structured-index builds as per-model `Task` (actor-reentrancy)
