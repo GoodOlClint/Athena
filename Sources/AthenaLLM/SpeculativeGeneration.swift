@@ -270,12 +270,15 @@ enum SpeculativeGeneration {
             // M47.2 — publish accept/reject so the test (and any future
             // perf-observability surface) can read the acceptance rate
             // via the SpeculativeStats TaskLocal.
-            SpeculativeStats.observer?
-                .recordIteration(accepted: draft == verifyPred)
+            // L1 (M70.3): the greedy-parity accept decision — its sequencing
+            // is pinned MLX-free in SpeculativeAcceptanceTests.
+            let accepted = SpeculativeAcceptance.accepts(
+                draft: draft, verifyPred: verifyPred)
+            SpeculativeStats.observer?.recordIteration(accepted: accepted)
             specIters += 1
-            if draft == verifyPred { specAccepts += 1 }
+            if accepted { specAccepts += 1 }
 
-            if draft == verifyPred {
+            if accepted {
                 if commit(draft) { break }  // advances the Guide
                 // bonus under the Guide state AFTER committing draft.
                 let bonus = decoder.pick(logits2[0..., 1, 0...])
