@@ -933,32 +933,49 @@ struct AthenaServer {
             let deadlineSecs =
                 body.timeout.map { $0 > 0 ? $0 : 0 }
                 ?? requestTimeoutSecs
-            return Self.streamSSE(
-                id: id, model: model, created: created,
-                events: deadlineBounded(
-                    seconds: deadlineSecs,
-                    llm.generateMetered(
-                        messages: turns, schemaJSON: schemaJSON,
-                        tools: toolSpecs, maxTokens: body.tokenCap,
-                        temperature: body.temperature,
-                        topP: body.top_p, seed: body.seed,
-                        speculative: body.speculative,
-                        chatTemplateKwargs:
-                            body.chatTemplateKwargsContext(),
-                        promptCacheKey: body.prompt_cache_key,
-                        principal: principal),
-                    onTimerFired: {
-                        Self.log.warning(
-                            """
-                            streamed request truncated by deadline \
-                            path=/v1/chat/completions seconds=\
-                            \(deadlineSecs) model=\(model)
-                            """)
-                    }),
-                includeUsage: includeUsage, stops: stops,
-                record: { usage in
-                    await meter(principal: principal, usage: usage)
-                })
+            // A8/E3/E13 (M68.4) — the streamed path doesn't go through
+            // `collectMetered`, so pre-fix it bound NO `DecodeProgress.counter`
+            // and never called `cancelGeneration()`: a client disconnect or a
+            // deadline truncation ended the SSE wire but the synchronous decode
+            // loop (polling the counter, not `Task.isCancelled`) ran on to
+            // `maxTokens`. Bind a cancel counter HERE — `generateMetered`'s
+            // (non-detached) Task, created synchronously inside this
+            // `withValue` scope, inherits the TaskLocal so the loop's task sees
+            // it (E13) — and flip it on BOTH a downstream disconnect (A8) and a
+            // deadline truncation (E3).
+            let cancelCounter = HeartbeatCounter()
+            return DecodeProgress.$counter.withValue(cancelCounter) {
+                Self.streamSSE(
+                    id: id, model: model, created: created,
+                    events: deadlineBounded(
+                        seconds: deadlineSecs,
+                        llm.generateMetered(
+                            messages: turns, schemaJSON: schemaJSON,
+                            tools: toolSpecs, maxTokens: body.tokenCap,
+                            temperature: body.temperature,
+                            topP: body.top_p, seed: body.seed,
+                            speculative: body.speculative,
+                            chatTemplateKwargs:
+                                body.chatTemplateKwargsContext(),
+                            promptCacheKey: body.prompt_cache_key,
+                            principal: principal),
+                        onTimerFired: {
+                            // E3 — a deadline truncation must reach the decode
+                            // loop, not just close the wire.
+                            cancelCounter.cancelGeneration()
+                            Self.log.warning(
+                                """
+                                streamed request truncated by deadline \
+                                path=/v1/chat/completions seconds=\
+                                \(deadlineSecs) model=\(model)
+                                """)
+                        }),
+                    includeUsage: includeUsage, stops: stops,
+                    onConsumerCancel: { cancelCounter.cancelGeneration() },
+                    record: { usage in
+                        await meter(principal: principal, usage: usage)
+                    })
+            }
         }
 
         let collected: GenCollected
@@ -3095,6 +3112,7 @@ struct AthenaServer {
     /// JSON line; a final `done` line closes the stream.
     private static func streamNDJSON(
         tokens: AsyncStream<String>,
+        onConsumerCancel: (@Sendable () -> Void)? = nil,
         line: @escaping @Sendable (_ content: String, _ done: Bool)
             -> Data?
     ) -> Response {
@@ -3111,7 +3129,12 @@ struct AthenaServer {
                 emit(line("", true))
                 continuation.finish()
             }
-            continuation.onTermination = { _ in task.cancel() }
+            // A8 — bridge a client disconnect to the generation's cancel flag
+            // (the decode loop polls the counter, not `Task.isCancelled`).
+            continuation.onTermination = { _ in
+                task.cancel()
+                onConsumerCancel?()
+            }
         }
         var headers = HTTPFields()
         headers[.contentType] = "application/x-ndjson"
@@ -3151,31 +3174,39 @@ struct AthenaServer {
         let principal = await usagePrincipal(request)
         if body.stream == true {
             let deadlineSecs = requestTimeoutSecs
-            return Self.streamNDJSON(
-                tokens: deadlineBounded(
-                    seconds: deadlineSecs,
-                    Self.textChunks(
-                        llm.generateMetered(
-                            messages: turns, schemaJSON: nil, tools: nil,
-                            maxTokens: body.max_tokens,
-                            temperature: body.temperature,
-                            topP: nil, seed: nil,
-                            speculative: body.speculative,
-                            chatTemplateKwargs: nil,
-                            promptCacheKey: body.prompt_cache_key,
-                            principal: principal)),
-                    onTimerFired: {
-                        Self.log.warning(
-                            """
-                            streamed request truncated by deadline \
-                            path=/api/chat seconds=\(deadlineSecs) \
-                            model=\(model)
-                            """)
-                    })
-            ) { content, done in
-                try? JSONEncoder().encode(
-                    AthenaChatChunk(
-                        content: done ? "" : content, done: done))
+            // A8/E3/E13 — same cancel bridge as /v1/chat streaming: bind a
+            // cancel counter so generateMetered's decode loop sees it, and
+            // flip it on disconnect AND deadline truncation so the loop stops.
+            let cancelCounter = HeartbeatCounter()
+            return DecodeProgress.$counter.withValue(cancelCounter) {
+                Self.streamNDJSON(
+                    tokens: deadlineBounded(
+                        seconds: deadlineSecs,
+                        Self.textChunks(
+                            llm.generateMetered(
+                                messages: turns, schemaJSON: nil, tools: nil,
+                                maxTokens: body.max_tokens,
+                                temperature: body.temperature,
+                                topP: nil, seed: nil,
+                                speculative: body.speculative,
+                                chatTemplateKwargs: nil,
+                                promptCacheKey: body.prompt_cache_key,
+                                principal: principal)),
+                        onTimerFired: {
+                            cancelCounter.cancelGeneration()
+                            Self.log.warning(
+                                """
+                                streamed request truncated by deadline \
+                                path=/api/chat seconds=\(deadlineSecs) \
+                                model=\(model)
+                                """)
+                        }),
+                    onConsumerCancel: { cancelCounter.cancelGeneration() }
+                ) { content, done in
+                    try? JSONEncoder().encode(
+                        AthenaChatChunk(
+                            content: done ? "" : content, done: done))
+                }
             }
         }
         let collected: GenCollected
@@ -4983,6 +5014,7 @@ struct AthenaServer {
         id: String, model: String, created: Int,
         events: AsyncStream<GenChunk>, includeUsage: Bool,
         stops: [String] = [],
+        onConsumerCancel: (@Sendable () -> Void)? = nil,
         record: @escaping @Sendable (TokenUsage) async -> Void
     ) -> Response {
         let stream = AsyncStream<ByteBuffer> { continuation in
@@ -5104,7 +5136,16 @@ struct AthenaServer {
                 await record(usage)
                 continuation.finish()
             }
-            continuation.onTermination = { _ in task.cancel() }
+            // A8 (M68.4) — a client disconnect terminates THIS byte stream;
+            // bridge it to the generation's cancel flag so the synchronous
+            // decode loops (which poll `DecodeProgress.counter?.isCancelled`,
+            // not `Task.isCancelled`) stop instead of decoding to maxTokens
+            // for a request no one is reading. `task.cancel()` alone only ends
+            // the SSE consume task, not the decode loop.
+            continuation.onTermination = { _ in
+                task.cancel()
+                onConsumerCancel?()
+            }
         }
         var headers = HTTPFields()
         headers[.contentType] = "text/event-stream"

@@ -141,6 +141,40 @@ final class AthenaStoreTests: XCTestCase {
         XCTAssertEqual(after, 1)
     }
 
+    /// A23 (M68.4) — `cancelQueuedJob` is a single conditional UPDATE: it
+    /// cancels ONLY a still-queued job, and a job the worker already moved to
+    /// `running`/`done` is never clobbered back to `canceled`.
+    func testCancelQueuedJobIsConditionalA23() async throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("athena-a23-\(UUID()).sqlite")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let s = try AthenaStore(path: url)
+
+        // A queued job cancels and transitions to canceled.
+        try await s.insertJob(
+            id: "q", kind: "conversation", request: Data(), owner: nil)
+        let okQ = try await s.cancelQueuedJob(id: "q")
+        XCTAssertTrue(okQ)
+        let qNow = await s.getJob(id: "q")
+        XCTAssertEqual(qNow?.status, "canceled")
+
+        // A job already running (the worker picked it up) is NOT cancellable;
+        // the conditional UPDATE matches no row and leaves it running.
+        try await s.insertJob(
+            id: "r", kind: "conversation", request: Data(), owner: nil)
+        try await s.updateJob(
+            id: "r", status: "running", result: nil, error: nil)
+        let okR = try await s.cancelQueuedJob(id: "r")
+        XCTAssertFalse(okR, "a running job must not be cancellable")
+        let rNow = await s.getJob(id: "r")
+        XCTAssertEqual(
+            rNow?.status, "running", "running job must NOT be clobbered")
+
+        // A missing id is simply false.
+        let okMissing = try await s.cancelQueuedJob(id: "nope")
+        XCTAssertFalse(okMissing)
+    }
+
     /// H6 (M65.6) — the optional store-layer owner filter on
     /// getJob/listJobs/allUsage. nil keeps the legacy unfiltered behavior;
     /// a non-nil owner confines the result, and an ownerless (NULL) row

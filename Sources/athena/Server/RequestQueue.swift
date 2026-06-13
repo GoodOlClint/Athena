@@ -114,11 +114,10 @@ actor RequestQueue {
     /// Cancel a not-yet-running job. Running jobs can't be interrupted
     /// (the governed work is atomic); returns false then.
     func cancel(id: String) async -> Bool {
-        guard let j = await store.getJob(id: id) else { return false }
-        guard j.status == "queued" else { return false }
-        try? await store.updateJob(
-            id: id, status: "canceled", result: nil, error: nil)
-        return true
+        // A23 — one atomic conditional UPDATE (cancel iff still queued) so the
+        // worker can't pick the job up between a separate check and write and
+        // have a running/done job clobbered back to `canceled`.
+        (try? await store.cancelQueuedJob(id: id)) ?? false
     }
 
     /// Serial worker: drain on startup (re-pick interrupted jobs),

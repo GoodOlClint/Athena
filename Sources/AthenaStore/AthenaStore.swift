@@ -627,6 +627,26 @@ public actor AthenaStore {
         }
     }
 
+    /// A23 (M68.4) — atomically cancel a job ONLY if it is still `queued`,
+    /// in ONE conditional UPDATE. The previous `getJob`-check-then-`updateJob`
+    /// straddled two `await`s, so the serial worker could pick the job up
+    /// (queued → running) in between and a running/done job would be clobbered
+    /// back to `canceled`. The `WHERE … AND status='queued'` guard makes the
+    /// check-and-act a single SQLite statement; returns true iff a queued row
+    /// was actually transitioned.
+    public func cancelQueuedJob(id: String) throws -> Bool {
+        let st = try Self.prepared(db,
+            "UPDATE jobs SET status='canceled',updated=? "
+                + "WHERE id=? AND status='queued';")
+        defer { sqlite3_finalize(st) }
+        sqlite3_bind_double(st, 1, Date().timeIntervalSince1970)
+        sqlite3_bind_text(st, 2, id, -1, Self.transient)
+        guard sqlite3_step(st) == SQLITE_DONE else {
+            throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
+        }
+        return sqlite3_changes(db) > 0
+    }
+
     /// Zero-length SQLite blobs return a NULL pointer — read safely.
     private static func blob(_ st: OpaquePointer?, _ i: Int32) -> Data {
         guard let p = sqlite3_column_blob(st, i) else { return Data() }

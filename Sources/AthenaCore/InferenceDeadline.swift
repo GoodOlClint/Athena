@@ -95,6 +95,15 @@ func deadlineBoundedNanos<E: Sendable>(
         }
         let timer = Task {
             try? await Task.sleep(nanoseconds: nanos)
+            // NE6 — if the sleep was CANCELLED, the consumer terminated the
+            // stream (client disconnect / outer cancellation, which
+            // `onTermination` below turns into `timer.cancel()`). That is NOT
+            // a deadline truncation, so return before `markTimerFiredIfFirst`
+            // — otherwise the timer could win the race against the pump's
+            // `markPumpFinished` and emit a misleading "deadline truncated the
+            // stream" warning when the real cause was a disconnect. The
+            // callback must fire only on a genuine expiry.
+            if Task.isCancelled { return }
             // If the pump already finished, the stream ran to natural
             // completion — no truncation, no callback. Otherwise the
             // timer is the actual end of the stream and the truncation

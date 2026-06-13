@@ -122,6 +122,43 @@ final class InferenceDeadlineTests: XCTestCase {
                 + "naturally before the deadline"
         )
     }
+
+    func testDownstreamCancelDoesNotFireCallbackNE6() async {
+        // NE6 — a consumer that breaks early (client disconnect) BEFORE the
+        // deadline must not get a spurious "deadline truncated" callback: the
+        // cancelled timer must return before markTimerFiredIfFirst, so the
+        // operator isn't misled into chasing a timeout that never happened.
+        let source = AsyncStream<Int> { cont in
+            let t = Task {
+                var i = 0
+                while !Task.isCancelled {
+                    cont.yield(i)
+                    i += 1
+                    try? await Task.sleep(nanoseconds: 10_000_000)
+                }
+                cont.finish()
+            }
+            cont.onTermination = { _ in t.cancel() }
+        }
+        let fired = TestFlag()
+        // A long deadline so it can't fire by elapsed time within the test —
+        // the only way the callback could fire is the bug (timer firing on a
+        // downstream cancel).
+        let bounded = deadlineBoundedNanos(5_000_000_000, source) {
+            fired.set()
+        }
+        var seen = 0
+        for await _ in bounded {
+            seen += 1
+            if seen >= 1 { break }  // simulate a disconnect mid-stream
+        }
+        // Give the now-cancelled timer time to (wrongly) fire if the bug is back.
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertFalse(
+            fired.value(),
+            "a downstream cancel must not fire the deadline-truncation callback"
+        )
+    }
 }
 
 /// NSLock-isolated bool for test assertions that touch state across
