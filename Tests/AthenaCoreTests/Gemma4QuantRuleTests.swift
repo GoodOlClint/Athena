@@ -83,4 +83,48 @@ final class Gemma4QuantRuleTests: XCTestCase {
         ])
         XCTAssertTrue(ov.allSatisfy { $0.bits == 8 && $0.groupSize == 64 })
     }
+
+    // MARK: - ADR 012 amendment — arch-gated mixed precision
+
+    /// The 8/4 mixed scheme applies ONLY to gemma4; every other arch (and an
+    /// unknown/absent model_type) quantizes uniformly.
+    func testAppliesMixedPrecisionGatedToGemma4() {
+        XCTAssertTrue(Gemma4QuantRule.appliesMixedPrecision(modelType: "gemma4"))
+        for other in ["qwen3_5", "qwen3_5_moe", "gemma4_text", "llama", nil] {
+            XCTAssertFalse(
+                Gemma4QuantRule.appliesMixedPrecision(modelType: other),
+                "\(other ?? "nil") must not get the gemma4 mixed scheme")
+        }
+    }
+
+    /// With `mixedPrecision: false` (any non-gemma4 arch) there is NO 8-bit
+    /// override: a fully-dense Qwen's every `mlp.*_proj` AND a Qwen-MoE's
+    /// routed experts (`mlp.switch_mlp.*`) — the two paths that bloated the
+    /// "4-bit" converts — all quantize at the GLOBAL bits. Encoder towers stay
+    /// skipped (vision full-precision for any arch), and no override entries
+    /// are emitted into the config.
+    func testUniformQuantForNonGemma4() {
+        let uniform = Gemma4QuantRule(
+            groupSize: 64, bits: 4, overrideBits: 8, mixedPrecision: false)
+        func u(_ p: String) -> (groupSize: Int, bits: Int)? {
+            uniform.quantization(forPath: p)
+        }
+        // Dense Qwen MLP — would be 8-bit under the gemma4 override; now 4-bit.
+        XCTAssertEqual(u("language_model.model.layers.0.mlp.down_proj")?.bits, 4)
+        // Qwen-MoE routed EXPERTS — the bulk; must be global 4-bit, not 8.
+        XCTAssertEqual(
+            u("language_model.model.layers.0.mlp.switch_mlp.down_proj")?.bits, 4)
+        XCTAssertEqual(
+            u("language_model.model.layers.0.mlp.shared_expert.up_proj")?.bits, 4)
+        // Attention/embeds → 4-bit; encoder tower → still skipped.
+        XCTAssertEqual(u("language_model.model.layers.0.self_attn.q_proj")?.bits, 4)
+        XCTAssertNil(u("vision_tower.encoder.layers.0.mlp.down_proj"))
+        // No per-module overrides emitted (everything quantizable == global).
+        let ov = uniform.overrides(forModules: [
+            "language_model.model.layers.0.mlp.down_proj",
+            "language_model.model.layers.0.mlp.switch_mlp.gate_proj",
+            "language_model.model.layers.0.self_attn.q_proj",
+        ])
+        XCTAssertTrue(ov.isEmpty, "uniform convert writes no 8-bit overrides")
+    }
 }

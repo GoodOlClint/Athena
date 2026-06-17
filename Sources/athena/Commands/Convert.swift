@@ -32,7 +32,7 @@ struct Convert: AsyncParsableCommand {
 
     @Option(
         help: """
-            Output name in the store. Default: <repo>-<bits>bit when
+            Output name in the store. Default: <repo>-mlx-<bits>bit when
             --q-bits is set, otherwise <repo>-mlx.
             """
     )

@@ -119,3 +119,37 @@ reference recipe. Four sub-decisions:
   already provides.
 - **Port the omni `gemma4_unified_audio` vision arch** — out of scope: the 26B-A4B target is
   the supported full-`vision_tower` family; omni support is a separate milestone (RUNBOOK J).
+
+## Amendment — 2026-06-17: the 8/4 mixed scheme is **Gemma-4-specific**; other arches quantize uniformly
+
+**Problem found (post-ship):** `Gemma4QuantRule`'s per-layer 8-bit override —
+`isOverrideLayer` matching `.mlp.{gate,up,down}_proj` (+ `.router.proj`) — was pinned to the
+`mlx-community/gemma-4-26b-a4b-it-4bit` reference, where it hits only the *few* dense
+`mlp` layers among mostly-MoE `experts.switch_glu.*` (which have no `.mlp.` and stay 4-bit).
+That assumption is **Gemma-4-MoE-shaped** and silently misfires on other arches, because the
+override keys on a *Gemma-4 naming convention*, not on a real shared-vs-expert distinction:
+
+- **`qwen3_5` (dense 27B):** *every* layer's `mlp.{gate,up,down}_proj` matches → the whole MLP
+  stack (≈⅔ of weights) is forced to 8-bit. A "4-bit" convert came out **22.9 GB** instead of
+  ~13.5 GB (verified: 192 = 64 layers × 3 overrides, all 8-bit).
+- **`qwen3_5_moe` (35B-A3B):** Qwen names its **routed experts** `mlp.switch_mlp.*_proj`
+  (contains `.mlp.`) → the override forces the **expert bulk** to 8-bit. The "4-bit" build came
+  out **34 GB** ≈ the 8-bit build (35 GB) ≈ **½ of the 65 GB unquant** — i.e. effectively 8-bit;
+  a true 4-bit would be ~16 GB (verified: 240 = 40 layers × {shared_expert,switch_mlp}×3, all
+  8-bit).
+
+**Decision:** the mixed 8/4 scheme **reproduces a specific published Gemma-4 quant and is not a
+general quantizer.** `athena convert` applies the per-layer 8-bit override **only when
+`model_type == "gemma4"`**; every other arch (`qwen3_5`, `qwen3_5_moe`, …) is quantized
+**uniformly at the global `--q-bits`**. The **encoder-tower full-precision skip
+(`vision_tower`/`audio_tower`) stays unconditional** for *all* arches — it is correct for any
+vision checkpoint and is what lets a converted Qwen-VL load (the M71.2 `.scales`-driven loader
+leaves the tower full-precision). Detection keys on the top-level `model_type`
+(`gemma4` / `qwen3_5` / `qwen3_5_moe`), captured in `ModelConfigInfo`.
+
+**Consequences:** Gemma-4 converts are **byte-unchanged**. Re-converting the Qwen models yields
+true 4-bit sizes (dense ~13.5 GB, MoE ~16 GB); the existing oversized exports still load/serve
+(valid mixed-precision), they just use more of the Metal budget — re-convert to reclaim it. A
+per-arch shared-vs-expert *quality* knob (8-bit shared path for Qwen-MoE, like Gemma-4 gets) is
+**deliberately deferred** — uniform 4-bit is correct and predictable; revisit only if a Qwen-MoE
+shows a measurable quality regression. Plan: `docs/convert-quant-arch-gate-plan.md`.

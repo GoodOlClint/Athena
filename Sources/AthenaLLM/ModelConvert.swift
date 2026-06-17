@@ -44,7 +44,7 @@ public enum ModelConvert {
     /// --quantize`): nil ⇒ no quantization, the model is converted into
     /// the MLX-native on-disk layout in source precision (output name
     /// `<base>-mlx`); set to N ⇒ quantize to N-bit with `groupSize`
-    /// (output name `<base>-Nbit`, as before).
+    /// (output name `<base>-mlx-Nbit`).
     public static func convert(
         id: String, revision: String? = nil,
         bits: Int? = nil, groupSize: Int = 64,
@@ -77,9 +77,15 @@ public enum ModelConvert {
         // `sanitize()` strips `vision_tower`, and the converted model would be
         // text-only. Same `hasVisionConfig` detector the serve path (M71.2)
         // uses.
-        let isVision =
-            ModelConfigInfo.read(modelDirectory: snapshot)?.hasVisionConfig
-            ?? false
+        let srcInfo = ModelConfigInfo.read(modelDirectory: snapshot)
+        let isVision = srcInfo?.hasVisionConfig ?? false
+        // ADR 012 amendment — the mixed 8/4 scheme is Gemma-4-specific; any
+        // other arch quantizes uniformly at the global bits (the encoder-tower
+        // skip still keeps vision/audio towers full-precision). Decided from
+        // the SOURCE config's model_type, then threaded to both the quantize
+        // closure and the emitted config so they stay in lock-step.
+        let mixedPrecision = Gemma4QuantRule.appliesMixedPrecision(
+            modelType: srcInfo?.modelType)
         let container = try await AthenaModelRegistration
             .$currentModelDirectory.withValue(snapshot) {
                 let loader = #huggingFaceTokenizerLoader()
@@ -92,8 +98,12 @@ public enum ModelConvert {
             }
 
         let base = id.split(separator: "/").last.map(String.init) ?? id
+        // Naming: all converts carry the `-mlx` family marker; a quantized
+        // convert appends the bit-width (`<base>-mlx-4bit`), an unquantized one
+        // is just `<base>-mlx`. (Purely a label — quant level is read from
+        // config.json, never parsed from the name.)
         let outName =
-            name ?? (bits.map { "\(base)-\($0)bit" } ?? "\(base)-mlx")
+            name ?? (bits.map { "\(base)-mlx-\($0)bit" } ?? "\(base)-mlx")
         // C6: a caller-supplied `name` like `../evil` would escape the
         // store root through the `removeItem`/`createDirectory` below.
         // Confine the output to a bare child name.
@@ -119,9 +129,12 @@ public enum ModelConvert {
             if let bits {
                 // M72 — quantize via the shared rule: encoder towers stay
                 // full-precision (nil ⇒ no `.scales`, the loader leaves them
-                // unquantized), the per-layer dense `mlp` + `router.proj` take
-                // the 8-bit override, everything else the global bits.
-                let rule = Gemma4QuantRule(groupSize: groupSize, bits: bits)
+                // unquantized). The per-layer dense `mlp` + `router.proj` take
+                // the 8-bit override ONLY for gemma4 (ADR 012 amendment); other
+                // arches quantize uniformly at the global bits.
+                let rule = Gemma4QuantRule(
+                    groupSize: groupSize, bits: bits,
+                    mixedPrecision: mixedPrecision)
                 quantize(
                     model: model,
                     filter: { path, _ in rule.quantization(forPath: path) })
@@ -159,7 +172,7 @@ public enum ModelConvert {
 
         try writeConfig(
             from: snapshot, to: dest, bits: bits, groupSize: groupSize,
-            quantizedModules: quantizedModules)
+            quantizedModules: quantizedModules, mixedPrecision: mixedPrecision)
         try copyAux(from: snapshot, to: dest)
 
         let attrs = try? FileManager.default.attributesOfItem(
@@ -184,7 +197,7 @@ public enum ModelConvert {
     /// `.scales`-driven loader leaves them unquantized.
     private static func writeConfig(
         from snapshot: URL, to dest: URL, bits: Int?, groupSize: Int,
-        quantizedModules: [String]
+        quantizedModules: [String], mixedPrecision: Bool
     ) throws {
         let src = snapshot.appendingPathComponent("config.json")
             .resolvingSymlinksInPath()
@@ -197,7 +210,9 @@ public enum ModelConvert {
                 .llm, reason: "source config.json is not an object")
         }
         if let bits {
-            let rule = Gemma4QuantRule(groupSize: groupSize, bits: bits)
+            let rule = Gemma4QuantRule(
+                groupSize: groupSize, bits: bits,
+                mixedPrecision: mixedPrecision)
             var quant: [String: Any] = [
                 "group_size": groupSize, "bits": bits, "mode": "affine",
             ]

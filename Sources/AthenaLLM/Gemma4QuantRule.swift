@@ -31,11 +31,34 @@ public struct Gemma4QuantRule: Sendable, Equatable {
     public let bits: Int
     /// Per-layer override bits for the dense `mlp` + `router.proj` (e.g. 8).
     public let overrideBits: Int
+    /// ADR 012 amendment (2026-06-17) — apply the per-layer 8-bit override
+    /// ONLY for `gemma4`. The override pattern (`.mlp.{…}_proj`) is the
+    /// Gemma-4 reference recipe, where it hits the *few* dense `mlp` layers
+    /// among MoE `experts.switch_glu.*` (no `.mlp.`, stay 4-bit). On a
+    /// fully-dense arch (`qwen3_5`) it would catch EVERY `mlp` layer; on a
+    /// different MoE naming (`qwen3_5_moe`, experts `mlp.switch_mlp.*`) it
+    /// would catch the EXPERT bulk — both inflating a "4-bit" convert toward
+    /// 8-bit. `false` ⇒ quantize uniformly at the global `bits` (the
+    /// encoder-tower skip still applies, so vision stays full-precision).
+    public let mixedPrecision: Bool
 
-    public init(groupSize: Int = 64, bits: Int, overrideBits: Int = 8) {
+    public init(
+        groupSize: Int = 64, bits: Int, overrideBits: Int = 8,
+        mixedPrecision: Bool = true
+    ) {
         self.groupSize = groupSize
         self.bits = bits
         self.overrideBits = overrideBits
+        self.mixedPrecision = mixedPrecision
+    }
+
+    /// Whether the Gemma-4 mixed 8/4 scheme applies to a checkpoint of this
+    /// `model_type`. The scheme reproduces a specific published Gemma-4 quant
+    /// and is NOT a general quantizer, so it is gated to `gemma4`; every other
+    /// arch quantizes uniformly at the global bits. Single source of the arch
+    /// key, shared by `ModelConvert` and the tests.
+    public static func appliesMixedPrecision(modelType: String?) -> Bool {
+        modelType == "gemma4"
     }
 
     /// `(groupSize, bits)` for a quantizable layer at `path`; `nil` ⇒ SKIP
@@ -44,7 +67,9 @@ public struct Gemma4QuantRule: Sendable, Equatable {
         -> (groupSize: Int, bits: Int)?
     {
         if Self.isEncoderTower(path) { return nil }
-        if Self.isOverrideLayer(path) { return (groupSize, overrideBits) }
+        if mixedPrecision, Self.isOverrideLayer(path) {
+            return (groupSize, overrideBits)
+        }
         return (groupSize, bits)
     }
 
