@@ -236,6 +236,20 @@ vision/VLM load or chat-image path** — otherwise N/A.
 > `MLXLLM.Gemma4`). Qwen3.5-MTP / structured output are unaffected. Re-wiring
 > DFlash onto the VLM's inner text backbone is a deferred follow-on.
 
+> **VALIDATED 2026-06-17 (v0.10.160)** on `mlx-community/gemma-4-e2b-it-4bit`
+> (`model_type: gemma4_audio`, full `vision_tower`, 3.58 GB): J2 returned an
+> accurate description of a red-square test image ("solid red square … the rest
+> white"); J3 remote URL → 400 `invalid_image`; J4 text on the VLM container →
+> normal completion; J5 image → a text model (Qwen) → 400 `vision_not_supported`.
+>
+> **Substrate VLM support is the gemma-4 VLM family only** (`gemma4` /
+> `gemma4_audio`, full `vision_tower`). The **omni** family
+> (`gemma4_unified_audio`, e.g. `gemma-4-12B-it`) has a *different, minimal*
+> vision arch (`vision_embedder` / `embed_vision`, no SigLIP blocks) the
+> substrate does **not** implement — it fails to load with `keyNotFound
+> vision_tower.patch_embedder.input_proj.weight`. Serving the omni family is a
+> separate, larger substrate-port milestone, not M71 wiring.
+
 ---
 
 ## Teardown

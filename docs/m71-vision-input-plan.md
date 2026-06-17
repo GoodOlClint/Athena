@@ -77,6 +77,12 @@ constrained/structured decoding over the VLM path (open question, not needed by 
   safetensors incl. the tower). Non-vision text models are byte-unchanged. Unit tests:
   `ModelConfigInfoTests` vision cases + `ChatImage` decodable-image validation. Real
   image→text validation = RUNBOOK scenario **J** (stub can't exercise the VLM path).
+  **VALIDATED 2026-06-17** on `mlx-community/gemma-4-e2b-it-4bit` (`gemma4_audio`, full
+  `vision_tower`): accurate image description + all J negatives pass. The substrate VLM
+  port serves the gemma-4 **VLM** family (`gemma4`/`gemma4_audio`); the **omni** family
+  (`gemma4_unified_audio`, e.g. `gemma-4-12B-it`) has a different minimal vision arch
+  (`vision_embedder`/`embed_vision`) the substrate does NOT implement → **omni vision is a
+  separate future substrate-port milestone**, tracked outside M71.
 - **M71.3 — capability surface + e2e.** `athena show` reports a vision capability for
   `gemma4_unified`; real-model e2e (curl an image → coherent description) in
   `deploy/integration/RUNBOOK.md` (real-model tier) + a stub-tier e2e-rbac.sh phase;
