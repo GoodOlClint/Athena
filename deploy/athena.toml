@@ -232,10 +232,24 @@ engine = "mlx"
 # extraction-shape decodes on 27B-class models routinely need 300-600 s.
 # request_timeout_secs = 600
 
+# Block-until-ready budget for a cold-load, in SECONDS (ADR 015). A request
+# for a model that isn't resident yet but IS on disk waits up to this long
+# for the local load, then serves the response — matching Ollama/LM Studio
+# instead of returning 503 immediately. Streamed requests emit `: loading`
+# SSE keep-alives during the wait; non-streaming ones block silently (set a
+# reverse proxy's read timeout ≥ this — see docs/reverse-proxy.md). On
+# timeout it falls back to 503 module_loading + Retry-After. Distinct from
+# request_timeout_secs, which bounds GENERATION (after the load). Commented
+# ⇒ a 120 s default (block-until-ready on). Set to 0 to restore the legacy
+# immediate-503 behavior (the revert switch). An in-progress operator weight
+# DOWNLOAD is never waited on — it still 503s at once.
+# cold_load_wait_secs = 120
+
 # Preload (warm) every module that has a configured default model at
 # startup, instead of lazily on the first request. With it off (default)
-# each module loads on its first inference call, so that request pays
-# the load latency AND sees a 503 module_loading retry-after dance; with
+# each module loads on its first inference call, so that request pays the
+# load latency (it now BLOCKS until ready — see cold_load_wait_secs — rather
+# than 503-ing immediately); with
 # it on, the daemon warms every module-class-with-a-default concurrently
 # right as it starts serving (the HTTP surface still comes up immediately
 # — warms run in the background). Best-effort and per-module: a failure

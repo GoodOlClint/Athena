@@ -705,4 +705,184 @@ final class MemoryGovernorTests: XCTestCase {
         let after = try await gov.beginLoadIfNeeded(.llm)
         XCTAssertEqual(after, .loading, "clearing the pull starts the load")
     }
+
+    // MARK: - ADR 015 — block-until-ready (awaitLoad) decision algebra
+
+    /// A module whose `load()` sleeps a configurable time, so a test can make
+    /// the load OUTLAST a short `awaitLoad` budget (the timeout path) or finish
+    /// WITHIN a generous one (the block-until-ready path). Counts loads so the
+    /// single-flight invariant is checkable.
+    private actor SlowLoadModule: InferenceModule {
+        nonisolated let id: ModuleID
+        private let bytes: Int
+        private let loadDelayNs: UInt64
+        private(set) var loadCount = 0
+        private var isLoaded = false
+        init(id: ModuleID, bytes: Int, loadDelayNs: UInt64) {
+            self.id = id
+            self.bytes = bytes
+            self.loadDelayNs = loadDelayNs
+        }
+        var residentBytes: Int { isLoaded ? bytes : 0 }
+        func memoryEstimate() -> Int { bytes }
+        func load(reservation: MemoryReservation) async throws {
+            loadCount += 1
+            try? await Task.sleep(nanoseconds: loadDelayNs)
+            isLoaded = true
+        }
+        func unload() async { isLoaded = false }
+        func count() -> Int { loadCount }
+    }
+
+    /// ADR 015 — a cold slot whose local load completes within the budget is
+    /// WAITED ON and served `.loaded` in a single call (the peer-runner
+    /// "block-until-ready" behavior), with exactly one underlying load.
+    func testAwaitLoadBlocksUntilLoaded() async throws {
+        let gov = MemoryGovernor(totalBudgetBytes: 1_000)
+        let m = SlowLoadModule(id: .llm, bytes: 400, loadDelayNs: 30_000_000)
+        await gov.register(m, evictable: false)
+
+        let status = try await gov.awaitLoad(.llm, within: 5.0)
+
+        XCTAssertEqual(status, .loaded, "a within-budget load is awaited")
+        let count = await m.count()
+        XCTAssertEqual(count, 1, "exactly one load ran")
+        let state = await gov.snapshot().modules.first { $0.id == .llm }?.state
+        XCTAssertEqual(state, .loaded)
+    }
+
+    /// ADR 015 — when the load OUTLASTS the budget, `awaitLoad` returns
+    /// `.loading` (caller 503s) but does NOT cancel the load: it keeps running
+    /// detached so a later call finds the slot resident — and only ONE load ran.
+    func testAwaitLoadTimesOutThenLandsLoaded() async throws {
+        let gov = MemoryGovernor(totalBudgetBytes: 1_000)
+        let m = SlowLoadModule(id: .llm, bytes: 400, loadDelayNs: 200_000_000)
+        await gov.register(m, evictable: false)
+
+        // Budget far shorter than the 200ms load ⇒ timeout ⇒ .loading.
+        let timed = try await gov.awaitLoad(.llm, within: 0.02)
+        XCTAssertEqual(timed, .loading, "budget elapsed ⇒ .loading (503)")
+
+        // The detached load was NOT cancelled; poll until it lands .loaded.
+        var landed: MemoryGovernor.LoadStatus = .loading
+        for _ in 0..<100 {
+            landed = try await gov.awaitLoad(.llm, within: 0.05)
+            if landed == .loaded { break }
+        }
+        XCTAssertEqual(landed, .loaded, "the un-cancelled load eventually lands")
+        let count = await m.count()
+        XCTAssertEqual(count, 1, "the timeout did not start a second load")
+    }
+
+    /// ADR 015 — `within: 0` is the revert switch: behave exactly like the
+    /// legacy non-blocking gate (start the load, return `.loading` at once).
+    func testAwaitLoadZeroBudgetIsImmediateLoading() async throws {
+        let gov = MemoryGovernor(totalBudgetBytes: 1_000)
+        let m = SlowLoadModule(id: .llm, bytes: 400, loadDelayNs: 30_000_000)
+        await gov.register(m, evictable: false)
+
+        let status = try await gov.awaitLoad(.llm, within: 0)
+        XCTAssertEqual(status, .loading, "zero budget ⇒ immediate .loading")
+        // It still kicked the load off (legacy beginLoadIfNeeded semantics).
+        var landed: MemoryGovernor.LoadStatus = .loading
+        for _ in 0..<100 {
+            landed = try await gov.awaitLoad(.llm, within: 0)
+            if landed == .loaded { break }
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTAssertEqual(landed, .loaded)
+        let count = await m.count()
+        XCTAssertEqual(count, 1)
+    }
+
+    /// ADR 015 — an in-flight operator pull (download) is NOT waited on:
+    /// `awaitLoad` returns `.loading` immediately and attempts no load, even
+    /// with a generous budget (blocking on a multi-GB download is exactly what
+    /// M43.2 forbids).
+    func testAwaitLoadDoesNotWaitOnPull() async throws {
+        let gov = MemoryGovernor(totalBudgetBytes: 1_000)
+        let m = SlowLoadModule(id: .llm, bytes: 400, loadDelayNs: 30_000_000)
+        await gov.register(m, evictable: false)
+
+        await gov.setPulling(.llm, true)
+        let start = Date()
+        let status = try await gov.awaitLoad(.llm, within: 10.0)
+        let elapsed = Date().timeIntervalSince(start)
+
+        XCTAssertEqual(status, .loading, "pull-in-flight ⇒ .loading")
+        XCTAssertLessThan(elapsed, 1.0, "must return at once, not wait the budget")
+        let count = await m.count()
+        XCTAssertEqual(count, 0, "no load attempted while pulling")
+    }
+
+    /// ADR 015 — a failing local load surfaces its REAL error within the same
+    /// blocking call (the poll loop observes `lastLoadError`), not a perpetual
+    /// `module_loading`.
+    func testAwaitLoadSurfacesLoadFailure() async throws {
+        let gov = MemoryGovernor(totalBudgetBytes: 1_000)
+        await gov.register(FailingModule(id: .llm), evictable: false)
+
+        do {
+            _ = try await gov.awaitLoad(.llm, within: 5.0)
+            XCTFail("expected the load failure to surface")
+        } catch let e as AthenaError {
+            guard case .moduleLoadFailed = e else {
+                return XCTFail("expected moduleLoadFailed, got \(e)")
+            }
+        }
+    }
+
+    /// ADR 015 — over-budget admission surfaces `memory_budget_exceeded` from
+    /// the blocking call too (not a wait, not a perpetual loading).
+    func testAwaitLoadSurfacesAdmissionFailure() async throws {
+        let gov = MemoryGovernor(totalBudgetBytes: 50)
+        await gov.register(StubLLMModule(reserveBytes: 100), evictable: false)
+
+        do {
+            _ = try await gov.awaitLoad(.llm, within: 5.0)
+            XCTFail("expected memoryBudgetExceeded")
+        } catch let e as AthenaError {
+            guard case .memoryBudgetExceeded = e else {
+                return XCTFail("expected memoryBudgetExceeded, got \(e)")
+            }
+        }
+    }
+
+    /// ADR 015 — `peekLoad` is a non-mutating disposition read: a cold slot is
+    /// `.needsLoad` (and stays cold — no load kicked off), a pull is `.pulling`,
+    /// a hot slot is `.loaded`.
+    func testPeekLoadDispositions() async throws {
+        let gov = MemoryGovernor(totalBudgetBytes: 1_000)
+        let m = SlowLoadModule(id: .llm, bytes: 400, loadDelayNs: 30_000_000)
+        await gov.register(m, evictable: false)
+
+        let cold = await gov.peekLoad(.llm)
+        XCTAssertEqual(cold, .needsLoad, "cold slot ⇒ needsLoad")
+        let kicked = await m.count()
+        XCTAssertEqual(kicked, 0, "peek must not start a load")
+
+        await gov.setPulling(.llm, true)
+        let pulling = await gov.peekLoad(.llm)
+        XCTAssertEqual(pulling, .pulling, "pull in flight ⇒ pulling")
+        await gov.setPulling(.llm, false)
+
+        try await gov.ensureLoaded(.llm)
+        let hot = await gov.peekLoad(.llm)
+        XCTAssertEqual(hot, .loaded, "resident slot ⇒ loaded")
+    }
+
+    /// ADR 015 — an already-resident slot returns `.loaded` immediately with no
+    /// new load (the hot fast-path is unchanged).
+    func testAwaitLoadHotSlotReturnsImmediately() async throws {
+        let gov = MemoryGovernor(totalBudgetBytes: 1_000)
+        let m = SlowLoadModule(id: .llm, bytes: 400, loadDelayNs: 10_000_000)
+        await gov.register(m, evictable: false)
+
+        try await gov.ensureLoaded(.llm)  // make it hot
+        let status = try await gov.awaitLoad(.llm, within: 5.0)
+
+        XCTAssertEqual(status, .loaded)
+        let count = await m.count()
+        XCTAssertEqual(count, 1, "hot slot triggers no second load")
+    }
 }

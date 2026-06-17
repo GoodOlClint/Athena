@@ -887,7 +887,7 @@ enum OpenAPISpec {
               "Unauthorized": { "description": "Missing or invalid bearer token.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
               "Forbidden": { "description": "Insufficient permissions.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
               "NotFound": { "description": "Not found.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
-              "Overloaded": { "description": "Backpressure — the memory governor or a rate/concurrency cap declined the request. Retry after the indicated delay.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+              "Overloaded": { "description": "Backpressure — the memory governor or a rate/concurrency cap declined the request, or (code `module_loading`) a model is still being made resident. A request for an on-disk model now BLOCKS until ready (up to `cold_load_wait_secs`) and serves 200; a `module_loading` 503 here means the load exceeded that budget or an operator weight download is in progress. Retry after the indicated delay.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
             },
             "schemas": {
               "Error": {

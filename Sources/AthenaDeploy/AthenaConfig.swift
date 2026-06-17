@@ -94,6 +94,14 @@ public struct AthenaConfig: Sendable, Equatable {
     /// Optional — absent / non-positive ⇒ no deadline (opt-in, off by
     /// default).
     public var requestTimeoutSecs: Int?
+    /// Block-until-ready budget for a request-path cold-load, in seconds
+    /// (ADR 015). A request for a non-resident-but-on-disk model waits up to
+    /// this long for the local load, then serves; on timeout it falls back to
+    /// `503 module_loading` + `Retry-After`. Distinct from
+    /// `requestTimeoutSecs` (which bounds generation, after the load). Optional
+    /// — absent ⇒ a 120s default; `0` ⇒ legacy immediate-503 (the revert
+    /// switch). Downloads (operator pull) are never waited on.
+    public var coldLoadWaitSecs: Int?
     /// Preload (warm) the LLM at startup instead of lazily on first
     /// request (M33.3). Optional — absent / false ⇒ lazy load (default).
     /// Opt-in: the operator trades a slower start for a warm first
@@ -153,6 +161,7 @@ public struct AthenaConfig: Sendable, Equatable {
         auditRetentionDays: Int? = nil,
         tokenMaxAgeDays: Int? = nil,
         requestTimeoutSecs: Int? = nil,
+        coldLoadWaitSecs: Int? = nil,
         preload: Bool? = nil,
         queueResultTtlSecs: Int? = nil,
         queueMaxRows: Int? = nil,
@@ -192,6 +201,7 @@ public struct AthenaConfig: Sendable, Equatable {
         self.auditRetentionDays = auditRetentionDays
         self.tokenMaxAgeDays = tokenMaxAgeDays
         self.requestTimeoutSecs = requestTimeoutSecs
+        self.coldLoadWaitSecs = coldLoadWaitSecs
         self.preload = preload
         self.queueResultTtlSecs = queueResultTtlSecs
         self.queueMaxRows = queueMaxRows
@@ -323,6 +333,10 @@ public struct AthenaConfig: Sendable, Equatable {
         if let rt = scalar("request_timeout_secs", in: toml) {
             reqTimeout = try int("request_timeout_secs", rt)
         }
+        var coldLoadWait: Int?
+        if let cw = scalar("cold_load_wait_secs", in: toml) {
+            coldLoadWait = try int("cold_load_wait_secs", cw)
+        }
         var queueTtl: Int?
         if let qt = scalar("queue_result_ttl_secs", in: toml) {
             queueTtl = try int("queue_result_ttl_secs", qt)
@@ -390,6 +404,7 @@ public struct AthenaConfig: Sendable, Equatable {
             auditRetentionDays: auditDays,
             tokenMaxAgeDays: tokenMaxAge,
             requestTimeoutSecs: reqTimeout,
+            coldLoadWaitSecs: coldLoadWait,
             preload: preload,
             queueResultTtlSecs: queueTtl,
             queueMaxRows: queueMax,

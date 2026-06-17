@@ -69,6 +69,16 @@ These come from the daemon's own limits — keep the proxy in sync:
   queue long-poll, and `/v1/queue` SSE hold the connection open. Disable
   response buffering and use generous read timeouts, or clients see
   truncated/stalled streams.
+- **Cold-load waits (ADR 015):** a request for a not-yet-resident model
+  now BLOCKS until the model loads (up to `cold_load_wait_secs`, default
+  120 s) instead of returning 503 immediately. Streamed requests emit
+  `: loading` SSE keep-alive comments during the wait, so the buffering-off
+  + generous-read-timeout settings above already cover them. **Non-streaming**
+  cold-loads send no bytes until the load finishes, so set
+  `proxy_read_timeout` (and the equivalent on other proxies) **≥
+  `cold_load_wait_secs`** or a slow first load trips a proxy idle-timeout
+  before the daemon's own fallback. The `1h` below is comfortably above the
+  default budget.
 - **Authorization header:** bearer auth and the WebUI session cookie ride
   on the request — pass `Authorization` and `Cookie` through untouched.
 - **Rate / concurrency limits:** the daemon does its own per-principal

@@ -81,6 +81,15 @@ struct AthenaServer {
     /// (`inference_timeout`), a streamed one is truncated at the wire.
     /// `var = 0` so it's a memberwise-init param.
     var requestTimeoutSecs: Int = 0
+    /// ADR 015 — block-until-ready budget for a request-path cold-load, in
+    /// seconds. A request for a non-resident-but-on-disk model waits up to this
+    /// long for the local load, then serves; on timeout it falls back to
+    /// `503 module_loading` + `Retry-After`. Distinct from `requestTimeoutSecs`
+    /// (which bounds generation, after the load). `0` ⇒ legacy immediate-503
+    /// (revert switch). Downloads (operator pull) are never waited on.
+    /// `var = 120` so it's a memberwise-init param (the block-until-ready
+    /// default; peer-runner behavior out of the box).
+    var coldLoadWaitSecs: Double = 120
     /// Warm the LLM at startup instead of lazily on first request
     /// (M33.3). `var = false` so it's a memberwise-init param. Best-
     /// effort: the warm runs concurrently with serving (the HTTP surface
@@ -871,12 +880,44 @@ struct AthenaServer {
         // 503 here; an unknown id becomes a 400 `model_not_available`
         // (never a silent fallback or on-request download). M41.4: an
         // actual rebind emits a `model.rebind` audit record.
-        if let err = await governedLLM(
-            request: request, requestedModel: body.model)
-        {
-            return err
+        //
+        // ADR 015 — block-until-ready. For a STREAMING request whose model
+        // isn't resident, defer the load into the SSE producer so it can emit
+        // `: loading` keep-alives; that commits the response to 200, so the
+        // model-DEPENDENT checks (vision / prompt-cap / rebind) also move into
+        // the producer as in-stream errors. Everything else (non-stream, warm
+        // stream, download-in-progress) resolves the load here as a clean HTTP
+        // status, exactly as before.
+        let wantStream = (body.stream == true)
+        var deferLoadIntoStream = false
+        if wantStream {
+            // Validate the requested id up front — a clean 400 before any SSE
+            // commitment — then decide: wait inline (warm) vs stream the wait.
+            do {
+                try await llm.selectColdLoadModel(body.model)
+            } catch let e as AthenaError {
+                return Self.error(
+                    status: HTTPResponse.Status(code: e.httpStatus),
+                    message: e.message, type: "server_error", code: e.code)
+            } catch {
+                return Self.classified(error, module: .llm)
+            }
+            switch await governor.peekLoad(.llm) {
+            case .loaded: break  // warm: checks stay clean & pre-stream
+            case .pulling: return Self.coldLoadResponse(.llm)  // download ⇒ 503
+            case .needsLoad: deferLoadIntoStream = true
+            }
         }
-        let model = await servedLLMModel()
+        if !deferLoadIntoStream {
+            if let err = await governedLLM(
+                request: request, requestedModel: body.model)
+            {
+                return err
+            }
+        }
+        // Resolved once the slot is hot; the deferred path resolves it post-load
+        // inside the producer instead (`modelName` closure).
+        let model = deferLoadIntoStream ? "" : await servedLLMModel()
         // M24.1: carry the FULL conversation (system/user/assistant/tool)
         // into the model, not a user-only join — system instructions and
         // prior turns must reach the chat template. A message with no text
@@ -891,33 +932,37 @@ struct AthenaServer {
             return Self.imageContentError(error)
         }
         // M71.2: image content-parts are served only by a vision-capable
-        // resident model (loaded via the substrate VLM path). The model is
-        // resolved by `governedLLM` above, so `servesVision` is accurate here;
-        // an image to a text-only model is a clean 400.
-        if turns.contains(where: { !$0.images.isEmpty }),
-            await llm.servesVision == false
-        {
-            return Self.error(
-                status: .badRequest,
-                message:
-                    "image input is not supported by the requested model",
-                type: "invalid_request_error", code: "vision_not_supported")
-        }
-        // Brief 4b: refuse an over-cap prompt up front as a governed
-        // 503, before any KV cache is allocated.
-        do {
-            // NC3: preflight the prompt generation will actually render
-            // (tools + chat-template kwargs included), so the cap check
-            // matches the real prefill size.
-            try await llm.preflightPromptCache(
-                messages: turns, tools: body.toolSpecs(),
-                chatTemplateKwargs: body.chatTemplateKwargsContext())
-        } catch let e as AthenaError {
-            return Self.error(
-                status: HTTPResponse.Status(code: e.httpStatus),
-                message: e.message, type: "server_error", code: e.code)
-        } catch {
-            return Self.classified(error, module: .llm)
+        // resident model (loaded via the substrate VLM path). These two checks
+        // need a RESIDENT model, so on the deferred streaming path they move
+        // into the SSE producer (`prepareAfterLoad`) and surface as in-stream
+        // errors (ADR 015); on every other path they stay clean pre-response
+        // HTTP statuses exactly as before. The `hasImages` flag itself is
+        // model-independent (pure request parse) and is computed regardless.
+        let hasImages = turns.contains { !$0.images.isEmpty }
+        if !deferLoadIntoStream {
+            if hasImages, await llm.servesVision == false {
+                return Self.error(
+                    status: .badRequest,
+                    message:
+                        "image input is not supported by the requested model",
+                    type: "invalid_request_error", code: "vision_not_supported")
+            }
+            // Brief 4b: refuse an over-cap prompt up front as a governed
+            // 503, before any KV cache is allocated.
+            do {
+                // NC3: preflight the prompt generation will actually render
+                // (tools + chat-template kwargs included), so the cap check
+                // matches the real prefill size.
+                try await llm.preflightPromptCache(
+                    messages: turns, tools: body.toolSpecs(),
+                    chatTemplateKwargs: body.chatTemplateKwargsContext())
+            } catch let e as AthenaError {
+                return Self.error(
+                    status: HTTPResponse.Status(code: e.httpStatus),
+                    message: e.message, type: "server_error", code: e.code)
+            } catch {
+                return Self.classified(error, module: .llm)
+            }
         }
 
         // G4 fail-closed: a `response_format: json_schema` with a
@@ -963,6 +1008,91 @@ struct AthenaServer {
             // it (E13) — and flip it on BOTH a downstream disconnect (A8) and a
             // deadline truncation (E3).
             let cancelCounter = HeartbeatCounter()
+            if deferLoadIntoStream {
+                // ADR 015 — cold-load streaming: open the SSE 200, emit
+                // `: loading` keep-alives while the model loads, run the
+                // model-dependent checks in-band, then decode. A load timeout
+                // or failure becomes an in-stream error, not a dropped wire.
+                return DecodeProgress.$counter.withValue(cancelCounter) {
+                    Self.streamSSEAwaitingLoad(
+                        id: id, created: created,
+                        modelName: { await servedLLMModel() },
+                        load: {
+                            do {
+                                switch try await governor.awaitLoad(
+                                    .llm, within: coldLoadWaitSecs)
+                                {
+                                case .loaded: return .ready
+                                case .loading: return .timedOut
+                                }
+                            } catch let e as AthenaError {
+                                return .failed(
+                                    message: e.message, type: "server_error",
+                                    code: e.code)
+                            } catch {
+                                let c = AthenaError.classify(
+                                    error, module: .llm)
+                                return .failed(
+                                    message: c.message, type: "server_error",
+                                    code: c.code)
+                            }
+                        },
+                        prepareAfterLoad: {
+                            // The cold-load already bound the requested id
+                            // (selectColdLoadModel), so no rebind is needed; run
+                            // only the resident-model checks the warm path runs
+                            // pre-stream.
+                            if hasImages, await llm.servesVision == false {
+                                return (
+                                    "image input is not supported by the "
+                                        + "requested model",
+                                    "invalid_request_error",
+                                    "vision_not_supported")
+                            }
+                            do {
+                                try await llm.preflightPromptCache(
+                                    messages: turns, tools: toolSpecs,
+                                    chatTemplateKwargs:
+                                        body.chatTemplateKwargsContext())
+                                return nil
+                            } catch let e as AthenaError {
+                                return (e.message, "server_error", e.code)
+                            } catch {
+                                let c = AthenaError.classify(
+                                    error, module: .llm)
+                                return (c.message, "server_error", c.code)
+                            }
+                        },
+                        eventsBuilder: {
+                            deadlineBounded(
+                                seconds: deadlineSecs,
+                                llm.generateMetered(
+                                    messages: turns, schemaJSON: schemaJSON,
+                                    tools: toolSpecs, maxTokens: body.tokenCap,
+                                    temperature: body.temperature,
+                                    topP: body.top_p, seed: body.seed,
+                                    speculative: body.speculative,
+                                    chatTemplateKwargs:
+                                        body.chatTemplateKwargsContext(),
+                                    promptCacheKey: body.prompt_cache_key,
+                                    principal: principal),
+                                onTimerFired: {
+                                    cancelCounter.cancelGeneration()
+                                    Self.log.warning(
+                                        """
+                                        streamed request truncated by deadline \
+                                        path=/v1/chat/completions seconds=\
+                                        \(deadlineSecs)
+                                        """)
+                                })
+                        },
+                        includeUsage: includeUsage, stops: stops,
+                        onConsumerCancel: { cancelCounter.cancelGeneration() },
+                        record: { usage in
+                            await meter(principal: principal, usage: usage)
+                        })
+                }
+            }
             return DecodeProgress.$counter.withValue(cancelCounter) {
                 Self.streamSSE(
                     id: id, model: model, created: created,
@@ -1496,7 +1626,7 @@ struct AthenaServer {
             // M43.2: never block the request thread on a multi-GB
             // cold-load. `.loading` ⇒ 503+Retry-After so the client
             // paces its retries instead of hitting its own timeout.
-            switch try await governor.beginLoadIfNeeded(.textEmbedding) {
+            switch try await governor.awaitLoad(.textEmbedding, within: coldLoadWaitSecs) {
             case .loaded: break
             case .loading: return Self.coldLoadResponse(.textEmbedding)
             }
@@ -1591,7 +1721,7 @@ struct AthenaServer {
 
         do {
             // M43.2: non-blocking cold-load (see /v1/embeddings).
-            switch try await governor.beginLoadIfNeeded(.transcription) {
+            switch try await governor.awaitLoad(.transcription, within: coldLoadWaitSecs) {
             case .loaded: break
             case .loading: return Self.coldLoadResponse(.transcription)
             }
@@ -1662,7 +1792,7 @@ struct AthenaServer {
             if form.text("diarize") == "true" {
                 do {
                     // M43.2: non-blocking cold-load.
-                    switch try await governor.beginLoadIfNeeded(.diarization) {
+                    switch try await governor.awaitLoad(.diarization, within: coldLoadWaitSecs) {
                     case .loaded: break
                     case .loading: return Self.coldLoadResponse(.diarization)
                     }
@@ -1762,7 +1892,7 @@ struct AthenaServer {
 
         do {
             // M43.2: non-blocking cold-load.
-            switch try await governor.beginLoadIfNeeded(.diarization) {
+            switch try await governor.awaitLoad(.diarization, within: coldLoadWaitSecs) {
             case .loaded: break
             case .loading: return Self.coldLoadResponse(.diarization)
             }
@@ -1814,7 +1944,7 @@ struct AthenaServer {
 
         do {
             // M43.2: non-blocking cold-load.
-            switch try await governor.beginLoadIfNeeded(.speakerEmbedding) {
+            switch try await governor.awaitLoad(.speakerEmbedding, within: coldLoadWaitSecs) {
             case .loaded: break
             case .loading: return Self.coldLoadResponse(.speakerEmbedding)
             }
@@ -1941,7 +2071,7 @@ struct AthenaServer {
 
         do {
             // M43.2: non-blocking cold-load.
-            switch try await governor.beginLoadIfNeeded(.speakerEmbedding) {
+            switch try await governor.awaitLoad(.speakerEmbedding, within: coldLoadWaitSecs) {
             case .loaded: break
             case .loading: return Self.coldLoadResponse(.speakerEmbedding)
             }
@@ -3278,7 +3408,7 @@ struct AthenaServer {
         do {
             // M43.2: non-blocking cold-load — surfaces as
             // `503 module_loading` to the native /api/embed caller too.
-            switch try await governor.beginLoadIfNeeded(.textEmbedding) {
+            switch try await governor.awaitLoad(.textEmbedding, within: coldLoadWaitSecs) {
             case .loaded: break
             case .loading:
                 return .fail(Self.coldLoadResponse(.textEmbedding))
@@ -3547,16 +3677,19 @@ struct AthenaServer {
         do {
             // M62 — bind the requested model on the (possibly cold) load,
             // not the default. Setting the cold-load target BEFORE
-            // beginLoadIfNeeded means the background load binds the requested
+            // awaitLoad means the background load binds the requested
             // model directly; without this a cold/just-restarted slot loaded
             // the DEFAULT and 503'd before the rebind ran, so a request for a
             // non-default model silently got the default (the consuming application's
             // 4bit→8bit). Validated here so an unknown id is a 400 before a
             // doomed multi-GB load starts; nil/empty ⇒ the default.
             try await llm.selectColdLoadModel(requestedModel)
-            // M43.2: non-blocking cold-load — covers /v1/chat/completions
-            // AND /api/chat (the brief's biggest hang vector).
-            switch try await governor.beginLoadIfNeeded(.llm) {
+            // ADR 015: block-until-ready — wait up to `coldLoadWaitSecs` for an
+            // on-disk cold-load, then serve (peer-runner behavior); only a
+            // timeout or an in-flight download (pull) still 503s. Covers
+            // /v1/chat/completions AND /api/chat. (The streaming path layers
+            // SSE keep-alives over this wait — see handleChatCompletions.)
+            switch try await governor.awaitLoad(.llm, within: coldLoadWaitSecs) {
             case .loaded: break
             case .loading: return Self.coldLoadResponse(.llm)
             }
@@ -5034,7 +5167,151 @@ struct AthenaServer {
     ) -> Response {
         let stream = AsyncStream<ByteBuffer> { continuation in
             let task = Task {
-                func emit(_ chunk: ChatCompletionChunk) {
+                await pumpTokens(
+                    into: continuation, id: id, model: model,
+                    created: created, events: events,
+                    includeUsage: includeUsage, stops: stops, record: record)
+            }
+            // A8 (M68.4) — a client disconnect terminates THIS byte stream;
+            // bridge it to the generation's cancel flag so the synchronous
+            // decode loops (which poll `DecodeProgress.counter?.isCancelled`,
+            // not `Task.isCancelled`) stop instead of decoding to maxTokens
+            // for a request no one is reading.
+            continuation.onTermination = { _ in
+                task.cancel()
+                onConsumerCancel?()
+            }
+        }
+        var headers = HTTPFields()
+        headers[.contentType] = "text/event-stream"
+        headers[.cacheControl] = "no-cache"
+        return Response(
+            status: .ok, headers: headers,
+            body: ResponseBody(asyncSequence: stream))
+    }
+
+    /// ADR 015 — outcome of the in-SSE cold-load wait. `ready` ⇒ proceed to
+    /// post-load validation + token streaming; `timedOut`/`failed` ⇒ emit an
+    /// in-stream OpenAI-style error event then `[DONE]`.
+    private enum ColdStreamLoad: Sendable {
+        case ready
+        case timedOut
+        case failed(message: String, type: String, code: String)
+    }
+
+    /// ADR 015 — the streaming counterpart of the block-until-ready gate: open
+    /// the SSE `200` immediately, emit `: loading` keep-alive comments while the
+    /// model loads (so a reverse proxy doesn't idle-time-out and the client sees
+    /// liveness), then run the MODEL-DEPENDENT validations (`prepareAfterLoad`:
+    /// rebind / vision / prompt-cap) — surfacing any failure as an in-stream
+    /// error event, OpenAI-consistent — and finally stream tokens. A load
+    /// timeout or failure becomes an in-stream error, not a dropped connection.
+    /// Used only when `peekLoad` said `.needsLoad`; the warm path uses
+    /// `streamSSE` and never emits keep-alives.
+    private static func streamSSEAwaitingLoad(
+        id: String, created: Int,
+        modelName: @escaping @Sendable () async -> String,
+        load: @escaping @Sendable () async -> ColdStreamLoad,
+        prepareAfterLoad:
+            @escaping @Sendable () async -> (
+                message: String, type: String, code: String
+            )?,
+        eventsBuilder: @escaping @Sendable () -> AsyncStream<GenChunk>,
+        includeUsage: Bool, stops: [String] = [],
+        onConsumerCancel: (@Sendable () -> Void)? = nil,
+        record: @escaping @Sendable (TokenUsage) async -> Void
+    ) -> Response {
+        let stream = AsyncStream<ByteBuffer> { continuation in
+            let task = Task {
+                func emitError(
+                    _ message: String, _ type: String, _ code: String
+                ) {
+                    let body = APIErrorBody(
+                        error: .init(
+                            message: message, type: type, code: code))
+                    if let data = try? JSONEncoder().encode(body) {
+                        var buf = ByteBuffer()
+                        buf.writeString("data: ")
+                        buf.writeBytes(data)
+                        buf.writeString("\n\n")
+                        continuation.yield(buf)
+                    }
+                    var done = ByteBuffer()
+                    done.writeString("data: [DONE]\n\n")
+                    continuation.yield(done)
+                }
+                // Emit `: loading` SSE comments on a timer (a child of the group
+                // so a consumer disconnect — which cancels `task` — stops it),
+                // while the bounded load runs. Comment lines keep the byte
+                // stream alive without being surfaced to the client as content.
+                let outcome: ColdStreamLoad = await withTaskGroup(
+                    of: Void.self
+                ) { group in
+                    group.addTask {
+                        while !Task.isCancelled {
+                            do {
+                                try await Task.sleep(
+                                    nanoseconds: 10_000_000_000)
+                            } catch { break }
+                            var b = ByteBuffer()
+                            b.writeString(": loading\n\n")
+                            continuation.yield(b)
+                        }
+                    }
+                    let o = await load()
+                    group.cancelAll()  // stop the keep-alive ticker
+                    return o
+                }
+                switch outcome {
+                case .timedOut:
+                    emitError(
+                        "model is loading; retry shortly", "server_error",
+                        "module_loading")
+                    continuation.finish()
+                    return
+                case .failed(let m, let t, let c):
+                    emitError(m, t, c)
+                    continuation.finish()
+                    return
+                case .ready:
+                    if let err = await prepareAfterLoad() {
+                        emitError(err.message, err.type, err.code)
+                        continuation.finish()
+                        return
+                    }
+                    let model = await modelName()
+                    await pumpTokens(
+                        into: continuation, id: id, model: model,
+                        created: created, events: eventsBuilder(),
+                        includeUsage: includeUsage, stops: stops,
+                        record: record)
+                }
+            }
+            continuation.onTermination = { _ in
+                task.cancel()
+                onConsumerCancel?()
+            }
+        }
+        var headers = HTTPFields()
+        headers[.contentType] = "text/event-stream"
+        headers[.cacheControl] = "no-cache"
+        return Response(
+            status: .ok, headers: headers,
+            body: ResponseBody(asyncSequence: stream))
+    }
+
+    /// Shared GenChunk→SSE pump: emit the assistant role chunk, stream content
+    /// deltas (stop-sequence filtered), then the terminal finish/usage chunks
+    /// and `[DONE]`, recording usage. Factored out of `streamSSE` so the
+    /// load-awaiting variant reuses the exact wire shape (ADR 015).
+    private static func pumpTokens(
+        into continuation: AsyncStream<ByteBuffer>.Continuation,
+        id: String, model: String, created: Int,
+        events: AsyncStream<GenChunk>, includeUsage: Bool,
+        stops: [String],
+        record: @escaping @Sendable (TokenUsage) async -> Void
+    ) async {
+        func emit(_ chunk: ChatCompletionChunk) {
                     if let data = try? JSONEncoder().encode(chunk) {
                         var buf = ByteBuffer()
                         buf.writeString("data: ")
@@ -5150,24 +5427,6 @@ struct AthenaServer {
                 continuation.yield(done)
                 await record(usage)
                 continuation.finish()
-            }
-            // A8 (M68.4) — a client disconnect terminates THIS byte stream;
-            // bridge it to the generation's cancel flag so the synchronous
-            // decode loops (which poll `DecodeProgress.counter?.isCancelled`,
-            // not `Task.isCancelled`) stop instead of decoding to maxTokens
-            // for a request no one is reading. `task.cancel()` alone only ends
-            // the SSE consume task, not the decode loop.
-            continuation.onTermination = { _ in
-                task.cancel()
-                onConsumerCancel?()
-            }
-        }
-        var headers = HTTPFields()
-        headers[.contentType] = "text/event-stream"
-        headers[.cacheControl] = "no-cache"
-        return Response(
-            status: .ok, headers: headers,
-            body: ResponseBody(asyncSequence: stream))
     }
 
     static func json<T: Encodable>(

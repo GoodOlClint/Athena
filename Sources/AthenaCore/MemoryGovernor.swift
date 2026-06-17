@@ -348,6 +348,106 @@ public actor MemoryGovernor {
         try await task.value
     }
 
+    /// ADR 015 — blocking-with-budget variant of `beginLoadIfNeeded` for the
+    /// request path: wait up to `seconds` for an in-progress LOCAL load, then
+    /// serve. Returns:
+    ///   - `.loaded`  ⇒ slot went hot within the budget; proceed to inference.
+    ///   - `.loading` ⇒ the budget elapsed OR an operator pull (download) is in
+    ///     flight; caller responds `503` + `Retry-After` exactly as today.
+    /// A failed / over-budget load throws its real error IMMEDIATELY (never
+    /// waited on), identical to `beginLoadIfNeeded`. `seconds <= 0` ⇒ no wait
+    /// (legacy immediate-503 behavior; the revert switch).
+    ///
+    /// Unlike `ensureLoaded`, a timeout does NOT cancel the shared load — it
+    /// keeps running detached so the next request finds the slot resident. A
+    /// request-side cancellation (client disconnect) ends the wait gracefully
+    /// (returns `.loading`) and likewise leaves the load running. Downloads are
+    /// minutes/GB and operator-initiated, so they are never waited on (the same
+    /// boundary M43.2 drew — see ADR 015).
+    public func awaitLoad(_ id: ModuleID, within seconds: Double) async throws
+        -> LoadStatus
+    {
+        guard entries[id] != nil else {
+            throw AthenaError.moduleNotRegistered(id)
+        }
+        relievePressure(except: id)
+        // E1 — read CURRENT state after the (state-mutating) relief above.
+        if entries[id]?.state == .loaded {
+            entries[id]?.lastUsed = Date()
+            return .loaded
+        }
+        // A download is materializing the weights: 503 now, do not wait.
+        if pulling.contains(id) { return .loading }
+        // Surface a real prior failure at once (same as `beginLoadIfNeeded`).
+        if let err = lastLoadError[id] {
+            lastLoadError[id] = nil
+            throw err
+        }
+        // Ensure exactly one load is in flight: join an existing one or start it.
+        if inFlight[id] == nil {
+            loadSeq &+= 1
+            let token = loadSeq
+            let started = Task<Void, Error> { try await self.performLoad(id) }
+            inFlight[id] = started
+            inFlightToken[id] = token
+            Task { [weak self] in
+                _ = try? await started.value
+                await self?.clearInFlight(id, token: token)
+            }
+        }
+        // `seconds <= 0` ⇒ don't wait; behave like the legacy non-blocking gate.
+        guard seconds > 0 else { return .loading }
+        // Poll the slot until it goes hot, fails, or the budget elapses. Each
+        // `Task.sleep` suspends THIS actor method so `performLoad` (also an
+        // actor method) can make progress; on resume we re-read live state.
+        let deadline = Date().addingTimeInterval(seconds)
+        let pollNanos = UInt64(loadPollIntervalMillis) * 1_000_000
+        while Date() < deadline {
+            do {
+                try await Task.sleep(nanoseconds: pollNanos)
+            } catch {
+                // Request cancelled (client disconnect): stop waiting; leave the
+                // detached load running for the next caller.
+                return .loading
+            }
+            if entries[id]?.state == .loaded {
+                entries[id]?.lastUsed = Date()
+                return .loaded
+            }
+            if let err = lastLoadError[id] {
+                lastLoadError[id] = nil
+                throw err
+            }
+        }
+        // Budget elapsed with the load still running — 503 + Retry-After.
+        return .loading
+    }
+
+    /// ADR 015 — a streaming caller's pre-flight read: decide, WITHOUT
+    /// mutating state or starting a load, whether to serve immediately, return
+    /// a clean `503` (a download is materializing the weights), or start an
+    /// SSE response that emits `: loading` keep-alives while `awaitLoad` runs.
+    ///   - `.loaded`    ⇒ slot is hot; stream normally (no keep-alives).
+    ///   - `.pulling`   ⇒ operator pull in flight; caller 503s cleanly (no SSE).
+    ///   - `.needsLoad` ⇒ a local load is needed; caller opens the SSE stream
+    ///     and drives the wait inside it (a prior load failure also lands here
+    ///     and surfaces as an in-stream error when the caller then `awaitLoad`s).
+    public enum LoadPeek: Sendable {
+        case loaded
+        case pulling
+        case needsLoad
+    }
+    public func peekLoad(_ id: ModuleID) -> LoadPeek {
+        if entries[id]?.state == .loaded { return .loaded }
+        if pulling.contains(id) { return .pulling }
+        return .needsLoad
+    }
+
+    /// ADR 015 — poll cadence for `awaitLoad`. Coarse enough to avoid needless
+    /// wakeups during a multi-second load, fine enough that "ready" latency is
+    /// imperceptible. Not configurable (an implementation detail, not a knob).
+    private let loadPollIntervalMillis = 100
+
     /// M5.3 OOM guard: relief based on the LIVE substrate footprint,
     /// not the bookkeeping (which the static estimates can under-count
     /// even when reconciled). If actual MLX memory is above the

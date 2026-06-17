@@ -220,6 +220,12 @@ struct Load: AsyncParsableCommand {
     )
     var requestTimeoutSecs: Int?
 
+    @Option(
+        help:
+            "Block-until-ready budget for a cold-load, in seconds (ADR 015). A request for a non-resident-but-on-disk model waits up to this long for the local load, then serves — matching peer runners. On timeout it falls back to 503 module_loading + Retry-After. Distinct from --request-timeout-secs (which bounds generation, after the load). Absent ⇒ 120s; 0 ⇒ legacy immediate-503 (revert switch). Downloads (operator pull) are never waited on."
+    )
+    var coldLoadWaitSecs: Int?
+
     @Flag(
         help:
             "Warm every module that has a configured default model (one per LLM/embedding/transcription/diarization/speaker-embedding class with an `is_default=1` allowlist row) at startup, instead of lazily on first request. The HTTP surface still comes up immediately; warms run concurrently in the background (best-effort — a per-module failure falls back to lazy load for that module). Modules without a configured default stay lazy."
@@ -679,6 +685,7 @@ struct Load: AsyncParsableCommand {
             maxConcurrencyPerPrincipal: maxConcurrencyPerPrincipal ?? 0,
             auditRetentionDays: auditRetentionDays ?? 0,
             requestTimeoutSecs: requestTimeoutSecs ?? 0,
+            coldLoadWaitSecs: Double(coldLoadWaitSecs ?? 120),
             preload: preload,
             prefixCache: prefixCache,
             queueResultTtlSecs: queueResultTtlSecs ?? 0,

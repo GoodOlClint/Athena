@@ -202,6 +202,28 @@ final class AthenaConfigTests: XCTestCase {
         XCTAssertNil(c.requestTimeoutSecs)
     }
 
+    // ADR 015 — cold_load_wait_secs parse + plist forwarding.
+    func testColdLoadWaitKeyParse() throws {
+        let toml = """
+            listen_host = "127.0.0.1"
+            listen_port = 7447
+            log_dir = "/l"
+            cold_load_wait_secs = 90
+            """
+        let c = try AthenaConfig.parse(toml: toml)
+        XCTAssertEqual(c.coldLoadWaitSecs, 90)
+    }
+
+    func testColdLoadWaitKeyAbsentIsNil() throws {
+        let toml = """
+            listen_host = "127.0.0.1"
+            listen_port = 7447
+            log_dir = "/l"
+            """
+        let c = try AthenaConfig.parse(toml: toml)
+        XCTAssertNil(c.coldLoadWaitSecs)
+    }
+
     func testPreloadKeyParse() throws {
         let toml = """
             listen_host = "127.0.0.1"
@@ -488,6 +510,7 @@ final class LaunchdPlistTests: XCTestCase {
         auditRetentionDays: Int? = nil,
         tokenMaxAgeDays: Int? = nil,
         requestTimeoutSecs: Int? = nil,
+        coldLoadWaitSecs: Int? = nil,
         preload: Bool? = nil,
         queueResultTtlSecs: Int? = nil,
         queueMaxRows: Int? = nil,
@@ -510,6 +533,7 @@ final class LaunchdPlistTests: XCTestCase {
             auditRetentionDays: auditRetentionDays,
             tokenMaxAgeDays: tokenMaxAgeDays,
             requestTimeoutSecs: requestTimeoutSecs,
+            coldLoadWaitSecs: coldLoadWaitSecs,
             preload: preload,
             queueResultTtlSecs: queueResultTtlSecs,
             queueMaxRows: queueMaxRows,
@@ -604,6 +628,29 @@ final class LaunchdPlistTests: XCTestCase {
                 "--drop-request-content",
                 "--encrypt-store",
             ])
+    }
+
+    // ADR 015 — a set cold-load wait is forwarded as a plist arg pair; unset
+    // omits it (so the CLI default applies).
+    func testColdLoadWaitForwardedToPlistArgs() {
+        let d = LaunchdPlist.dictionary(
+            label: "l", executablePath: "/bin/athena", user: "svc",
+            workingDirectory: "/w", config: cfg(coldLoadWaitSecs: 90))
+        let args = d["ProgramArguments"] as? [String] ?? []
+        guard let i = args.firstIndex(of: "--cold-load-wait-secs") else {
+            return XCTFail("expected --cold-load-wait-secs in \(args)")
+        }
+        XCTAssertEqual(args[i + 1], "90")
+    }
+
+    func testColdLoadWaitAbsentOmitsPlistArg() {
+        let d = LaunchdPlist.dictionary(
+            label: "l", executablePath: "/bin/athena", user: "svc",
+            workingDirectory: "/w", config: cfg())
+        let args = d["ProgramArguments"] as? [String] ?? []
+        XCTAssertFalse(
+            args.contains("--cold-load-wait-secs"),
+            "an unset cold-load wait must not emit a plist arg")
     }
 
     func testXmlDataRoundTripsAsValidPlist() throws {

@@ -104,6 +104,9 @@ public enum LaunchdPlist {
         if let reqTimeout = config.requestTimeoutSecs {
             args += ["--request-timeout-secs", String(reqTimeout)]
         }
+        if let coldWait = config.coldLoadWaitSecs {
+            args += ["--cold-load-wait-secs", String(coldWait)]
+        }
         if config.preload == true {
             args += ["--preload"]  // a Flag, not an Option
         }

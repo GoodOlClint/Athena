@@ -51,6 +51,8 @@ extension ConfigEditor {
             return cfg.tokenMaxAgeDays.map(String.init)
         case "request_timeout_secs":
             return cfg.requestTimeoutSecs.map(String.init)
+        case "cold_load_wait_secs":
+            return cfg.coldLoadWaitSecs.map(String.init)
         case "preload":
             return cfg.preload.map { $0 ? "true" : "false" }
         case "queue_result_ttl_secs":
