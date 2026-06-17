@@ -275,12 +275,21 @@ release touching the convert pipeline / quant-rule** — otherwise N/A.
 > preserved; weights had vision_tower with **0 `.scales`** (full-precision),
 > 318 language `.scales`, `embed_vision` projection quantized. Loaded (4.04 GB)
 > and accurately described the red-square test image. Confirms convert→load→
-> serve-vision end to end. (26B-A4B base convert: heavier — large download +
-> quantize; same code path, MoE adds the `router.proj` 8-bit override.)
+> serve-vision end to end.
 >
-> NOTE: a **base** repo (`google/gemma-4-26B-A4B`, no chat template) converts
-> fine and serves vision, but text/chat degenerates — use the `-it` variant for
-> chat quality (ADR-002-era caveat).
+> **26B-A4B (MoE) VALIDATED 2026-06-17 (v0.10.161):** `athena convert
+> google/gemma-4-26B-A4B-it --q-bits 4` (~50 GB bf16 source → 14.9 GB out,
+> ~12 min) produced a structurally-correct model — global 4-bit + 8-bit on
+> `mlp.{gate,up,down}_proj` AND `router.proj` (MoE override present),
+> vision_tower full-precision (0 `.scales`), experts 4-bit, `vision_config`
+> preserved — which loaded (15.89 GB, 1.1 s) and accurately described the test
+> image ("a solid red square on the left and a solid white square on the right").
+>
+> NOTE: the **base** repo (`google/gemma-4-26B-A4B`, no chat template) converts
+> fine and LOADS with the vision tower intact, but a chat request fails with
+> `missingChatTemplate` — use the **`-it`** variant for any chat/vision-chat
+> serving (ADR-002-era base caveat). (Known wart: `missingChatTemplate` surfaces
+> as a `500 module_load_failed` rather than a clear 400 — minor follow-up.)
 
 ---
 

@@ -1,6 +1,6 @@
 # 012 — Vision-aware `athena convert`: load via the VLM path, keep the vision tower full-precision
 
-**Status:** Accepted — implementing. M72.1 (vision-aware convert: load + quantize + config) shipped v0.10.161; M72.2 (real-model validation: convert → serve vision) pending.
+**Status:** Accepted — **Implemented & validated**. M72.1 (vision-aware convert: load + quantize + config) shipped v0.10.161. M72.2 (real-model validation) DONE 2026-06-17: `athena convert google/gemma-4-26B-A4B-it --q-bits 4` → loads + accurately describes a test image; the base `google/gemma-4-26B-A4B` converts + loads with the vision tower intact (chat blocked only by its missing chat template — use `-it`).
 **Date:** 2026-06-17
 **Milestone:** M72 — goal: `athena convert google/gemma-4-26B-A4B` produces a model that loads and serves **vision**.
 

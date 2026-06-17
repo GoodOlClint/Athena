@@ -76,10 +76,16 @@ now is the same effort as listing vision.
   `.scales` (via `rule.overrides(forModules:)`), so weights and config agree by construction.
   Unit-tested: `Gemma4QuantRuleTests` (paths → bits, tower-skip, experts≠8-bit, override
   emission).
-- **M72.2 — real-model validation.** Convert a small gemma-4 VLM **base** first (fast iterate),
-  then `google/gemma-4-26B-A4B`; load the output via the daemon and run RUNBOOK J (image →
-  description). Add a RUNBOOK scenario (convert → serve vision) + note base-vs-`-it` chat
-  caveat.
+- **M72.2 — real-model validation. ✅ DONE 2026-06-17.** Converted `google/gemma-4-e2b-it`
+  (3.5 GB) and `google/gemma-4-26B-A4B-it` (14.9 GB) via `athena convert … --q-bits 4`; both
+  loaded through the VLM path and **accurately described the test image** end-to-end. Verified
+  the converted configs/weights match the reference recipe (global 4-bit + dense-`mlp`/`router`
+  8-bit; vision_tower full-precision; experts 4-bit; `vision_config` preserved). The base
+  `google/gemma-4-26B-A4B` also converts + loads (vision tower intact) but its chat is blocked
+  by the base's missing chat template (`missingChatTemplate` — use `-it`). Recorded in RUNBOOK
+  scenario K. **No code change** (the convert code shipped in M72.1). Known wart:
+  `missingChatTemplate` returns `500 module_load_failed` instead of a clear 400 — minor
+  follow-up.
 
 ## Test bar
 
