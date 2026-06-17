@@ -33,10 +33,15 @@ cd "$(dirname "$0")/.."
 
 ATHENA="${1:-}"
 if [ -z "$ATHENA" ]; then
+  # Pick the NEWEST built binary, not a fixed Debug-first order: a stale
+  # Debug binary left over from an old build would otherwise shadow a fresh
+  # Release build and run the suite against the wrong code (e.g. a 6-day-old
+  # binary that predates a behavior change ⇒ a spurious mass-failure cascade).
   for c in \
     .build/xcode/Build/Products/Debug/athena \
     .build/xcode/Build/Products/Release/athena; do
-    [ -x "$c" ] && ATHENA="$c" && break
+    [ -x "$c" ] || continue
+    if [ -z "$ATHENA" ] || [ "$c" -nt "$ATHENA" ]; then ATHENA="$c"; fi
   done
 fi
 [ -x "$ATHENA" ] || { echo "no athena binary (build first)"; exit 2; }
