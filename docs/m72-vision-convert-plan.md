@@ -39,6 +39,14 @@ quantizing the vision tower (full-precision by design); audio-in-chat (audio tow
 `sanitize`); non-gemma VLM arches (convert still works with vision-skipped + global-bits
 language quant, just no MoE 8-bit overrides).
 
+**General by construction (operator intent: "convert should work for everything, incl. audio").**
+The quant-rule skips EVERY modality tower (`vision_tower`/`embed_vision` **and**
+`audio_tower`/`embed_audio`) and quantizes the language model — so convert already emits the
+correct artifact for an audio-bearing checkpoint once the substrate can serve audio. M72 does
+not *target* audio (blocked: `sanitize` strips `audio_tower`, no Swift audio encoder yet — ADR
+010); convert covers it for free when that port lands, no rework. Listing the audio prefixes
+now is the same effort as listing vision.
+
 ## Verified current-state seams (the map)
 
 - `Sources/AthenaLLM/ModelConvert.swift:75` — generic `loadModelContainer` (LLM factory wins →

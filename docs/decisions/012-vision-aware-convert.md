@@ -89,6 +89,17 @@ reference recipe. Four sub-decisions:
 - The quant-rule is gemma-4-MoE-shaped (router/mlp paths). A non-MoE or non-gemma vision
   checkpoint converts with vision-skipped + global-bits language quant (no 8-bit overrides) —
   still correct, just not mixed-precision.
+- **Generality / audio (operator intent).** The rule is framed as *"quantize the language
+  model; leave EVERY modality tower full-precision"* — the skip set lists the vision **and
+  audio** tower prefixes (`vision_tower`/`embed_vision`, `audio_tower`/`embed_audio`) now, even
+  though audio is not served. So convert already produces the right artifact for an
+  audio-bearing checkpoint (audio tower preserved full-precision, language quantized) the
+  moment the substrate gains an audio encoder — **no convert rework**. M72 does NOT and cannot
+  *validate* audio: the substrate `sanitize` strips `audio_tower` on load (no Swift audio
+  encoder yet — ADR 010's deferred audio-in-chat), so an audio tower has nothing to load into.
+  Audio-in-chat is the blocker, the convert pipeline is not; convert covers audio for free once
+  that port lands. This costs no extra effort now — listing the audio prefixes in the skip set
+  is the same work as listing vision.
 
 ## Alternatives rejected
 
