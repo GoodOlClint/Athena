@@ -5,6 +5,7 @@ import MLX
 import MLXHuggingFace
 import MLXLMCommon
 import MLXNN
+import MLXVLM
 import Tokenizers
 
 /// `mlx_lm.convert` for Athena: download an HF repo, load it
@@ -70,10 +71,24 @@ public enum ModelConvert {
         // serialized against a serve cold-load) so the two can't clobber a
         // shared global and mis-decide MTP suppression.
         await AthenaModelRegistration.install()
+        // M72 — a vision checkpoint (top-level `vision_config`) MUST load
+        // through the VLM path so the image tower is kept: the generic
+        // `loadModelContainer` would pick the text LLM factory, whose
+        // `sanitize()` strips `vision_tower`, and the converted model would be
+        // text-only. Same `hasVisionConfig` detector the serve path (M71.2)
+        // uses.
+        let isVision =
+            ModelConfigInfo.read(modelDirectory: snapshot)?.hasVisionConfig
+            ?? false
         let container = try await AthenaModelRegistration
             .$currentModelDirectory.withValue(snapshot) {
-                try await loadModelContainer(
-                    from: snapshot, using: #huggingFaceTokenizerLoader())
+                let loader = #huggingFaceTokenizerLoader()
+                if isVision {
+                    return try await VLMModelFactory.shared.loadContainer(
+                        from: snapshot, using: loader)
+                }
+                return try await loadModelContainer(
+                    from: snapshot, using: loader)
             }
 
         let base = id.split(separator: "/").last.map(String.init) ?? id
@@ -96,12 +111,20 @@ public enum ModelConvert {
         // Quantize + save inside `perform`: the non-Sendable model and
         // its MLXArrays never cross the isolation boundary; only the
         // Void result does.
-        try await container.perform { (ctx: ModelContext) in
+        let quantizedModules: [String] = try await container.perform {
+            (ctx: ModelContext) in
             // `any LanguageModel` is always a `Module` subclass
             // (BaseLanguageModel: Module), so this is an upcast.
             let model = ctx.model as Module
             if let bits {
-                quantize(model: model, groupSize: groupSize, bits: bits)
+                // M72 — quantize via the shared rule: encoder towers stay
+                // full-precision (nil ⇒ no `.scales`, the loader leaves them
+                // unquantized), the per-layer dense `mlp` + `router.proj` take
+                // the 8-bit override, everything else the global bits.
+                let rule = Gemma4QuantRule(groupSize: groupSize, bits: bits)
+                quantize(
+                    model: model,
+                    filter: { path, _ in rule.quantization(forPath: path) })
             }
             let weights = Dictionary(
                 uniqueKeysWithValues:
@@ -124,10 +147,19 @@ public enum ModelConvert {
             }
             MLX.Memory.clearCache()
             try MLX.save(arrays: weights, url: safetensors)
+            // The quantized modules are exactly those that gained `.scales`
+            // (an encoder tower, skipped by the rule, has none). `writeConfig`
+            // derives the per-layer override entries from this set, so the
+            // saved weights and the emitted config can never disagree.
+            return
+                weights.keys
+                .filter { $0.hasSuffix(".scales") }
+                .map { String($0.dropLast(7)) }  // strip ".scales"
         }
 
         try writeConfig(
-            from: snapshot, to: dest, bits: bits, groupSize: groupSize)
+            from: snapshot, to: dest, bits: bits, groupSize: groupSize,
+            quantizedModules: quantizedModules)
         try copyAux(from: snapshot, to: dest)
 
         let attrs = try? FileManager.default.attributesOfItem(
@@ -137,11 +169,22 @@ public enum ModelConvert {
     }
 
     /// Rewrite config.json with a `quantization` block so the loader
-    /// rebuilds quantized layers; all other model fields are preserved.
-    /// `bits == nil` ⇒ no-quantize convert: copy the config through
-    /// unchanged (no `quantization` block).
+    /// rebuilds quantized layers; all other model fields (incl.
+    /// `vision_config` / `audio_config`) are preserved by the whole-object
+    /// round-trip. `bits == nil` ⇒ no-quantize convert: copy the config
+    /// through unchanged (no `quantization` block).
+    ///
+    /// M72 — for a quantized convert the block is `{group_size, bits, mode}`
+    /// PLUS a per-module override entry for every quantized module whose bits
+    /// differ from the global (the dense `mlp` + `router.proj`, at 8-bit).
+    /// The override set is derived from `quantizedModules` (the modules that
+    /// actually gained `.scales`) via the SAME `Gemma4QuantRule`, so config
+    /// and weights agree by construction. The encoder towers are full-
+    /// precision (absent from `quantizedModules`) ⇒ no entry ⇒ the
+    /// `.scales`-driven loader leaves them unquantized.
     private static func writeConfig(
-        from snapshot: URL, to dest: URL, bits: Int?, groupSize: Int
+        from snapshot: URL, to dest: URL, bits: Int?, groupSize: Int,
+        quantizedModules: [String]
     ) throws {
         let src = snapshot.appendingPathComponent("config.json")
             .resolvingSymlinksInPath()
@@ -154,9 +197,14 @@ public enum ModelConvert {
                 .llm, reason: "source config.json is not an object")
         }
         if let bits {
-            obj["quantization"] = [
-                "group_size": groupSize, "bits": bits,
+            let rule = Gemma4QuantRule(groupSize: groupSize, bits: bits)
+            var quant: [String: Any] = [
+                "group_size": groupSize, "bits": bits, "mode": "affine",
             ]
+            for o in rule.overrides(forModules: quantizedModules) {
+                quant[o.path] = ["group_size": o.groupSize, "bits": o.bits]
+            }
+            obj["quantization"] = quant
         }
         let out = try JSONSerialization.data(
             withJSONObject: obj,

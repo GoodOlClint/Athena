@@ -62,16 +62,21 @@ now is the same effort as listing vision.
 
 ## Slices (each: xcodebuild Release → swift test + e2e phase → annotated tag → graphify)
 
-- **M72.1 — shared quant-rule + vision-aware load.** Add a single `Gemma4QuantRule` (path →
-  `(groupSize, bits)?`): `nil` for `vision_tower`/`audio_tower`, `(64,8)` for MoE
-  `mlp.{gate,up,down}_proj`/`router.proj`, global else. Route `ModelConvert` load through
-  `VLMModelFactory` when `hasVisionConfig`. Unit-test the rule (pure: paths → expected bits;
-  vision/audio → skip). No model run yet.
-- **M72.2 — quantize + config emission.** Switch `ModelConvert` to the closure-form
-  `quantize(model:)` using the rule; `writeConfig` emits the per-layer `quantization` block
-  from the same rule (global + MoE 8-bit overrides; vision absent). Assert (unit) the emitted
-  config matches the rule and round-trips.
-- **M72.3 — real-model validation.** Convert a small gemma-4 VLM **base** first (fast iterate),
+- **M72.1 — complete vision-aware convert (load + quantize + config). SHIPPED v0.10.161.**
+  Load/quant/config are interdependent (vision-aware load without the quant filter would
+  blanket-quantize the vision tower), so they land together as one coherent slice, with the
+  pure rule as the tested core (no broken intermediate). Adds `Gemma4QuantRule` (path →
+  `(groupSize, bits)?`): `nil` for the **encoder** towers `vision_tower`/`audio_tower`; 8-bit
+  for the dense `…mlp.{gate,up,down}_proj` + `router.proj`; global (4-bit) else — incl. the MoE
+  experts `experts.switch_glu.*`, attn, `embed_tokens`, and `embed_vision.embedding_projection`
+  (projections ARE quantized; only encoder towers are skipped). `ModelConvert` loads vision
+  checkpoints via `VLMModelFactory` (`hasVisionConfig`), quantizes with the closure-form
+  `quantize(model:filter:)` driven by the rule, and `writeConfig` emits `{group_size, bits,
+  mode:affine}` + the per-layer 8-bit overrides derived from the modules that actually gained
+  `.scales` (via `rule.overrides(forModules:)`), so weights and config agree by construction.
+  Unit-tested: `Gemma4QuantRuleTests` (paths → bits, tower-skip, experts≠8-bit, override
+  emission).
+- **M72.2 — real-model validation.** Convert a small gemma-4 VLM **base** first (fast iterate),
   then `google/gemma-4-26B-A4B`; load the output via the daemon and run RUNBOOK J (image →
   description). Add a RUNBOOK scenario (convert → serve vision) + note base-vs-`-it` chat
   caveat.

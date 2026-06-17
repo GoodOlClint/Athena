@@ -1,8 +1,8 @@
 # 012 — Vision-aware `athena convert`: load via the VLM path, keep the vision tower full-precision
 
-**Status:** Proposed — pending operator ratification
+**Status:** Accepted — implementing. M72.1 (vision-aware convert: load + quantize + config) shipped v0.10.161; M72.2 (real-model validation: convert → serve vision) pending.
 **Date:** 2026-06-17
-**Milestone:** M72 (proposed number — operator's call) — goal: `athena convert google/gemma-4-26B-A4B` produces a model that loads and serves **vision**.
+**Milestone:** M72 — goal: `athena convert google/gemma-4-26B-A4B` produces a model that loads and serves **vision**.
 
 ## Context
 
@@ -50,15 +50,22 @@ reference recipe. Four sub-decisions:
    re-saved. (Audio is still dropped — `MLXVLM.Gemma4.sanitize` strips `audio_tower`; the
    converted model is text + vision, matching the served capability.)
 
-2. **Quantize the language model, NOT the vision tower.** Replace the blanket
+2. **Quantize everything except the encoder towers.** Replace the blanket
    `quantize(model:groupSize:bits:)` with the **closure form**
-   `quantize(model:) { path, module in … }` (the same shape the loader uses), returning:
-   - `nil` for any `vision_tower.*` / `audio_tower.*` path → **full-precision, no `.scales`**
-     (so the `.scales`-driven loader leaves it unquantized — matches the reference);
-   - the per-layer **(groupSize: 64, bits: 8)** for MoE `mlp.{gate,up,down}_proj` +
-     `router.proj` paths;
-   - the global **(groupSize, bits)** (default 4-bit) for every other quantizable
-     language-model layer.
+   `quantize(model:) { path, module in … }` (the same shape the loader uses). The exact
+   scheme is pinned to the reference (`gemma-4-26b-a4b-it-4bit` quant config + `.scales`
+   inventory, verified 2026-06-17):
+   - `nil` for the **encoder towers** — any `vision_tower.*` / `audio_tower.*` path →
+     **full-precision, no `.scales`** (the `.scales`-driven loader then leaves them
+     unquantized). NOTE: only the ENCODER towers are skipped — the multimodal *projections*
+     `embed_vision` / `embed_audio` **are** quantized (4-bit) in the reference.
+   - **(groupSize: 64, bits: 8)** for the per-layer **dense** `…layers.N.mlp.{gate,up,down}_proj`
+     and `…layers.N.router.proj`.
+   - the global **(groupSize, bits)** (default 4-bit) for everything else quantizable — the MoE
+     experts `experts.switch_glu.{gate,up,down}_proj`, `self_attn.{q,k,v,o}_proj`,
+     `embed_tokens`, and `embed_vision.embedding_projection`.
+   (Encoder-tower skip is checked FIRST, so a tower's own `mlp.down_proj` is full-precision,
+   not 8-bit.)
 
 3. **Emit a matching quantization config** from `writeConfig`: a single **quant-rule
    function** is the source of truth, used BOTH by the quantize closure (2) and to generate
@@ -89,12 +96,13 @@ reference recipe. Four sub-decisions:
 - The quant-rule is gemma-4-MoE-shaped (router/mlp paths). A non-MoE or non-gemma vision
   checkpoint converts with vision-skipped + global-bits language quant (no 8-bit overrides) —
   still correct, just not mixed-precision.
-- **Generality / audio (operator intent).** The rule is framed as *"quantize the language
-  model; leave EVERY modality tower full-precision"* — the skip set lists the vision **and
-  audio** tower prefixes (`vision_tower`/`embed_vision`, `audio_tower`/`embed_audio`) now, even
-  though audio is not served. So convert already produces the right artifact for an
-  audio-bearing checkpoint (audio tower preserved full-precision, language quantized) the
-  moment the substrate gains an audio encoder — **no convert rework**. M72 does NOT and cannot
+- **Generality / audio (operator intent).** The rule is framed as *"quantize everything except
+  the encoder towers"* — the skip set lists the vision **and** audio ENCODER prefixes
+  (`vision_tower`, `audio_tower`) now, even though audio is not served (the `embed_vision` /
+  `embed_audio` projections are quantized, matching the reference). So convert already produces
+  the right artifact for an audio-bearing checkpoint (audio encoder preserved full-precision,
+  its projection + language quantized) the moment the substrate gains an audio encoder —
+  **no convert rework**. M72 does NOT and cannot
   *validate* audio: the substrate `sanitize` strips `audio_tower` on load (no Swift audio
   encoder yet — ADR 010's deferred audio-in-chat), so an audio tower has nothing to load into.
   Audio-in-chat is the blocker, the convert pipeline is not; convert covers audio for free once
