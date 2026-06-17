@@ -11,6 +11,13 @@ import PackageDescription
 // copy of the client code.
 let package = Package(
     name: "athena-client",
+    // The client uses async/await + async URLSession (`Task`,
+    // `data(for:delegate:)`, `value(forHTTPHeaderField:)`), which need a
+    // macOS 12+ deployment target. Without this, a plain `swift build` on
+    // macOS defaults to too old a target and fails with availability errors.
+    // (Apple-only; Linux/Windows ignore `platforms`, so cross-platform builds
+    // are unaffected.)
+    platforms: [.macOS(.v13)],
     products: [
         .executable(name: "athena", targets: ["athena"]),
         .library(name: "AthenaClient", targets: ["AthenaClient"]),

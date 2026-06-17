@@ -11,7 +11,16 @@ import XCTest
 /// output, frame math) on random init so a regression in the arch is
 /// caught without the heavy weights.
 final class WeSpeakerStructureTests: XCTestCase {
-    func testNetworkForwardShapeAndNorm() {
+    func testNetworkForwardShapeAndNorm() throws {
+        // Evaluates an MLXArray (network forward) → needs the MLX metallib,
+        // which only `xcodebuild` bundles. Under plain `swift test` this would
+        // abort the whole process ("Failed to load the default metallib"), so
+        // guard it like the other MLX-eval tests in this file (ADR 009).
+        guard ProcessInfo.processInfo.environment["ATHENA_RUN_MODEL_TESTS"] == "1"
+        else {
+            throw XCTSkip(
+                "needs the MLX metallib (run via xcodebuild + ATHENA_RUN_MODEL_TESTS=1)")
+        }
         let net = WeSpeakerNetwork()
         // [B=1, T=200, F=80, C=1] log-mel grid — deterministic varying
         // fill (avoids an MLXRandom dependency in the test target).
