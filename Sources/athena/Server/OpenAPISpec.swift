@@ -382,8 +382,9 @@ enum OpenAPISpec {
             "/api/chat": {
               "post": {
                 "tags": ["Native"],
-                "summary": "Native chat (Athena dialect).",
-                "description": "Minimal non-OpenAI shape. `stream:true` returns NDJSON content chunks ending in `{content:\"\",done:true}`.",
+                "summary": "Native chat (Athena dialect). DEPRECATED — use POST /v1/chat/completions.",
+                "deprecated": true,
+                "description": "DEPRECATED (ADR 013): the native inference dialect is superseded by the OpenAI surface `POST /v1/chat/completions`; `/api/*` is the daemon control plane, not an inference surface. Still served through the deprecation period. Minimal non-OpenAI shape. `stream:true` returns NDJSON content chunks ending in `{content:\"\",done:true}`.",
                 "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AthenaChatRequest" } } } },
                 "responses": {
                   "200": { "description": "Chat reply (object or NDJSON stream).", "content": {
@@ -400,7 +401,9 @@ enum OpenAPISpec {
             "/api/embed": {
               "post": {
                 "tags": ["Native"],
-                "summary": "Native embeddings (Athena dialect).",
+                "summary": "Native embeddings (Athena dialect). DEPRECATED — use POST /v1/embeddings.",
+                "deprecated": true,
+                "description": "DEPRECATED (ADR 013): superseded by the OpenAI surface `POST /v1/embeddings`; `/api/*` is the daemon control plane, not an inference surface. Still served through the deprecation period.",
                 "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AthenaEmbedRequest" } } } },
                 "responses": {
                   "200": { "description": "Embeddings.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AthenaEmbedResponse" } } } },

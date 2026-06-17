@@ -55,7 +55,8 @@ public struct Run: AsyncParsableCommand {
         }
 
         var req = URLRequest(
-            url: URL(string: "http://\(host):\(port)/api/chat")!)
+            url: URL(
+                string: "http://\(host):\(port)/v1/chat/completions")!)
         req.httpMethod = "POST"
         req.setValue(
             "application/json", forHTTPHeaderField: "Content-Type")
@@ -97,7 +98,13 @@ public struct Run: AsyncParsableCommand {
             print("error: \(msg)")
             throw ExitCode.failure
         }
-        if let content = obj["content"] as? String {
+        // OpenAI `/v1/chat/completions` shape: choices[0].message.content
+        // (ADR 013 — `/v1` is the inference surface; native `/api/chat`
+        // is deprecated).
+        if let choices = obj["choices"] as? [[String: Any]],
+            let message = choices.first?["message"] as? [String: Any],
+            let content = message["content"] as? String
+        {
             print(content)
         } else {
             print(
