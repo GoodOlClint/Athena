@@ -422,6 +422,36 @@ echo "$CTK" | grep -q '"finish_reason":"stop"' \
   || bad "chat_template_kwargs request rejected ($CTK)"
 
 echo
+echo "== phase 2.3: M71.1 image content-parts — wire protocol + passive-oracle =="
+# Vision wire protocol: OpenAI image_url content-parts decode; the passive-
+# oracle rule rejects remote (http/https) image URLs with 400; a valid inline
+# data: image is accepted by the DTO but has no model path yet (M71.1) ⇒ a
+# clean 400 vision_not_supported (flipped per-model when the VLM path lands,
+# M71.2). A plain-string content message is unaffected (still 200).
+# 1x1 PNG, base64.
+PNG_B64='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+IMG_DATA="{\"model\":\"Qwen3.5-27B-4bit-mtp\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"describe\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:image/png;base64,$PNG_B64\"}}]}]}"
+IMG_HTTP='{"model":"Qwen3.5-27B-4bit-mtp","messages":[{"role":"user","content":[{"type":"text","text":"describe"},{"type":"image_url","image_url":{"url":"https://example.com/cat.png"}}]}]}'
+# valid inline image, no VLM path yet ⇒ 400 vision_not_supported
+code 400 POST /v1/chat/completions "$ALICE_TOK" "$IMG_DATA"
+VNS="$(curl -s -H "Authorization: Bearer $ALICE_TOK" \
+  -H 'Content-Type: application/json' -d "$IMG_DATA" \
+  "http://127.0.0.1:$PORT/v1/chat/completions")"
+echo "$VNS" | grep -q '"code":"vision_not_supported"' \
+  && ok "inline data: image ⇒ 400 vision_not_supported" \
+  || bad "inline image not vision_not_supported ($VNS)"
+# remote image URL ⇒ 400 invalid_image (passive-oracle: no outbound fetch)
+code 400 POST /v1/chat/completions "$ALICE_TOK" "$IMG_HTTP"
+REM="$(curl -s -H "Authorization: Bearer $ALICE_TOK" \
+  -H 'Content-Type: application/json' -d "$IMG_HTTP" \
+  "http://127.0.0.1:$PORT/v1/chat/completions")"
+echo "$REM" | grep -q '"code":"invalid_image"' \
+  && ok "remote http(s) image ⇒ 400 invalid_image (passive-oracle)" \
+  || bad "remote image not invalid_image ($REM)"
+# plain-string content path unchanged ⇒ still 200
+code 200 POST /v1/chat/completions "$ALICE_TOK" "$CHAT"
+
+echo
 echo "== phase 2.5: WebUI session cookie + RBAC nav + CSRF (M18.1) =="
 # /ui is SESSION-cookie authed (not bearer). admin (daemonAdmin) gets
 # the control shell; a member is bounced to login; mutations require

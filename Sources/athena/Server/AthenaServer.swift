@@ -881,9 +881,23 @@ struct AthenaServer {
         // into the model, not a user-only join — system instructions and
         // prior turns must reach the chat template. A message with no text
         // content (e.g. an assistant tool-call shell) carries nothing.
-        let turns = body.messages.compactMap { m -> ChatTurn? in
-            guard let c = m.content else { return nil }
-            return ChatTurn(role: m.role, content: c)
+        // M71.1: decode any OpenAI `image_url` content-parts into the turns.
+        // A bad/remote image URL is a 400 here (passive-oracle: no outbound
+        // image fetch).
+        let turns: [ChatTurn]
+        do {
+            turns = try Self.chatTurns(from: body.messages)
+        } catch {
+            return Self.imageContentError(error)
+        }
+        // M71.1: image input has no model path yet — a request carrying images
+        // is a clean 400 until the VLM generate path lands (M71.2).
+        if turns.contains(where: { !$0.images.isEmpty }) {
+            return Self.error(
+                status: .badRequest,
+                message:
+                    "image input is not supported by the requested model",
+                type: "invalid_request_error", code: "vision_not_supported")
         }
         // Brief 4b: refuse an over-cap prompt up front as a governed
         // 503, before any KV cache is allocated.
@@ -2885,9 +2899,20 @@ struct AthenaServer {
                 let req = try? JSONDecoder().decode(
                     ChatCompletionRequest.self, from: request)
             else { return (nil, "invalid conversation body") }
-            let turns = req.messages.compactMap { m -> ChatTurn? in
-                guard let c = m.content else { return nil }
-                return ChatTurn(role: m.role, content: c)
+            // M71.1: decode image content-parts (passive-oracle: a remote/bad
+            // image URL fails the job); image input has no model path yet, so
+            // a job carrying images errors cleanly until the VLM path (M71.2).
+            let turns: [ChatTurn]
+            do {
+                turns = try Self.chatTurns(from: req.messages)
+            } catch {
+                return (nil, Self.imageErrorMessage(error))
+            }
+            if turns.contains(where: { !$0.images.isEmpty }) {
+                return (
+                    nil,
+                    "image input is not supported by the requested model"
+                )
             }
             do {
                 try await governor.ensureLoaded(.llm)
@@ -5220,6 +5245,49 @@ struct AthenaServer {
             APIErrorBody(
                 error: .init(message: message, type: type, code: code)),
             status: status)
+    }
+
+    /// M71.1 — build chat turns from OpenAI messages, decoding any `image_url`
+    /// content-parts into `ChatImage` bytes. A message with neither text nor
+    /// images carries nothing (dropped). Throws `ChatImageError` for an
+    /// unacceptable image URL (remote/unknown-scheme/malformed) so the caller
+    /// can map it to a 400 — the passive-oracle reject of `http(s)` lives in
+    /// `ChatImage.fromImageURL`.
+    static func chatTurns(from messages: [ChatMessage]) throws -> [ChatTurn] {
+        try messages.compactMap { m -> ChatTurn? in
+            let images = try m.imageURLs.map { try ChatImage.fromImageURL($0) }
+            guard let c = m.content else {
+                return images.isEmpty
+                    ? nil : ChatTurn(role: m.role, content: "", images: images)
+            }
+            return ChatTurn(role: m.role, content: c, images: images)
+        }
+    }
+
+    /// Human-readable 400 message for an image content-part failure (M71.1).
+    static func imageErrorMessage(_ error: Error) -> String {
+        switch error {
+        case ChatImageError.remoteURLUnsupported:
+            return
+                "remote image URLs (http/https) are not supported; inline the "
+                + "image as a base64 data: URL. Athena performs no outbound "
+                + "image fetch (passive oracle)."
+        case ChatImageError.unsupportedScheme:
+            return
+                "unsupported image URL scheme; only inline data: URLs are "
+                + "accepted"
+        case ChatImageError.malformedDataURL:
+            return "malformed image data: URL"
+        default:
+            return "invalid image content part"
+        }
+    }
+
+    /// 400 response for an image content-part failure (M71.1).
+    static func imageContentError(_ error: Error) -> Response {
+        Self.error(
+            status: .badRequest, message: Self.imageErrorMessage(error),
+            type: "invalid_request_error", code: "invalid_image")
     }
 
     /// M43.2 — response for a request that hit a still-cold module. The

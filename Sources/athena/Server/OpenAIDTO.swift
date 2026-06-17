@@ -20,12 +20,72 @@ struct ChatMessage: Codable {
     let role: String
     let content: String?  // null for a tool-call response
     var tool_calls: [ToolCallOut]?
+    /// M71.1 (vision input): the `image_url.url` strings extracted from an
+    /// OpenAI content-parts array. Empty for a plain-string content. Populated
+    /// only on DECODE; not part of the response-encoding surface (responses
+    /// always carry a plain-string `content`).
+    var imageURLs: [String]
 
-    init(role: String, content: String?, tool_calls: [ToolCallOut]? = nil) {
+    init(
+        role: String, content: String?, tool_calls: [ToolCallOut]? = nil,
+        imageURLs: [String] = []
+    ) {
         self.role = role
         self.content = content
         self.tool_calls = tool_calls
+        self.imageURLs = imageURLs
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case role, content, tool_calls
+    }
+
+    /// `content` decodes as EITHER a plain string (unchanged) OR an OpenAI
+    /// content-parts array (`[{type:"text",text} | {type:"image_url",...}]`).
+    /// Text parts are flattened (newline-joined) into `content`; image parts'
+    /// URLs land in `imageURLs`. Decoding the URLs into bytes (and the
+    /// passive-oracle reject of `http(s)`) happens at the handler via
+    /// `ChatImage.fromImageURL`.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        role = try c.decode(String.self, forKey: .role)
+        tool_calls = try c.decodeIfPresent([ToolCallOut].self, forKey: .tool_calls)
+        if !c.contains(.content)
+            || ((try? c.decodeNil(forKey: .content)) == true)
+        {
+            content = nil
+            imageURLs = []
+        } else if let s = try? c.decode(String.self, forKey: .content) {
+            content = s
+            imageURLs = []
+        } else {
+            let parts = try c.decode([ContentPart].self, forKey: .content)
+            let texts = parts.compactMap(\.text)
+            content = texts.isEmpty ? nil : texts.joined(separator: "\n")
+            imageURLs = parts.compactMap(\.imageURL)
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(role, forKey: .role)
+        try c.encodeIfPresent(content, forKey: .content)
+        try c.encodeIfPresent(tool_calls, forKey: .tool_calls)
+    }
+}
+
+/// One OpenAI chat content-part (M71.1). `type` is "text" or "image_url".
+private struct ContentPart: Codable {
+    let type: String
+    let text: String?
+    let image_url: ContentPartImageURL?
+    /// The image URL string when this is an image part (else nil).
+    var imageURL: String? { image_url?.url }
+}
+
+private struct ContentPartImageURL: Codable {
+    let url: String
+    let detail: String?
 }
 
 struct JSONSchemaSpec: Codable {

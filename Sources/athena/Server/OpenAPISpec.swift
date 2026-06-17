@@ -915,8 +915,17 @@ enum OpenAPISpec {
                 "required": ["role"],
                 "properties": {
                   "role": { "type": "string", "enum": ["system", "user", "assistant", "tool"] },
-                  "content": { "type": "string", "nullable": true },
+                  "content": { "description": "Either a plain string, or an OpenAI content-parts array for vision input (M71). Image parts accept ONLY inline data: URLs (base64) — http(s) image URLs are rejected with 400 (passive-oracle: the daemon performs no outbound image fetch). Text parts are concatenated.", "nullable": true, "oneOf": [ { "type": "string" }, { "type": "array", "items": { "$ref": "#/components/schemas/ChatContentPart" } } ] },
                   "tool_calls": { "type": "array", "items": { "type": "object" } }
+                }
+              },
+              "ChatContentPart": {
+                "type": "object",
+                "required": ["type"],
+                "properties": {
+                  "type": { "type": "string", "enum": ["text", "image_url"] },
+                  "text": { "type": "string" },
+                  "image_url": { "type": "object", "required": ["url"], "properties": { "url": { "type": "string", "description": "Inline data: URL (base64), e.g. data:image/png;base64,…. http(s) URLs are rejected with 400 (passive-oracle)." }, "detail": { "type": "string" } } }
                 }
               },
               "ChatCompletionRequest": {
