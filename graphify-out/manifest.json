@@ -120,7 +120,7 @@
     "semantic_hash": ""
   },
   "Sources/AthenaLLM/AthenaModelRegistration.swift": {
-    "mtime": 1781311268.370569,
+    "mtime": 1781713809.5850174,
     "ast_hash": "7e00ae05c1c7f680f0b9469e0ae5ea9b",
     "semantic_hash": ""
   },
@@ -155,7 +155,7 @@
     "semantic_hash": ""
   },
   "Sources/AthenaLLM/MLXLLMModule.swift": {
-    "mtime": 1781707975.164755,
+    "mtime": 1781713795.1589751,
     "ast_hash": "af431a020e22a31809d2180ed113be03",
     "semantic_hash": ""
   },
@@ -425,7 +425,7 @@
     "semantic_hash": "d16404614855c59c2001089f41c5bd78"
   },
   "Sources/athena/Athena.swift": {
-    "mtime": 1781708133.49603,
+    "mtime": 1781713814.9422648,
     "ast_hash": "33351480a74580383b7dff0d8026c6f5",
     "semantic_hash": ""
   },
@@ -965,8 +965,8 @@
     "semantic_hash": "e68714e301db830933023b6c4e32e8c7"
   },
   "deploy/integration/RUNBOOK.md": {
-    "mtime": 1781708334.1469743,
-    "ast_hash": "35f73a5d36240087f3bb1e49e89e2ac7",
+    "mtime": 1781714613.2713907,
+    "ast_hash": "2ccad44e5ab3c5688f848f4d951b97f8",
     "semantic_hash": ""
   },
   "docs/at-rest.md": {
@@ -1090,8 +1090,8 @@
     "semantic_hash": "371237f6ed34877c859b071318d9b529"
   },
   "CLAUDE.md": {
-    "mtime": 1781708348.4781342,
-    "ast_hash": "4c06100a5f4acad09f8aad84fec952c9",
+    "mtime": 1781715649.6580033,
+    "ast_hash": "d03de45ed0e0b05e6f93caae07055a78",
     "semantic_hash": ""
   },
   "docs/cli-reference.md": {
@@ -1380,8 +1380,18 @@
     "semantic_hash": ""
   },
   "docs/m71-vision-input-plan.md": {
-    "mtime": 1781708360.6757498,
-    "ast_hash": "46a4c1c8be54e7e3e48f7447b078e13c",
+    "mtime": 1781714640.3920276,
+    "ast_hash": "ee26ef131f01506cb0086b5a967dbcb3",
+    "semantic_hash": ""
+  },
+  "docs/decisions/012-vision-aware-convert.md": {
+    "mtime": 1781716314.2263927,
+    "ast_hash": "4375d0da627965e9f2d29a47cec0cbea",
+    "semantic_hash": ""
+  },
+  "docs/m72-vision-convert-plan.md": {
+    "mtime": 1781716324.4562469,
+    "ast_hash": "722f78f65dc3a24cc4d4eab7577b578f",
     "semantic_hash": ""
   }
 }
