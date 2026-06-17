@@ -252,6 +252,38 @@ vision/VLM load or chat-image path** — otherwise N/A.
 
 ---
 
+## K — Vision-aware convert (Studio) · P0*
+
+Exercises `athena convert` of a gemma-4 **VLM** checkpoint (M72): the
+convert must load through the VLM path (keep the image tower), quantize the
+language model only (`Gemma4QuantRule`: dense `mlp`+`router` 8-bit, else
+4-bit), leave the encoder tower full-precision, and emit a matching quant
+config — so the converted model loads and serves vision. `*`P0 **only for a
+release touching the convert pipeline / quant-rule** — otherwise N/A.
+
+| # | Action | Expected | Result |
+|---|---|---|---|
+| K1 | `athena convert <google/gemma-4 VLM repo> --q-bits 4 --name <out>` | succeeds; writes `<out>/model.safetensors` + `config.json` | ☐ |
+| K2 | Inspect `<out>/config.json` `quantization` | global `{group_size,bits,mode:affine}` + per-layer **8-bit** on `…mlp.{gate,up,down}_proj` (+ `…router.proj` for MoE); `vision_config`/`audio_config` preserved | ☐ |
+| K3 | Inspect `<out>/model.safetensors` keys | `vision_tower.*` has **no `.scales`** (full-precision); language layers + `embed_vision.embedding_projection` DO have `.scales` | ☐ |
+| K4 | `athena load --llm-model <out>` then image request (RUNBOOK J2) | loads via the VLM path; **accurate image description** from the freshly-converted model | ☐ |
+| K5 | (control) `athena convert <text-only repo>` | unchanged from pre-M72 (text path; no VLM branch) | ☐ |
+
+> **VALIDATED 2026-06-17 (v0.10.161)** — `athena convert google/gemma-4-e2b-it
+> --q-bits 4` produced `gemma-4-e2b-it-conv4bit` (3.5 GB): config had global
+> 4-bit + `mlp.{gate,up,down}_proj` 8-bit overrides, `vision_config`/`audio_config`
+> preserved; weights had vision_tower with **0 `.scales`** (full-precision),
+> 318 language `.scales`, `embed_vision` projection quantized. Loaded (4.04 GB)
+> and accurately described the red-square test image. Confirms convert→load→
+> serve-vision end to end. (26B-A4B base convert: heavier — large download +
+> quantize; same code path, MoE adds the `router.proj` 8-bit override.)
+>
+> NOTE: a **base** repo (`google/gemma-4-26B-A4B`, no chat template) converts
+> fine and serves vision, but text/chat degenerates — use the `-it` variant for
+> chat quality (ADR-002-era caveat).
+
+---
+
 ## Teardown
 
 ```
