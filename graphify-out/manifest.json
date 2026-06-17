@@ -1,7 +1,7 @@
 {
   "Package.swift": {
-    "mtime": 1781370763.5007641,
-    "ast_hash": "7d3ac4750cee3684f353b4fda70c608a",
+    "mtime": 1781707867.8010278,
+    "ast_hash": "e0c8d85f3ab3c2570f77bd1967b73c89",
     "semantic_hash": ""
   },
   "Sources/AthenaCore/AthenaEnv.swift": {
@@ -125,8 +125,8 @@
     "semantic_hash": ""
   },
   "Sources/AthenaLLM/ChatTurn.swift": {
-    "mtime": 1781705992.9195344,
-    "ast_hash": "331ed73c7a3f03eed9cc01c086b8cff5",
+    "mtime": 1781708088.2033823,
+    "ast_hash": "decf8f7e2a8a3794dafa4ce55b7bd39a",
     "semantic_hash": ""
   },
   "Sources/AthenaLLM/GenChunk.swift": {
@@ -155,14 +155,14 @@
     "semantic_hash": ""
   },
   "Sources/AthenaLLM/MLXLLMModule.swift": {
-    "mtime": 1781316573.1875203,
-    "ast_hash": "6cb4aa0a0bbe1f13aef385833136baa6",
+    "mtime": 1781707975.164755,
+    "ast_hash": "af431a020e22a31809d2180ed113be03",
     "semantic_hash": ""
   },
   "Sources/AthenaLLM/ModelConfigInfo.swift": {
-    "mtime": 1779421407.8047152,
-    "ast_hash": "b07d330ab930bb4b98f42c1ae3583421",
-    "semantic_hash": "b07d330ab930bb4b98f42c1ae3583421"
+    "mtime": 1781707894.4712448,
+    "ast_hash": "275ab5cd6c26ee6eafecfe9fb27ebf8b",
+    "semantic_hash": ""
   },
   "Sources/AthenaLLM/ModelConvert.swift": {
     "mtime": 1781311302.7722356,
@@ -220,8 +220,8 @@
     "semantic_hash": ""
   },
   "Sources/AthenaLLM/StubLLMModule.swift": {
-    "mtime": 1781311576.6345382,
-    "ast_hash": "5361035d2a333a36c821d929dab6ef15",
+    "mtime": 1781708004.923139,
+    "ast_hash": "5624f99715e26addc808bbdc56f9dee5",
     "semantic_hash": ""
   },
   "Sources/AthenaLLM/SupportedModels.swift": {
@@ -425,8 +425,8 @@
     "semantic_hash": "d16404614855c59c2001089f41c5bd78"
   },
   "Sources/athena/Athena.swift": {
-    "mtime": 1781706101.894877,
-    "ast_hash": "e3728cf5714abba7ba63db6b8f869374",
+    "mtime": 1781708133.49603,
+    "ast_hash": "33351480a74580383b7dff0d8026c6f5",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Audit.swift": {
@@ -550,8 +550,8 @@
     "semantic_hash": "ba546feb975db11ee6e42e5e147b55e0"
   },
   "Sources/athena/Server/AthenaServer.swift": {
-    "mtime": 1781706081.9547207,
-    "ast_hash": "fec1b85d58be70c0c7aba6359b31836e",
+    "mtime": 1781708059.401177,
+    "ast_hash": "d0fa129cb858424788bded68d8157007",
     "semantic_hash": ""
   },
   "Sources/athena/Server/GPUTelemetry.swift": {
@@ -655,9 +655,9 @@
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/ModelConfigInfoTests.swift": {
-    "mtime": 1779421423.45555,
-    "ast_hash": "b436cf6c2e1543f242701bb4478c6e5c",
-    "semantic_hash": "b436cf6c2e1543f242701bb4478c6e5c"
+    "mtime": 1781708116.4366012,
+    "ast_hash": "1bec76c918b0f6955d936b3c7b06b983",
+    "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/ModelHealthTests.swift": {
     "mtime": 1781325821.4052505,
@@ -885,8 +885,8 @@
     "semantic_hash": "e29565ca41e2bea1b26a9e5469e5349c"
   },
   "deploy/e2e-rbac.sh": {
-    "mtime": 1781706139.6047997,
-    "ast_hash": "a92f5b5401cb917eb228ae420933cd5e",
+    "mtime": 1781707082.888041,
+    "ast_hash": "2b370421018174fa9f57dc0447120e30",
     "semantic_hash": ""
   },
   "deploy/integration/e2e-embedding-select.sh": {
@@ -965,9 +965,9 @@
     "semantic_hash": "e68714e301db830933023b6c4e32e8c7"
   },
   "deploy/integration/RUNBOOK.md": {
-    "mtime": 1779898668.7353358,
-    "ast_hash": "caef6e9a62fd003ea2af1255a422939e",
-    "semantic_hash": "caef6e9a62fd003ea2af1255a422939e"
+    "mtime": 1781708334.1469743,
+    "ast_hash": "35f73a5d36240087f3bb1e49e89e2ac7",
+    "semantic_hash": ""
   },
   "docs/at-rest.md": {
     "mtime": 1779510844.852417,
@@ -1090,8 +1090,8 @@
     "semantic_hash": "371237f6ed34877c859b071318d9b529"
   },
   "CLAUDE.md": {
-    "mtime": 1781706514.9169168,
-    "ast_hash": "9642a026aa54557ec04add8c2ad9b67c",
+    "mtime": 1781708348.4781342,
+    "ast_hash": "4c06100a5f4acad09f8aad84fec952c9",
     "semantic_hash": ""
   },
   "docs/cli-reference.md": {
@@ -1370,8 +1370,8 @@
     "semantic_hash": ""
   },
   "docs/decisions/010-vision-input-vlm-chat.md": {
-    "mtime": 1781706505.8194928,
-    "ast_hash": "b09d017f468525867307ccfd9bf1a2e5",
+    "mtime": 1781708343.0528436,
+    "ast_hash": "7e61f54439a14a8394203e3c1cdcd314",
     "semantic_hash": ""
   },
   "docs/decisions/011-unified-memory-governor-as-thesis.md": {
@@ -1380,8 +1380,8 @@
     "semantic_hash": ""
   },
   "docs/m71-vision-input-plan.md": {
-    "mtime": 1781706526.7259665,
-    "ast_hash": "8fadc9cb64883c510fee8cf8dbdc7627",
+    "mtime": 1781708360.6757498,
+    "ast_hash": "46a4c1c8be54e7e3e48f7447b078e13c",
     "semantic_hash": ""
   }
 }
