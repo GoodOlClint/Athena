@@ -35,7 +35,12 @@ Current state (verified against live code 2026-06-17, not the 5-day-old memory):
 - **No audio-in-chat tower exists.** The same `MLXVLM/Gemma4.swift` `sanitize()` (≈ line
   1752) **strips `audio_tower` and `embed_audio`**; only audio-token *positions*
   (`audioMask`) are handled, with nothing to fill them. Audio-in-chat would be a net-new
-  tower port and overlaps the existing dedicated `/v1/audio/*` endpoints.
+  Swift tower port (research-grade, not the wiring vision was). It does **not** overlap the
+  dedicated `/v1/audio/*` endpoints: those serve audio *analysis* (transcribe/diarize/
+  speaker-embed via Whisper/Sortformer/WeSpeaker), whereas audio-in-chat would serve audio
+  *reasoning* (the model reasons over a clip) — complementary jobs, exactly as OpenAI ships
+  both Whisper and `gpt-4o-audio`. The dedicated endpoints stay canonical for analysis
+  regardless (dedicated models beat an omni tower there).
 - **Governor accounting already counts the tower.** `MLXLLMModule.estimateBytes` sums
   every `*.safetensors` in the model dir, so the on-disk admission estimate already
   includes the vision-tower weights even though the text path discards them at load —
@@ -69,11 +74,14 @@ Add image input to the chat path by **wiring Athena to the substrate's existing
    images itself. (A future outbound-image carve-out, if a consumer ever needs it, would
    require its own ADR amending the passive-oracle rule; it is explicitly out of scope.)
 
-4. **Defer audio-in-chat.** Audio-in-chat is **not** in this milestone: it needs a
-   net-new Swift audio tower (the substrate strips it) and duplicates the existing
-   `/v1/audio/*` endpoints. Captured as a separate future milestone with its own gate.
-   Audio understanding remains available via the dedicated transcription / diarization
-   endpoints.
+4. **Defer audio-in-chat.** Audio-in-chat is **not** in this milestone — deferred on
+   *feasibility*, not overlap: it needs a net-new Swift audio tower (the substrate strips
+   it; research-grade port). It is **complementary to**, not a duplicate of, the dedicated
+   `/v1/audio/*` endpoints — those own audio *analysis* (transcribe/diarize/speaker-embed),
+   audio-in-chat would own audio *reasoning*. Captured as a separate future milestone with
+   its own gate (plan: `docs/audio-input-chat-plan.md`; tracked as GitHub issue #5, gated on
+   upstream `mlx-swift-lm#207`). Audio analysis remains available via the dedicated
+   transcription / diarization endpoints in the meantime.
 
 ## Consequences
 
