@@ -167,7 +167,7 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
         try audio.write(to: tmp)
         defer { try? FileManager.default.removeItem(at: tmp) }
 
-        let pcm = try AudioDecode.pcm16kMono(from: tmp)
+        let pcm = try AudioDecode.pcm16kMono(from: tmp, module: .diarization)
         let audio = MLXArray(pcm).asType(.float32)
 
         // M24.4b: the offline single-pass path is capped by the

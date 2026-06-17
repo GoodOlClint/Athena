@@ -187,7 +187,7 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
         try audio.write(to: tmp)
         defer { try? FileManager.default.removeItem(at: tmp) }
 
-        let pcm = try AudioDecode.pcm16kMono(from: tmp)
+        let pcm = try AudioDecode.pcm16kMono(from: tmp, module: .transcription)
         // PCM-level entry: >30 s is chunked into 30 s windows. nil
         // language ⇒ Whisper auto-detects (once, on window 0). Result
         // carries timed segments for verbose_json/srt/vtt.

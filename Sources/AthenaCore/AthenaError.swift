@@ -28,6 +28,14 @@ public enum AthenaError: Error, Sendable, Equatable {
     /// yield any feature frame. A client error (400) — never a silent
     /// zero embedding.
     case audioSegmentInvalid(module: ModuleID, detail: String)
+    /// The uploaded audio could not be read/decoded (malformed, corrupt, or
+    /// truncated). A client error (400) — NOT a `moduleLoadFailed` 500: the
+    /// module is fine, the upload is the fault. (issue #6)
+    case invalidAudio(module: ModuleID, detail: String)
+    /// The uploaded audio's container/codec is not decodable by the daemon
+    /// (the AVFoundation converter could not be built for it). A client error
+    /// (400) — re-encode to a supported format (e.g. WAV/FLAC/MP3/M4A). (issue #6)
+    case audioFormatUnsupported(module: ModuleID, detail: String)
     /// Generation outlived the per-request inference deadline
     /// (`request_timeout_secs`) and was cancelled. A gateway timeout
     /// (504) so a runaway decode bounds the caller's wait (and frees the
@@ -52,6 +60,15 @@ public enum AthenaError: Error, Sendable, Equatable {
     /// unconstrained output (the structured-output contract breach G4/NC2
     /// were meant to eliminate).
     case structuredOutputUnavailable(detail: String)
+    /// The resident model loaded fine but has **no chat template**, so it
+    /// cannot render a chat request (e.g. a converted *base* checkpoint such
+    /// as `google/gemma-4-26B-A4B`, kept loadable by the vision-aware convert
+    /// path but unable to chat). A client error (400) — NOT a `moduleLoadFailed`
+    /// 500: the module loaded; the request/model shape is the fault. The
+    /// substrate raises `TokenizerError.missingChatTemplate` at prompt-render
+    /// time; the text factory silently falls back to plain formatting, so this
+    /// only escapes on the VLM path. (issue #4)
+    case noChatTemplate(module: ModuleID, detail: String)
 
     /// HTTP status the serve path should return for this error.
     public var httpStatus: Int {
@@ -63,11 +80,22 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .promptCacheCapExceeded: return 503
         case .audioTooLong: return 400
         case .audioSegmentInvalid: return 400
+        case .invalidAudio: return 400
+        case .audioFormatUnsupported: return 400
         case .requestTimedOut: return 504
         case .modelNotAvailable: return 400
         case .inputTooLong: return 400
         case .structuredOutputUnavailable: return 400
+        case .noChatTemplate: return 400
         }
+    }
+
+    /// OpenAI-style error `type`: `invalid_request_error` for any 4xx
+    /// (the caller can fix it), `server_error` otherwise. Replaces the
+    /// hardcoded `server_error` the serve path used to attach to every
+    /// classified error — which mislabeled client-caused 4xx faults.
+    public var type: String {
+        httpStatus < 500 ? "invalid_request_error" : "server_error"
     }
 
     /// Stable machine-readable code (OpenAI-style error `code`).
@@ -80,10 +108,13 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .promptCacheCapExceeded: return "prompt_cache_cap_exceeded"
         case .audioTooLong: return "audio_too_long"
         case .audioSegmentInvalid: return "audio_segment_invalid"
+        case .invalidAudio: return "invalid_audio"
+        case .audioFormatUnsupported: return "audio_format_unsupported"
         case .requestTimedOut: return "inference_timeout"
         case .modelNotAvailable: return "model_not_available"
         case .inputTooLong: return "input_too_long"
         case .structuredOutputUnavailable: return "structured_output_unavailable"
+        case .noChatTemplate: return "no_chat_template"
         }
     }
 
@@ -114,6 +145,15 @@ public enum AthenaError: Error, Sendable, Equatable {
                 seconds, module.rawValue, maxSeconds)
         case let .audioSegmentInvalid(module, detail):
             return "Invalid audio segment for \(module.rawValue): \(detail)"
+        case .invalidAudio:
+            // NE7: the substrate/AVFoundation detail (which can carry the
+            // temp file path) goes to `serverDetail`, not the client body.
+            return "The uploaded audio could not be decoded — it is "
+                + "malformed, corrupt, or truncated. Re-export it and try "
+                + "again."
+        case .audioFormatUnsupported:
+            return "The uploaded audio's format or codec is not supported. "
+                + "Re-encode it to WAV, FLAC, MP3, or M4A and try again."
         case let .requestTimedOut(seconds):
             return "Inference exceeded the \(seconds)s request timeout "
                 + "and was cancelled."
@@ -144,6 +184,12 @@ public enum AthenaError: Error, Sendable, Equatable {
         case let .structuredOutputUnavailable(detail):
             return "Structured output could not be enforced for this "
                 + "request: \(detail)."
+        case .noChatTemplate:
+            // NE7: keep the client body stable and detail-free; the
+            // substrate reason goes to `serverDetail`/the log.
+            return "The loaded model has no chat template, so it cannot "
+                + "serve chat. Use an instruct checkpoint (e.g. an `-it` "
+                + "variant) or a model that ships a chat template."
         }
     }
 
@@ -154,8 +200,23 @@ public enum AthenaError: Error, Sendable, Equatable {
         switch self {
         case let .moduleLoadFailed(_, reason): return reason
         case let .metalOutOfMemory(_, detail): return detail
+        case let .noChatTemplate(_, detail): return detail
+        case let .invalidAudio(_, detail): return detail
+        case let .audioFormatUnsupported(_, detail): return detail
         default: return nil
         }
+    }
+
+    /// Does `error` look like the substrate's "no chat template" condition
+    /// (`MLXLMCommon.TokenizerError.missingChatTemplate`)? Matched by string
+    /// so `AthenaCore` stays MLX-free (same approach as `isMetalOOM`). The
+    /// case's `String(describing:)` is `missingChatTemplate`; its
+    /// `errorDescription` is "This tokenizer does not have a chat template."
+    public static func isMissingChatTemplate(_ error: any Error) -> Bool {
+        if error is AthenaError { return false }
+        let s = String(describing: error).lowercased()
+        return s.contains("missingchattemplate")
+            || s.contains("does not have a chat template")
     }
 
     /// Does `error` look like a genuine MLX/Metal allocation failure
@@ -184,6 +245,12 @@ public enum AthenaError: Error, Sendable, Equatable {
         if isMetalOOM(error) {
             return .metalOutOfMemory(
                 module: module, detail: String(describing: error))
+        }
+        if isMissingChatTemplate(error) {
+            // The module loaded; the model just can't chat (no template).
+            // A 400 client error, not the generic 500 moduleLoadFailed.
+            return .noChatTemplate(
+                module: module ?? .llm, detail: String(describing: error))
         }
         return .moduleLoadFailed(
             module ?? .llm, reason: String(describing: error))

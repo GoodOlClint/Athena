@@ -1507,15 +1507,11 @@ struct AthenaServer {
                 try await auditedRebind(
                     request, module: .textEmbedding, target: m)
             }
-        } catch let e as AthenaError {
-            return Self.error(
-                status: HTTPResponse.Status(code: e.httpStatus),
-                message: e.message, type: "server_error", code: e.code)
         } catch {
-            return Self.error(
-                status: .internalServerError,
-                message: String(describing: error),
-                type: "server_error", code: "internal_error")
+            // issue #6: route every failure through the classification seam
+            // (correct 4xx + `type`, OOM→503, no substrate-detail leak to the
+            // client body) instead of a catch-all 500 `internal_error`.
+            return Self.classified(error, module: .textEmbedding)
         }
 
         // M39: `body.model` selects among the configured set. The module
@@ -1607,15 +1603,9 @@ struct AthenaServer {
                 try await auditedRebind(
                     request, module: .transcription, target: m)
             }
-        } catch let e as AthenaError {
-            return Self.error(
-                status: HTTPResponse.Status(code: e.httpStatus),
-                message: e.message, type: "server_error", code: e.code)
         } catch {
-            return Self.error(
-                status: .internalServerError,
-                message: String(describing: error),
-                type: "server_error", code: "internal_error")
+            // issue #6: classify (see textEmbedding handler) — no leak, right code.
+            return Self.classified(error, module: .transcription)
         }
 
         // Word timestamps are an opt-in of verbose_json only
@@ -1782,15 +1772,9 @@ struct AthenaServer {
                 try await auditedRebind(
                     request, module: .diarization, target: m)
             }
-        } catch let e as AthenaError {
-            return Self.error(
-                status: HTTPResponse.Status(code: e.httpStatus),
-                message: e.message, type: "server_error", code: e.code)
         } catch {
-            return Self.error(
-                status: .internalServerError,
-                message: String(describing: error),
-                type: "server_error", code: "internal_error")
+            // issue #6: classify (see textEmbedding handler) — no leak, right code.
+            return Self.classified(error, module: .diarization)
         }
 
         let r: DiarizationResult
@@ -1834,15 +1818,9 @@ struct AthenaServer {
             case .loaded: break
             case .loading: return Self.coldLoadResponse(.speakerEmbedding)
             }
-        } catch let e as AthenaError {
-            return Self.error(
-                status: HTTPResponse.Status(code: e.httpStatus),
-                message: e.message, type: "server_error", code: e.code)
         } catch {
-            return Self.error(
-                status: .internalServerError,
-                message: String(describing: error),
-                type: "server_error", code: "internal_error")
+            // issue #6: classify (see textEmbedding handler) — no leak, right code.
+            return Self.classified(error, module: .speakerEmbedding)
         }
 
         let we: SpeakerEmbeddingResult
@@ -1973,15 +1951,9 @@ struct AthenaServer {
                 try await auditedRebind(
                     request, module: .speakerEmbedding, target: m)
             }
-        } catch let e as AthenaError {
-            return Self.error(
-                status: HTTPResponse.Status(code: e.httpStatus),
-                message: e.message, type: "server_error", code: e.code)
         } catch {
-            return Self.error(
-                status: .internalServerError,
-                message: String(describing: error),
-                type: "server_error", code: "internal_error")
+            // issue #6: classify (see textEmbedding handler) — no leak, right code.
+            return Self.classified(error, module: .speakerEmbedding)
         }
 
         let result: SpeakerEmbeddingResult
@@ -2695,10 +2667,15 @@ struct AthenaServer {
                 owner: who.enforced ? who.principal : nil)
             return Self.json(
                 QueueSubmitResponse(id: id, status: "queued"))
+        } catch let e as AthenaError {
+            // issue #6: a queued request can fail for a client reason (e.g.
+            // model_not_available) — surface it as the real 4xx, not 500.
+            return Self.classified(e, module: .llm)
         } catch {
+            Self.log.warning("queue submit failed code=queue_error \(error)")
             return Self.error(
                 status: .internalServerError,
-                message: "queue submit failed: \(error)",
+                message: "Failed to enqueue the job.",
                 type: "server_error", code: "queue_error")
         }
     }
@@ -4097,10 +4074,14 @@ struct AthenaServer {
             return Self.json(
                 ModelJobResponse(job_id: id, status: "queued"),
                 status: .accepted)
+        } catch let e as AthenaError {
+            // issue #6: surface a client-reason failure as the real 4xx, not 500.
+            return Self.classified(e, module: .llm)
         } catch {
+            Self.log.warning("queue submit failed code=queue_error \(error)")
             return Self.error(
                 status: .internalServerError,
-                message: "queue submit failed: \(error)",
+                message: "Failed to enqueue the job.",
                 type: "server_error", code: "queue_error")
         }
     }
@@ -5338,7 +5319,7 @@ struct AthenaServer {
             """)
         return error(
             status: HTTPResponse.Status(code: e.httpStatus),
-            message: e.message, type: "server_error", code: e.code)
+            message: e.message, type: e.type, code: e.code)
     }
 }
 

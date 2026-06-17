@@ -1,4 +1,5 @@
 import AVFoundation
+import AthenaCore
 import Foundation
 
 /// Decode an audio file (any format AVFoundation reads — wav/mp3/m4a/
@@ -28,6 +29,40 @@ public enum AudioDecode {
                 return "audio exceeds the \(m)-sample (~\(m / sampleRate)s) "
                     + "decode limit"
             }
+        }
+
+        /// Map a decode failure to a classified client (400) `AthenaError`,
+        /// so a bad upload surfaces as `invalid_audio` / `audio_too_long` /
+        /// `audio_format_unsupported` instead of the catch-all `500
+        /// module_load_failed` (issue #6). The raw `description` (which can
+        /// carry the temp file path) rides in the error's `serverDetail`
+        /// (server log only, NE7), never the client body.
+        public func athenaError(module: ModuleID) -> AthenaError {
+            switch self {
+            case .open, .convert:
+                return .invalidAudio(module: module, detail: description)
+            case .converterInit:
+                return .audioFormatUnsupported(
+                    module: module, detail: description)
+            case .tooLong(let m):
+                let secs = Double(m) / Double(sampleRate)
+                return .audioTooLong(
+                    module: module, seconds: secs, maxSeconds: secs)
+            }
+        }
+    }
+
+    /// Decode `url` like `pcm16kMono(from:maxSamples:)`, but translate any
+    /// `DecodeError` into a classified 400 `AthenaError` tagged with `module`
+    /// (issue #6). Callers on the serve path use this so the governed
+    /// `classified(_:module:)` seam emits a cause-naming client error.
+    public static func pcm16kMono(
+        from url: URL, module: ModuleID, maxSamples: Int = defaultMaxSamples
+    ) throws -> [Float] {
+        do {
+            return try pcm16kMono(from: url, maxSamples: maxSamples)
+        } catch let e as DecodeError {
+            throw e.athenaError(module: module)
         }
     }
 

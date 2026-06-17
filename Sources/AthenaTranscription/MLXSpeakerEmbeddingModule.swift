@@ -147,7 +147,7 @@ public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule,
         try audio.write(to: tmp)
         defer { try? FileManager.default.removeItem(at: tmp) }
 
-        let pcm = try AudioDecode.pcm16kMono(from: tmp)
+        let pcm = try AudioDecode.pcm16kMono(from: tmp, module: .speakerEmbedding)
         let sr = Double(AudioDecode.sampleRate)
         let totalSeconds = Double(pcm.count) / sr
 
@@ -216,7 +216,7 @@ public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule,
         try audio.write(to: tmp)
         defer { try? FileManager.default.removeItem(at: tmp) }
 
-        let pcm = try AudioDecode.pcm16kMono(from: tmp)
+        let pcm = try AudioDecode.pcm16kMono(from: tmp, module: .speakerEmbedding)
         let sr = Double(AudioDecode.sampleRate)
         let win = max(1, Int(windowSeconds * sr))
         let hop = max(1, Int(hopSeconds * sr))
