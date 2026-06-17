@@ -1,6 +1,7 @@
 import AthenaCore
 import AthenaModels
 import AthenaStructured
+import CoreImage
 import Foundation
 import HuggingFace
 import Logging
@@ -8,6 +9,7 @@ import MLX
 import MLXHuggingFace
 import MLXLLM
 import MLXLMCommon
+import MLXVLM
 import Tokenizers
 
 /// Sampling/length knobs for the LLM module. Kept Sendable so the governed
@@ -103,6 +105,11 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     private var container: ModelContainer?
     /// Currently-resident model name (nil ⇒ slot unloaded).
     private var residentName: String?
+    /// M71.2 — true when the resident container was loaded via the substrate's
+    /// `VLMModelFactory` (a vision checkpoint with an image tower). Drives the
+    /// `servesVision` capability and disables the DFlash drafter (its capture
+    /// seam is bound to the text `MLXLLM.Gemma4` model, not the VLM model).
+    private var residentIsVision = false
     /// M62 — the model the NEXT cold `load(reservation:)` will bind, set by
     /// `selectColdLoadModel` before the governor's non-blocking cold-load is
     /// kicked off. nil ⇒ bind the default. Only consulted while the slot is
@@ -298,9 +305,18 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     /// substrate requires at least one message).
     static func chatMessages(_ turns: [ChatTurn]) -> [Chat.Message] {
         let mapped = turns.map { turn in
-            Chat.Message(
+            // M71.2 — carry any decoded images as `UserInput.Image` so the
+            // VLM processor (e.g. Gemma4Processor) splices them. The bytes
+            // were already validated decodable at the HTTP boundary
+            // (`ChatImage.fromImageURL`), so `CIImage(data:)` is non-nil;
+            // compactMap is belt-and-suspenders. A text-only model ignores
+            // them (the serve path 400s an image to a non-vision model first).
+            let images: [UserInput.Image] = turn.images.compactMap {
+                CIImage(data: $0.data).map(UserInput.Image.ciImage)
+            }
+            return Chat.Message(
                 role: Chat.Message.Role(rawValue: turn.role) ?? .user,
-                content: turn.content)
+                content: turn.content, images: images)
         }
         return mapped.isEmpty ? [.user("")] : mapped
     }
@@ -308,6 +324,11 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     public var residentBytes: Int {
         container == nil ? 0 : estimatedBytes + dflashDraftBytes
     }
+
+    /// M71.2 — true when the resident model accepts image inputs (loaded via
+    /// the substrate VLM path). The serve path gates `image_url` content-parts
+    /// on this: a vision request to a text-only model is a 400.
+    public var servesVision: Bool { residentIsVision }
 
     public func memoryEstimate() -> Int { estimatedBytes }
 
@@ -331,6 +352,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     private func dropResidentModel() {
         container = nil
         residentName = nil
+        residentIsVision = false  // M71.2
         resetStructuredCaches()
     }
 
@@ -445,6 +467,13 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         // follow a symlinked ROOT, so it would load ZERO shards → the model
         // fails with keyNotFound on its first parameter. Convert-produced
         // models are real dirs and were unaffected; every pulled model was.
+        // Read config BEFORE the load: a `vision_config` routes the load
+        // through the substrate's VLMModelFactory (M71.2) so the image tower
+        // is built, not stripped. (The generic loadModelContainer tries
+        // factories in registration order and the text LLMModelFactory would
+        // win for gemma4 — so vision must be selected EXPLICITLY.)
+        let info = ModelConfigInfo.read(modelDirectory: url)
+        let isVision = info?.hasVisionConfig ?? false
         let loaded: ModelContainer
         do {
             // NC1: bind the checkpoint directory for the registry creators,
@@ -452,17 +481,22 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             // load's directory even if a queued convert loads concurrently.
             loaded = try await AthenaModelRegistration.$currentModelDirectory
                 .withValue(url) {
-                    try await loadModelContainer(
-                        from: url.resolvingSymlinksInPath(),
-                        using: #huggingFaceTokenizerLoader())
+                    let resolved = url.resolvingSymlinksInPath()
+                    let loader = #huggingFaceTokenizerLoader()
+                    if isVision {
+                        // Single VLM container serves BOTH text and image for a
+                        // vision checkpoint (ADR 010/011: one resident copy).
+                        // DFlash is intentionally disabled for this load.
+                        return try await VLMModelFactory.shared.loadContainer(
+                            from: resolved, using: loader)
+                    }
+                    return try await loadModelContainer(
+                        from: resolved, using: loader)
                 }
         } catch {
             dropResidentModel()  // C10
             throw error
         }
-        // Refresh per-model geometry: vocab size + KV per-token bound
-        // for THIS model's config.json (each rebind may change arch).
-        let info = ModelConfigInfo.read(modelDirectory: url)
         configVocabSize = info?.vocabSize
         let fp16PerToken =
             info?.perTokenKVBytes(bytesPerElement: 2) ?? (256 * 1024)
@@ -480,6 +514,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         dflashDraftBytes = 0
         container = loaded
         residentName = name
+        residentIsVision = isVision  // M71.2
     }
 
     /// M63.3b — ensure the DFlash drafter registered for the resident model
@@ -489,6 +524,11 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     /// fetched from Hugging Face on first use (the passive-oracle weight-fetch
     /// carve-out) and cached until rebind.
     private func ensureDFlashDraft() async throws -> DFlashDraftBox? {
+        // M71.2 — a VLM-loaded model can't use DFlash: the capture seam
+        // (`DFlashGemma4Backbone`) is bound to the text `MLXLLM.Gemma4` model,
+        // not the substrate VLM model. Skip the drafter download entirely
+        // (the dispatch at the perform site would no-op anyway).
+        guard !residentIsVision else { return nil }
         guard dflashEnabled, let name = residentName,
             let draftId = DFlashRegistry.draftId(forModel: name)
         else { return nil }

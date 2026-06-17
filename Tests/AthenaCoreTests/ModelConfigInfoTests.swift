@@ -36,6 +36,36 @@ final class ModelConfigInfoTests: XCTestCase {
         XCTAssertEqual(i.perTokenKVBytes(bytesPerElement: 2), 256 * 1024)
     }
 
+    // M71.2 — a top-level `vision_config` marks a vision checkpoint so the
+    // load routes through the substrate VLMModelFactory.
+    func testVisionConfigDetected() {
+        let i = info(
+            """
+            {"model_type":"gemma4","vocab_size":262144,
+             "text_config":{"num_hidden_layers":30,"hidden_size":2816},
+             "vision_config":{"hidden_size":1152,"num_hidden_layers":27}}
+            """)
+        XCTAssertTrue(i.hasVisionConfig)
+        XCTAssertEqual(i.modelType, "gemma4")
+        // text dims still resolve from the nested text_config
+        XCTAssertEqual(i.numHiddenLayers, 30)
+    }
+
+    func testNoVisionConfigForTextModel() {
+        let i = info(
+            """
+            {"model_type":"gemma4","vocab_size":262144,
+             "num_hidden_layers":30,"hidden_size":2816}
+            """)
+        XCTAssertFalse(i.hasVisionConfig)
+    }
+
+    func testVisionConfigMustBeObjectNotScalar() {
+        // A stray scalar named vision_config must NOT trip the router.
+        let i = info(#"{"model_type":"llama","vision_config":true}"#)
+        XCTAssertFalse(i.hasVisionConfig)
+    }
+
     func testKVHeadsFallBackToAttentionHeads() {
         let i = info(
             """

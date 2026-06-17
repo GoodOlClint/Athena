@@ -1,6 +1,6 @@
 # 010 — Vision input on chat: wire the substrate VLM path, base64-only images, defer audio-in-chat
 
-**Status:** Accepted — implementing. M71.1 (wire protocol) shipped v0.10.159; M71.2 (VLM load/generate) + M71.3 (capability surface + e2e) pending.
+**Status:** Accepted — implementing. M71.1 (wire protocol) shipped v0.10.159; M71.2 (VLM load/generate) shipped v0.10.160; M71.3 (capability surface in `athena show` + real-model e2e) pending. Load-path fork resolved: **single VLM container** for vision checkpoints (text + image both via `MLXVLM.Gemma4`), DFlash-on-gemma4 deferred (re-wire onto the VLM's inner text backbone is a follow-on).
 **Date:** 2026-06-17
 **Milestone:** M71 — resolves issue #3 (vision/image input)
 

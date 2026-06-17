@@ -4,6 +4,12 @@ import Foundation
 /// Typed inference contract for the LLM module. The MLX-backed
 /// implementation lands in M1; this protocol is what the serve path holds.
 public protocol LLMModule: InferenceModule {
+    /// M71.2 — true when the resident model accepts image inputs (a vision
+    /// checkpoint loaded via the substrate VLM path). The serve path gates
+    /// OpenAI `image_url` content-parts on this. Default false (text-only
+    /// conformers, the stub).
+    var servesVision: Bool { get async }
+
     /// Stream generated text chunks. M0 is a canned stub; M1 replaces the
     /// body with native `TokenIterator` generation.
     nonisolated func generate(prompt: String) -> AsyncStream<String>
@@ -103,6 +109,9 @@ public protocol LLMModule: InferenceModule {
 }
 
 extension LLMModule {
+    /// Default: no vision (text-only conformers, the stub). M71.2.
+    public var servesVision: Bool { get async { false } }
+
     public func preflightPromptCache(prompt: String) async throws {}
 
     public func selectColdLoadModel(_ id: String?) async throws {}

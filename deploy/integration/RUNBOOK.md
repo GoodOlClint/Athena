@@ -208,6 +208,36 @@ kv_compression path** — otherwise N/A.
 
 ---
 
+## J — Vision input / VLM chat (Studio + MacBook) · P0*
+
+Exercises **image input** (M71) on the real model path — a vision
+checkpoint (`vision_config` present, e.g. a `gemma-4-*-it` unified model)
+loads through the substrate **VLMModelFactory** (`MLXVLM.Gemma4`), not the
+text `LLMModelFactory`. The automated stub gate (phase 2.3) covers only the
+wire protocol + passive-oracle 400s; the stub is non-vision, so the actual
+image→text generation can only be checked here. Bring the host up with a
+vision `TEST_MODEL`. `*`P0 **only for a release that touches the
+vision/VLM load or chat-image path** — otherwise N/A.
+
+`IMG` below = a small base64 data: URL, e.g.
+`IMG="data:image/png;base64,$(base64 -i some.png | tr -d '\n')"`.
+
+| # | Action | Expected | Result |
+|---|---|---|---|
+| J1 | Studio: `athena show "$TEST_MODEL"` (vision model) | loads; `type:` is the gemma4 family; daemon comes up with the model resident | ☐ |
+| J2 | `curl $B/v1/chat/completions` with `content:[{type:text,text:"describe this image"},{type:image_url,image_url:{url:"$IMG"}}]` | a coherent **description of the image** (the VLM vision path ran) | ☐ |
+| J3 | Same as J2 but `url` = `https://…/x.png` | **400** `invalid_image` — passive-oracle, no outbound fetch | ☐ |
+| J4 | Plain text chat (no image parts) to the same vision model | normal completion — text path still works through the VLM container | ☐ |
+| J5 | (control) point `TEST_MODEL` at a TEXT model; redo J2 | **400** `vision_not_supported` — a text-only model refuses image input | ☐ |
+| J6 | Studio: `athena logs` during J2 | governor counts ONE resident copy (no double-load); decode heartbeats fire | ☐ |
+
+> NOTE (M71.2): a vision checkpoint loads via the VLM path, which **disables
+> DFlash for that model** (the drafter seam is bound to the text
+> `MLXLLM.Gemma4`). Qwen3.5-MTP / structured output are unaffected. Re-wiring
+> DFlash onto the VLM's inner text backbone is a deferred follow-on.
+
+---
+
 ## Teardown
 
 ```

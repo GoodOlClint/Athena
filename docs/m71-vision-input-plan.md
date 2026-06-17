@@ -65,11 +65,18 @@ constrained/structured decoding over the VLM path (open question, not needed by 
   `ChatContentPart` + `content` oneOf. e2e phase 2.3 asserts the two 400s + the unchanged
   200 text path. (Native `/api/chat` minimal dialect left text-only — vision goes through
   `/v1`; revisit if a native consumer needs it.)
-- **M71.2 — VLM load/generate path.** Link `MLXVLM`; add a vision-capable load/generate
-  route in `AthenaLLM` (`VLMModelFactory` + `Gemma4Processor` + `MLXVLM.Gemma4`) selected
-  when a request carries images and the model is vision-capable; text path stays on
-  `MLXLLM` **byte-unchanged**; governor counts the tower once (no double-count vs the text
-  module for the same weights). Pin the substrate commit in this slice.
+- **M71.2 — VLM load/generate path. ✅ SHIPPED v0.10.160** (substrate path-dep @ `7eb154c`).
+  Linked `MLXVLM` (daemon graph only). A checkpoint with a top-level `vision_config`
+  (`ModelConfigInfo.hasVisionConfig`) loads via `VLMModelFactory.shared.loadContainer`
+  instead of the text factory — **single VLM container** serves text + image
+  (`MLXLLMModule.residentIsVision`/`servesVision`). Images flow `ChatTurn.images` →
+  `Chat.Message(images:)` → `UserInput` → `Gemma4Processor` (CIImage). The serve path
+  (sync + queued) allows image parts only when `servesVision`, else 400
+  `vision_not_supported`. DFlash is skipped for VLM loads (seam bound to the text model;
+  re-wire deferred). Governor counts one resident copy (`estimateBytes` already sums all
+  safetensors incl. the tower). Non-vision text models are byte-unchanged. Unit tests:
+  `ModelConfigInfoTests` vision cases + `ChatImage` decodable-image validation. Real
+  image→text validation = RUNBOOK scenario **J** (stub can't exercise the VLM path).
 - **M71.3 — capability surface + e2e.** `athena show` reports a vision capability for
   `gemma4_unified`; real-model e2e (curl an image → coherent description) in
   `deploy/integration/RUNBOOK.md` (real-model tier) + a stub-tier e2e-rbac.sh phase;

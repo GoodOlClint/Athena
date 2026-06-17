@@ -1,3 +1,4 @@
+import CoreImage
 import Foundation
 
 /// One chat turn carried into the LLM module — role + content (+ any image
@@ -94,6 +95,13 @@ extension ChatImage {
             bytes = d
         }
         guard !bytes.isEmpty else { throw ChatImageError.malformedDataURL }
+        // Validate the bytes are a decodable image at the HTTP boundary so a
+        // corrupt-but-base64 payload is a clean 400 here, not a 500 deep in
+        // the VLM prepare path (M71.2). CIImage is lazy — this parses the
+        // header, it does not render pixels.
+        guard CIImage(data: bytes) != nil else {
+            throw ChatImageError.malformedDataURL
+        }
         return ChatImage(data: bytes, mediaType: mediaType)
     }
 }

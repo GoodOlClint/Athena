@@ -19,12 +19,17 @@ public struct ModelConfigInfo: Sendable, Equatable {
     public let numKeyValueHeads: Int?
     public let headDim: Int?
     public let hiddenSize: Int?
+    /// True when the checkpoint carries a `vision_config` object — i.e. it is
+    /// a vision-language checkpoint with an image tower (e.g. gemma4_unified),
+    /// not a text-only model. M71.2 uses this to route the load through the
+    /// substrate's `VLMModelFactory` instead of the text `LLMModelFactory`.
+    public let hasVisionConfig: Bool
 
     public init(
         modelType: String? = nil, vocabSize: Int? = nil,
         numHiddenLayers: Int? = nil, numAttentionHeads: Int? = nil,
         numKeyValueHeads: Int? = nil, headDim: Int? = nil,
-        hiddenSize: Int? = nil
+        hiddenSize: Int? = nil, hasVisionConfig: Bool = false
     ) {
         self.modelType = modelType
         self.vocabSize = vocabSize
@@ -33,6 +38,7 @@ public struct ModelConfigInfo: Sendable, Equatable {
         self.numKeyValueHeads = numKeyValueHeads
         self.headDim = headDim
         self.hiddenSize = hiddenSize
+        self.hasVisionConfig = hasVisionConfig
     }
 
     /// KV heads actually used by attention — `num_key_value_heads` when
@@ -88,6 +94,11 @@ public struct ModelConfigInfo: Sendable, Equatable {
             (obj[key] as? String) ?? (nested?[key] as? String)
         }
 
+        // A vision checkpoint carries a top-level `vision_config` object
+        // (gemma4_unified et al.). Presence — not contents — is the routing
+        // signal; the substrate's VLM model decodes the details.
+        let hasVision = obj["vision_config"] is [String: Any]
+
         return ModelConfigInfo(
             modelType: string("model_type"),
             vocabSize: int("vocab_size"),
@@ -95,7 +106,8 @@ public struct ModelConfigInfo: Sendable, Equatable {
             numAttentionHeads: int("num_attention_heads"),
             numKeyValueHeads: int("num_key_value_heads"),
             headDim: int("head_dim"),
-            hiddenSize: int("hidden_size"))
+            hiddenSize: int("hidden_size"),
+            hasVisionConfig: hasVision)
     }
 
     /// Read + parse `config.json` from a model directory, resolving a

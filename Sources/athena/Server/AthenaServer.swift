@@ -890,9 +890,13 @@ struct AthenaServer {
         } catch {
             return Self.imageContentError(error)
         }
-        // M71.1: image input has no model path yet — a request carrying images
-        // is a clean 400 until the VLM generate path lands (M71.2).
-        if turns.contains(where: { !$0.images.isEmpty }) {
+        // M71.2: image content-parts are served only by a vision-capable
+        // resident model (loaded via the substrate VLM path). The model is
+        // resolved by `governedLLM` above, so `servesVision` is accurate here;
+        // an image to a text-only model is a clean 400.
+        if turns.contains(where: { !$0.images.isEmpty }),
+            await llm.servesVision == false
+        {
             return Self.error(
                 status: .badRequest,
                 message:
@@ -2900,19 +2904,12 @@ struct AthenaServer {
                     ChatCompletionRequest.self, from: request)
             else { return (nil, "invalid conversation body") }
             // M71.1: decode image content-parts (passive-oracle: a remote/bad
-            // image URL fails the job); image input has no model path yet, so
-            // a job carrying images errors cleanly until the VLM path (M71.2).
+            // image URL fails the job up front, model-independent).
             let turns: [ChatTurn]
             do {
                 turns = try Self.chatTurns(from: req.messages)
             } catch {
                 return (nil, Self.imageErrorMessage(error))
-            }
-            if turns.contains(where: { !$0.images.isEmpty }) {
-                return (
-                    nil,
-                    "image input is not supported by the requested model"
-                )
             }
             do {
                 try await governor.ensureLoaded(.llm)
@@ -2921,6 +2918,17 @@ struct AthenaServer {
                 // governor before the preflight + decode.
                 if let m = req.model, !m.isEmpty {
                     try await selectable(.llm).rebind(to: m)
+                }
+                // M71.2: gate image content-parts on the RESOLVED model's
+                // vision capability (checked after the rebind, like the sync
+                // handler). An image to a text-only model fails the job.
+                if turns.contains(where: { !$0.images.isEmpty }),
+                    await llm.servesVision == false
+                {
+                    return (
+                        nil,
+                        "image input is not supported by the requested model"
+                    )
                 }
                 // NC3: same tools + kwargs the queued decode renders.
                 try await llm.preflightPromptCache(
