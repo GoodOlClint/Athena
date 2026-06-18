@@ -64,8 +64,9 @@ wants that to hold for **every modality Athena serves**, not just transcription.
      mis-decodes — already enforced at load).
    - **transcription / parakeet** — the **NeMo** signal `joint.vocabulary`
      present. A `parakeet_tdt` transformers checkpoint without it →
-     `unsupported(reason: "transformers packaging; use the mlx-community NeMo
-     build mlx-community/parakeet-tdt-0.6b-v3")`.
+     `unsupported(reason: "config has no joint.vocabulary — the Parakeet loader
+     needs a NeMo-format export")`. The message names the **structural
+     requirement**, never a repo id (see the guidance rule below).
    - **diarization** — `sortformer` / `pyannote-segmentation` per ADR 018.
    - **embedding** — sentence-transformers markers or an embedder-only type
      (ADR 016).
@@ -101,6 +102,17 @@ wants that to hold for **every modality Athena serves**, not just transcription.
    forward pass is numerically correct. Full correctness remains the job of the
    gated heavy tests (`ATHENA_RUN_MODEL_TESTS=1`). Messaging must say "Athena can
    load this," never "this model is correct."
+
+5. **Guidance names the requirement, never a repo (binding).** A
+   `reason`/`guidance` string in code describes the **structural requirement**
+   the checkpoint fails — what the packaging lacks or what Athena needs (e.g.
+   "config has no `joint.vocabulary`"; "decoder requires the large-v3 vocab
+   51866, this has N") — and **must not hard-code a specific model id or HF
+   repo**. Repos are renamed, gated, or deleted; a message pointing at one rots,
+   and baking a vendor's id into error paths couples Athena to that vendor. The
+   requirement is stable; the repo that satisfies it is the operator's choice.
+   (Historical incident examples in *docs* may name repos for context; **code**
+   must not.)
 
 ### Rejected / deferred
 

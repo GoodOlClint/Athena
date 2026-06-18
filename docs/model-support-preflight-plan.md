@@ -36,7 +36,7 @@ ModelSupport (MLX-free)
  │     (delegates to ModelClass / TranscriptionArch / DiarizationBackend)
  └─ loadability(config, modality) → loadable | unsupported(reason, guidance) | unknown
         whisper:   model_type==whisper && n_vocab==51866
-        parakeet:  joint.vocabulary present (NeMo)  — else "use mlx-community NeMo build"
+        parakeet:  joint.vocabulary present (NeMo)  — else "no joint.vocabulary; needs a NeMo-format export"
         embedding: ST markers / embedder-only type
         generative/vision: best-effort (.unknown for named-but-unverified; substrate is ground truth)
 
@@ -58,9 +58,12 @@ pyannote, speaker-embedding, generative, vision, unknown.
 
 **S2 — Loader consumers.** Each module's `loadModel` consults `ModelSupport` and
 refuses `.unsupported` packaging with a cause-naming 4xx (generalizes the M76
-Parakeet 500→400; folds in the whisper-vocab guard). *Test:* a `parakeet_tdt`
-transformers-format dir → `400 unsupported_transcription_arch` naming the
-mlx-community build, **not** a 500.
+Parakeet 500→400; folds in the whisper-vocab guard). Error guidance names the
+**structural requirement** (missing `joint.vocabulary` / NeMo-format export),
+never a repo id (ADR 021 guidance rule). *Test:* a `parakeet_tdt`
+transformers-format dir → `400 unsupported_transcription_arch` describing the
+missing `joint.vocabulary` requirement, **not** a 500; assert the message
+contains **no** hard-coded model id.
 
 **S3 — `convert` consumer.** `convert` uses `ModelSupport`: transcription /
 diarization / speaker-embedding modalities are redirected to `pull` with
@@ -88,6 +91,9 @@ vs preflight (support). ADR 021 → Accepted; CLAUDE.md index updated.
   e2e; `./deploy/e2e-rbac.sh` stays green.
 - Regression pins for both incident cases (Parakeet nvidia load 500→400; convert
   ASR misroute → redirect).
+- **Guidance-rule pin:** every `unsupported(...)` reason/guidance string asserts
+  it contains **no** hard-coded model id / HF repo (ADR 021 decision 5) — a unit
+  test over the predicate's verdict messages.
 
 ## Risks
 
