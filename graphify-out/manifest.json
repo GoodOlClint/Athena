@@ -1090,8 +1090,8 @@
     "semantic_hash": "371237f6ed34877c859b071318d9b529"
   },
   "CLAUDE.md": {
-    "mtime": 1781810310.904963,
-    "ast_hash": "7b9f0ad1026f5fbf678bab2ba4a5e2a0",
+    "mtime": 1781816135.9682932,
+    "ast_hash": "32e66c8030ce2871a284b6759459109f",
     "semantic_hash": ""
   },
   "docs/cli-reference.md": {
@@ -1545,8 +1545,33 @@
     "semantic_hash": ""
   },
   "docs/decisions/019-parakeet-asr-deferred.md": {
-    "mtime": 1781810268.586709,
-    "ast_hash": "965b1c88cd1a8ecc91c7ed4145760f64",
+    "mtime": 1781815786.5958707,
+    "ast_hash": "4da05f7f1256f5eb7b6c0da0dfba329e",
+    "semantic_hash": ""
+  },
+  "Sources/AthenaTranscription/Parakeet/ParakeetLoader.swift": {
+    "mtime": 1781815563.5722616,
+    "ast_hash": "6c40f3172283c84023d2d342025a9e71",
+    "semantic_hash": ""
+  },
+  "Sources/AthenaTranscription/Parakeet/ParakeetModel.swift": {
+    "mtime": 1781815543.8507383,
+    "ast_hash": "a585f3fb8bb9401899bce0d1a71d6e68",
+    "semantic_hash": ""
+  },
+  "Tests/AthenaCoreTests/ParakeetSpikeTests.swift": {
+    "mtime": 1781815119.2152853,
+    "ast_hash": "48c477fded4d971f2d832507ed88d0f5",
+    "semantic_hash": ""
+  },
+  "docs/decisions/020-multi-backend-transcription.md": {
+    "mtime": 1781816061.0076253,
+    "ast_hash": "57a3e131cde18a5ba8a168f048ceaca5",
+    "semantic_hash": ""
+  },
+  "docs/parakeet-transcription-plan.md": {
+    "mtime": 1781816106.674897,
+    "ast_hash": "9418985004d73af38da321e0c03343ac",
     "semantic_hash": ""
   }
 }
