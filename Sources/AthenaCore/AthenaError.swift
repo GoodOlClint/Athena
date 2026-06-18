@@ -79,6 +79,19 @@ public enum AthenaError: Error, Sendable, Equatable {
     /// not the daemon, is the fault.
     case unsupportedConvertClass(model: String, detected: String, guidance: String)
 
+    /// The requested `/v1/audio/diarizations` `method` does not match the
+    /// resident diarization model's backend (ADR 018) — e.g. `method=pyannote`
+    /// with a Sortformer model, `method=sortformer` with a segmentation model,
+    /// or an unrecognized method string. A client error (400): the request
+    /// selected an incompatible method, the daemon is healthy. `reason` is
+    /// client-safe.
+    case diarizationMethodInvalid(method: String, reason: String)
+
+    /// A wired-but-not-yet-built capability (a placeholder while a feature
+    /// lands across stacked slices). 501 — the route exists, the engine does
+    /// not yet. `feature` is client-safe.
+    case notImplemented(feature: String)
+
     /// HTTP status the serve path should return for this error.
     public var httpStatus: Int {
         switch self {
@@ -97,6 +110,8 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .structuredOutputUnavailable: return 400
         case .noChatTemplate: return 400
         case .unsupportedConvertClass: return 400
+        case .diarizationMethodInvalid: return 400
+        case .notImplemented: return 501
         }
     }
 
@@ -126,6 +141,8 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .structuredOutputUnavailable: return "structured_output_unavailable"
         case .noChatTemplate: return "no_chat_template"
         case .unsupportedConvertClass: return "unsupported_convert_class"
+        case .diarizationMethodInvalid: return "invalid_method"
+        case .notImplemented: return "not_implemented"
         }
     }
 
@@ -205,6 +222,10 @@ public enum AthenaError: Error, Sendable, Equatable {
             return "Cannot convert '\(model)': detected model class "
                 + "'\(detected)', which `athena convert` does not handle. "
                 + guidance
+        case let .diarizationMethodInvalid(method, reason):
+            return "Diarization method '\(method)' cannot be used: \(reason)."
+        case let .notImplemented(feature):
+            return "\(feature) is not yet available."
         }
     }
 

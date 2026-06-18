@@ -1919,12 +1919,26 @@ struct AthenaServer {
                 type: "invalid_request_error", code: "missing_file")
         }
 
-        // Method select: default Sortformer (fast, ≤4 speakers); opt into
-        // the embedding+clustering diarizer (M25.3) for >4 speakers with
-        // `method=cluster` (+ optional num_speakers / max_speakers /
-        // threshold).
-        if form.text("method") == "cluster" {
+        // Method select (ADR 018). Default `sortformer` (fast, end-to-end,
+        // ≤4 speakers); `cluster` = naive-window embedding cluster (M25.3,
+        // >4, no overlap); `pyannote` = learned segmentation + embed + global
+        // cluster (overlap-aware, arbitrary speakers). `model` selects weights
+        // within the chosen method's family.
+        switch (form.text("method") ?? "").lowercased() {
+        case "", "sortformer":
+            break  // fall through to the Sortformer path below
+        case "cluster":
             return await handleClusterDiarization(file: file, form: form)
+        case "pyannote":
+            return await handlePyannoteDiarization(
+                request: request, file: file, form: form)
+        case let other:
+            return Self.classified(
+                AthenaError.diarizationMethodInvalid(
+                    method: other,
+                    reason: "unknown method — use sortformer, cluster, "
+                        + "or pyannote"),
+                module: .diarization)
         }
 
         do {
@@ -1965,6 +1979,138 @@ struct AthenaServer {
                     DiarizationSegmentDTO(
                         start: $0.start, end: $0.end,
                         speaker: $0.speaker)
+                }))
+    }
+
+    /// ADR 018 — pyannote pipeline: learned PyanNet segmentation → WeSpeaker
+    /// embed each locally-active region → GLOBAL agglomerative cluster
+    /// (same-window cannot-link) → overlap-aware turns with file-stable speaker
+    /// ids. The overlap-aware path the naive `cluster` method cannot produce.
+    /// The resident diarization model must be a pyannote segmentation
+    /// checkpoint (select via `model=`); `num_speakers`/`min_speakers`/
+    /// `max_speakers`/`threshold` tune the global clustering.
+    private func handlePyannoteDiarization(
+        request: Request, file: MultipartForm.Part, form: MultipartForm
+    ) async -> Response {
+        let t0 = Date()
+        let numSpeakers = form.text("num_speakers").flatMap(Int.init)
+        let minSpeakers = form.text("min_speakers").flatMap(Int.init)
+        let maxSpeakers = form.text("max_speakers").flatMap(Int.init)
+        let threshold = form.text("threshold").flatMap(Float.init) ?? 0.75
+
+        do {
+            // Cold-load the segmentation slot + optional per-request model
+            // selection, same as the Sortformer path (shared 100 MiB cap +
+            // cold-load 503 behavior).
+            switch try await governor.awaitLoad(
+                .diarization, within: coldLoadWaitSecs)
+            {
+            case .loaded: break
+            case .loading: return Self.coldLoadResponse(.diarization)
+            }
+            if let m = form.text("model"), !m.isEmpty {
+                try await auditedRebind(
+                    request, module: .diarization, target: m)
+            }
+            // The pyannote pipeline also needs the speaker-embedding model.
+            switch try await governor.awaitLoad(
+                .speakerEmbedding, within: coldLoadWaitSecs)
+            {
+            case .loaded: break
+            case .loading: return Self.coldLoadResponse(.speakerEmbedding)
+            }
+        } catch {
+            return Self.classified(error, module: .diarization)
+        }
+
+        // Method/model match: pyannote requires a segmentation-backed model.
+        let backend = await diarization.residentBackend()
+        guard backend == .pyannoteSegmentation else {
+            return Self.classified(
+                AthenaError.diarizationMethodInvalid(
+                    method: "pyannote",
+                    reason: "the resident diarization model is not a "
+                        + "segmentation model — select one with `model=` "
+                        + "(operator must pull a pyannote-segmentation model "
+                        + "into the diarization allowlist)"),
+                module: .diarization)
+        }
+
+        // 1. Learned segmentation → per-window locally-tagged regions.
+        let regions: [SpeakerActivityRegion]
+        do {
+            regions = try await diarization.segment(
+                audio: file.data, filename: file.filename)
+        } catch {
+            return Self.classified(error, module: .diarization)
+        }
+        if regions.isEmpty {
+            return Self.json(
+                DiarizationResponse(num_speakers: 0, segments: []))
+        }
+
+        // 2. Embed each region with WeSpeaker (256-d, stable model — ADR 018).
+        let embResult: SpeakerEmbeddingResult
+        do {
+            embResult = try await speakerEmbedding.embed(
+                audio: file.data, filename: file.filename,
+                segments: regions.map {
+                    SpeakerSegmentRequest(start: $0.start, end: $0.end)
+                })
+        } catch {
+            return Self.classified(error, module: .speakerEmbedding)
+        }
+        guard embResult.segments.count == regions.count else {
+            return Self.classified(
+                AthenaError.moduleLoadFailed(
+                    .speakerEmbedding,
+                    reason: "embedding count \(embResult.segments.count) "
+                        + "≠ region count \(regions.count)"),
+                module: .speakerEmbedding)
+        }
+
+        // 3. GLOBAL cluster with same-window cannot-link → file-stable ids.
+        let embeddings = embResult.segments.map { $0.embedding }
+        var labels = AgglomerativeClustering.cluster(
+            embeddings,
+            numClusters: numSpeakers, threshold: threshold,
+            maxClusters: maxSpeakers, minClusters: minSpeakers ?? 1,
+            cannotLink: PyannoteSegmentationDecode.sameWindowCannotLink(regions))
+
+        // 3b. Auto mode only: dissolve tiny clusters into real speakers
+        //     (pyannote min_cluster_size) so noisy short/overlap embeddings on
+        //     long messy audio don't inflate the count. An explicit
+        //     num_speakers is honored as-is.
+        if numSpeakers == nil {
+            let minClusterSeconds =
+                form.text("min_cluster_seconds").flatMap(Double.init) ?? 6.0
+            labels = PyannoteSegmentationDecode.reassignSmallClusters(
+                embeddings: embeddings, labels: labels,
+                durations: regions.map { $0.end - $0.start },
+                minDuration: minClusterSeconds)
+        }
+
+        // 4. Overlap-aware turns: one turn per region at its global id, then
+        //    merge each speaker's overlapping/adjacent turns (cross-speaker
+        //    overlap is preserved).
+        let rawTurns = zip(regions, labels).map {
+            DiarizationTurn(start: $0.start, end: $0.end, speaker: $1)
+        }
+        let turns = PyannoteSegmentationDecode.mergeSameSpeakerTurns(rawTurns)
+        let speakers = Set(labels).count
+
+        Logger(label: AthenaLogLabel.model(.diarization)).notice(
+            """
+            diarization done method=pyannote \
+            speakers=\(speakers) regions=\(regions.count) \
+            turns=\(turns.count) elapsed_ms=\(Self.elapsedMs(t0))
+            """)
+        return Self.json(
+            DiarizationResponse(
+                num_speakers: speakers,
+                segments: turns.map {
+                    DiarizationSegmentDTO(
+                        start: $0.start, end: $0.end, speaker: $0.speaker)
                 }))
     }
 

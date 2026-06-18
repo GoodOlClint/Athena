@@ -189,7 +189,7 @@ enum OpenAPISpec {
               "post": {
                 "tags": ["Audio"],
                 "summary": "Diarize audio (who spoke when).",
-                "description": "Multipart upload. Returns speaker-labelled time spans. Max upload size = `max_audio_upload_bytes` (default 100 MiB); over it ⇒ 413 payload_too_large.",
+                "description": "Multipart upload. Returns speaker-labelled time spans. `method` selects the engine (ADR 018): `sortformer` (default, end-to-end, ≤4 speakers), `cluster` (embedding+clustering, >4, no overlap), `pyannote` (learned segmentation + embedding + global clustering — arbitrary speakers, overlap-aware, file-stable ids; emits overlapping segments). Speaker ids are global across the whole file. Max upload size = `max_audio_upload_bytes` (default 100 MiB); over it ⇒ 413 payload_too_large.",
                 "requestBody": {
                   "required": true,
                   "content": { "multipart/form-data": { "schema": {
@@ -197,8 +197,13 @@ enum OpenAPISpec {
                     "required": ["file"],
                     "properties": {
                       "file": { "type": "string", "format": "binary" },
-                      "model": { "type": "string", "description": "Selects among --diarization-model allowlist (M41.3). Omit ⇒ default; unknown id ⇒ 400 model_not_available." },
-                      "num_speakers": { "type": "integer" }
+                      "method": { "type": "string", "enum": ["sortformer", "cluster", "pyannote"], "description": "Diarization engine. Omit ⇒ sortformer. A method that mismatches the resident model's backend ⇒ 400 invalid_method." },
+                      "model": { "type": "string", "description": "Selects among --diarization-model allowlist (M41.3). For method=pyannote this must be a pyannote-segmentation model. Omit ⇒ default; unknown id ⇒ 400 model_not_available." },
+                      "num_speakers": { "type": "integer", "description": "Exact speaker count (cluster/pyannote)." },
+                      "min_speakers": { "type": "integer", "description": "Floor on auto speaker count (cluster/pyannote)." },
+                      "max_speakers": { "type": "integer", "description": "Cap on auto speaker count (cluster/pyannote)." },
+                      "threshold": { "type": "number", "description": "Cosine-distance merge threshold for auto speaker count (cluster/pyannote; default 0.75)." },
+                      "min_cluster_seconds": { "type": "number", "description": "pyannote auto mode only: minimum total airtime for a cluster to count as a speaker; smaller clusters are reassigned to the nearest speaker (default 6). Ignored when num_speakers is set." }
                     }
                   } } }
                 },

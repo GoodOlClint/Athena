@@ -1,6 +1,11 @@
 # ADR 018 — multi-backend diarization (pyannote pipeline for >4 / overlapping speakers)
 
-**Status:** Proposed (M74) — awaiting operator approval. No code yet.
+**Status:** Accepted — shipped v0.10.168 (M74). The `pyannote` method is live
+behind `POST /v1/audio/diarizations`; PyanNet segmentation ported to MLX,
+forward validated on real audio (overlap detected, no 4-cap). Auto speaker
+counting on long/messy audio is approximate — pass `num_speakers`/`max_speakers`
+for an exact count (see plan + `docs/diarization.md`). Implementation:
+`docs/multi-backend-diarization-plan.md`.
 
 ## Context
 
@@ -67,9 +72,17 @@ piece is CoreML — irrelevant here, Athena's WeSpeaker is already MLX).
    existing `speakerEmbedding` module → `AgglomerativeClustering` with a
    **same-window cannot-link** constraint (two local speakers in one window are
    never merged) → **overlap-aware** turn assembly (a frame may belong to two
-   global speakers). This mirrors exactly how `method=cluster` already composes
+   global speakers). Clustering is **global over the whole file**, so emitted
+   speaker ids are stable end-to-end (the same person = the same integer from
+   0:00 to EOF); `SpeakerActivityRegion.localSpeaker` is an internal per-window
+   id only. This mirrors exactly how `method=cluster` already composes
    `speakerEmbedding` + clustering at the route layer — the module owns only the
    model-specific segmentation step (`segment(audio:) -> [SpeakerActivityRegion]`).
+   Whole-file is processed in one call (pyannote is internally windowed — no
+   Parakeet-style attention-window limit); client-side chunking is rejected
+   because it would break global ids. The full consumer contract (response
+   shape, hints, overlap, embeddings stability, ASR pairing, shared cap) is
+   recorded in the plan's "Consumer contract (confirmed M74)".
 
 3. **Selection is explicit (no magic).** `method` picks the algorithm family —
    `sortformer` (default / absent, ≤4, fast, end-to-end), `cluster` (existing

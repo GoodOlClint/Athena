@@ -38,6 +38,11 @@ struct Load: AsyncParsableCommand {
         "mlx-community/whisper-large-v3-turbo"
     static let defaultDiarizationModel =
         "mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16"
+    /// Additive pyannote segmentation backend (ADR 018) — selectable via
+    /// `method=pyannote` for >4 / overlapping speakers. Not the default
+    /// diarizer; seeded into the allowlist alongside Sortformer.
+    static let defaultPyannoteSegmentationModel =
+        "aufklarer/Pyannote-Segmentation-MLX"
     static let defaultSpeakerEmbeddingModel =
         "aufklarer/WeSpeaker-ResNet34-LM-MLX"
 
@@ -123,7 +128,9 @@ struct Load: AsyncParsableCommand {
             default.
             """
     )
-    var diarizationModels: [String] = [Load.defaultDiarizationModel]
+    var diarizationModels: [String] = [
+        Load.defaultDiarizationModel, Load.defaultPyannoteSegmentationModel,
+    ]
 
     @Option(
         name: .customLong("speaker-embedding-model"),

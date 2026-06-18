@@ -22,16 +22,30 @@ public enum AgglomerativeClustering {
     ///     Guards against a permissive threshold collapsing distinct
     ///     speakers into one. Default 1 = prior behavior.
     /// - Returns: a 0-based contiguous label per input row.
+    /// - Parameter cannotLink: point-index pairs that must NEVER share a
+    ///   cluster (ADR 018 — two locally-simultaneous pyannote speakers are
+    ///   distinct people). A merge is skipped whenever the two clusters
+    ///   jointly contain any forbidden pair; the constraint propagates on
+    ///   merge. Out-of-range indices are ignored.
     public static func cluster(
         _ embeddings: [[Float]],
         numClusters: Int? = nil,
         threshold: Float = 0.75,
         maxClusters: Int? = nil,
-        minClusters: Int = 1
+        minClusters: Int = 1,
+        cannotLink: [(Int, Int)] = []
     ) -> [Int] {
         let n = embeddings.count
         if n == 0 { return [] }
         if n == 1 { return [0] }
+
+        // Cluster-level cannot-link matrix, seeded from the point pairs and
+        // unioned on every merge so a forbidden pair can never be bridged.
+        var forbidden = [Bool](repeating: false, count: n * n)
+        for (a, b) in cannotLink where a >= 0 && b >= 0 && a < n && b < n && a != b {
+            forbidden[a * n + b] = true
+            forbidden[b * n + a] = true
+        }
 
         // D10: a cosine distance over unit vectors is in [0, 2]; clamp a
         // caller-supplied threshold into range so an out-of-band value can't
@@ -74,7 +88,7 @@ public enum AgglomerativeClustering {
             var bestJ = -1
             var bestD = Float.greatestFiniteMagnitude
             for i in 0..<n where active[i] {
-                for j in (i + 1)..<n where active[j] {
+                for j in (i + 1)..<n where active[j] && !forbidden[i * n + j] {
                     let d = dist[i * n + j]
                     if d < bestD {
                         bestD = d
@@ -83,6 +97,7 @@ public enum AgglomerativeClustering {
                     }
                 }
             }
+            // No allowed pair left (all remaining pairs are cannot-linked).
             if bestI < 0 { break }
 
             // Decide whether to merge this closest pair (checked before
@@ -110,6 +125,14 @@ public enum AgglomerativeClustering {
                 let merged = (si * dik + sj * djk) / (si + sj)
                 dist[bestI * n + k] = merged
                 dist[k * n + bestI] = merged
+            }
+            // Propagate cannot-link: the merged cluster inherits every
+            // forbidden relation of both halves.
+            for k in 0..<n where active[k] && k != bestI && k != bestJ {
+                if forbidden[bestJ * n + k] {
+                    forbidden[bestI * n + k] = true
+                    forbidden[k * n + bestI] = true
+                }
             }
             size[bestI] += size[bestJ]
             active[bestJ] = false

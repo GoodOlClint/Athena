@@ -77,6 +77,9 @@ struct Init: AsyncParsableCommand {
                 embeddingModels.map { ("embeddings", $0) }
             def.append(("transcription", Load.defaultTranscriptionModel))
             def.append(("diarization", Load.defaultDiarizationModel))
+            // ADR 018 — pyannote segmentation backend for method=pyannote
+            // (>4 / overlapping speakers). Tiny (~6 MB); pulled alongside.
+            def.append(("diarization", Load.defaultPyannoteSegmentationModel))
             def.append(("speaker-embeddings", Load.defaultSpeakerEmbeddingModel))
             aux = def
         }

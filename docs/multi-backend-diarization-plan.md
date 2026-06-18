@@ -1,7 +1,13 @@
 # Multi-backend diarization — change plan (M74)
 
-**Status:** Proposed, awaiting operator approval. Pairs with ADR 018. No code
-until approved (brownfield change gate).
+**Status:** Accepted — operator-approved. Pairs with ADR 018. Implemented as
+stacked slices S1–S4 below.
+
+Confirmed during de-risk: the existing `cluster` path is *tunable* on messy
+6-speaker audio but the right `threshold` is strongly audio-dependent (0.75→65,
+0.85→12, 0.90→5 speakers on one real file) — non-transferable across recordings.
+That sensitivity is exactly what the learned segmentation front-end removes;
+hence the build proceeds rather than shipping threshold tuning alone.
 
 ## Goal
 
@@ -38,14 +44,65 @@ unchanged.
 - `model` (existing): selects weights within the chosen method's family from the
   `diarization` allowlist. Mismatch → 4xx `model_not_available` /
   `invalid_method_model` (cause-naming, standard envelope).
-- `num_speakers` (exact) / `max_speakers` (cap) / `threshold` (default 0.75) —
-  reused for `pyannote` clustering. Optional `min_duration`, `onset`/`offset`
-  segmentation thresholds if tuning needs them.
+- `num_speakers` (exact) / `min_speakers` (floor) / `max_speakers` (cap) /
+  `threshold` (default 0.75) — clustering hints for `pyannote`. `min_speakers`
+  maps to `AgglomerativeClustering.minClusters`; `max_speakers` to
+  `maxClusters`; `num_speakers` to the exact count. Optional `min_duration`,
+  `onset`/`offset` segmentation thresholds if tuning needs them. (Also accepted
+  on `method=cluster` for parity.)
 - Response: `{num_speakers, segments:[{start,end,speaker}]}`. The `pyannote`
   path may emit **overlapping** segments (same span, different speaker); no
   schema change.
 
 Default behavior for every existing caller is byte-unchanged.
+
+## Consumer contract (confirmed M74)
+
+Locked with the audio-consumer agent that is decoupling ASR (Parakeet) from
+diarization. All confirmed against the ADR-018 design:
+
+1. **Response shape unchanged** — `{num_speakers, segments:[{start,end,speaker}]}`,
+   OpenAI multipart, Bearer auth. No change.
+2. **Globally-stable speaker ids.** Speaker integers are **global across the
+   whole file**, not per-window. `SpeakerActivityRegion.localSpeaker` is an
+   internal per-window track id; the route's cross-window agglomerative
+   clustering maps every region to a **global** label before emitting turns, so
+   the same person carries the same integer from 0:00 to end-of-file. The
+   same-window cannot-link constraint guarantees two simultaneous local tracks
+   never collapse to one global id.
+3. **No speaker cap.** The pyannote/cluster path has no architectural ceiling
+   (the 4-cap is Sortformer-only). `num_speakers` / `min_speakers` /
+   `max_speakers` hints accepted (all optional; absent ⇒ auto via `threshold`).
+4. **Whole-file, single call.** pyannote is internally windowed (10 s / 50%
+   overlap) and stream-friendly, so there is **no Parakeet-style 24-min
+   attention window** — a 77-min file diarizes in one call. Binding limits:
+   (a) the **100 MiB upload cap** shared with all `/v1/audio/*` — note raw
+   16 kHz mono WAV of 77 min is ~148 MB and will 413; use compressed
+   (m4a/opus); (b) clustering cost grows with the number of speech regions
+   (O(n²) memory, O(n³) time in the current UPGMA). **Commitment: keep
+   whole-file server-side — client-side chunking is explicitly rejected because
+   it would break global ids.** S4 benchmarks a real ~77-min file and reports a
+   concrete region-count/latency number; if clustering dominates, mitigate with
+   coarser hop / region cap / faster linkage — never by chunking.
+5. **Overlap = multiple segments.** Overlapping speech is emitted as multiple
+   segments with intersecting time spans and **different** speaker ids; overlaps
+   are **not** collapsed. (Sortformer and `cluster` keep emitting
+   non-overlapping turns.)
+6. **Embeddings untouched.** `POST /v1/audio/embeddings` keeps its
+   `segments`-JSON contract, **256-d WeSpeaker**, stable model id — this work
+   does not change the embedding model or dimension (would invalidate enrolled
+   voiceprints). The pyannote pipeline reuses that same WeSpeaker module
+   internally.
+7. **ASR+diar pairing = option (a), confirmed.** `/v1/audio/diarizations` is the
+   single authoritative diarization source; the client calls `/transcriptions`
+   (text) and `/diarizations` separately and merges by timestamp.
+   `/transcriptions?diarize=true` stays the **legacy Sortformer convenience**
+   (≤4, max-overlap tagging) and its ids are **not** reconciled with a
+   standalone pyannote `/diarizations` call — do not rely on it for >4 or for
+   id-consistency.
+8. **Shared cap + cold-load.** `/v1/audio/diarizations` shares the 100 MiB audio
+   cap and the same `governor.awaitLoad` cold-load 503/keep-alive behavior as
+   the other audio endpoints, for every method.
 
 ## Architecture
 
