@@ -189,19 +189,55 @@ public enum PyannoteSegmentationDecode {
         }
         var totalDur: [Int: Double] = [:]
         for i in 0..<n { totalDur[labels[i], default: 0] += durations[i] }
-        var big = totalDur.filter { $0.value >= minDuration }.map { $0.key }
+        var big = Set(totalDur.filter { $0.value >= minDuration }.map { $0.key })
         // Never dissolve everything: anchor on the longest cluster if none
         // clear the bar.
         if big.isEmpty, let top = totalDur.max(by: { $0.value < $1.value })?.key
         {
             big = [top]
         }
-        let bigSet = Set(big)
-        if bigSet.count == totalDur.count { return compact(labels) }
+        if big.count == totalDur.count { return compact(labels) }
+        return reassignToAnchors(
+            embeddings: embeddings, labels: labels, anchors: big)
+    }
 
-        // L2-normalized centroid per surviving cluster.
+    /// Force exactly `target` clusters: keep the `target` largest (by total
+    /// region duration) as anchors and reassign every other region to the
+    /// nearest anchor centroid. This honors an explicit `num_speakers` even
+    /// when the same-window cannot-link constraint leaves the agglomerative cut
+    /// stuck *above* the target (the constraint can never be satisfied below
+    /// the size of a mutually-overlapping speaker clique, so an exact count
+    /// must override it). Returns `labels` compacted when already ≤ `target`.
+    public static func reduceToTargetClusters(
+        embeddings: [[Float]], labels: [Int], durations: [Double], target: Int
+    ) -> [Int] {
+        let n = labels.count
+        guard n > 0, target > 0, embeddings.count == n, durations.count == n
+        else { return compact(labels) }
+        var totalDur: [Int: Double] = [:]
+        for i in 0..<n { totalDur[labels[i], default: 0] += durations[i] }
+        if totalDur.count <= target { return compact(labels) }
+        let anchors = Set(
+            totalDur.sorted { $0.value > $1.value }
+                .prefix(target).map { $0.key })
+        return reassignToAnchors(
+            embeddings: embeddings, labels: labels, anchors: anchors)
+    }
+
+    /// Reassign every region whose label is not in `anchors` to the nearest
+    /// anchor cluster by centroid cosine similarity; anchors keep their
+    /// members. Returns contiguous 0-based labels with exactly `anchors.count`
+    /// clusters. Shared by `reassignSmallClusters` (anchors = big clusters) and
+    /// `reduceToTargetClusters` (anchors = top-N).
+    private static func reassignToAnchors(
+        embeddings: [[Float]], labels: [Int], anchors: Set<Int>
+    ) -> [Int] {
+        let n = labels.count
+        guard let fallback = anchors.first else { return compact(labels) }
+
+        // L2-normalized centroid per anchor cluster.
         var centroids: [Int: [Float]] = [:]
-        for label in big {
+        for label in anchors {
             let members = (0..<n).filter { labels[$0] == label }
             guard let dim = members.first.map({ embeddings[$0].count }) else {
                 continue
@@ -216,10 +252,10 @@ public enum PyannoteSegmentationDecode {
         }
 
         var out = labels
-        for i in 0..<n where !bigSet.contains(labels[i]) {
+        for i in 0..<n where !anchors.contains(labels[i]) {
             let e = embeddings[i]
             let en = max(sqrt(e.reduce(0) { $0 + $1 * $1 }), 1e-9)
-            var bestLabel = big[0]
+            var bestLabel = fallback
             var bestSim = -Float.greatestFiniteMagnitude
             for (label, c) in centroids {
                 var dot: Float = 0

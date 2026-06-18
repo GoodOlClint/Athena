@@ -2077,17 +2077,23 @@ struct AthenaServer {
             maxClusters: maxSpeakers, minClusters: minSpeakers ?? 1,
             cannotLink: PyannoteSegmentationDecode.sameWindowCannotLink(regions))
 
-        // 3b. Auto mode only: dissolve tiny clusters into real speakers
-        //     (pyannote min_cluster_size) so noisy short/overlap embeddings on
-        //     long messy audio don't inflate the count. An explicit
-        //     num_speakers is honored as-is.
-        if numSpeakers == nil {
+        let regionDurations = regions.map { $0.end - $0.start }
+        if let target = numSpeakers {
+            // Exact count: the agglomerative cut can stick *above* the target
+            // because same-window cannot-link forbids the final merges, so
+            // force exactly N (override the constraint — the user asked for N).
+            labels = PyannoteSegmentationDecode.reduceToTargetClusters(
+                embeddings: embeddings, labels: labels,
+                durations: regionDurations, target: target)
+        } else {
+            // Auto mode: dissolve tiny clusters into real speakers (pyannote
+            // min_cluster_size) so noisy short/overlap embeddings on long messy
+            // audio don't inflate the count.
             let minClusterSeconds =
                 form.text("min_cluster_seconds").flatMap(Double.init) ?? 6.0
             labels = PyannoteSegmentationDecode.reassignSmallClusters(
                 embeddings: embeddings, labels: labels,
-                durations: regions.map { $0.end - $0.start },
-                minDuration: minClusterSeconds)
+                durations: regionDurations, minDuration: minClusterSeconds)
         }
 
         // 4. Overlap-aware turns: one turn per region at its global id, then

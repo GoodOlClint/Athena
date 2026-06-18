@@ -102,5 +102,18 @@ final class PyanNetSegmentationModelTests: XCTestCase {
         // refinement must keep the count sane (not the ~90 raw fragmentation).
         XCTAssertGreaterThanOrEqual(speakers, 2)
         XCTAssertLessThanOrEqual(speakers, 20)
+
+        // Exact-count fix (v0.10.169): num_speakers must force EXACTLY N on real
+        // embeddings, even when the same-window cannot-link floor leaves the raw
+        // cut above N. Regression for "num_speakers ignored on method=pyannote".
+        try XCTSkipIf(regions.count < 3, "too few regions for exact-count check")
+        for target in [2, 3] {
+            let forced = PyannoteSegmentationDecode.reduceToTargetClusters(
+                embeddings: embeddings, labels: rawLabels,
+                durations: regions.map { $0.end - $0.start }, target: target)
+            XCTAssertEqual(
+                Set(forced).count, target,
+                "num_speakers=\(target) must yield exactly \(target) (raw=\(Set(rawLabels).count))")
+        }
     }
 }

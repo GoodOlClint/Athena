@@ -198,6 +198,42 @@ final class PyannoteSegmentationDecodeTests: XCTestCase {
         XCTAssertEqual(Set(out).count, 1)
     }
 
+    // MARK: exact num_speakers reduction (cannot-link floor fix)
+
+    func testReduceToTargetForcesExactlyNWhenStuckAbove() {
+        // 4 clusters that the agglomerative cut left above the requested count
+        // (cannot-link floor). num_speakers=2 must collapse to exactly 2,
+        // keeping the two largest (by duration) as anchors.
+        let a: [Float] = [1, 0]
+        let b: [Float] = [0, 1]
+        let embeddings = [a, a, b, b, [0.9, 0.1], [0.1, 0.9]]
+        let labels = [0, 0, 1, 1, 2, 3]  // 4 clusters
+        let durations = [10.0, 10.0, 8.0, 8.0, 1.0, 1.0]  // 0 and 1 largest
+        let out = PyannoteSegmentationDecode.reduceToTargetClusters(
+            embeddings: embeddings, labels: labels, durations: durations,
+            target: 2)
+        XCTAssertEqual(Set(out).count, 2)
+        // The [0.9,0.1] outlier joins cluster A (indices 0,1); [0.1,0.9] joins B.
+        XCTAssertEqual(out[4], out[0])
+        XCTAssertEqual(out[5], out[2])
+    }
+
+    func testReduceToTargetNoOpWhenAlreadyAtOrBelowTarget() {
+        let embeddings = [[Float]([1, 0]), [0, 1]]
+        let out = PyannoteSegmentationDecode.reduceToTargetClusters(
+            embeddings: embeddings, labels: [0, 1], durations: [5, 5], target: 5)
+        XCTAssertEqual(Set(out).count, 2)
+    }
+
+    func testReduceToTargetOneCollapsesEverything() {
+        // num_speakers=1 overrides cannot-link entirely → exactly 1.
+        let embeddings = [[Float]([1, 0]), [0, 1], [0.5, 0.5]]
+        let out = PyannoteSegmentationDecode.reduceToTargetClusters(
+            embeddings: embeddings, labels: [0, 1, 2], durations: [3, 2, 1],
+            target: 1)
+        XCTAssertEqual(Set(out).count, 1)
+    }
+
     func testCompactRenumbersFirstAppearanceOrder() {
         XCTAssertEqual(
             PyannoteSegmentationDecode.compact([5, 5, 2, 9, 2]), [0, 0, 1, 2, 1])
