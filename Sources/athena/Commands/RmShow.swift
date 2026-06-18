@@ -1,5 +1,6 @@
 import ArgumentParser
 import AthenaClient
+import AthenaCore
 import AthenaLLM
 import Foundation
 

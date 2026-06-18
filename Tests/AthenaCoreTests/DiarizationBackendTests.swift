@@ -1,7 +1,7 @@
 import Foundation
 import XCTest
 
-@testable import AthenaTranscription
+@testable import AthenaCore
 
 /// Pure diarization-backend classification (ADR 018 / M74). No MLX — the
 /// detector is MLX-free so it always runs in CI (ADR 009). Pins the decision

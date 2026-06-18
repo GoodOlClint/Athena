@@ -1,7 +1,6 @@
 import XCTest
 
 @testable import AthenaCore
-@testable import AthenaLLM
 
 /// Pure model-class classification (ADR 016 / M73). No MLX — the detector is
 /// MLX-free so it always runs in CI (ADR 009). Pins the decision table that

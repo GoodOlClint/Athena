@@ -1,7 +1,7 @@
 import Foundation
 import XCTest
 
-@testable import AthenaTranscription
+@testable import AthenaCore
 
 /// Pure (MLX-free) transcription-engine routing (ADR 020). Always runs in CI
 /// (ADR 009). Pins the positive router: Whisper checkpoints → `.whisper`,

@@ -1,6 +1,6 @@
 import XCTest
 
-@testable import AthenaLLM
+@testable import AthenaCore
 
 /// Pure config.json parsing + the generalized per-token KV estimate
 /// (M23 fork C). No MLX — always runs in CI.
