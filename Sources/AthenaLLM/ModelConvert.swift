@@ -36,6 +36,65 @@ public enum ModelConvert {
         return !name.hasPrefix(".")
     }
 
+    /// ADR 021 S3 — given a config-only `ModelSupport` verdict, decide whether
+    /// `athena convert` can handle this checkpoint. `convert` is a
+    /// generative/vision **quantization** pipeline; the other modalities load
+    /// in source precision via their own module paths, so they are REDIRECTED
+    /// to `pull` with a cause-naming error rather than mis-routed to the
+    /// generative factory (the M76 incident, where a Parakeet checkpoint hit
+    /// the LLM factory and produced a misleading "bump the substrate" message).
+    ///
+    /// Returns nil for a convert target: `.llm` / `.vision`, or `.unsupported`
+    /// (no `model_type` — proceed so the substrate factory raises the precise
+    /// architecture error, which the existing `looksLikeUnsupportedArch`
+    /// handler wraps). Returns a 400 `unsupportedConvertClass` for embedding +
+    /// the audio modalities. Guidance echoes the operator's own `id` (dynamic
+    /// input, not a hard-coded repo) and names no other repo (ADR 021 D5).
+    ///
+    /// MLX-free decision logic (ADR 008/009): unit-pinned without a network
+    /// fetch or model load.
+    public static func convertRedirect(
+        for support: ModelSupport, id: String
+    ) -> AthenaError? {
+        switch support.modality {
+        case .llm, .vision, .unsupported:
+            return nil
+        case .embedding:
+            return .unsupportedConvertClass(
+                model: id, detected: "embedding",
+                guidance:
+                    "Embedding models load in source precision directly — run "
+                    + "`athena pull \(id)`, then select it as the embedding "
+                    + "model (`--embedding-model \(id)` / config). `convert` "
+                    + "is for generative and vision models.")
+        case .transcription, .diarization, .speakerEmbedding:
+            let label = modalityLabel(support.modality)
+            return .unsupportedConvertClass(
+                model: id, detected: label,
+                guidance:
+                    "\(label.capitalized) models load in source precision via "
+                    + "their audio module paths — run `athena pull \(id)`, then "
+                    + "select it for that module (config / `athena allowlist "
+                    + "add`). `convert` quantizes only generative and vision "
+                    + "models.")
+        }
+    }
+
+    /// A short human label for the detected modality, used in the convert
+    /// redirect's `detected` field. Repo-id-free by construction.
+    static func modalityLabel(_ modality: ModelModality) -> String {
+        switch modality {
+        case .llm: return "generative"
+        case .vision: return "vision"
+        case .embedding: return "embedding"
+        case .transcription(let arch): return "transcription (\(arch.rawValue))"
+        case .diarization(let backend):
+            return "diarization (\(backend.rawValue))"
+        case .speakerEmbedding: return "speaker-embedding"
+        case .unsupported: return "unsupported"
+        }
+    }
+
     /// `progress` (0…1) covers the DOWNLOAD phase only; the
     /// quantization tail has no HF progress. Default nil keeps the
     /// daemon/queue caller unchanged.
@@ -55,11 +114,16 @@ public enum ModelConvert {
             HuggingFace.HubClient(
                 session: AthenaProxy.proxiedURLSession()))
 
-        // ADR 016 fail-fast: fetch only the small metadata needed to classify
-        // the model's CLASS before pulling multi-GB weights. An embedding
-        // model is redirected to the serve path (it loads in source precision
-        // and needs no converted artifact), not mis-routed to the LLM factory
-        // — which would fail with an opaque `unsupportedModelType`/`keyNotFound`.
+        // ADR 016/021 fail-fast: fetch only the small metadata needed to
+        // classify the model's MODALITY before pulling multi-GB weights, and
+        // redirect the classes `convert` does not quantize. Embedding,
+        // transcription, diarization and speaker-embedding models all load in
+        // source precision via their own module paths and need no converted
+        // artifact — so convert REDIRECTS them to `pull` (ADR 021 S3) instead
+        // of mis-routing them to the generative factory, which for a Parakeet
+        // checkpoint produced the misleading "bump the substrate" error (the
+        // M76 incident). The decision is the shared `ModelSupport` predicate,
+        // so convert and the loaders/preflight can never disagree.
         let meta = try await downloader.download(
             id: id, revision: revision,
             matching: [
@@ -69,14 +133,10 @@ public enum ModelConvert {
             ],
             useLatest: false,
             progressHandler: { _ in })
-        if ModelClass.detect(in: meta) == .embedding {
-            throw AthenaError.unsupportedConvertClass(
-                model: id, detected: "embedding",
-                guidance:
-                    "Embedding models load in source precision directly — run "
-                    + "`athena pull \(id)`, then select it as the embedding "
-                    + "model (`--embedding-model \(id)` / config). `convert` "
-                    + "is for generative and vision models.")
+        if let redirect = convertRedirect(
+            for: ModelSupport.detect(in: meta), id: id)
+        {
+            throw redirect
         }
 
         let snapshot = try await downloader.download(
