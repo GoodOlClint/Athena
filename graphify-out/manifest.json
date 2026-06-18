@@ -10,8 +10,8 @@
     "semantic_hash": "baa0b2e6c2456a2ddc1a4b2e82592cd6"
   },
   "Sources/AthenaCore/AthenaError.swift": {
-    "mtime": 1781809540.6263576,
-    "ast_hash": "75138b6bbc8890317846a10f1a53c637",
+    "mtime": 1781824270.498733,
+    "ast_hash": "cc255fefcc53d4e5094b9231cde41641",
     "semantic_hash": ""
   },
   "Sources/AthenaCore/AthenaProxy.swift": {
@@ -159,14 +159,9 @@
     "ast_hash": "af431a020e22a31809d2180ed113be03",
     "semantic_hash": ""
   },
-  "Sources/AthenaLLM/ModelConfigInfo.swift": {
-    "mtime": 1781707894.4712448,
-    "ast_hash": "275ab5cd6c26ee6eafecfe9fb27ebf8b",
-    "semantic_hash": ""
-  },
   "Sources/AthenaLLM/ModelConvert.swift": {
-    "mtime": 1781741805.5467207,
-    "ast_hash": "c456e1deb6b8032c0511c3dd34a835e9",
+    "mtime": 1781824614.5644443,
+    "ast_hash": "4aa08f7db3a62055775f4405f2fe7d56",
     "semantic_hash": ""
   },
   "Sources/AthenaLLM/ModelHealth.swift": {
@@ -325,8 +320,8 @@
     "semantic_hash": ""
   },
   "Sources/AthenaTranscription/MLXTranscriptionModule.swift": {
-    "mtime": 1781817729.2213666,
-    "ast_hash": "f3f608f612e400cedb7c8e2a9f2dee34",
+    "mtime": 1781824251.9521182,
+    "ast_hash": "bf15be8f4444d0ff9cf03ee9a4611813",
     "semantic_hash": ""
   },
   "Sources/AthenaTranscription/Sortformer/Sortformer.swift": {
@@ -425,8 +420,8 @@
     "semantic_hash": "d16404614855c59c2001089f41c5bd78"
   },
   "Sources/athena/Athena.swift": {
-    "mtime": 1781818372.2048275,
-    "ast_hash": "029e7ceef30c6cdddda197943e3d38c2",
+    "mtime": 1781824961.6777508,
+    "ast_hash": "06935c2741600fa6926a46e37c4cc1a7",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Audit.swift": {
@@ -480,8 +475,8 @@
     "semantic_hash": "40959ed4c75d499abd5030eea0e01f75"
   },
   "Sources/athena/Commands/Init.swift": {
-    "mtime": 1781796142.3020813,
-    "ast_hash": "1f6b92789fd670b79a3dbf0fbf1cd9ab",
+    "mtime": 1781818480.9881053,
+    "ast_hash": "8ae7139c26e54158fdbc89b0dba1c60f",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Install.swift": {
@@ -495,8 +490,8 @@
     "semantic_hash": "5f5b49d75a33c5f490e2fa462f22c6ea"
   },
   "Sources/athena/Commands/Load.swift": {
-    "mtime": 1781796130.7311835,
-    "ast_hash": "59225c1fffafba649a3ce9ad1a8fb001",
+    "mtime": 1781818474.2948625,
+    "ast_hash": "2effb2502b25c4d754432b6f6d5b2f93",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Logs.swift": {
@@ -520,14 +515,14 @@
     "semantic_hash": "29eec2ca8952347026658846a69e015c"
   },
   "Sources/athena/Commands/Pull.swift": {
-    "mtime": 1779577726.3838696,
-    "ast_hash": "f7adaf740d32eb3d0eda9aac715bad4b",
-    "semantic_hash": "f7adaf740d32eb3d0eda9aac715bad4b"
+    "mtime": 1781824743.7465844,
+    "ast_hash": "8e6362c8ad4898c4ae13c705593b4ca3",
+    "semantic_hash": ""
   },
   "Sources/athena/Commands/RmShow.swift": {
-    "mtime": 1779422180.47122,
-    "ast_hash": "b9da5486accb76dd9a51b84b9d43f85e",
-    "semantic_hash": "b9da5486accb76dd9a51b84b9d43f85e"
+    "mtime": 1781823898.2595894,
+    "ast_hash": "43dcc31f927cbe13bcc42d3b1d85e047",
+    "semantic_hash": ""
   },
   "Sources/athena/Commands/StoreKey.swift": {
     "mtime": 1781298357.802107,
@@ -570,8 +565,8 @@
     "semantic_hash": ""
   },
   "Sources/athena/Server/OpenAPISpec.swift": {
-    "mtime": 1781796886.487104,
-    "ast_hash": "f5e98c4ebf84b7c815ba034c9f30f514",
+    "mtime": 1781818510.7499714,
+    "ast_hash": "6a4506ad81c466116a0c973e0a1a6722",
     "semantic_hash": ""
   },
   "Sources/athena/Server/QueueWorkerService.swift": {
@@ -655,8 +650,8 @@
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/ModelConfigInfoTests.swift": {
-    "mtime": 1781708116.4366012,
-    "ast_hash": "1bec76c918b0f6955d936b3c7b06b983",
+    "mtime": 1781823915.04501,
+    "ast_hash": "0fcbbdc3f5b76964a84774c4bb89ca99",
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/ModelHealthTests.swift": {
@@ -1090,13 +1085,13 @@
     "semantic_hash": "371237f6ed34877c859b071318d9b529"
   },
   "CLAUDE.md": {
-    "mtime": 1781816135.9682932,
-    "ast_hash": "32e66c8030ce2871a284b6759459109f",
+    "mtime": 1781824945.9416907,
+    "ast_hash": "1ca1be385dde3b4bda64220649d06c02",
     "semantic_hash": ""
   },
   "docs/cli-reference.md": {
-    "mtime": 1781300298.5364296,
-    "ast_hash": "e75197b268ca6a30859611e741ceb5af",
+    "mtime": 1781824903.2046049,
+    "ast_hash": "0b4d90665ff676bfa2187814ed857c60",
     "semantic_hash": ""
   },
   "docs/decisions/README.md": {
@@ -1449,14 +1444,9 @@
     "ast_hash": "00cc1eb702aaf43203e2e2e7c34ea643",
     "semantic_hash": ""
   },
-  "Sources/AthenaLLM/ModelClass.swift": {
-    "mtime": 1781741767.3341606,
-    "ast_hash": "25984e4e8d5a36b5d201c31b4d18231f",
-    "semantic_hash": ""
-  },
   "Tests/AthenaCoreTests/ModelClassTests.swift": {
-    "mtime": 1781741847.8369129,
-    "ast_hash": "a73d38145d768851456c4b83ef5b2cce",
+    "mtime": 1781823903.918069,
+    "ast_hash": "01797bf055370bdb565f4521ea43a1a2",
     "semantic_hash": ""
   },
   "docs/decisions/016-model-class-aware-convert.md": {
@@ -1499,11 +1489,6 @@
     "ast_hash": "88f887f8a87190fb8de5e8984332dd5b",
     "semantic_hash": ""
   },
-  "Sources/AthenaTranscription/DiarizationBackend.swift": {
-    "mtime": 1781793822.6165075,
-    "ast_hash": "4d39efd71ef571442da9d5e39dfe4611",
-    "semantic_hash": ""
-  },
   "Sources/AthenaTranscription/Pyannote/PyanNetSegmentation.swift": {
     "mtime": 1781795550.9338734,
     "ast_hash": "7f252acbb8c1ef4593e202568e50c7d2",
@@ -1515,8 +1500,8 @@
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/DiarizationBackendTests.swift": {
-    "mtime": 1781793848.1313741,
-    "ast_hash": "0514ac6969ca393439736afb548c5642",
+    "mtime": 1781823925.5238855,
+    "ast_hash": "525cc2be5079262dd7c7b321e80f1731",
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/PyanNetSegmentationModelTests.swift": {
@@ -1534,14 +1519,9 @@
     "ast_hash": "8e5b709c6b2ffb9df1b3b255503f3807",
     "semantic_hash": ""
   },
-  "Sources/AthenaTranscription/TranscriptionArch.swift": {
-    "mtime": 1781816615.7881389,
-    "ast_hash": "f3e2d99f563691615affe6adcf4bc61d",
-    "semantic_hash": ""
-  },
   "Tests/AthenaCoreTests/TranscriptionArchTests.swift": {
-    "mtime": 1781816646.6966274,
-    "ast_hash": "07203c16516f8fe1479c7dc53bbecf56",
+    "mtime": 1781823930.307701,
+    "ast_hash": "647cd05a053b7a59fef86d91e609ead2",
     "semantic_hash": ""
   },
   "docs/decisions/019-parakeet-asr-deferred.md": {
@@ -1560,13 +1540,13 @@
     "semantic_hash": ""
   },
   "docs/decisions/020-multi-backend-transcription.md": {
-    "mtime": 1781816061.0076253,
-    "ast_hash": "57a3e131cde18a5ba8a168f048ceaca5",
+    "mtime": 1781818575.1652832,
+    "ast_hash": "263c47eb0af7c2e04c8190f7fd0352f4",
     "semantic_hash": ""
   },
   "docs/parakeet-transcription-plan.md": {
-    "mtime": 1781816106.674897,
-    "ast_hash": "9418985004d73af38da321e0c03343ac",
+    "mtime": 1781818613.4752135,
+    "ast_hash": "eba467193893e14171dc029bebe45f76",
     "semantic_hash": ""
   },
   "Sources/AthenaTranscription/Parakeet/ParakeetDetokenizer.swift": {
@@ -1612,6 +1592,76 @@
   "Tests/AthenaCoreTests/ParakeetDecodeStepTests.swift": {
     "mtime": 1781818115.8919528,
     "ast_hash": "7bc196f41760d8f810b8fbd2745b52f9",
+    "semantic_hash": ""
+  },
+  "docs/transcription.md": {
+    "mtime": 1781818563.90316,
+    "ast_hash": "5e2a7428d44413588c4758be1019a0ea",
+    "semantic_hash": ""
+  },
+  "docs/decisions/021-model-support-preflight.md": {
+    "mtime": 1781824914.1815348,
+    "ast_hash": "5565894564a39fa9fb398abf9683ed97",
+    "semantic_hash": ""
+  },
+  "docs/model-support-preflight-plan.md": {
+    "mtime": 1781822684.3718383,
+    "ast_hash": "ae891701209aefa7e99307b60fdf3a37",
+    "semantic_hash": ""
+  },
+  "Sources/AthenaCore/DiarizationBackend.swift": {
+    "mtime": 1781793822.6165075,
+    "ast_hash": "4d39efd71ef571442da9d5e39dfe4611",
+    "semantic_hash": ""
+  },
+  "Sources/AthenaCore/ModelClass.swift": {
+    "mtime": 1781741767.3341606,
+    "ast_hash": "25984e4e8d5a36b5d201c31b4d18231f",
+    "semantic_hash": ""
+  },
+  "Sources/AthenaCore/ModelConfigInfo.swift": {
+    "mtime": 1781707894.4712448,
+    "ast_hash": "275ab5cd6c26ee6eafecfe9fb27ebf8b",
+    "semantic_hash": ""
+  },
+  "Sources/AthenaCore/ModelSupport.swift": {
+    "mtime": 1781824602.248732,
+    "ast_hash": "31e4507ae96f312b7000de62ccbfc8aa",
+    "semantic_hash": ""
+  },
+  "Sources/AthenaCore/TranscriptionArch.swift": {
+    "mtime": 1781816615.7881389,
+    "ast_hash": "f3e2d99f563691615affe6adcf4bc61d",
+    "semantic_hash": ""
+  },
+  "Tests/AthenaCoreTests/ModelSupportTests.swift": {
+    "mtime": 1781823973.728553,
+    "ast_hash": "d99111c904c36ca625fe85301a16ebdc",
+    "semantic_hash": ""
+  },
+  "Tests/AthenaCoreTests/TranscriptionLoaderSupportTests.swift": {
+    "mtime": 1781824308.065747,
+    "ast_hash": "4afb0af8f10768adb334ad354dbe5d18",
+    "semantic_hash": ""
+  },
+  "Tests/AthenaCoreTests/ConvertRedirectTests.swift": {
+    "mtime": 1781824522.5436432,
+    "ast_hash": "7b15c31ac55aaae2ea3dc9bbe6eb2bea",
+    "semantic_hash": ""
+  },
+  "Sources/AthenaLLM/ModelPreflight.swift": {
+    "mtime": 1781824723.8498476,
+    "ast_hash": "663372605715b957ae16842282c6d3a3",
+    "semantic_hash": ""
+  },
+  "Tests/AthenaCoreTests/ModelPreflightTests.swift": {
+    "mtime": 1781824703.086285,
+    "ast_hash": "97f5e25e45135473360c1e90eb34daf8",
+    "semantic_hash": ""
+  },
+  "docs/model-support.md": {
+    "mtime": 1781824814.5411024,
+    "ast_hash": "6b64d9847336c4bdbc19f4197c06ad62",
     "semantic_hash": ""
   }
 }
