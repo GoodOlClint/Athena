@@ -325,8 +325,8 @@
     "semantic_hash": ""
   },
   "Sources/AthenaTranscription/MLXTranscriptionModule.swift": {
-    "mtime": 1781809548.5179372,
-    "ast_hash": "07a8c70435a95c3848a6b01e7b1393d2",
+    "mtime": 1781817033.062563,
+    "ast_hash": "1ae1059465bfef4e8b76797787dd77a1",
     "semantic_hash": ""
   },
   "Sources/AthenaTranscription/Sortformer/Sortformer.swift": {
@@ -425,8 +425,8 @@
     "semantic_hash": "d16404614855c59c2001089f41c5bd78"
   },
   "Sources/athena/Athena.swift": {
-    "mtime": 1781809938.87052,
-    "ast_hash": "b6efc0136a2141d562374ebb3d8564d6",
+    "mtime": 1781817401.4355311,
+    "ast_hash": "3bfc963464d476fa2ff5dd189d6dd972",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Audit.swift": {
@@ -1535,13 +1535,13 @@
     "semantic_hash": ""
   },
   "Sources/AthenaTranscription/TranscriptionArch.swift": {
-    "mtime": 1781809511.440577,
-    "ast_hash": "b984430eb7a429ba426bf830a4800449",
+    "mtime": 1781816615.7881389,
+    "ast_hash": "f3e2d99f563691615affe6adcf4bc61d",
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/TranscriptionArchTests.swift": {
-    "mtime": 1781809929.8304741,
-    "ast_hash": "2002dc7ae049bce702918baa8eb52679",
+    "mtime": 1781816646.6966274,
+    "ast_hash": "07203c16516f8fe1479c7dc53bbecf56",
     "semantic_hash": ""
   },
   "docs/decisions/019-parakeet-asr-deferred.md": {
@@ -1550,18 +1550,13 @@
     "semantic_hash": ""
   },
   "Sources/AthenaTranscription/Parakeet/ParakeetLoader.swift": {
-    "mtime": 1781815563.5722616,
-    "ast_hash": "6c40f3172283c84023d2d342025a9e71",
+    "mtime": 1781817054.4735878,
+    "ast_hash": "1310115d7a19399a45102e8e8a9c1f99",
     "semantic_hash": ""
   },
   "Sources/AthenaTranscription/Parakeet/ParakeetModel.swift": {
-    "mtime": 1781815543.8507383,
-    "ast_hash": "a585f3fb8bb9401899bce0d1a71d6e68",
-    "semantic_hash": ""
-  },
-  "Tests/AthenaCoreTests/ParakeetSpikeTests.swift": {
-    "mtime": 1781815119.2152853,
-    "ast_hash": "48c477fded4d971f2d832507ed88d0f5",
+    "mtime": 1781817046.161961,
+    "ast_hash": "17fa8f0a55abdc6277a590f60856df02",
     "semantic_hash": ""
   },
   "docs/decisions/020-multi-backend-transcription.md": {
@@ -1572,6 +1567,21 @@
   "docs/parakeet-transcription-plan.md": {
     "mtime": 1781816106.674897,
     "ast_hash": "9418985004d73af38da321e0c03343ac",
+    "semantic_hash": ""
+  },
+  "Sources/AthenaTranscription/Parakeet/ParakeetDetokenizer.swift": {
+    "mtime": 1781816953.5987759,
+    "ast_hash": "0878101a703ce99782f2a9fdd08f6be8",
+    "semantic_hash": ""
+  },
+  "Tests/AthenaCoreTests/ParakeetDetokenizerTests.swift": {
+    "mtime": 1781817070.2348163,
+    "ast_hash": "47e2b18731c9c33e12420d2e84caf03f",
+    "semantic_hash": ""
+  },
+  "Tests/AthenaCoreTests/ParakeetTranscriptionTests.swift": {
+    "mtime": 1781817238.9019625,
+    "ast_hash": "ccda14fa27b48019e2950f14c6de48e4",
     "semantic_hash": ""
   }
 }
