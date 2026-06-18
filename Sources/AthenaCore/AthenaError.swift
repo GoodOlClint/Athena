@@ -92,6 +92,12 @@ public enum AthenaError: Error, Sendable, Equatable {
     /// not yet. `feature` is client-safe.
     case notImplemented(feature: String)
 
+    /// A transcription model whose architecture the Whisper-only engine cannot
+    /// load (e.g. Parakeet/TDT/Conformer). A client/config fault (400) — the
+    /// id is allowlisted but unportable — surfaced as a cause-naming error
+    /// instead of a deep Whisper-loader 500. `model`/`detail` are client-safe.
+    case unsupportedTranscriptionArch(model: String, detail: String)
+
     /// HTTP status the serve path should return for this error.
     public var httpStatus: Int {
         switch self {
@@ -112,6 +118,7 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .unsupportedConvertClass: return 400
         case .diarizationMethodInvalid: return 400
         case .notImplemented: return 501
+        case .unsupportedTranscriptionArch: return 400
         }
     }
 
@@ -143,6 +150,7 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .unsupportedConvertClass: return "unsupported_convert_class"
         case .diarizationMethodInvalid: return "invalid_method"
         case .notImplemented: return "not_implemented"
+        case .unsupportedTranscriptionArch: return "unsupported_transcription_arch"
         }
     }
 
@@ -226,6 +234,10 @@ public enum AthenaError: Error, Sendable, Equatable {
             return "Diarization method '\(method)' cannot be used: \(reason)."
         case let .notImplemented(feature):
             return "\(feature) is not yet available."
+        case let .unsupportedTranscriptionArch(model, detail):
+            return "Transcription model '\(model)' is not a Whisper-family "
+                + "model; the transcription engine only supports Whisper "
+                + "checkpoints. \(detail)"
         }
     }
 

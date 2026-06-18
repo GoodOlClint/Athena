@@ -193,12 +193,21 @@ struct AthenaServer {
 
         router.get("/healthz") { [metrics, queue] _, _ -> Response in
             let snapshot = await governor.snapshot()
+            // Join each module slot to the id of its resident model (the
+            // governor tracks bytes/state, not model identity).
+            var residentModels: [ModuleID: String] = [:]
+            for m in snapshot.modules {
+                if let r = await self.selectable(m.id).residentModelId() {
+                    residentModels[m.id] = r
+                }
+            }
             let (inflight, lastAt, decodeTps) = await metrics.healthFields()
             let depth = await queue.depth()
             let gpu = gpuProbe?.current ?? (mhz: nil, activeResidency: nil)
             return Self.json(
                 HealthResponse(
                     snapshot: snapshot,
+                    residentModels: residentModels,
                     inflight: inflight,
                     queueDepth: depth,
                     lastRequestAt: lastAt,
@@ -1825,6 +1834,27 @@ struct AthenaServer {
                     switch try await governor.awaitLoad(.diarization, within: coldLoadWaitSecs) {
                     case .loaded: break
                     case .loading: return Self.coldLoadResponse(.diarization)
+                    }
+                    // diarize=true uses the END-TO-END (Sortformer) path to tag
+                    // each segment. The diarization slot is a single global
+                    // tenant (ADR 011), so if a pyannote *segmentation* model is
+                    // resident (e.g. a prior method=pyannote request rebound it),
+                    // this can't run — surface a clear 409, not a misleading
+                    // "use method=pyannote" (there is no method param here). The
+                    // canonical source is the standalone /v1/audio/diarizations
+                    // route (ADR 013).
+                    guard await diarization.residentBackend() == .sortformer
+                    else {
+                        return Self.error(
+                            status: .conflict,
+                            message: "diarize=true needs an end-to-end "
+                                + "(Sortformer) diarization model, but a "
+                                + "segmentation model is currently resident in "
+                                + "the single diarization slot. Diarize "
+                                + "separately via POST /v1/audio/diarizations, "
+                                + "or select a Sortformer diarization model.",
+                            type: "invalid_request_error",
+                            code: "diarization_backend_conflict")
                     }
                     turns = try await diarization.diarize(
                         audio: file.data, filename: file.filename
@@ -5866,13 +5896,28 @@ struct HealthResponse: Encodable {
     /// M60.3 — fraction of the recent window the GPU was active (`0...1`), or
     /// `null` when unavailable.
     let gpuActiveResidency: Double?
-    let modules: [ModuleSnapshot]
+    let modules: [ModuleHealth]
     let inflight: Int
     let queueDepth: Int
     let lastRequestAt: Double
 
+    /// A governor module snapshot enriched with the id of the model currently
+    /// resident in that module's slot (`nil` when unloaded) — so `athena ps`
+    /// and any /healthz scraper can see *which* model is loaded per module, not
+    /// just that the slot is occupied. The governor itself does not track model
+    /// ids (that is a `ModelSelectable` concern), so it is joined in here.
+    struct ModuleHealth: Encodable {
+        let id: ModuleID
+        let state: ModuleState
+        let residentBytes: Int
+        let evictable: Bool
+        let unloadedReason: UnloadedReason?
+        let model: String?
+    }
+
     init(
-        snapshot: GovernorSnapshot, inflight: Int,
+        snapshot: GovernorSnapshot, residentModels: [ModuleID: String],
+        inflight: Int,
         queueDepth: Int, lastRequestAt: Double,
         lastDecodeTokensPerSec: Double, powerAssertionHeld: Bool,
         gpuClockMHz: Double? = nil, gpuActiveResidency: Double? = nil
@@ -5892,7 +5937,12 @@ struct HealthResponse: Encodable {
         self.gpuActiveResidency = gpuActiveResidency
         self.mlxActiveBytes = MLX.Memory.activeMemory
         self.mlxCacheBytes = MLX.Memory.cacheMemory
-        self.modules = snapshot.modules
+        self.modules = snapshot.modules.map { m in
+            ModuleHealth(
+                id: m.id, state: m.state, residentBytes: m.residentBytes,
+                evictable: m.evictable, unloadedReason: m.unloadedReason,
+                model: residentModels[m.id])
+        }
         self.inflight = inflight
         self.queueDepth = queueDepth
         self.lastRequestAt = lastRequestAt

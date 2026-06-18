@@ -90,9 +90,18 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
                     + "— pull it first (operator action); inference does "
                     + "not auto-download")
         }
+        // Refuse a known non-Whisper ASR arch (e.g. Parakeet/TDT) up front with
+        // a cause-naming 4xx, instead of letting the Whisper loader fail deep
+        // with an opaque 500. The id is allowlisted but unportable.
+        let resolved = dir.resolvingSymlinksInPath()
+        if TranscriptionArch.isUnsupported(in: resolved) {
+            throw AthenaError.unsupportedTranscriptionArch(
+                model: canonical,
+                detail: "Use a Whisper model (e.g. "
+                    + "mlx-community/whisper-large-v3-turbo).")
+        }
         do {
-            model = try WhisperLoader.load(
-                directory: dir.resolvingSymlinksInPath())
+            model = try WhisperLoader.load(directory: resolved)
             tokenizer = try await WhisperLoader.loadTokenizer()
             residentId = canonical
         } catch {

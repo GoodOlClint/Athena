@@ -30,6 +30,10 @@ public struct Ps: AsyncParsableCommand {
             let state: String
             let residentBytes: Int
             let evictable: Bool
+            /// Id of the model resident in this module's slot (nil when
+            /// unloaded). Optional so the client still renders against a daemon
+            /// that predates the field.
+            let model: String?
         }
         let totalBudgetBytes: Int
         let residentBytes: Int
@@ -72,6 +76,8 @@ public struct Ps: AsyncParsableCommand {
                     toLength: 12, withPad: " ", startingAt: 0)
                 + "RESIDENT".padding(
                     toLength: 12, withPad: " ", startingAt: 0)
+                + "MODEL".padding(
+                    toLength: 40, withPad: " ", startingAt: 0)
                 + "EVICTABLE")
         for m in snap.modules.sorted(by: { $0.id < $1.id }) {
             print(
@@ -81,6 +87,8 @@ public struct Ps: AsyncParsableCommand {
                         toLength: 12, withPad: " ", startingAt: 0)
                     + humanBytes(m.residentBytes).padding(
                         toLength: 12, withPad: " ", startingAt: 0)
+                    + (m.model ?? "-").padding(
+                        toLength: 40, withPad: " ", startingAt: 0)
                     + (m.evictable ? "yes" : "no"))
         }
     }
