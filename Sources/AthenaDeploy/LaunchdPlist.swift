@@ -107,6 +107,12 @@ public enum LaunchdPlist {
         if let coldWait = config.coldLoadWaitSecs {
             args += ["--cold-load-wait-secs", String(coldWait)]
         }
+        if let audioCap = config.maxAudioUploadBytes {
+            args += ["--max-audio-upload-bytes", String(audioCap)]
+        }
+        if let bodyCap = config.maxRequestBodyBytes {
+            args += ["--max-request-body-bytes", String(bodyCap)]
+        }
         if config.preload == true {
             args += ["--preload"]  // a Flag, not an Option
         }

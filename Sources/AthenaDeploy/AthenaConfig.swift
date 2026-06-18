@@ -102,6 +102,16 @@ public struct AthenaConfig: Sendable, Equatable {
     /// — absent ⇒ a 120s default; `0` ⇒ legacy immediate-503 (the revert
     /// switch). Downloads (operator pull) are never waited on.
     public var coldLoadWaitSecs: Int?
+    /// Inbound upload caps (ADR 017). `maxAudioUploadBytes` bounds the raw
+    /// multipart body of the three `/v1/audio/*` routes (file + MIME
+    /// framing); `maxRequestBodyBytes` bounds the JSON request bodies
+    /// (`/v1/chat/completions`, `/v1/embeddings`, …). Both optional — absent
+    /// ⇒ daemon defaults (100 MiB audio / 4 MiB JSON). A configured value of
+    /// `0` or negative is a parse error (an unbounded upload is a memory-DoS
+    /// the governor does not cover — set a large positive number for
+    /// "effectively unlimited"). Over-cap ⇒ a clean `413 payload_too_large`.
+    public var maxAudioUploadBytes: Int?
+    public var maxRequestBodyBytes: Int?
     /// Preload (warm) the LLM at startup instead of lazily on first
     /// request (M33.3). Optional — absent / false ⇒ lazy load (default).
     /// Opt-in: the operator trades a slower start for a warm first
@@ -162,6 +172,8 @@ public struct AthenaConfig: Sendable, Equatable {
         tokenMaxAgeDays: Int? = nil,
         requestTimeoutSecs: Int? = nil,
         coldLoadWaitSecs: Int? = nil,
+        maxAudioUploadBytes: Int? = nil,
+        maxRequestBodyBytes: Int? = nil,
         preload: Bool? = nil,
         queueResultTtlSecs: Int? = nil,
         queueMaxRows: Int? = nil,
@@ -202,6 +214,8 @@ public struct AthenaConfig: Sendable, Equatable {
         self.tokenMaxAgeDays = tokenMaxAgeDays
         self.requestTimeoutSecs = requestTimeoutSecs
         self.coldLoadWaitSecs = coldLoadWaitSecs
+        self.maxAudioUploadBytes = maxAudioUploadBytes
+        self.maxRequestBodyBytes = maxRequestBodyBytes
         self.preload = preload
         self.queueResultTtlSecs = queueResultTtlSecs
         self.queueMaxRows = queueMaxRows
@@ -292,6 +306,17 @@ public struct AthenaConfig: Sendable, Equatable {
             }
             return i
         }
+        // ADR 017: an upload cap of `0`/negative is rejected (not treated as
+        // "unlimited") — an unbounded buffered upload is a memory-DoS the
+        // governor doesn't account for. Reuses `invalidInt` so the ParseError
+        // enum stays stable.
+        func positiveInt(_ key: String, _ raw: String) throws -> Int {
+            let i = try int(key, raw)
+            guard i > 0 else {
+                throw ParseError.invalidInt(key: key, value: raw)
+            }
+            return i
+        }
 
         let host = try require("listen_host")
         let portRaw = try require("listen_port")
@@ -336,6 +361,14 @@ public struct AthenaConfig: Sendable, Equatable {
         var coldLoadWait: Int?
         if let cw = scalar("cold_load_wait_secs", in: toml) {
             coldLoadWait = try int("cold_load_wait_secs", cw)
+        }
+        var maxAudioUpload: Int?
+        if let ma = scalar("max_audio_upload_bytes", in: toml) {
+            maxAudioUpload = try positiveInt("max_audio_upload_bytes", ma)
+        }
+        var maxRequestBody: Int?
+        if let mb = scalar("max_request_body_bytes", in: toml) {
+            maxRequestBody = try positiveInt("max_request_body_bytes", mb)
         }
         var queueTtl: Int?
         if let qt = scalar("queue_result_ttl_secs", in: toml) {
@@ -405,6 +438,8 @@ public struct AthenaConfig: Sendable, Equatable {
             tokenMaxAgeDays: tokenMaxAge,
             requestTimeoutSecs: reqTimeout,
             coldLoadWaitSecs: coldLoadWait,
+            maxAudioUploadBytes: maxAudioUpload,
+            maxRequestBodyBytes: maxRequestBody,
             preload: preload,
             queueResultTtlSecs: queueTtl,
             queueMaxRows: queueMax,

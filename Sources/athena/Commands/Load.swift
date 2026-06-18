@@ -226,6 +226,18 @@ struct Load: AsyncParsableCommand {
     )
     var coldLoadWaitSecs: Int?
 
+    @Option(
+        help:
+            "Max audio upload size in bytes for /v1/audio/* (ADR 017) — bounds the raw multipart body (file + MIME framing). Over the cap ⇒ 413 payload_too_large. Absent ⇒ 100 MiB (104857600). Must be positive. Worst-case transient memory ≈ this × in-flight audio requests (bound it with --max-concurrency)."
+    )
+    var maxAudioUploadBytes: Int?
+
+    @Option(
+        help:
+            "Max JSON request-body size in bytes for /v1/chat/completions, /v1/embeddings, etc. (ADR 017). Over the cap ⇒ 413 payload_too_large. Absent ⇒ 4 MiB (4194304). Must be positive."
+    )
+    var maxRequestBodyBytes: Int?
+
     @Flag(
         help:
             "Warm every module that has a configured default model (one per LLM/embedding/transcription/diarization/speaker-embedding class with an `is_default=1` allowlist row) at startup, instead of lazily on first request. The HTTP surface still comes up immediately; warms run concurrently in the background (best-effort — a per-module failure falls back to lazy load for that module). Modules without a configured default stay lazy."
@@ -686,6 +698,8 @@ struct Load: AsyncParsableCommand {
             auditRetentionDays: auditRetentionDays ?? 0,
             requestTimeoutSecs: requestTimeoutSecs ?? 0,
             coldLoadWaitSecs: Double(coldLoadWaitSecs ?? 120),
+            maxAudioUploadBytes: maxAudioUploadBytes ?? 104_857_600,
+            maxRequestBodyBytes: maxRequestBodyBytes ?? 4_194_304,
             preload: preload,
             prefixCache: prefixCache,
             queueResultTtlSecs: queueResultTtlSecs ?? 0,

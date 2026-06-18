@@ -53,6 +53,10 @@ extension ConfigEditor {
             return cfg.requestTimeoutSecs.map(String.init)
         case "cold_load_wait_secs":
             return cfg.coldLoadWaitSecs.map(String.init)
+        case "max_audio_upload_bytes":
+            return cfg.maxAudioUploadBytes.map(String.init)
+        case "max_request_body_bytes":
+            return cfg.maxRequestBodyBytes.map(String.init)
         case "preload":
             return cfg.preload.map { $0 ? "true" : "false" }
         case "queue_result_ttl_secs":

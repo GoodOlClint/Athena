@@ -200,6 +200,17 @@ engine = "mlx"
 # max_concurrency = 8                  # daemon-wide in-flight cap
 # max_concurrency_per_principal = 2    # per-caller in-flight cap
 
+# Inbound upload caps (ADR 017). max_audio_upload_bytes bounds the raw
+# multipart body of /v1/audio/* (file + MIME framing); max_request_body_bytes
+# bounds JSON bodies (/v1/chat/completions, /v1/embeddings, …). Over a cap ⇒
+# HTTP 413 payload_too_large. Commented ⇒ defaults (100 MiB audio / 4 MiB
+# JSON). A value of 0 or negative is a config error (not "unlimited"). NOTE:
+# worst-case transient memory ≈ max_audio_upload_bytes × in-flight audio
+# requests — bound it with max_concurrency if you raise this much. Behind a
+# reverse proxy, raise its body cap to match (see docs/reverse-proxy.md).
+# max_audio_upload_bytes = 104857600   # 100 MiB (default)
+# max_request_body_bytes = 4194304     # 4 MiB (default)
+
 # Audit-log retention. Every RBAC/admin mutation (user/role/token CRUD,
 # model removal, default-model change, daemon load/unload) is recorded
 # to an append-only audit_log table (read it via `athena audit` or

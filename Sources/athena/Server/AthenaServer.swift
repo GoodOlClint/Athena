@@ -90,6 +90,17 @@ struct AthenaServer {
     /// `var = 120` so it's a memberwise-init param (the block-until-ready
     /// default; peer-runner behavior out of the box).
     var coldLoadWaitSecs: Double = 120
+    /// Inbound upload caps (ADR 017). `maxAudioUploadBytes` bounds the raw
+    /// multipart body of the three `/v1/audio/*` routes; `maxRequestBodyBytes`
+    /// bounds the JSON request bodies (`/v1/chat/completions`, `/v1/embeddings`,
+    /// the native control bodies). Over the cap ⇒ a clean `413
+    /// payload_too_large` (an up-front `Content-Length` check + a streamed
+    /// `collect(upTo:)` backstop). `var = ` defaults (100 MiB / 4 MiB) so
+    /// they're memberwise-init params. A `100 Continue` channel handler
+    /// (`ExpectContinueHandler`) keeps `Expect:`-using clients from hanging
+    /// while a large body streams.
+    var maxAudioUploadBytes: Int = 104_857_600
+    var maxRequestBodyBytes: Int = 4_194_304
     /// Warm the LLM at startup instead of lazily on first request
     /// (M33.3). `var = false` so it's a memberwise-init param. Best-
     /// effort: the warm runs concurrently with serving (the HTTP surface
@@ -827,9 +838,17 @@ struct AthenaServer {
     static func serverBuilder(
         tlsCertPath: String?, tlsKeyPath: String?
     ) throws -> HTTPServerBuilder {
+        // ADR 017 — inject the `Expect: 100-continue` handler into the HTTP1
+        // channel pipeline so `Expect:`-using clients (URLSession /
+        // AsyncHTTPClient, for large bodies) don't hang waiting for a `100`
+        // the daemon otherwise never sends. The autoclosure builds a fresh
+        // per-connection handler. One config object covers both transports.
+        let http1 = HTTPServerBuilder.http1(
+            configuration: .init(
+                additionalChannelHandlers: [ExpectContinueHandler()]))
         switch (tlsCertPath, tlsKeyPath) {
         case (nil, nil):
-            return .http1()
+            return http1
         case (let cert?, let key?):
             let chain = try NIOSSLCertificate.fromPEMFile(cert)
                 .map { NIOSSLCertificateSource.certificate($0) }
@@ -839,7 +858,7 @@ struct AthenaServer {
                 privateKey: .privateKey(pkey))
             Logger(label: AthenaLogLabel.daemon).notice(
                 "TLS: serving HTTPS (cert \(cert))")
-            return try .tls(.http1(), tlsConfiguration: tls)
+            return try .tls(http1, tlsConfiguration: tls)
         case (.some, nil), (nil, .some):
             throw TLSConfigError.incomplete
         }
@@ -848,7 +867,7 @@ struct AthenaServer {
     private func handleChatCompletions(_ request: Request) async -> Response {
         let body: ChatCompletionRequest
         do {
-            let buffer = try await request.body.collect(upTo: 4 * 1024 * 1024)
+            let buffer = try await request.body.collect(upTo: maxRequestBodyBytes)
             let data = Data(buffer: buffer)
             body = try JSONDecoder().decode(
                 ChatCompletionRequest.self, from: data)
@@ -1605,7 +1624,7 @@ struct AthenaServer {
         let t0 = Date()
         let body: EmbeddingRequest
         do {
-            let buffer = try await request.body.collect(upTo: 4 * 1024 * 1024)
+            let buffer = try await request.body.collect(upTo: maxRequestBodyBytes)
             body = try JSONDecoder().decode(
                 EmbeddingRequest.self, from: Data(buffer: buffer))
         } catch {
@@ -1697,15 +1716,26 @@ struct AthenaServer {
                 type: "invalid_request_error", code: "invalid_content_type")
         }
 
+        // ADR 017: fast-fail an over-cap upload from its declared
+        // Content-Length, before reading the body.
+        if let tooLarge = Self.payloadTooLarge(
+            request, cap: maxAudioUploadBytes)
+        {
+            return tooLarge
+        }
+
         let body: Data
         do {
             let buffer = try await request.body.collect(
-                upTo: 25 * 1024 * 1024)  // OpenAI's 25 MB audio cap
+                upTo: maxAudioUploadBytes)  // ADR 017: configurable, 100 MiB default
             body = Data(buffer: buffer)
+        } catch is NIOTooManyBytesError {
+            // ADR 017: streamed body crossed the cap ⇒ clean 413.
+            return Self.tooLargeResponse(cap: maxAudioUploadBytes)
         } catch {
             return Self.error(
                 status: .badRequest,
-                message: "Invalid request body: \(error)",
+                message: "invalid request body",
                 type: "invalid_request_error", code: "invalid_body")
         }
 
@@ -1861,15 +1891,22 @@ struct AthenaServer {
                 type: "invalid_request_error",
                 code: "invalid_content_type")
         }
+        if let tooLarge = Self.payloadTooLarge(
+            request, cap: maxAudioUploadBytes)
+        {
+            return tooLarge
+        }
         let body: Data
         do {
             let buffer = try await request.body.collect(
-                upTo: 25 * 1024 * 1024)
+                upTo: maxAudioUploadBytes)
             body = Data(buffer: buffer)
+        } catch is NIOTooManyBytesError {
+            return Self.tooLargeResponse(cap: maxAudioUploadBytes)
         } catch {
             return Self.error(
                 status: .badRequest,
-                message: "Invalid request body: \(error)",
+                message: "invalid request body",
                 type: "invalid_request_error", code: "invalid_body")
         }
         guard
@@ -2029,15 +2066,22 @@ struct AthenaServer {
                 type: "invalid_request_error",
                 code: "invalid_content_type")
         }
+        if let tooLarge = Self.payloadTooLarge(
+            request, cap: maxAudioUploadBytes)
+        {
+            return tooLarge
+        }
         let body: Data
         do {
             let buffer = try await request.body.collect(
-                upTo: 25 * 1024 * 1024)
+                upTo: maxAudioUploadBytes)
             body = Data(buffer: buffer)
+        } catch is NIOTooManyBytesError {
+            return Self.tooLargeResponse(cap: maxAudioUploadBytes)
         } catch {
             return Self.error(
                 status: .badRequest,
-                message: "Invalid request body: \(error)",
+                message: "invalid request body",
                 type: "invalid_request_error", code: "invalid_body")
         }
         guard
@@ -3212,7 +3256,7 @@ struct AthenaServer {
         _ request: Request, _ type: T.Type
     ) async -> Outcome<T> {
         do {
-            let buf = try await request.body.collect(upTo: 4 * 1024 * 1024)
+            let buf = try await request.body.collect(upTo: maxRequestBodyBytes)
             return .ok(
                 try JSONDecoder().decode(T.self, from: Data(buffer: buf)))
         } catch {
@@ -5493,6 +5537,31 @@ struct AthenaServer {
             APIErrorBody(
                 error: .init(message: message, type: type, code: code)),
             status: status)
+    }
+
+    /// ADR 017 — the `413 payload_too_large` envelope (clean message,
+    /// stating the cap; no leaked internal type names).
+    private static func tooLargeResponse(cap: Int) -> Response {
+        error(
+            status: .contentTooLarge,
+            message: UploadLimit.tooLargeMessage(cap: cap),
+            type: "invalid_request_error", code: "payload_too_large")
+    }
+
+    /// ADR 017 — up-front 413 when a declared `Content-Length` already
+    /// exceeds `cap`, so an oversized upload fails fast without reading
+    /// the body (and, for an `Expect: 100-continue` client, a final status
+    /// the client accepts in lieu of `100`). nil ⇒ proceed; the streamed
+    /// `collect(upTo: cap)` backstop still enforces the cap when the
+    /// header is absent, chunked, or understated.
+    private static func payloadTooLarge(_ request: Request, cap: Int)
+        -> Response?
+    {
+        let declared = request.headers[.contentLength].flatMap { Int($0) }
+        switch UploadLimit.check(contentLength: declared, cap: cap) {
+        case .proceed: return nil
+        case .rejectTooLarge: return tooLargeResponse(cap: cap)
+        }
     }
 
     /// M71.1 — build chat turns from OpenAI messages, decoding any `image_url`

@@ -62,9 +62,17 @@ that warning is the reminder to do so.
 
 These come from the daemon's own limits — keep the proxy in sync:
 
-- **Request body size:** chat/embed accept up to **4 MB**; audio
-  endpoints (`/v1/audio/*`) up to **25 MB**. Set the proxy's max body to
-  at least **25 MB** or large uploads get a proxy-level 413.
+- **Request body size (ADR 017):** JSON bodies (chat/embed) accept up to
+  `max_request_body_bytes` (**default 4 MiB**); audio endpoints
+  (`/v1/audio/*`) up to `max_audio_upload_bytes` (**default 100 MiB**, up
+  from the old 25 MB). Set the proxy's max body to **at least the audio
+  cap** (e.g. `client_max_body_size 100m`) or large uploads get a
+  proxy-level 413 before they ever reach the daemon. If you also enable
+  request buffering (nginx `proxy_request_buffering on`, the default), size
+  the proxy's temp/buffer storage for the cap too. Over-cap at the daemon
+  is a clean `413 payload_too_large`; worst-case transient daemon memory ≈
+  `max_audio_upload_bytes × in-flight audio requests`, so bound concurrency
+  (`--max-concurrency`) if you raise the cap much further.
 - **Streaming + long-poll:** SSE chat streams (`stream: true`), the
   queue long-poll, and `/v1/queue` SSE hold the connection open. Disable
   response buffering and use generous read timeouts, or clients see
@@ -103,8 +111,9 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/athena.example.com/privkey.pem;
     ssl_protocols       TLSv1.2 TLSv1.3;
 
-    # Audio uploads go up to 25 MB (see daemon limits above).
-    client_max_body_size 25m;
+    # Audio uploads go up to max_audio_upload_bytes (default 100 MiB; see
+    # daemon limits above). Match or exceed the daemon cap.
+    client_max_body_size 100m;
 
     location / {
         proxy_pass http://127.0.0.1:7447;
@@ -142,9 +151,9 @@ ZeroSSL) when `server_name` is a public domain.
 
 ```caddyfile
 athena.example.com {
-    # Audio uploads go up to 25 MB (see daemon limits above).
+    # Audio uploads go up to max_audio_upload_bytes (default 100 MiB).
     request_body {
-        max_size 25MB
+        max_size 100MB
     }
 
     reverse_proxy 127.0.0.1:7447 {
@@ -161,7 +170,7 @@ For a private host with no public DNS, use Caddy's internal CA:
 https://athena.internal {
     tls internal
     request_body {
-        max_size 25MB
+        max_size 100MB
     }
     reverse_proxy 127.0.0.1:7447 {
         flush_interval -1

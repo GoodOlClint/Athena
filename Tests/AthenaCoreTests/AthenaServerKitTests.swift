@@ -1,5 +1,9 @@
 import Foundation
+import HTTPTypes
 import Logging
+import NIOCore
+import NIOEmbedded
+import NIOHTTPTypes
 import XCTest
 
 import AthenaCore
@@ -392,5 +396,105 @@ final class AthenaServerKitTests: XCTestCase {
             Passwords.verify(
                 password: "wrong", salt: salt, hash: hash,
                 iters: Passwords.defaultIterations))
+    }
+
+    // MARK: - UploadLimit (ADR 017)
+
+    func testUploadLimitContentLengthDecision() {
+        let cap = 104_857_600  // 100 MiB
+        // Absent / unparseable Content-Length never rejects up front — the
+        // streamed collect backstop enforces the cap as the body arrives.
+        XCTAssertEqual(
+            UploadLimit.check(contentLength: nil, cap: cap), .proceed)
+        // Within cap proceeds; exactly at the cap proceeds (cap is inclusive).
+        XCTAssertEqual(
+            UploadLimit.check(contentLength: 1, cap: cap), .proceed)
+        XCTAssertEqual(
+            UploadLimit.check(contentLength: cap, cap: cap), .proceed)
+        // One byte over the cap rejects up front.
+        XCTAssertEqual(
+            UploadLimit.check(contentLength: cap + 1, cap: cap),
+            .rejectTooLarge)
+        XCTAssertEqual(
+            UploadLimit.check(contentLength: 200_000_000, cap: cap),
+            .rejectTooLarge)
+    }
+
+    func testUploadLimitMessageStatesCapAndLeaksNoType() {
+        let msg = UploadLimit.tooLargeMessage(cap: 104_857_600)
+        XCTAssertTrue(msg.contains("104857600"), "states the cap in bytes")
+        // Must not leak the internal NIO error type the old 400 exposed.
+        XCTAssertFalse(msg.contains("NIOTooManyBytesError"))
+        XCTAssertFalse(msg.contains("Optional"))
+    }
+
+    // MARK: - ExpectContinueHandler (ADR 017)
+
+    func testExpectContinuePredicate() {
+        var withExpect = HTTPFields()
+        withExpect[.expect] = "100-continue"
+        XCTAssertTrue(
+            ExpectContinueHandler.expectsContinue(
+                HTTPRequest(
+                    method: .post, scheme: "http", authority: "h",
+                    path: "/", headerFields: withExpect)))
+        // Case-insensitive value (RFC 9110 §10.1.1).
+        var mixed = HTTPFields()
+        mixed[.expect] = "100-Continue"
+        XCTAssertTrue(
+            ExpectContinueHandler.expectsContinue(
+                HTTPRequest(
+                    method: .post, scheme: "http", authority: "h",
+                    path: "/", headerFields: mixed)))
+        // Absent ⇒ false (no interim emitted).
+        XCTAssertFalse(
+            ExpectContinueHandler.expectsContinue(
+                HTTPRequest(
+                    method: .post, scheme: "http", authority: "h",
+                    path: "/", headerFields: HTTPFields())))
+    }
+
+    func testExpectContinueHandlerEmitsInterimAndForwardsHead() throws {
+        let channel = EmbeddedChannel(handler: ExpectContinueHandler())
+        defer { _ = try? channel.finish() }
+        var fields = HTTPFields()
+        fields[.expect] = "100-continue"
+        let req = HTTPRequest(
+            method: .post, scheme: "http", authority: "h",
+            path: "/v1/audio/transcriptions", headerFields: fields)
+        try channel.writeInbound(HTTPRequestPart.head(req))
+
+        // The interim 100 Continue is written outbound …
+        let out = try channel.readOutbound(as: HTTPResponsePart.self)
+        guard case .head(let resp)? = out else {
+            return XCTFail("expected an outbound 100 Continue head")
+        }
+        XCTAssertEqual(resp.status, .continue)
+        XCTAssertNil(
+            try channel.readOutbound(as: HTTPResponsePart.self),
+            "exactly one interim head")
+        // … and the request head is forwarded inbound, unchanged.
+        let fwd = try channel.readInbound(as: HTTPRequestPart.self)
+        guard case .head(let head)? = fwd else {
+            return XCTFail("request head not forwarded")
+        }
+        XCTAssertEqual(head.path, "/v1/audio/transcriptions")
+    }
+
+    func testExpectContinueHandlerPassthroughWithoutExpect() throws {
+        let channel = EmbeddedChannel(handler: ExpectContinueHandler())
+        defer { _ = try? channel.finish() }
+        let req = HTTPRequest(
+            method: .post, scheme: "http", authority: "h",
+            path: "/v1/chat/completions", headerFields: HTTPFields())
+        try channel.writeInbound(HTTPRequestPart.head(req))
+
+        // No interim response when the client didn't ask for one …
+        XCTAssertNil(try channel.readOutbound(as: HTTPResponsePart.self))
+        // … and the head still flows through.
+        let fwd = try channel.readInbound(as: HTTPRequestPart.self)
+        guard case .head? = fwd else {
+            return XCTFail("request head not forwarded")
+        }
     }
 }

@@ -29,6 +29,21 @@ let package = Package(
         .package(
             url: "https://github.com/hummingbird-project/hummingbird",
             from: "2.5.0"),
+        // swift-nio / swift-nio-extras / swift-http-types are already in
+        // the graph transitively (Hummingbird). Declared direct (ADR 017)
+        // so AthenaServerKit can import NIOCore + NIOHTTPTypes + HTTPTypes
+        // for the `Expect: 100-continue` channel handler — HummingbirdCore
+        // `package import`s NIOHTTPTypes, so it is NOT re-exported to us.
+        // Loose lower bounds; SwiftPM resolves to Hummingbird's pins.
+        .package(
+            url: "https://github.com/apple/swift-nio",
+            from: "2.65.0"),
+        .package(
+            url: "https://github.com/apple/swift-nio-extras",
+            from: "1.20.0"),
+        .package(
+            url: "https://github.com/apple/swift-http-types",
+            from: "1.0.0"),
         .package(
             url: "https://github.com/apple/swift-argument-parser",
             from: "1.4.0"),
@@ -243,6 +258,10 @@ let package = Package(
                 .product(name: "Hummingbird", package: "hummingbird"),
                 .product(name: "Crypto", package: "swift-crypto"),
                 .product(name: "Logging", package: "swift-log"),
+                // ADR 017 — the `Expect: 100-continue` channel handler.
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOHTTPTypes", package: "swift-nio-extras"),
+                .product(name: "HTTPTypes", package: "swift-http-types"),
             ],
             path: "Sources/AthenaServerKit"),
 
@@ -327,6 +346,11 @@ let package = Package(
                 "AthenaLLM", "AthenaModels", "AthenaStructured",
                 "AthenaTranscription", "AthenaEmbedding",
                 "AthenaStore",
+                // ADR 017 — NIOEmbeddedChannel pins ExpectContinueHandler.
+                .product(name: "NIOEmbedded", package: "swift-nio"),
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOHTTPTypes", package: "swift-nio-extras"),
+                .product(name: "HTTPTypes", package: "swift-http-types"),
             ],
             path: "Tests/AthenaCoreTests",
             exclude: ["Fixtures"],

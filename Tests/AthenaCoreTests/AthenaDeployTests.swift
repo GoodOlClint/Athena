@@ -128,6 +128,54 @@ final class AthenaConfigTests: XCTestCase {
         XCTAssertEqual(c.maxConcurrencyPerPrincipal, 2)
     }
 
+    func testUploadCapKeysParse() throws {
+        // ADR 017 — both upload caps parse as positive ints.
+        let toml = """
+            listen_host = "127.0.0.1"
+            listen_port = 7447
+            log_dir = "/l"
+            max_audio_upload_bytes = 104857600
+            max_request_body_bytes = 4194304
+            """
+        let c = try AthenaConfig.parse(toml: toml)
+        XCTAssertEqual(c.maxAudioUploadBytes, 104_857_600)
+        XCTAssertEqual(c.maxRequestBodyBytes, 4_194_304)
+    }
+
+    func testUploadCapKeysAbsentAreNil() throws {
+        let toml = """
+            listen_host = "127.0.0.1"
+            listen_port = 7447
+            log_dir = "/l"
+            """
+        let c = try AthenaConfig.parse(toml: toml)
+        XCTAssertNil(c.maxAudioUploadBytes)
+        XCTAssertNil(c.maxRequestBodyBytes)
+    }
+
+    func testUploadCapZeroIsRejected() throws {
+        // ADR 017 — 0 (and negative) is a parse error, NOT "unlimited".
+        for raw in ["0", "-1"] {
+            let toml = """
+                listen_host = "127.0.0.1"
+                listen_port = 7447
+                log_dir = "/l"
+                max_audio_upload_bytes = \(raw)
+                """
+            XCTAssertThrowsError(
+                try AthenaConfig.parse(toml: toml),
+                "max_audio_upload_bytes=\(raw) must be rejected"
+            ) { error in
+                guard case AthenaConfig.ParseError.invalidInt(let key, _) =
+                    error
+                else {
+                    return XCTFail("expected invalidInt, got \(error)")
+                }
+                XCTAssertEqual(key, "max_audio_upload_bytes")
+            }
+        }
+    }
+
     func testAuditRetentionKeyParse() throws {
         let toml = """
             listen_host = "127.0.0.1"

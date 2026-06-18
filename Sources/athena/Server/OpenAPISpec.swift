@@ -105,6 +105,7 @@ enum OpenAPISpec {
                   "400": { "$ref": "#/components/responses/BadRequest" },
                   "401": { "$ref": "#/components/responses/Unauthorized" },
                   "403": { "$ref": "#/components/responses/Forbidden" },
+                  "413": { "$ref": "#/components/responses/PayloadTooLarge" },
                   "503": { "$ref": "#/components/responses/Overloaded" }
                 }
               }
@@ -147,6 +148,7 @@ enum OpenAPISpec {
                   "400": { "$ref": "#/components/responses/BadRequest" },
                   "401": { "$ref": "#/components/responses/Unauthorized" },
                   "403": { "$ref": "#/components/responses/Forbidden" },
+                  "413": { "$ref": "#/components/responses/PayloadTooLarge" },
                   "503": { "$ref": "#/components/responses/Overloaded" }
                 }
               }
@@ -155,7 +157,7 @@ enum OpenAPISpec {
               "post": {
                 "tags": ["Audio"],
                 "summary": "Transcribe audio.",
-                "description": "OpenAI-compatible multipart upload. `response_format` of `json` (default), `text`, `srt`, `vtt`, or `verbose_json`; `timestamp_granularities[]=word` adds word timings; `diarize=true` adds per-segment speaker ids in verbose_json.",
+                "description": "OpenAI-compatible multipart upload. `response_format` of `json` (default), `text`, `srt`, `vtt`, or `verbose_json`; `timestamp_granularities[]=word` adds word timings; `diarize=true` adds per-segment speaker ids in verbose_json. Max upload size = `max_audio_upload_bytes` (default 100 MiB) over the raw multipart body; over it ⇒ 413 payload_too_large.",
                 "requestBody": {
                   "required": true,
                   "content": { "multipart/form-data": { "schema": {
@@ -178,6 +180,7 @@ enum OpenAPISpec {
                   "400": { "$ref": "#/components/responses/BadRequest" },
                   "401": { "$ref": "#/components/responses/Unauthorized" },
                   "403": { "$ref": "#/components/responses/Forbidden" },
+                  "413": { "$ref": "#/components/responses/PayloadTooLarge" },
                   "503": { "$ref": "#/components/responses/Overloaded" }
                 }
               }
@@ -186,7 +189,7 @@ enum OpenAPISpec {
               "post": {
                 "tags": ["Audio"],
                 "summary": "Diarize audio (who spoke when).",
-                "description": "Multipart upload. Returns speaker-labelled time spans.",
+                "description": "Multipart upload. Returns speaker-labelled time spans. Max upload size = `max_audio_upload_bytes` (default 100 MiB); over it ⇒ 413 payload_too_large.",
                 "requestBody": {
                   "required": true,
                   "content": { "multipart/form-data": { "schema": {
@@ -204,6 +207,7 @@ enum OpenAPISpec {
                   "400": { "$ref": "#/components/responses/BadRequest" },
                   "401": { "$ref": "#/components/responses/Unauthorized" },
                   "403": { "$ref": "#/components/responses/Forbidden" },
+                  "413": { "$ref": "#/components/responses/PayloadTooLarge" },
                   "503": { "$ref": "#/components/responses/Overloaded" }
                 }
               }
@@ -212,7 +216,7 @@ enum OpenAPISpec {
               "post": {
                 "tags": ["Audio"],
                 "summary": "Speaker (voice) embeddings.",
-                "description": "Multipart upload. Returns an embedding per requested segment.",
+                "description": "Multipart upload. Returns an embedding per requested segment. Max upload size = `max_audio_upload_bytes` (default 100 MiB); over it ⇒ 413 payload_too_large.",
                 "requestBody": {
                   "required": true,
                   "content": { "multipart/form-data": { "schema": {
@@ -230,6 +234,7 @@ enum OpenAPISpec {
                   "400": { "$ref": "#/components/responses/BadRequest" },
                   "401": { "$ref": "#/components/responses/Unauthorized" },
                   "403": { "$ref": "#/components/responses/Forbidden" },
+                  "413": { "$ref": "#/components/responses/PayloadTooLarge" },
                   "503": { "$ref": "#/components/responses/Overloaded" }
                 }
               }
@@ -887,7 +892,8 @@ enum OpenAPISpec {
               "Unauthorized": { "description": "Missing or invalid bearer token.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
               "Forbidden": { "description": "Insufficient permissions.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
               "NotFound": { "description": "Not found.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
-              "Overloaded": { "description": "Backpressure — the memory governor or a rate/concurrency cap declined the request, or (code `module_loading`) a model is still being made resident. A request for an on-disk model now BLOCKS until ready (up to `cold_load_wait_secs`) and serves 200; a `module_loading` 503 here means the load exceeded that budget or an operator weight download is in progress. Retry after the indicated delay.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+              "Overloaded": { "description": "Backpressure — the memory governor or a rate/concurrency cap declined the request, or (code `module_loading`) a model is still being made resident. A request for an on-disk model now BLOCKS until ready (up to `cold_load_wait_secs`) and serves 200; a `module_loading` 503 here means the load exceeded that budget or an operator weight download is in progress. Retry after the indicated delay.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+              "PayloadTooLarge": { "description": "Request body exceeds the configured upload limit (code `payload_too_large`). Audio uploads (`/v1/audio/*`) are bounded by `max_audio_upload_bytes` (default 100 MiB); JSON bodies by `max_request_body_bytes` (default 4 MiB). Pre-check with `Content-Length` to avoid the rejected transfer.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
             },
             "schemas": {
               "Error": {
