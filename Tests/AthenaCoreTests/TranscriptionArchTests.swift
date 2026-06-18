@@ -3,70 +3,119 @@ import XCTest
 
 @testable import AthenaTranscription
 
-/// Pure (MLX-free) detection of non-Whisper ASR architectures the
-/// transcription engine can't load (e.g. Parakeet). Always runs in CI
-/// (ADR 009). Pins that real Whisper checkpoints are never falsely rejected.
+/// Pure (MLX-free) transcription-engine routing (ADR 020). Always runs in CI
+/// (ADR 009). Pins the positive router: Whisper checkpoints → `.whisper`,
+/// Parakeet checkpoints (both config shapes) → `.parakeet`, everything else →
+/// `.unsupported`. Replaces the v0.10.170 denylist semantics.
 final class TranscriptionArchTests: XCTestCase {
 
-    func testWhisperIsSupported() {
-        XCTAssertFalse(
-            TranscriptionArch.isUnsupported(
-                modelType: "whisper",
-                architectures: ["WhisperForConditionalGeneration"]))
+    // MARK: classify — the pure decision
+
+    func testWhisperByModelType() {
+        XCTAssertEqual(
+            TranscriptionArch.classify(.init(modelType: "whisper")), .whisper)
     }
 
-    func testMissingMetadataIsNotRejected() {
-        // Unknown/absent metadata is left to the Whisper loader, not pre-judged.
-        XCTAssertFalse(
-            TranscriptionArch.isUnsupported(modelType: nil, architectures: []))
-        XCTAssertFalse(
-            TranscriptionArch.isUnsupported(modelType: "", architectures: []))
+    func testWhisperByArchitecture() {
+        XCTAssertEqual(
+            TranscriptionArch.classify(
+                .init(architectures: ["WhisperForConditionalGeneration"])),
+            .whisper)
     }
 
-    func testParakeetRejectedByModelType() {
-        XCTAssertTrue(
-            TranscriptionArch.isUnsupported(
-                modelType: "parakeet", architectures: []))
+    /// transformers-style Parakeet (e.g. nvidia/parakeet-tdt-0.6b-v3):
+    /// top-level `model_type` + `architectures`.
+    func testParakeetTransformersConfig() {
+        XCTAssertEqual(
+            TranscriptionArch.classify(
+                .init(
+                    modelType: "parakeet_tdt",
+                    architectures: ["ParakeetForTDT"])),
+            .parakeet)
     }
 
-    func testRNNTAndTDTArchitecturesRejected() {
-        XCTAssertTrue(
-            TranscriptionArch.isUnsupported(
-                modelType: nil, architectures: ["EncDecRNNTBPEModel"]))
-        XCTAssertTrue(
-            TranscriptionArch.isUnsupported(
-                modelType: "tdt", architectures: []))
+    /// NeMo / MLX-style Parakeet (mlx-community/parakeet-tdt-0.6b-v3 — the
+    /// port's load source): NO top-level `model_type`/`architectures`; the
+    /// signal is the NeMo `target` + `decoding.model_type: tdt`.
+    func testParakeetNeMoConfig() {
+        XCTAssertEqual(
+            TranscriptionArch.classify(
+                .init(
+                    target:
+                        "nemo.collections.asr.models.rnnt_bpe_models"
+                        + ".EncDecRNNTBPEModel",
+                    decodingModelType: "tdt")),
+            .parakeet)
     }
 
-    func testFastConformerAndNemoRejected() {
-        XCTAssertTrue(
-            TranscriptionArch.isUnsupported(
-                modelType: "fastconformer", architectures: []))
-        XCTAssertTrue(
-            TranscriptionArch.isUnsupported(
-                modelType: nil, architectures: ["EncDecCTCModelBPE", "nemo"]))
+    /// The NeMo `target` alone names RNN-T/Conformer (not "parakeet"/"tdt"); the
+    /// decisive Parakeet signal is `decoding.model_type: tdt`. Without it, a
+    /// bare RNN-T config is not claimed by the Parakeet engine.
+    func testNeMoTargetWithoutTDTIsUnsupported() {
+        XCTAssertEqual(
+            TranscriptionArch.classify(
+                .init(
+                    target:
+                        "nemo.collections.asr.models.EncDecCTCModelBPE")),
+            .unsupported)
     }
 
-    func testReadConfigFromDir() throws {
+    func testBertIsUnsupported() {
+        XCTAssertEqual(
+            TranscriptionArch.classify(
+                .init(modelType: "bert", architectures: ["BertModel"])),
+            .unsupported)
+    }
+
+    func testOtherAsrFamiliesUnsupported() {
+        for t in ["canary", "wav2vec2", "hubert", "wavlm"] {
+            XCTAssertEqual(
+                TranscriptionArch.classify(.init(modelType: t)), .unsupported,
+                "\(t) should route to .unsupported")
+        }
+    }
+
+    func testEmptyConfigIsUnsupported() {
+        XCTAssertEqual(TranscriptionArch.classify(.init()), .unsupported)
+    }
+
+    // MARK: detect — config.json on disk
+
+    private func writeConfig(_ json: String) throws -> URL {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("ta-\(UUID().uuidString)")
         try FileManager.default.createDirectory(
             at: dir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: dir) }
-        try #"{"model_type":"parakeet","architectures":["EncDecRNNTBPEModel"]}"#
-            .data(using: .utf8)!
+        try json.data(using: .utf8)!
             .write(to: dir.appendingPathComponent("config.json"))
-        XCTAssertTrue(TranscriptionArch.isUnsupported(in: dir))
+        return dir
     }
 
-    func testWhisperDirNotRejected() throws {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ta-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(
-            at: dir, withIntermediateDirectories: true)
+    func testDetectWhisperDir() throws {
+        let dir = try writeConfig(#"{"model_type":"whisper"}"#)
         defer { try? FileManager.default.removeItem(at: dir) }
-        try #"{"model_type":"whisper"}"#.data(using: .utf8)!
-            .write(to: dir.appendingPathComponent("config.json"))
-        XCTAssertFalse(TranscriptionArch.isUnsupported(in: dir))
+        XCTAssertEqual(TranscriptionArch.detect(in: dir), .whisper)
+    }
+
+    func testDetectParakeetNeMoDir() throws {
+        // Mirrors the real mlx-community/parakeet-tdt-0.6b-v3 config shape.
+        let dir = try writeConfig(
+            #"{"target":"nemo.collections.asr.models.rnnt_bpe_models.EncDecRNNTBPEModel","decoding":{"model_type":"tdt","strategy":"greedy_batch"}}"#
+        )
+        defer { try? FileManager.default.removeItem(at: dir) }
+        XCTAssertEqual(TranscriptionArch.detect(in: dir), .parakeet)
+    }
+
+    func testDetectParakeetTransformersDir() throws {
+        let dir = try writeConfig(
+            #"{"model_type":"parakeet_tdt","architectures":["ParakeetForTDT"]}"#)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        XCTAssertEqual(TranscriptionArch.detect(in: dir), .parakeet)
+    }
+
+    func testDetectMissingConfigIsUnsupported() {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ta-missing-\(UUID().uuidString)")
+        XCTAssertEqual(TranscriptionArch.detect(in: dir), .unsupported)
     }
 }

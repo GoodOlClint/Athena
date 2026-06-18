@@ -90,15 +90,25 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
                     + "— pull it first (operator action); inference does "
                     + "not auto-download")
         }
-        // Refuse a known non-Whisper ASR arch (e.g. Parakeet/TDT) up front with
-        // a cause-naming 4xx, instead of letting the Whisper loader fail deep
-        // with an opaque 500. The id is allowlisted but unportable.
+        // ADR 020 — route to the engine the checkpoint's class names. The
+        // single governed slot spans Whisper and Parakeet; everything else is
+        // refused up front with a cause-naming 4xx instead of letting a loader
+        // fail deep with an opaque 500.
         let resolved = dir.resolvingSymlinksInPath()
-        if TranscriptionArch.isUnsupported(in: resolved) {
+        switch TranscriptionArch.detect(in: resolved) {
+        case .whisper:
+            break  // fall through to the Whisper load below.
+        case .parakeet:
+            // S1 wires the dispatch; the hardened Parakeet engine lands in S2.
+            throw AthenaError.notImplemented(
+                feature: "Parakeet transcription engine (model "
+                    + "'\(canonical)') — lands in M76 S2")
+        case .unsupported:
             throw AthenaError.unsupportedTranscriptionArch(
                 model: canonical,
-                detail: "Use a Whisper model (e.g. "
-                    + "mlx-community/whisper-large-v3-turbo).")
+                detail: "Neither a Whisper nor a Parakeet checkpoint. Use a "
+                    + "Whisper model (e.g. mlx-community/whisper-large-v3-turbo)"
+                    + " or a Parakeet-TDT model.")
         }
         do {
             model = try WhisperLoader.load(directory: resolved)
