@@ -325,8 +325,8 @@
     "semantic_hash": ""
   },
   "Sources/AthenaTranscription/MLXTranscriptionModule.swift": {
-    "mtime": 1781817033.062563,
-    "ast_hash": "1ae1059465bfef4e8b76797787dd77a1",
+    "mtime": 1781817729.2213666,
+    "ast_hash": "f3f608f612e400cedb7c8e2a9f2dee34",
     "semantic_hash": ""
   },
   "Sources/AthenaTranscription/Sortformer/Sortformer.swift": {
@@ -425,8 +425,8 @@
     "semantic_hash": "d16404614855c59c2001089f41c5bd78"
   },
   "Sources/athena/Athena.swift": {
-    "mtime": 1781817401.4355311,
-    "ast_hash": "3bfc963464d476fa2ff5dd189d6dd972",
+    "mtime": 1781818372.2048275,
+    "ast_hash": "029e7ceef30c6cdddda197943e3d38c2",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Audit.swift": {
@@ -1555,8 +1555,8 @@
     "semantic_hash": ""
   },
   "Sources/AthenaTranscription/Parakeet/ParakeetModel.swift": {
-    "mtime": 1781817046.161961,
-    "ast_hash": "17fa8f0a55abdc6277a590f60856df02",
+    "mtime": 1781818323.2662792,
+    "ast_hash": "8f35d3ed9b022ce02e5072f70843f9f8",
     "semantic_hash": ""
   },
   "docs/decisions/020-multi-backend-transcription.md": {
@@ -1580,8 +1580,38 @@
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/ParakeetTranscriptionTests.swift": {
-    "mtime": 1781817238.9019625,
-    "ast_hash": "ccda14fa27b48019e2950f14c6de48e4",
+    "mtime": 1781818154.0950086,
+    "ast_hash": "484a7e0a120db58600be20c77c7322a1",
+    "semantic_hash": ""
+  },
+  "Sources/AthenaTranscription/Parakeet/ParakeetAlignment.swift": {
+    "mtime": 1781817658.4624379,
+    "ast_hash": "a624d13f36b5c8b14bac2351afc85e93",
+    "semantic_hash": ""
+  },
+  "Tests/AthenaCoreTests/ParakeetAlignmentTests.swift": {
+    "mtime": 1781817767.105842,
+    "ast_hash": "108c5179274c5ccb3d205335db322bf4",
+    "semantic_hash": ""
+  },
+  "Sources/AthenaTranscription/Parakeet/ParakeetChunkMerge.swift": {
+    "mtime": 1781818175.2907026,
+    "ast_hash": "15442f7c8786248c66a2b43986c800ec",
+    "semantic_hash": ""
+  },
+  "Sources/AthenaTranscription/Parakeet/ParakeetDecodeStep.swift": {
+    "mtime": 1781818019.652838,
+    "ast_hash": "bb6801e8a28ddea29667ca2f1366a315",
+    "semantic_hash": ""
+  },
+  "Tests/AthenaCoreTests/ParakeetChunkMergeTests.swift": {
+    "mtime": 1781818131.351793,
+    "ast_hash": "fdb33cc0f1bdf97b651bcd43b4918b39",
+    "semantic_hash": ""
+  },
+  "Tests/AthenaCoreTests/ParakeetDecodeStepTests.swift": {
+    "mtime": 1781818115.8919528,
+    "ast_hash": "7bc196f41760d8f810b8fbd2745b52f9",
     "semantic_hash": ""
   }
 }
