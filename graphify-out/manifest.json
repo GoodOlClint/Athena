@@ -1090,8 +1090,8 @@
     "semantic_hash": "371237f6ed34877c859b071318d9b529"
   },
   "CLAUDE.md": {
-    "mtime": 1781791227.545459,
-    "ast_hash": "09d461182ef2899eaacc394ed47476cd",
+    "mtime": 1781810310.904963,
+    "ast_hash": "7b9f0ad1026f5fbf678bab2ba4a5e2a0",
     "semantic_hash": ""
   },
   "docs/cli-reference.md": {
@@ -1542,6 +1542,11 @@
   "Tests/AthenaCoreTests/TranscriptionArchTests.swift": {
     "mtime": 1781809929.8304741,
     "ast_hash": "2002dc7ae049bce702918baa8eb52679",
+    "semantic_hash": ""
+  },
+  "docs/decisions/019-parakeet-asr-deferred.md": {
+    "mtime": 1781810268.586709,
+    "ast_hash": "965b1c88cd1a8ecc91c7ed4145760f64",
     "semantic_hash": ""
   }
 }
