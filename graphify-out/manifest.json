@@ -10,8 +10,8 @@
     "semantic_hash": "baa0b2e6c2456a2ddc1a4b2e82592cd6"
   },
   "Sources/AthenaCore/AthenaError.swift": {
-    "mtime": 1781793958.1924615,
-    "ast_hash": "1da6eeea5262f31b756043dcffa50cbf",
+    "mtime": 1781809540.6263576,
+    "ast_hash": "75138b6bbc8890317846a10f1a53c637",
     "semantic_hash": ""
   },
   "Sources/AthenaCore/AthenaProxy.swift": {
@@ -325,8 +325,8 @@
     "semantic_hash": ""
   },
   "Sources/AthenaTranscription/MLXTranscriptionModule.swift": {
-    "mtime": 1781723825.573094,
-    "ast_hash": "a65cf9cc9a9c65fb05bddace665820f0",
+    "mtime": 1781809548.5179372,
+    "ast_hash": "07a8c70435a95c3848a6b01e7b1393d2",
     "semantic_hash": ""
   },
   "Sources/AthenaTranscription/Sortformer/Sortformer.swift": {
@@ -425,8 +425,8 @@
     "semantic_hash": "d16404614855c59c2001089f41c5bd78"
   },
   "Sources/athena/Athena.swift": {
-    "mtime": 1781806446.3131752,
-    "ast_hash": "4bd931dae01fb3370e5615622ae95be0",
+    "mtime": 1781809938.87052,
+    "ast_hash": "b6efc0136a2141d562374ebb3d8564d6",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Audit.swift": {
@@ -550,8 +550,8 @@
     "semantic_hash": "ba546feb975db11ee6e42e5e147b55e0"
   },
   "Sources/athena/Server/AthenaServer.swift": {
-    "mtime": 1781806416.327719,
-    "ast_hash": "3334e316c19ad8c173b2ae48ab186e0b",
+    "mtime": 1781809861.8508434,
+    "ast_hash": "d3c48bff0cf274b22a849b587c2f8b6d",
     "semantic_hash": ""
   },
   "Sources/athena/Server/GPUTelemetry.swift": {
@@ -800,9 +800,9 @@
     "semantic_hash": "225d53f317e04cd4fdb03124cdc97a46"
   },
   "clients/Sources/AthenaClient/Ps.swift": {
-    "mtime": 1780207069.131816,
-    "ast_hash": "209626d68e7e9eaf482ec4bf9d26c1c4",
-    "semantic_hash": "209626d68e7e9eaf482ec4bf9d26c1c4"
+    "mtime": 1781809911.9842756,
+    "ast_hash": "5595d348699d6c94f9a372395a917c67",
+    "semantic_hash": ""
   },
   "clients/Sources/AthenaClient/QueueCmd.swift": {
     "mtime": 1779123971.1728725,
@@ -1532,6 +1532,16 @@
   "docs/diarization.md": {
     "mtime": 1781798422.7612715,
     "ast_hash": "8e5b709c6b2ffb9df1b3b255503f3807",
+    "semantic_hash": ""
+  },
+  "Sources/AthenaTranscription/TranscriptionArch.swift": {
+    "mtime": 1781809511.440577,
+    "ast_hash": "b984430eb7a429ba426bf830a4800449",
+    "semantic_hash": ""
+  },
+  "Tests/AthenaCoreTests/TranscriptionArchTests.swift": {
+    "mtime": 1781809929.8304741,
+    "ast_hash": "2002dc7ae049bce702918baa8eb52679",
     "semantic_hash": ""
   }
 }
