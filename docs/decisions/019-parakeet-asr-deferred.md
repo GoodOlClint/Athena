@@ -1,15 +1,42 @@
 # ADR 019 — Parakeet ASR: MLX feasibility spike (was: deferred)
 
-**Status:** Reopened — **MLX spike in progress (M75)**. The original deferral
-(M74) rested on "the Swift-MLX reference was archived for performance." That
-premise was **corrected by the operator**: the reference team archived for an
-**iOS / ANE power-efficiency strategy**, which has no bearing on a plugged-in
-macOS GPU daemon — so MLX-Swift Parakeet performance on a Mac is *unquantified,
-not known-bad*. Since CoreML/ANE is off the table for Athena (governor thesis),
-MLX is the only path, and a **spike** is the way to quantify it before any
-milestone. Whisper remains the sole *shipped* transcription engine until the
-spike reports. Interim error surface (`unsupported_transcription_arch` 4xx,
-v0.10.170) stands. Spike scope at the end of this ADR.
+**Status:** Spike **COMPLETE — GO (M75)**. An MLX-Swift Parakeet-TDT-0.6B-v3
+spike is faithful (verbatim-correct transcript on real audio) **and ~63× real
+time** on Apple Silicon — refuting the perf concern entirely. A full production
+port is **recommended**; scheduling is the operator's call. Whisper remains the
+sole *shipped* engine until that port lands; the `unsupported_transcription_arch`
+4xx (v0.10.170) stands as the interim surface. Result + numbers below; the
+original deferral rationale (corrected: the reference was archived for an iOS/ANE
+power-efficiency strategy, irrelevant to a plugged-in macOS GPU daemon) is kept
+for the record.
+
+## Spike result (M75) — GO
+
+Throwaway MLX-Swift port (additive `Sources/AthenaTranscription/Parakeet/*` +
+gated heavy test), built green, run on a real 60 s clip:
+
+- **Transcript: coherent and verbatim-correct** — fluent, punctuated English
+  with the correct proper names/content of the source recording (the decisive
+  correctness proof: a broken forward cannot produce the right words). One short
+  garbled stretch on overlapping/disfluent speech; the rest clean.
+- **~63× real time** (60 s audio in ~0.95 s total inference: encoder ~529 ms +
+  decode ~420 ms), **787 decode tok/s**, on a *Debug* xctest binary (Release is
+  faster). Dramatically faster than the Whisper path.
+- Forward verified end-to-end: mel filterbank, rel-pos attention + rel-shift,
+  conv-subsampling layout, LSTM gate order, and the TDT duration-split
+  (`[:8193]` tokens / `[8193:]` durations) all correct; loader's critical-tensor
+  non-zero guard confirms real weights (not random init).
+- **Big reuse win confirmed:** the encoder is the Sortformer FastConformer
+  (adapted keys + bias-off); the pred-net LSTM is the pyannote `Wx/Wh/bias`
+  cell. Net new = 128-bin mel, TDT joint + greedy decode, trivial tokenizer.
+- **Spike shortcut to fix in production:** the mel magnitude uses standard
+  `|X|`; the reference uses a quirky int16-view `abs[::2]+abs[1::2]` trick.
+  Coherent output ⇒ numerically close enough for the spike, but the production
+  port must match the reference exactly.
+
+**Decision: GO.** The only open question (Mac-GPU MLX-TDT perf) is resolved
+decisively in favor. Proceed to a full multi-backend transcription port when
+prioritized (scope below).
 
 ## Context
 
@@ -60,41 +87,41 @@ blocked by a known performance wall.
 
 ## Decision
 
-**Run a time-boxed MLX feasibility spike before any milestone commitment.** The
-only open question is *does MLX-Swift Parakeet (FastConformer + TDT greedy) run
-fast enough on a Mac to beat Whisper on quality-per-second?* Build the minimum
-needed to measure that, throwaway-grade, off to the side of the daemon. Do **not**
-adopt CoreML (breaches the ADR-011 governor thesis / WhisperKit precedent). Keep
-Whisper as the shipped engine until the spike reports; the
-`unsupported_transcription_arch` 4xx stays the interim surface.
+**Spike done → GO.** The feasibility question is resolved (faithful + ~63× real
+time, above). The thesis-aligned MLX path is viable, so plan a full
+**multi-backend transcription port** when prioritized; do **not** adopt CoreML
+(breaches the ADR-011 governor thesis / WhisperKit precedent). Whisper stays the
+shipped engine until the port lands.
 
-## Spike scope (M75)
+## Full-port scope (the milestone, when scheduled)
 
-Minimum to produce a real number; **not** production:
+The spike proved the engine; the milestone hardens + integrates it. Model-class
+routed exactly like diarization's ADR 018 (Whisper stays default; Parakeet is an
+additional transcription backend selected by `config.json` model class):
 
-- Load `mlx-community/parakeet-tdt-0.6b-v3` (config + safetensors) — confirm
-  tensor keys / arch up front (the pyannote-style de-risk).
-- Port the **FastConformer encoder** to MLX-Swift — reuse what's possible from
-  the vendored Sortformer encoder (`ConvSubsampling` + conformer layers; same
-  NeMo family) rather than porting from scratch.
-- Port the **TDT decoder**: prediction network (LSTM) + joint network + the
-  **greedy TDT decode loop** (token + duration prediction). Greedy only — no
-  beam, no streaming, no chunking.
-- Mel features + the model's BPE/SentencePiece tokenizer (multilingual v3).
-- Harness: a **gated heavy test** (or throwaway target) that transcribes one
-  real clip and prints **transcript + decode tok/s + wall-clock**; A/B the WER
-  and speed against `whisper-large-v3-turbo` on the same clip.
+- **Mel exactness:** match the reference magnitude (int16-view trick) and
+  re-validate; pin numeric parity on a fixture.
+- **Multi-backend `transcription` slot:** an MLX-free arch detector routes a
+  checkpoint to the Whisper engine or the Parakeet engine (mirror
+  `DiarizationBackend` / ADR 016). One governed slot (ADR 011).
+- **Governor integration:** real memory estimate + reconciliation; cold-load;
+  evictable; the 100 MiB upload cap + cold-load 503 behavior.
+- **API:** the existing `/v1/audio/transcriptions` surface unchanged; Parakeet
+  selected by `model=`/allowlist. Word/segment timestamps from TDT durations
+  (`time_ratio` 0.08 s/frame) for `verbose_json`. Language handling for the
+  25-lang v3.
+- **Robustness:** long-audio chunking, the SentencePiece detokenizer (vs the
+  spike's inline vocab), special-token handling, decode anti-stall.
+- **Tests:** MLX-free decode/detector logic unit-pinned (ADR 008/009); a gated
+  heavy parity/throughput test; e2e.
+- Allowlist seed + `athena init` aux-pull; OpenAPI + docs.
 
-**Exit criteria → informs the full-port decision:**
-- *Go* (plan the full multi-backend transcription port, model-class routed like
-  ADR 018): MLX Parakeet decodes at usable speed (target: ≥ Whisper-large-turbo
-  throughput, ideally faster) AND lower/comparable WER.
-- *No-go* (return to Deferred, this ADR records why): decode is meaningfully
-  slower than Whisper with no clear optimization path.
+**Out of scope (defer within the milestone):** beam search, streaming/online
+decode.
 
-**Explicitly out of scope for the spike:** governor integration, allowlist/API
-wiring, multi-backend transcription routing, robustness, broad tests, beam
-search, streaming. Those belong to the full port if the spike says *go*.
+The spike code (`Sources/AthenaTranscription/Parakeet/*`, gated test) is the
+foundation the milestone hardens — not production as-is (mel shortcut, no
+routing/governor/API).
 
 ## Consequences
 
