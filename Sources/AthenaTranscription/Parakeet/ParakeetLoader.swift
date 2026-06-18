@@ -1,7 +1,9 @@
-// THROWAWAY FEASIBILITY SPIKE (ADR 019) — loader for the Parakeet-TDT-0.6B-v3
-// MLX port. Downloads via Athena's governed #hubDownloader (same mechanism as
-// WeSpeakerModel/SortformerModel), reads `config.json` for the vocabulary,
-// loads the safetensors and maps keys onto the module tree.
+// Loader for the Parakeet-TDT-0.6B-v3 MLX port (ADR 020). The serve path loads
+// from the local model-store dir via `fromModelDirectory` (inference never
+// auto-downloads); `fromPretrained` (governed #hubDownloader, same mechanism as
+// WeSpeakerModel/SortformerModel) backs the operator pull + the gated test. It
+// reads `config.json` for the vocabulary, loads the safetensors and maps keys
+// onto the module tree.
 //
 // Conv weights in v3 are already MLX-layout (no transpose). The only key
 // surgery: BatchNorm `num_batches_tracked` is dropped (not a parameter), and

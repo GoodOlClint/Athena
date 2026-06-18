@@ -2,17 +2,30 @@ import AthenaCore
 import Foundation
 import MLXLMCommon
 
-/// The real MLX-backed speech-to-text module (M4.2d). Loads the ported
-/// Whisper model + its tokenizer and runs the M4.2c greedy decode over
-/// a single 30 s log-mel window.
+/// The real MLX-backed speech-to-text module. A single governed slot (ADR 011)
+/// whose allowlist spans two engine families (ADR 020): OpenAI **Whisper**
+/// (the default) and NVIDIA **Parakeet-TDT**. `TranscriptionArch` classifies
+/// the resident checkpoint from its `config.json` and `loadModel` instantiates
+/// the matching engine; `transcribe` dispatches on the loaded engine. Whisper
+/// runs the M4.2c greedy decode over 30 s log-mel windows; Parakeet runs the
+/// FastConformer encoder + greedy TDT decode (the hardened ADR-019 port).
 ///
-/// Memory accounting is a fixed pre-load estimate (weights aren't on
-/// disk until first download); live reconciliation is the shared M5
-/// follow-up. The HF cache root follows `HF_HOME` (SSD-or-local — set
+/// Memory accounting is a fixed pre-load estimate sized to cover either engine
+/// (Whisper F16 ≈ 1.6 GB, Parakeet fp ≈ 2.4 GB); one model is resident at a
+/// time, so the fixed estimate bounds the slot, with live reconciliation the
+/// shared M5 follow-up. The HF cache root follows `HF_HOME` (SSD-or-local — set
 /// by the serve entrypoint), so this module stays location-agnostic.
 public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
     public nonisolated let id: ModuleID = .transcription
     public nonisolated var moduleID: ModuleID { .transcription }
+
+    /// The loaded inference engine for the resident checkpoint (ADR 020). The
+    /// resident model's class (`TranscriptionArch`) decides which case is built
+    /// at load; `transcribe` dispatches on it.
+    private enum Engine {
+        case whisper(WhisperModel, any MLXLMCommon.Tokenizer)
+        case parakeet(ParakeetTDTModel)
+    }
 
     /// M41.3 operator-declared allowlist (HF ids; the substrate's HF
     /// cache is the load source). First-declared = the default.
@@ -21,9 +34,8 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
     private var allowedIds: [String]
     private var defaultId: String
     private let estimatedBytes: Int
-    private var model: WhisperModel?
-    private var tokenizer: (any MLXLMCommon.Tokenizer)?
-    /// nil ⇒ unloaded; otherwise the id resident in `model`.
+    private var engine: Engine?
+    /// nil ⇒ unloaded; otherwise the id resident in `engine`.
     private var residentId: String?
     /// Model-store root (M54) — load from the local store dir when the
     /// model is materialized there, so a bare store-dir name or full HF
@@ -34,7 +46,7 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
     ///   - modelIds: HF id allowlist (first = default). Default
     ///     `[mlx-community/whisper-large-v3-turbo]`. M41.3.
     ///   - estimatedBytes: governor admission estimate. Default 3 GiB:
-    ///     headroom over the F16 weights (~1.6 GB) + tokenizer + the
+    ///     headroom over the larger engine's weights + tokenizer + the
     ///     encoder/decoder activation working set. One model is
     ///     resident at a time, so the fixed estimate bounds the slot.
     public init(
@@ -59,12 +71,12 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
         self.init(modelIds: [modelId], estimatedBytes: estimatedBytes)
     }
 
-    public var residentBytes: Int { model == nil ? 0 : estimatedBytes }
+    public var residentBytes: Int { engine == nil ? 0 : estimatedBytes }
 
     public func memoryEstimate() -> Int { estimatedBytes }
 
     public func load(reservation: MemoryReservation) async throws {
-        if model != nil { return }
+        if engine != nil { return }
         try await loadModel(id: residentId ?? defaultId)
     }
 
@@ -97,12 +109,9 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
         let resolved = dir.resolvingSymlinksInPath()
         switch TranscriptionArch.detect(in: resolved) {
         case .whisper:
-            break  // fall through to the Whisper load below.
+            try await loadWhisper(canonical: canonical, dir: resolved)
         case .parakeet:
-            // S1 wires the dispatch; the hardened Parakeet engine lands in S2.
-            throw AthenaError.notImplemented(
-                feature: "Parakeet transcription engine (model "
-                    + "'\(canonical)') — lands in M76 S2")
+            try loadParakeet(canonical: canonical, dir: resolved)
         case .unsupported:
             throw AthenaError.unsupportedTranscriptionArch(
                 model: canonical,
@@ -110,17 +119,20 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
                     + "Whisper model (e.g. mlx-community/whisper-large-v3-turbo)"
                     + " or a Parakeet-TDT model.")
         }
+    }
+
+    private func loadWhisper(canonical: String, dir: URL) async throws {
+        let model: WhisperModel
+        let tokenizer: any MLXLMCommon.Tokenizer
         do {
-            model = try WhisperLoader.load(directory: resolved)
+            model = try WhisperLoader.load(directory: dir)
             tokenizer = try await WhisperLoader.loadTokenizer()
-            residentId = canonical
         } catch {
-            model = nil
-            tokenizer = nil
+            engine = nil
             residentId = nil
             throw AthenaError.moduleLoadFailed(
                 .transcription,
-                reason: "whisper \(id): \(error)")
+                reason: "whisper \(canonical): \(error)")
         }
         // ND2: the decoder's special-token ids (eot/sot/langBase/transcribe/
         // timestampBegin) are pinned to the whisper-large-v3 family
@@ -129,10 +141,9 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
         // one (v3 inserted Cantonese), so the forced prefix, the eot stop
         // test, the special mask and timestamp parsing would all target the
         // wrong tokens — silently mis-decoding. Fail loud at load instead.
-        if let m = model, m.config.n_vocab != 51866 {
-            let bad = m.config.n_vocab
-            model = nil
-            tokenizer = nil
+        if model.config.n_vocab != 51866 {
+            let bad = model.config.n_vocab
+            engine = nil
             residentId = nil
             throw AthenaError.moduleLoadFailed(
                 .transcription,
@@ -141,11 +152,26 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
                     + "(vocab 51866) — use a large-v3 / large-v3-turbo "
                     + "checkpoint")
         }
+        engine = .whisper(model, tokenizer)
+        residentId = canonical
+    }
+
+    private func loadParakeet(canonical: String, dir: URL) throws {
+        do {
+            let model = try ParakeetLoader.fromModelDirectory(dir)
+            engine = .parakeet(model)
+            residentId = canonical
+        } catch {
+            engine = nil
+            residentId = nil
+            throw AthenaError.moduleLoadFailed(
+                .transcription,
+                reason: "parakeet \(canonical): \(error)")
+        }
     }
 
     public func unload() async {
-        model = nil
-        tokenizer = nil
+        engine = nil
         residentId = nil
     }
 
@@ -164,9 +190,8 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
             throw AthenaError.modelNotAvailable(
                 requested: requested, available: allowedIds)
         }
-        if residentId == target, model != nil { return }
-        model = nil
-        tokenizer = nil
+        if residentId == target, engine != nil { return }
+        engine = nil
         residentId = nil
         try await loadModel(id: target)
     }
@@ -181,8 +206,7 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
         // equivalent spelling (bare vs full HF id, case diff) would needlessly
         // drop the loaded model+tokenizer and force a multi-GB reload.
         if let r = residentId, ids.canonicalByStoreIdentity(r) == nil {
-            model = nil
-            tokenizer = nil
+            engine = nil
             residentId = nil
         }
     }
@@ -191,7 +215,7 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
         audio: Data, filename: String?, language: String?,
         wordTimestamps: Bool
     ) async throws -> TranscriptionResult {
-        guard let model, let tokenizer else {
+        guard let engine else {
             throw AthenaError.moduleLoadFailed(
                 .transcription, reason: "transcribe called before load")
         }
@@ -207,11 +231,27 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
         defer { try? FileManager.default.removeItem(at: tmp) }
 
         let pcm = try AudioDecode.pcm16kMono(from: tmp, module: .transcription)
-        // PCM-level entry: >30 s is chunked into 30 s windows. nil
-        // language ⇒ Whisper auto-detects (once, on window 0). Result
-        // carries timed segments for verbose_json/srt/vtt.
-        return WhisperDecode.transcribeResult(
-            model: model, pcm: pcm, tokenizer: tokenizer,
-            language: language, wordTimestamps: wordTimestamps)
+        switch engine {
+        case .whisper(let model, let tokenizer):
+            // PCM-level entry: >30 s is chunked into 30 s windows. nil
+            // language ⇒ Whisper auto-detects (once, on window 0). Result
+            // carries timed segments for verbose_json/srt/vtt.
+            return WhisperDecode.transcribeResult(
+                model: model, pcm: pcm, tokenizer: tokenizer,
+                language: language, wordTimestamps: wordTimestamps)
+        case .parakeet(let model):
+            // S2: single whole-file pass + greedy TDT decode. Per-segment /
+            // per-word TDT-duration timestamps land in S3; long-audio chunking
+            // in S4. For now the result is one segment spanning the clip.
+            let r = model.transcribe(pcm)
+            let text = r.transcript.trimmingCharacters(
+                in: .whitespacesAndNewlines)
+            let duration = Double(pcm.count) / 16000.0
+            return TranscriptionResult(
+                text: text, language: language ?? "auto", duration: duration,
+                segments: [
+                    TranscriptionSegment(start: 0, end: duration, text: text)
+                ])
+        }
     }
 }

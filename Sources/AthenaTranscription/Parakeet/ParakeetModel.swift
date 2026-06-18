@@ -1,10 +1,10 @@
-// THROWAWAY FEASIBILITY SPIKE (ADR 019).
-//
 // MLX-Swift port of NVIDIA Parakeet-TDT-0.6B-v3
-// (`mlx-community/parakeet-tdt-0.6b-v3`). Goal: a real decode-speed number
-// plus a coherent transcript to compare against Whisper. NOT production code:
-// no governor wiring, no daemon route, no streaming, no chunking, no beam
-// search. Single forward + greedy TDT decode on one clip.
+// (`mlx-community/parakeet-tdt-0.6b-v3`). Hardened from the ADR-019
+// feasibility spike into the production Parakeet transcription engine
+// (ADR 020): governed via `MLXTranscriptionModule`, model-class routed by
+// `TranscriptionArch`, reference-exact L1 mel magnitude (R1), and a proper
+// special-token-stripping detokenizer (`ParakeetDetokenizer`, R2). Still
+// greedy TDT — beam search / streaming are out of scope (ADR 020).
 //
 // Architecture follows the live Python MLX reference at
 // `/tmp/parakeet-ref/parakeet-mlx/parakeet_mlx/` (audio.py / conformer.py /
@@ -151,11 +151,14 @@ enum ParakeetMel {
 
         let frameArr = MLXArray(frames, [nFrames, cfg.nFFT])
         let spec = MLXFFT.rfft(frameArr, n: cfg.nFFT, axis: -1)  // [nFrames, 257]
-        // audio.py: abs of the int16-view then x[::2]+x[1::2]; for a plain
-        // complex magnitude this equals |re|+|im|... but reference takes the
-        // *magnitude* via mx.abs(mx.view(...)) which is |X| per bin. We use
-        // the standard complex magnitude |X|, then mag_power=2 → power.
-        let mag = MLX.abs(spec)  // [nFrames, 257]
+        // Mel-exactness (ADR 020 S2 / R1). audio.py computes the magnitude as
+        //   abs = mx.abs(mx.view(x, float32)); x = abs[..., ::2] + abs[..., 1::2]
+        // i.e. it views the complex spectrum as interleaved (re, im) float32
+        // pairs, takes |·| of each, and sums adjacent — which is the **L1**
+        // magnitude |re| + |im| per bin, NOT the Euclidean |X| = sqrt(re²+im²).
+        // The spike used sqrt; match the reference exactly so the mel (and thus
+        // the encoder input) is numerically faithful. mag_power=2 → power.
+        let mag = MLX.abs(spec.realPart()) + MLX.abs(spec.imaginaryPart())
         let power = mag.square()
 
         let nFreqs = cfg.nFFT / 2 + 1
@@ -660,12 +663,9 @@ public final class ParakeetTDTModel: Module {
             encoderSeconds: encSeconds, decodeSeconds: decSeconds)
     }
 
-    /// Trivial SentencePiece detokenize: join vocab[id] with ▁→space.
+    /// SentencePiece detokenize via the MLX-free `ParakeetDetokenizer`
+    /// (special-token stripping + leading-space trim; unit-pinned, ADR 008/009).
     static func decode(_ ids: [Int], vocabulary: [String]) -> String {
-        var s = ""
-        for id in ids where id >= 0 && id < vocabulary.count {
-            s += vocabulary[id].replacingOccurrences(of: "\u{2581}", with: " ")
-        }
-        return s
+        ParakeetDetokenizer.detokenize(ids, vocabulary: vocabulary)
     }
 }
