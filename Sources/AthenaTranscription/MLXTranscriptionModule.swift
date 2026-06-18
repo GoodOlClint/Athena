@@ -240,18 +240,29 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
                 model: model, pcm: pcm, tokenizer: tokenizer,
                 language: language, wordTimestamps: wordTimestamps)
         case .parakeet(let model):
-            // S2: single whole-file pass + greedy TDT decode. Per-segment /
-            // per-word TDT-duration timestamps land in S3; long-audio chunking
-            // in S4. For now the result is one segment spanning the clip.
+            // Whole-file greedy TDT decode. Segment/word timestamps come from
+            // the TDT durations (0.08 s/encoder frame) via the MLX-free
+            // `ParakeetAlignment` grouping (S3); long-audio chunking lands in
+            // S4. Parakeet greedy decode does not surface a detected language
+            // (no forced language prompt, unlike Whisper), so the response
+            // echoes the requested `language` or "auto".
             let r = model.transcribe(pcm)
             let text = r.transcript.trimmingCharacters(
                 in: .whitespacesAndNewlines)
             let duration = Double(pcm.count) / 16000.0
+            var segments = ParakeetAlignment.segments(
+                from: r.tokens, attachWords: wordTimestamps)
+            if segments.isEmpty {
+                // Edge: speech with no sentence-final punctuation → one span.
+                segments = [
+                    TranscriptionSegment(start: 0, end: duration, text: text)
+                ]
+            }
+            let words =
+                wordTimestamps ? ParakeetAlignment.words(from: r.tokens) : []
             return TranscriptionResult(
                 text: text, language: language ?? "auto", duration: duration,
-                segments: [
-                    TranscriptionSegment(start: 0, end: duration, text: text)
-                ])
+                segments: segments, words: words)
         }
     }
 }

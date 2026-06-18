@@ -601,6 +601,9 @@ public final class ParakeetTDTModel: Module {
     public struct Result {
         public var transcript: String
         public var tokenIds: [Int]
+        /// TDT-aligned tokens (timing from the durations, specials excluded) —
+        /// the source for segment/word timestamps (ADR 020 S3).
+        public var tokens: [ParakeetAlignment.Token]
         public var decodeSteps: Int
         public var encoderSeconds: Double
         public var decodeSeconds: Double
@@ -625,6 +628,7 @@ public final class ParakeetTDTModel: Module {
         var lastToken: Int? = nil
         var (h, c) = decoder.zeroState()
         var hyp = [Int]()
+        var tokens = [ParakeetAlignment.Token]()
         var steps = 0
 
         while step < T {
@@ -636,12 +640,33 @@ public final class ParakeetTDTModel: Module {
             let durLogits = logits[(blank + 1)...]  // 5
             let predToken = MLX.argMax(tokenLogits).item(Int.self)
             let decision = MLX.argMax(durLogits).item(Int.self)
+            // Frame index at emission → time (before `step` advances). The TDT
+            // duration is the token's own time span (S3).
+            let tokenStart = Double(step) * cfg.timeRatio
+            let tokenDur = Double(durations[decision]) * cfg.timeRatio
 
             if predToken != blank {
                 hyp.append(predToken)
                 lastToken = predToken
                 h = newH
                 c = newC
+                // Record the aligned token for timestamping — predicted-token
+                // softmax probability as confidence; specials/out-of-range are
+                // excluded so segment/word text matches the detokenized output.
+                if predToken >= 0, predToken < vocabulary.count {
+                    let piece = vocabulary[predToken]
+                    if !ParakeetDetokenizer.isSpecial(piece) {
+                        let conf = softmax(tokenLogits, axis: -1)[predToken]
+                            .item(Float.self)
+                        tokens.append(
+                            ParakeetAlignment.Token(
+                                id: predToken,
+                                text: piece.replacingOccurrences(
+                                    of: "\u{2581}", with: " "),
+                                start: tokenStart, duration: tokenDur,
+                                confidence: Double(conf)))
+                    }
+                }
             }
 
             step += durations[decision]
@@ -659,8 +684,9 @@ public final class ParakeetTDTModel: Module {
         let transcript = ParakeetTDTModel.decode(hyp, vocabulary: vocabulary)
         MLX.Memory.clearCache()
         return Result(
-            transcript: transcript, tokenIds: hyp, decodeSteps: steps,
-            encoderSeconds: encSeconds, decodeSeconds: decSeconds)
+            transcript: transcript, tokenIds: hyp, tokens: tokens,
+            decodeSteps: steps, encoderSeconds: encSeconds,
+            decodeSeconds: decSeconds)
     }
 
     /// SentencePiece detokenize via the MLX-free `ParakeetDetokenizer`

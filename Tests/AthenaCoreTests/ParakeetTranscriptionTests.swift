@@ -137,5 +137,38 @@ final class ParakeetTranscriptionTests: XCTestCase {
         XCTAssertGreaterThan(
             rtf, 5.0, "real-time factor \(rtf)x is far below the ~63x baseline")
         print("[parakeet] distinct words: \(distinct) / total \(words.count)")
+
+        // S3: TDT-derived timestamps — non-decreasing token starts, all within
+        // the clip; sentence segments + words monotonic and in-bounds.
+        XCTAssertFalse(result.tokens.isEmpty, "no aligned tokens")
+        var lastStart = -1.0
+        for tok in result.tokens {
+            XCTAssertGreaterThanOrEqual(tok.start, 0)
+            XCTAssertLessThanOrEqual(
+                tok.end, audioSeconds + 1.0, "token past clip end")
+            XCTAssertGreaterThanOrEqual(
+                tok.start, lastStart - 1e-6, "token starts must be non-decreasing")
+            lastStart = tok.start
+        }
+        let segs = ParakeetAlignment.segments(
+            from: result.tokens, attachWords: true)
+        XCTAssertFalse(segs.isEmpty, "no segments")
+        for s in segs {
+            XCTAssertLessThanOrEqual(s.start, s.end)
+            XCTAssertLessThanOrEqual(s.end, audioSeconds + 1.0)
+        }
+        let alignedWords = ParakeetAlignment.words(from: result.tokens)
+        XCTAssertGreaterThan(
+            alignedWords.count, 20, "too few timed words for 60 s of speech")
+        for i in 1..<alignedWords.count {
+            XCTAssertLessThanOrEqual(
+                alignedWords[i - 1].start, alignedWords[i].start)
+        }
+        print(
+            "[parakeet] segments: \(segs.count), timed words: "
+                + "\(alignedWords.count), first seg: "
+                + "[\(String(format: "%.2f", segs[0].start))–"
+                + "\(String(format: "%.2f", segs[0].end))] "
+                + "\"\(segs[0].text.prefix(60))\"")
     }
 }
