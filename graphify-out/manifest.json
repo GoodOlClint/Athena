@@ -425,8 +425,8 @@
     "semantic_hash": "d16404614855c59c2001089f41c5bd78"
   },
   "Sources/athena/Athena.swift": {
-    "mtime": 1781798434.5037675,
-    "ast_hash": "29c21d07628e88ae6619a4cce40eda88",
+    "mtime": 1781806446.3131752,
+    "ast_hash": "4bd931dae01fb3370e5615622ae95be0",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Audit.swift": {
@@ -550,8 +550,8 @@
     "semantic_hash": "ba546feb975db11ee6e42e5e147b55e0"
   },
   "Sources/athena/Server/AthenaServer.swift": {
-    "mtime": 1781796849.6322985,
-    "ast_hash": "e95ffdf784890f6518e3976acd740bc8",
+    "mtime": 1781806416.327719,
+    "ast_hash": "3334e316c19ad8c173b2ae48ab186e0b",
     "semantic_hash": ""
   },
   "Sources/athena/Server/GPUTelemetry.swift": {
@@ -1510,8 +1510,8 @@
     "semantic_hash": ""
   },
   "Sources/AthenaTranscription/Pyannote/PyannoteSegmentationDecode.swift": {
-    "mtime": 1781796833.1367064,
-    "ast_hash": "9ce80bb7f48243658042d2826915a619",
+    "mtime": 1781806405.5808709,
+    "ast_hash": "8a354cb964aedd280c9be60c8078bfbd",
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/DiarizationBackendTests.swift": {
@@ -1520,13 +1520,13 @@
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/PyanNetSegmentationModelTests.swift": {
-    "mtime": 1781796878.6992476,
-    "ast_hash": "02029e54acd98f6f0bd9e543cd34c8ee",
+    "mtime": 1781806457.3580995,
+    "ast_hash": "a436409e4e09f957d26669e3a393575a",
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/PyannoteSegmentationDecodeTests.swift": {
-    "mtime": 1781796867.2897322,
-    "ast_hash": "fa5cb033a2826559084fa4f7847ab8c2",
+    "mtime": 1781806430.746074,
+    "ast_hash": "f8fae447c6b6f251502053efd29b2bbb",
     "semantic_hash": ""
   },
   "docs/diarization.md": {
