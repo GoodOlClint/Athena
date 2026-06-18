@@ -56,6 +56,21 @@ public enum ModelModality: Sendable, Equatable {
     case speakerEmbedding
     /// No modality Athena serves could be identified from the config.
     case unsupported
+
+    /// A short, repo-id-free human label for the modality, used in cause-naming
+    /// errors (convert redirect) and the `pull` preflight verdict.
+    public var label: String {
+        switch self {
+        case .llm: return "generative"
+        case .vision: return "vision"
+        case .embedding: return "embedding"
+        case .transcription(let arch): return "transcription (\(arch.rawValue))"
+        case .diarization(let backend):
+            return "diarization (\(backend.rawValue))"
+        case .speakerEmbedding: return "speaker-embedding"
+        case .unsupported: return "unsupported"
+        }
+    }
 }
 
 /// Whether the loader's required packaging is present — a check distinct from

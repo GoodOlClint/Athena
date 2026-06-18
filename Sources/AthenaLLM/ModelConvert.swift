@@ -68,7 +68,7 @@ public enum ModelConvert {
                     + "model (`--embedding-model \(id)` / config). `convert` "
                     + "is for generative and vision models.")
         case .transcription, .diarization, .speakerEmbedding:
-            let label = modalityLabel(support.modality)
+            let label = support.modality.label
             return .unsupportedConvertClass(
                 model: id, detected: label,
                 guidance:
@@ -77,21 +77,6 @@ public enum ModelConvert {
                     + "select it for that module (config / `athena allowlist "
                     + "add`). `convert` quantizes only generative and vision "
                     + "models.")
-        }
-    }
-
-    /// A short human label for the detected modality, used in the convert
-    /// redirect's `detected` field. Repo-id-free by construction.
-    static func modalityLabel(_ modality: ModelModality) -> String {
-        switch modality {
-        case .llm: return "generative"
-        case .vision: return "vision"
-        case .embedding: return "embedding"
-        case .transcription(let arch): return "transcription (\(arch.rawValue))"
-        case .diarization(let backend):
-            return "diarization (\(backend.rawValue))"
-        case .speakerEmbedding: return "speaker-embedding"
-        case .unsupported: return "unsupported"
         }
     }
 
