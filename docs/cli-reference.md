@@ -71,9 +71,9 @@ expiry (still subject to `token_max_age_days`).
 | `install` | Install Athena as a boot-time launchd system daemon. |
 | `list` (alias `ls`) | List models available in the local model store. |
 | `ps` | Show governed module state from a running daemon. |
-| `pull` | Download a model (HF id) into the local store. |
-| `convert` | Convert an HF model into the local MLX-format store (optionally quantize). |
-| `verify` | Check a stored model's integrity (offline). |
+| `pull` | Download a model (HF id) into the local store. `--check` is a config-only dry run reporting whether Athena can load it (modality + loadability), downloading nothing — see [model-support.md](model-support.md). |
+| `convert` | Convert an HF model into the local MLX-format store (optionally quantize). Redirects non-quantizable modalities (embedding/transcription/diarization/speaker) to `pull`. |
+| `verify` | Check a stored model's **integrity** (offline). Complements `pull --check` (model **support**) — see [model-support.md](model-support.md). |
 | `prune` | Remove broken/dangling models from the store. |
 | `cp` | Alias or copy a stored model under a new name. |
 | `default` | Show or set the default served model. |

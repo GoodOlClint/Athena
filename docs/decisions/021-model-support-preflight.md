@@ -1,10 +1,19 @@
 # ADR 021 — unified model-support classification + pre-pull preflight
 
-**Status:** Proposed (M77) — awaiting operator approval. No production code yet.
-Pairs with `docs/model-support-preflight-plan.md`. Motivated by an M76 field
-incident (a `nvidia/parakeet-tdt-0.6b-v3` checkpoint produced an opaque
-`module_load_failed` 500, and `athena convert` on the same id failed with a
-misleading "bump the substrate" message).
+**Status:** **Accepted — shipped M77** (v0.10.176–179). Pairs with
+`docs/model-support-preflight-plan.md`; usage in `docs/model-support.md`.
+Motivated by an M76 field incident (a `nvidia/parakeet-tdt-0.6b-v3` checkpoint
+produced an opaque `module_load_failed` 500, and `athena convert` on the same id
+failed with a misleading "bump the substrate" message).
+
+Shipped as four stacked slices: S1 the MLX-free `ModelSupport` predicate
+(detectors relocated to `AthenaCore` so one predicate can compose them; v0.10.176),
+S2 the transcription loader gate (Parakeet 500→400; v0.10.177), S3 the `convert`
+redirect for the source-precision modalities (v0.10.178), S4 the `pull --check`
+dry run + in-pull gate (v0.10.179). E2E-validated on the real incident pair
+(nvidia transformers Parakeet → unsupported/exit 1 naming the missing
+`joint.vocabulary`; mlx-community NeMo Parakeet + whisper-large-v3-turbo →
+loadable).
 
 ## Context
 
