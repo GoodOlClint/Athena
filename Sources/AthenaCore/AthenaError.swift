@@ -69,6 +69,15 @@ public enum AthenaError: Error, Sendable, Equatable {
     /// time; the text factory silently falls back to plain formatting, so this
     /// only escapes on the VLM path. (issue #4)
     case noChatTemplate(module: ModuleID, detail: String)
+    /// `athena convert` was handed a checkpoint whose model CLASS it does not
+    /// handle. Convert is a generative/vision quantization pipeline; an
+    /// embedding model is loaded in source precision by the serve path instead
+    /// (ADR 016), so convert REDIRECTS rather than mis-routing it to the LLM
+    /// factory (which would fail with an opaque `unsupportedModelType` /
+    /// `keyNotFound`). Also covers a generative/vision `model_type` the
+    /// substrate has no architecture for. A client error (400) — the action,
+    /// not the daemon, is the fault.
+    case unsupportedConvertClass(model: String, detected: String, guidance: String)
 
     /// HTTP status the serve path should return for this error.
     public var httpStatus: Int {
@@ -87,6 +96,7 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .inputTooLong: return 400
         case .structuredOutputUnavailable: return 400
         case .noChatTemplate: return 400
+        case .unsupportedConvertClass: return 400
         }
     }
 
@@ -115,6 +125,7 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .inputTooLong: return "input_too_long"
         case .structuredOutputUnavailable: return "structured_output_unavailable"
         case .noChatTemplate: return "no_chat_template"
+        case .unsupportedConvertClass: return "unsupported_convert_class"
         }
     }
 
@@ -190,6 +201,10 @@ public enum AthenaError: Error, Sendable, Equatable {
             return "The loaded model has no chat template, so it cannot "
                 + "serve chat. Use an instruct checkpoint (e.g. an `-it` "
                 + "variant) or a model that ships a chat template."
+        case let .unsupportedConvertClass(model, detected, guidance):
+            return "Cannot convert '\(model)': detected model class "
+                + "'\(detected)', which `athena convert` does not handle. "
+                + guidance
         }
     }
 
@@ -217,6 +232,19 @@ public enum AthenaError: Error, Sendable, Equatable {
         let s = String(describing: error).lowercased()
         return s.contains("missingchattemplate")
             || s.contains("does not have a chat template")
+    }
+
+    /// Does `error` look like the substrate factory's "no architecture for
+    /// this model_type" condition? The LLM/VLM factories raise
+    /// `unsupportedModelType("…")` when no registered architecture claims the
+    /// checkpoint's `model_type`; the weight loader raises `keyNotFound` when a
+    /// plausible-but-wrong architecture was picked (the convert mis-route ADR
+    /// 016 fixes). Matched by string so `AthenaCore` stays MLX-free.
+    public static func looksLikeUnsupportedArch(_ error: any Error) -> Bool {
+        if error is AthenaError { return false }
+        let s = String(describing: error).lowercased()
+        return s.contains("unsupportedmodeltype")
+            || s.contains("keynotfound")
     }
 
     /// Does `error` look like a genuine MLX/Metal allocation failure

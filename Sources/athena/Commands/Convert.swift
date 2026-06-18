@@ -1,5 +1,6 @@
 import ArgumentParser
 import AthenaClient
+import AthenaCore
 import AthenaLLM
 import Foundation
 
@@ -85,6 +86,13 @@ struct Convert: AsyncParsableCommand {
             print(
                 "converted \(model) → \(r.path.path) "
                     + "(\(String(format: "%.0f", mb)) MB)")
+        } catch let e as AthenaError {
+            // Cause-naming convert errors (e.g. an embedding-model redirect or
+            // an unsupported architecture, ADR 016) carry an actionable
+            // message — surface it instead of a raw substrate dump.
+            bar.finish()
+            print("error: \(e.message)")
+            throw ExitCode.failure
         } catch {
             bar.finish()
             print("error: convert failed — \(error)")

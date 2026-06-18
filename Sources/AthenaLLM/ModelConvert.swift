@@ -51,10 +51,35 @@ public enum ModelConvert {
         into storeRoot: URL, name: String? = nil,
         progress: (@Sendable (Double) -> Void)? = nil
     ) async throws -> Result {
-        let snapshot = try await #hubDownloader(
+        let downloader = #hubDownloader(
             HuggingFace.HubClient(
-                session: AthenaProxy.proxiedURLSession())
-        ).download(
+                session: AthenaProxy.proxiedURLSession()))
+
+        // ADR 016 fail-fast: fetch only the small metadata needed to classify
+        // the model's CLASS before pulling multi-GB weights. An embedding
+        // model is redirected to the serve path (it loads in source precision
+        // and needs no converted artifact), not mis-routed to the LLM factory
+        // — which would fail with an opaque `unsupportedModelType`/`keyNotFound`.
+        let meta = try await downloader.download(
+            id: id, revision: revision,
+            matching: [
+                "config.json", "modules.json",
+                "config_sentence_transformers.json",
+                "sentence_bert_config.json",
+            ],
+            useLatest: false,
+            progressHandler: { _ in })
+        if ModelClass.detect(in: meta) == .embedding {
+            throw AthenaError.unsupportedConvertClass(
+                model: id, detected: "embedding",
+                guidance:
+                    "Embedding models load in source precision directly — run "
+                    + "`athena pull \(id)`, then select it as the embedding "
+                    + "model (`--embedding-model \(id)` / config). `convert` "
+                    + "is for generative and vision models.")
+        }
+
+        let snapshot = try await downloader.download(
             id: id, revision: revision,
             matching: [
                 "*.json", "*.safetensors", "*.txt", "*.jinja",
@@ -86,16 +111,31 @@ public enum ModelConvert {
         // closure and the emitted config so they stay in lock-step.
         let mixedPrecision = Gemma4QuantRule.appliesMixedPrecision(
             modelType: srcInfo?.modelType)
-        let container = try await AthenaModelRegistration
-            .$currentModelDirectory.withValue(snapshot) {
-                let loader = #huggingFaceTokenizerLoader()
-                if isVision {
-                    return try await VLMModelFactory.shared.loadContainer(
+        let container: ModelContainer
+        do {
+            container = try await AthenaModelRegistration
+                .$currentModelDirectory.withValue(snapshot) {
+                    let loader = #huggingFaceTokenizerLoader()
+                    if isVision {
+                        return try await VLMModelFactory.shared.loadContainer(
+                            from: snapshot, using: loader)
+                    }
+                    return try await loadModelContainer(
                         from: snapshot, using: loader)
                 }
-                return try await loadModelContainer(
-                    from: snapshot, using: loader)
-            }
+        } catch where AthenaError.looksLikeUnsupportedArch(error) {
+            // A generative/vision checkpoint whose `model_type` the substrate
+            // has no architecture for (ADR 016) — name the cause instead of
+            // leaking the raw substrate `unsupportedModelType`/`keyNotFound`.
+            let cls = isVision ? "vision" : "generative"
+            throw AthenaError.unsupportedConvertClass(
+                model: id,
+                detected: srcInfo?.modelType.map { "\($0) (\(cls))" } ?? cls,
+                guidance:
+                    "Athena loads only architectures the vendored mlx-swift-lm "
+                    + "substrate implements. If upstream has since added this "
+                    + "model_type, bump the substrate pin and rebuild.")
+        }
 
         let base = id.split(separator: "/").last.map(String.init) ?? id
         // Naming: all converts carry the `-mlx` family marker; a quantized
