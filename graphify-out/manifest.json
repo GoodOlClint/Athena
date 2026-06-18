@@ -165,8 +165,8 @@
     "semantic_hash": ""
   },
   "Sources/AthenaLLM/ModelConvert.swift": {
-    "mtime": 1781716771.5028346,
-    "ast_hash": "a87efd177ed8f5867e481b652fe2ae89",
+    "mtime": 1781740541.0702567,
+    "ast_hash": "cd3cf035283357b15184ec06fcc4db6d",
     "semantic_hash": ""
   },
   "Sources/AthenaLLM/ModelHealth.swift": {
@@ -425,8 +425,8 @@
     "semantic_hash": "d16404614855c59c2001089f41c5bd78"
   },
   "Sources/athena/Athena.swift": {
-    "mtime": 1781736657.2050683,
-    "ast_hash": "c47e55534a3d94a0a2e13673d14d8ab7",
+    "mtime": 1781740671.2255867,
+    "ast_hash": "0a8c3b6d6ee54b6ac6a91a052bb6cdbf",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Audit.swift": {
@@ -450,9 +450,9 @@
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Convert.swift": {
-    "mtime": 1779803414.6975677,
-    "ast_hash": "57c077f9a0c0d05db500a875f4a7de38",
-    "semantic_hash": "57c077f9a0c0d05db500a875f4a7de38"
+    "mtime": 1781740547.1251245,
+    "ast_hash": "67d7540e4ab55f4a2cd89c98ae464160",
+    "semantic_hash": ""
   },
   "Sources/athena/Commands/Cp.swift": {
     "mtime": 1779134804.633495,
@@ -1090,8 +1090,8 @@
     "semantic_hash": "371237f6ed34877c859b071318d9b529"
   },
   "CLAUDE.md": {
-    "mtime": 1781736648.798285,
-    "ast_hash": "00f2f12c08de81b106a7226f0ead3682",
+    "mtime": 1781740689.510524,
+    "ast_hash": "d1bc879ac46c1986d5b3a530a1c82f09",
     "semantic_hash": ""
   },
   "docs/cli-reference.md": {
@@ -1385,8 +1385,8 @@
     "semantic_hash": ""
   },
   "docs/decisions/012-vision-aware-convert.md": {
-    "mtime": 1781719224.105019,
-    "ast_hash": "7a533d8737210ecbaccfb833b4dbbb17",
+    "mtime": 1781740176.5954225,
+    "ast_hash": "ffe754f6a4b8df98d1e5001c6c98b906",
     "semantic_hash": ""
   },
   "docs/m72-vision-convert-plan.md": {
@@ -1395,13 +1395,13 @@
     "semantic_hash": ""
   },
   "Sources/AthenaLLM/Gemma4QuantRule.swift": {
-    "mtime": 1781716763.3096871,
-    "ast_hash": "388cb943ac29629098cfbafde0165b45",
+    "mtime": 1781740447.589361,
+    "ast_hash": "ad4dfdf1400774075ec978b6a42997bb",
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/Gemma4QuantRuleTests.swift": {
-    "mtime": 1781716784.2702754,
-    "ast_hash": "7bd2810d62595379707d26933bdba57a",
+    "mtime": 1781740575.6973765,
+    "ast_hash": "7224c17dfad541e3c1b882a0da46b302",
     "semantic_hash": ""
   },
   "docs/api-surface-rollout-plan.md": {
@@ -1442,6 +1442,11 @@
   "docs/speaker-identification-plan.md": {
     "mtime": 1781729645.0764458,
     "ast_hash": "84b855be5e613ffabc9e29a15bbfeaeb",
+    "semantic_hash": ""
+  },
+  "docs/convert-quant-arch-gate-plan.md": {
+    "mtime": 1781740666.104526,
+    "ast_hash": "00cc1eb702aaf43203e2e2e7c34ea643",
     "semantic_hash": ""
   }
 }
