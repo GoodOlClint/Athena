@@ -102,22 +102,33 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
                     + "— pull it first (operator action); inference does "
                     + "not auto-download")
         }
-        // ADR 020 — route to the engine the checkpoint's class names. The
-        // single governed slot spans Whisper and Parakeet; everything else is
-        // refused up front with a cause-naming 4xx instead of letting a loader
-        // fail deep with an opaque 500.
+        // ADR 021 — one predicate decides BOTH modality and loadability. The
+        // single governed slot spans Whisper and Parakeet; a checkpoint that
+        // classifies as one of them by family but whose PACKAGING the loader
+        // cannot read — a non-large-v3 Whisper vocab, or a transformers-format
+        // Parakeet with no `joint.vocabulary` (the M76 field incident) — is
+        // refused here with a cause-naming 4xx naming the structural
+        // requirement, instead of dispatching into a loader that fails deep
+        // with an opaque 500. This subsumes the old `TranscriptionArch.detect`
+        // switch and the post-load whisper-vocab guard (kept below as a
+        // belt-and-braces backstop). The guidance is repo-id-free (ADR 021 D5).
         let resolved = dir.resolvingSymlinksInPath()
-        switch TranscriptionArch.detect(in: resolved) {
-        case .whisper:
+        let support = ModelSupport.detect(in: resolved)
+        if case let .unsupported(reason, guidance) = support.loadability {
+            throw AthenaError.unsupportedTranscriptionArch(
+                model: canonical, detail: "\(reason); \(guidance)")
+        }
+        switch support.modality {
+        case .transcription(.whisper):
             try await loadWhisper(canonical: canonical, dir: resolved)
-        case .parakeet:
+        case .transcription(.parakeet):
             try loadParakeet(canonical: canonical, dir: resolved)
-        case .unsupported:
+        default:
             throw AthenaError.unsupportedTranscriptionArch(
                 model: canonical,
-                detail: "Neither a Whisper nor a Parakeet checkpoint. Use a "
-                    + "Whisper model (e.g. mlx-community/whisper-large-v3-turbo)"
-                    + " or a Parakeet-TDT model.")
+                detail: "the checkpoint is neither a Whisper nor a Parakeet "
+                    + "transcription model; the transcription slot serves only "
+                    + "those two engine families")
         }
     }
 

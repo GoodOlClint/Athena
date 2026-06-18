@@ -92,10 +92,15 @@ public enum AthenaError: Error, Sendable, Equatable {
     /// not yet. `feature` is client-safe.
     case notImplemented(feature: String)
 
-    /// A transcription model whose architecture the Whisper-only engine cannot
-    /// load (e.g. Parakeet/TDT/Conformer). A client/config fault (400) — the
-    /// id is allowlisted but unportable — surfaced as a cause-naming error
-    /// instead of a deep Whisper-loader 500. `model`/`detail` are client-safe.
+    /// A transcription checkpoint the governed slot cannot load: neither a
+    /// Whisper nor a Parakeet family model, or one of those families whose
+    /// PACKAGING the loader requires is absent (a non-large-v3 Whisper vocab; a
+    /// transformers-format Parakeet with no `joint.vocabulary`). A client/config
+    /// fault (400) — the id is allowlisted but unloadable — surfaced via the
+    /// shared `ModelSupport` predicate as a cause-naming error instead of a deep
+    /// loader 500 (ADR 020/021). `detail` names the structural requirement and
+    /// is free of any model id / HF repo (ADR 021 D5). `model`/`detail` are
+    /// client-safe.
     case unsupportedTranscriptionArch(model: String, detail: String)
 
     /// HTTP status the serve path should return for this error.
@@ -235,9 +240,10 @@ public enum AthenaError: Error, Sendable, Equatable {
         case let .notImplemented(feature):
             return "\(feature) is not yet available."
         case let .unsupportedTranscriptionArch(model, detail):
-            return "Transcription model '\(model)' is not a Whisper-family "
-                + "model; the transcription engine only supports Whisper "
-                + "checkpoints. \(detail)"
+            // Modality-neutral since ADR 020 (Whisper AND Parakeet are
+            // served); the cause-naming `detail` carries the structural
+            // requirement the checkpoint fails (ADR 021).
+            return "Transcription model '\(model)' cannot be loaded: \(detail)."
         }
     }
 
