@@ -76,6 +76,46 @@ final class ParakeetTranscriptionTests: XCTestCase {
             "per-feature std should be ~1 after normalize (got \(meanStd))")
     }
 
+    /// S4: a clip longer than `chunkSeconds` (120 s) is decoded in overlapping
+    /// windows and stitched. Tile the fixture ×3 (~180 s) to force the chunked
+    /// path, then assert the stitched timeline is coherent, monotonic, and
+    /// reaches the tail (later chunks contributed with correct offsets).
+    func testLongAudioChunking() async throws {
+        try modelGate()
+        let clip = try fixture()
+        let one = try AudioDecode.pcm16kMono(from: clip)
+        let pcm = one + one + one
+        let audioSeconds = Double(pcm.count) / 16000.0
+        XCTAssertGreaterThan(audioSeconds, 120, "need >120 s to exercise chunking")
+
+        let model = try await ParakeetLoader.fromPretrained(
+            "mlx-community/parakeet-tdt-0.6b-v3")
+        let result = model.transcribe(pcm)
+
+        let t = result.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        XCTAssertFalse(t.isEmpty, "empty transcript on long audio")
+        XCTAssertFalse(t.contains("<|"), "control token leaked")
+        XCTAssertFalse(result.tokens.isEmpty, "no aligned tokens")
+
+        var last = -1.0
+        for tk in result.tokens {
+            XCTAssertGreaterThanOrEqual(
+                tk.start, last - 1e-6, "stitched starts must be non-decreasing")
+            last = tk.start
+            XCTAssertLessThanOrEqual(
+                tk.end, audioSeconds + 1.0, "token past clip end")
+        }
+        // The tail must be reached — proves a later chunk's offset timestamps
+        // were merged in (not just the first window).
+        XCTAssertGreaterThan(
+            result.tokens.last!.start, 120.0,
+            "stitched timeline never passes 120 s — chunking/stitch broken")
+        print(
+            "[parakeet] long-audio: \(String(format: "%.0f", audioSeconds)) s, "
+                + "tokens \(result.tokens.count), last start "
+                + "\(String(format: "%.1f", result.tokens.last!.start)) s")
+    }
+
     func testTranscribeBenchmark() async throws {
         try modelGate()
         let clip = try fixture()

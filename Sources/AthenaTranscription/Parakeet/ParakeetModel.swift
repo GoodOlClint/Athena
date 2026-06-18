@@ -59,6 +59,14 @@ struct ParakeetConfig {
     var durations: [Int] { [0, 1, 2, 3, 4] }
     var maxSymbols = 10  // anti-stall
 
+    // Long-audio chunking (S4). Clips longer than `chunkSeconds` are split into
+    // overlapping windows decoded independently and stitched (the encoder's
+    // rel-pos attention is O(T²), so a single pass over a very long clip blows
+    // the Metal budget). 120 s keeps the common case single-pass; 15 s overlap
+    // matches the reference and gives the stitch enough anchor tokens.
+    var chunkSeconds: Double = 120
+    var overlapSeconds: Double = 15
+
     var timeRatio: Double {
         Double(subsamplingFactor) / Double(sampleRate) * Double(hopLength)
     }  // 0.08 s/frame
@@ -609,8 +617,71 @@ public final class ParakeetTDTModel: Module {
         public var decodeSeconds: Double
     }
 
-    /// Run encoder once, then greedy TDT decode (parakeet.py decode_greedy).
+    /// Transcribe a whole clip. Clips longer than `cfg.chunkSeconds` are split
+    /// into overlapping windows (decoded independently, stitched by
+    /// `ParakeetChunkMerge`) so the O(T²) encoder stays within the Metal budget
+    /// (S4); shorter clips run a single pass (the S2/S3 path, unchanged).
     public func transcribe(_ samples: [Float]) -> Result {
+        // Edge audio: too short for even one STFT frame ⇒ empty result.
+        guard samples.count >= cfg.winLength else {
+            return Result(
+                transcript: "", tokenIds: [], tokens: [], decodeSteps: 0,
+                encoderSeconds: 0, decodeSeconds: 0)
+        }
+        let audioSeconds = Double(samples.count) / Double(cfg.sampleRate)
+        if audioSeconds <= cfg.chunkSeconds {
+            return transcribeWindow(samples, offset: 0)
+        }
+
+        // Chunked: stride = chunk − overlap; offset each chunk's token times by
+        // its start; stitch successive chunks at their time overlap.
+        let chunkSamples = Int(cfg.chunkSeconds * Double(cfg.sampleRate))
+        let overlapSamples = Int(cfg.overlapSeconds * Double(cfg.sampleRate))
+        let stride = max(1, chunkSamples - overlapSamples)
+        var all = [ParakeetAlignment.Token]()
+        var encSec = 0.0, decSec = 0.0, steps = 0
+        var start = 0
+        while start < samples.count {
+            let end = min(start + chunkSamples, samples.count)
+            if end - start < cfg.hopLength { break }  // no zero-length mel
+            let r = transcribeWindow(
+                Array(samples[start..<end]),
+                offset: Double(start) / Double(cfg.sampleRate))
+            encSec += r.encoderSeconds
+            decSec += r.decodeSeconds
+            steps += r.decodeSteps
+            all =
+                all.isEmpty
+                ? r.tokens
+                : ParakeetChunkMerge.merge(
+                    all, r.tokens, overlapDuration: cfg.overlapSeconds)
+            if end == samples.count { break }
+            start += stride
+        }
+        // Subtitles/word timings require a monotonic timeline. The stitch is
+        // near-sorted, but a boundary merge can reorder a token or two; a final
+        // stable sort by start guarantees non-decreasing timestamps (ties keep
+        // emission order), matching the reference's per-sentence sort.
+        let ordered =
+            all.enumerated()
+            .sorted {
+                $0.element.start != $1.element.start
+                    ? $0.element.start < $1.element.start
+                    : $0.offset < $1.offset
+            }
+            .map(\.element)
+        let transcript = ordered.map(\.text).joined()
+            .trimmingCharacters(in: .whitespaces)
+        return Result(
+            transcript: transcript, tokenIds: ordered.map(\.id),
+            tokens: ordered, decodeSteps: steps, encoderSeconds: encSec,
+            decodeSeconds: decSec)
+    }
+
+    /// Single-window encode + greedy TDT decode (parakeet.py decode_greedy).
+    /// `offset` (seconds) is added to every emitted token's start so chunked
+    /// windows carry whole-clip-relative timestamps.
+    func transcribeWindow(_ samples: [Float], offset: Double) -> Result {
         let mel = ParakeetMel.logMel(samples, cfg)  // [1, T, 128]
 
         let encStart = CFAbsoluteTimeGetCurrent()
@@ -640,9 +711,10 @@ public final class ParakeetTDTModel: Module {
             let durLogits = logits[(blank + 1)...]  // 5
             let predToken = MLX.argMax(tokenLogits).item(Int.self)
             let decision = MLX.argMax(durLogits).item(Int.self)
-            // Frame index at emission → time (before `step` advances). The TDT
-            // duration is the token's own time span (S3).
-            let tokenStart = Double(step) * cfg.timeRatio
+            // Frame index at emission → time (before `step` advances), shifted
+            // by the window offset for chunked decode. The TDT duration is the
+            // token's own time span (S3).
+            let tokenStart = Double(step) * cfg.timeRatio + offset
             let tokenDur = Double(durations[decision]) * cfg.timeRatio
 
             if predToken != blank {
@@ -669,14 +741,12 @@ public final class ParakeetTDTModel: Module {
                 }
             }
 
-            step += durations[decision]
-            newSymbols += 1
-            if durations[decision] != 0 {
-                newSymbols = 0
-            } else if newSymbols >= cfg.maxSymbols {
-                step += 1
-                newSymbols = 0
-            }
+            // Frame-pointer advance + anti-stall guard (pure, unit-pinned).
+            let adv = ParakeetDecodeStep.advance(
+                duration: durations[decision], priorNewSymbols: newSymbols,
+                maxSymbols: cfg.maxSymbols)
+            step += adv.stepDelta
+            newSymbols = adv.newSymbols
             steps += 1
         }
         let decSeconds = CFAbsoluteTimeGetCurrent() - decStart
