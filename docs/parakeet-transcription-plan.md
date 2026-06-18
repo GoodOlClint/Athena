@@ -1,9 +1,9 @@
 # Multi-backend transcription (Parakeet) — change plan (M76)
 
-**Status:** Proposed, awaiting operator approval. Pairs with ADR 020. No
-production code until approved (brownfield change gate). The ADR-019 spike
-(`Sources/AthenaTranscription/Parakeet/*` + gated test) is the validated
-foundation this hardens.
+**Status:** Shipped M76 (v0.10.171–175). All slices S1–S5 landed; pairs with
+ADR 020 (Accepted). Usage: `docs/transcription.md`. The ADR-019 spike
+(`Sources/AthenaTranscription/Parakeet/*`) was the validated foundation this
+hardened.
 
 ## Goal
 

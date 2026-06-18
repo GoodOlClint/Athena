@@ -36,6 +36,13 @@ struct Load: AsyncParsableCommand {
     static let defaultEmbeddingModel = "BAAI/bge-small-en-v1.5"
     static let defaultTranscriptionModel =
         "mlx-community/whisper-large-v3-turbo"
+    /// Additive Parakeet-TDT transcription backend (ADR 020) — selectable via
+    /// the `model` form field for higher multilingual ASR quality / ~63× RT.
+    /// Not the default transcription engine; seeded into the allowlist
+    /// alongside Whisper (the default stays Whisper until a WER/throughput A/B
+    /// justifies otherwise — ADR 020 open decision).
+    static let defaultParakeetTranscriptionModel =
+        "mlx-community/parakeet-tdt-0.6b-v3"
     static let defaultDiarizationModel =
         "mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16"
     /// Additive pyannote segmentation backend (ADR 018) — selectable via
@@ -110,13 +117,15 @@ struct Load: AsyncParsableCommand {
     @Option(
         name: .customLong("whisper-model"),
         help: """
-            Speech-to-text model HF id. Repeatable: pass it more than \
-            once to make several whisper models selectable per-request \
-            via the `model` form field; the FIRST is the default.
+            Speech-to-text model HF id — Whisper or Parakeet-TDT (the \
+            resident model's class picks the engine, ADR 020). Repeatable: \
+            pass it more than once to make several models selectable \
+            per-request via the `model` form field; the FIRST is the default.
             """
     )
     var transcriptionModels: [String] = [
-        Load.defaultTranscriptionModel
+        Load.defaultTranscriptionModel,
+        Load.defaultParakeetTranscriptionModel,
     ]
 
     @Option(

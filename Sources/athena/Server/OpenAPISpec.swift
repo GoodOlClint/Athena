@@ -157,7 +157,7 @@ enum OpenAPISpec {
               "post": {
                 "tags": ["Audio"],
                 "summary": "Transcribe audio.",
-                "description": "OpenAI-compatible multipart upload. `response_format` of `json` (default), `text`, `srt`, `vtt`, or `verbose_json`; `timestamp_granularities[]=word` adds word timings; `diarize=true` adds per-segment speaker ids in verbose_json. Max upload size = `max_audio_upload_bytes` (default 100 MiB) over the raw multipart body; over it ⇒ 413 payload_too_large.",
+                "description": "OpenAI-compatible multipart upload. `response_format` of `json` (default), `text`, `srt`, `vtt`, or `verbose_json`; `timestamp_granularities[]=word` adds word timings; `diarize=true` adds per-segment speaker ids in verbose_json. The engine is chosen by the resident model's class (ADR 020): Whisper (default) or Parakeet-TDT (multilingual; word/segment timestamps from TDT durations). Max upload size = `max_audio_upload_bytes` (default 100 MiB) over the raw multipart body; over it ⇒ 413 payload_too_large.",
                 "requestBody": {
                   "required": true,
                   "content": { "multipart/form-data": { "schema": {
@@ -165,7 +165,7 @@ enum OpenAPISpec {
                     "required": ["file"],
                     "properties": {
                       "file": { "type": "string", "format": "binary", "description": "Audio file." },
-                      "model": { "type": "string", "description": "Selects among --whisper-model allowlist (M41.3). Omit ⇒ default; unknown id ⇒ 400 model_not_available." },
+                      "model": { "type": "string", "description": "Selects among the --whisper-model allowlist (M41.3) — a Whisper or Parakeet-TDT id (ADR 020); the resident model's class picks the engine. Omit ⇒ default (Whisper); unknown id ⇒ 400 model_not_available; an unsupported ASR arch ⇒ 400 unsupported_transcription_arch." },
                       "language": { "type": "string" },
                       "response_format": { "type": "string", "enum": ["json", "text", "srt", "vtt", "verbose_json"] },
                       "diarize": { "type": "boolean" }

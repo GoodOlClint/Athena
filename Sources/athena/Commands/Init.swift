@@ -76,6 +76,11 @@ struct Init: AsyncParsableCommand {
             var def: [(role: String, id: String)] =
                 embeddingModels.map { ("embeddings", $0) }
             def.append(("transcription", Load.defaultTranscriptionModel))
+            // ADR 020 — Parakeet-TDT transcription backend, selectable via the
+            // `model` form field (higher multilingual quality). ~2.4 GB; pulled
+            // alongside Whisper so the selectable set is present pre-request.
+            def.append(
+                ("transcription", Load.defaultParakeetTranscriptionModel))
             def.append(("diarization", Load.defaultDiarizationModel))
             // ADR 018 — pyannote segmentation backend for method=pyannote
             // (>4 / overlapping speakers). Tiny (~6 MB); pulled alongside.
