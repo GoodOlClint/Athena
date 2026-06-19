@@ -1748,5 +1748,15 @@
     "mtime": 1781906322.1518574,
     "ast_hash": "d3efe4ae69c2b055ffa12c6485f66e22",
     "semantic_hash": ""
+  },
+  "Sources/AthenaCore/LogprobMath.swift": {
+    "mtime": 1781906526.1054552,
+    "ast_hash": "3f2d367ee0098cb6f74f5398f88c959b",
+    "semantic_hash": ""
+  },
+  "Tests/AthenaCoreTests/LogprobMathTests.swift": {
+    "mtime": 1781906543.1300597,
+    "ast_hash": "b2c62e41b83f3189a15802ffded16edd",
+    "semantic_hash": ""
   }
 }
