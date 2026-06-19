@@ -1,6 +1,10 @@
 # ADR 022 — video support: transcription + keyframe description
 
-**Status:** Proposed (M78) — awaiting operator review. No production code yet.
+**Status:** **M78.1 (transcription) Accepted + shipped** (v0.10.183–186);
+**M78.2 (description) Proposed/deferred** (requirement-gated). `/v1/video/
+transcriptions` is live and e2e-validated (real video → transcript; degenerate
+videos → cause-naming 4xx, daemon survives — `deploy/e2e-video.sh`). Usage:
+`docs/video.md`.
 Pairs with `docs/video-support-plan.md`. Operator-set framing (interview):
 **transcription first**, a **dedicated `/v1/video/*` surface**, **keyframe-level**
 description is acceptable. Driver clarified after the interview: **video exists
