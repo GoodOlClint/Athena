@@ -1,6 +1,6 @@
 # 007 — Native `/api` metering + token-budget quotas (in-program)
 
-**Status:** Accepted — Not yet implemented
+**Status:** Accepted — Partially implemented. Native `/api` metering (#8) + NA8 single-principal resolution shipped (v0.10.140, `AthenaServer.swift` `meter()` chokepoint). Token-budget quotas (#9) NOT implemented — milestone never scheduled. (Caveat: `handleNativeEmbed` still drops `meter()` — see `docs/backlog-hitlist.md` #6.)
 **Date:** 2026-06-12
 **Milestone:** M69+ (audit-remediation; resolves standing DECISION #5; backlog #8/#9 + audit NA8)
 

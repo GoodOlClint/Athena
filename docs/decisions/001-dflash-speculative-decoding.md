@@ -1,6 +1,6 @@
 # 001 — DFlash speculative decoding for non-MTP targets (Gemma4-first)
 
-**Status:** Accepted (pending approval — not yet ratified; no code written)
+**Status:** Accepted — Implemented (M63.1–.4 shipped v0.10.108–112, 31B dense path complete; M63.5/MoE shipped as M64.4 v0.10.116). Remaining deferrals (DFlash-accelerated structured output, temp>0 sampling, Metal kernels, Qwen/GDN targets) are tracked in §Status below — none are silent descopes.
 **Date:** 2026-06-11
 **Milestone:** M63
 

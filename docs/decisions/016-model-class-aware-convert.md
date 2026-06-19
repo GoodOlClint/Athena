@@ -1,6 +1,6 @@
 # ADR 016 — model-class-aware convert + cause-naming load errors
 
-**Status:** Proposed (M73) — awaiting operator approval.
+**Status:** Accepted — Implemented (M73, v0.10.166). MLX-free `ModelClass` detector + convert embedder-redirect (4xx `unsupported_convert_class`) shipped; later relocated into `AthenaCore`/`ModelSupport` and composed by the shipped ADR 021.
 
 ## Context
 

@@ -57,11 +57,12 @@ A6 ("server god-object") decoupling.
 - The moved server primitives are now `public` *within the package*. This is an
   application package, not a published SDK, so the wider surface is acceptable; it is the
   cost of making the security boundary testable.
-- `Commands/` (audit NB4 — `ConfigEditor`/`parseTTLSeconds`/`isValidLabel`) is **not**
-  addressed in this slice: `ConfigEditor` couples to `Engine` (in `Commands/Load.swift`)
-  and `KVCompression` (in the MLX-linked `AthenaLLM`), which must be relocated to an
-  MLX-free target first. That extraction is a follow-on slice (M70.1b), tracked separately
-  so it doesn't bloat the keystone.
+- `Commands/` (audit NB4 — `ConfigEditor`/`parseTTLSeconds`/`isValidLabel`) was **not**
+  addressed in this slice: `ConfigEditor` coupled to `Engine` (then in `Commands/Load.swift`)
+  and `KVCompression` (in the MLX-linked `AthenaLLM`), which had to be relocated to an
+  MLX-free target first. **DONE (M70.1b):** `Engine`/`KVCompression` now live in `AthenaCore`,
+  and a new MLX-free `AthenaDeploy` target holds `ConfigEditor.swift`/`CLIParse.swift`/
+  `LaunchdPlist.swift`, unit-pinned by `ConfigEditorTests`/`AthenaDeployTests`/`CLIParseTests`.
 - `Package.swift` gains one target; `deploy/build.sh` (xcodebuild) and `deploy/test.sh`
   (swift test) both still work; the `clients/` package and the rust-shim linkage are
   unaffected (the moved code reaches neither).

@@ -1,6 +1,6 @@
 # 017 — Configurable upload limits + `Expect: 100-continue` handling
 
-**Status:** Proposed — pending operator review (no code yet)
+**Status:** Accepted — Implemented (v0.10.167). `ExpectContinueHandler` + `UploadLimit` algebra in `AthenaServerKit` (unit-pinned), `max_audio_upload_bytes` (100 MiB) / `max_request_body_bytes` (4 MiB) config (0⇒parse-error), clean 413 `payload_too_large`, cap surfaced in `/openapi.json`. Streaming-to-disk decode remains a noted out-of-scope follow-up (see `docs/backlog-hitlist.md` #28).
 **Date:** 2026-06-18
 **Relates:** ADR 008 (AthenaServerKit testable seam), ADR 009 (stub/MLX-free CI tier),
 ADR 013 (`/v1` is the inference surface), ADR 004 (non-loopback TLS posture / reverse proxy),

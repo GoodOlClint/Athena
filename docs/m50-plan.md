@@ -7,7 +7,9 @@ audit list flagged but never inspected.
 
 ## Status
 
-Not started. Audit list lives in
+**Shipped (M50.1–.5, v0.10.80).** `clearCache()` added across the flagged non-LLM
+modules (`WhisperDecode`, `WeSpeakerModel`, `Sortformer`, `TriAttentionScorer`,
+`VectorStore`). Audit list lives in
 [project_mlx-clearcache-per-call](
 ../../.internal/projects/-Users-goodolclint-Source-Athena/memory/project_mlx-clearcache-per-call.md)
 and was captured immediately after M46.6 found the 37.9 GiB embedder

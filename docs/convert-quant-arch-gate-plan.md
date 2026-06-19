@@ -1,6 +1,6 @@
 # Convert quant: arch-gate the Gemma-4 mixed-precision scheme — change plan
 
-**Status:** Plan — awaiting operator review (do not implement yet)
+**Status:** Shipped (v0.10.165) — ADR 012 amendment. `Gemma4QuantRule.mixedPrecision` gated on `model_type=="gemma4"`; other arches quantize uniformly at the global bits.
 **Date:** 2026-06-17
 **Decision of record:** ADR 012 amendment (2026-06-17) — the 8/4 mixed scheme is
 Gemma-4-specific; other arches quantize uniformly at the global bits.

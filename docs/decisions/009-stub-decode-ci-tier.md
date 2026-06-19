@@ -1,6 +1,6 @@
 # 009 — Stub decode CI tier: pure-Swift control-flow seams, not a fake MLX device
 
-**Status:** Accepted — Implementing (M70.2/.3, from v0.10.151)
+**Status:** Accepted — Implemented (M70.2/.3, v0.10.151+). All decision-algebra seams + unit tests landed (`DecodeLoopControl`, `GuidedMask`/`maskedArgmax`, `PrefixKVCache`, speculative-sampling, structured-schema). The numeric tier stays env-gated (`ATHENA_RUN_MODEL_TESTS`) by design — `MLXArray` cannot evaluate under `swift test`. (M70.3 test-coverage tail ND14/ND15 still open — see `docs/backlog-hitlist.md` #8.)
 **Date:** 2026-06-13
 **Milestone:** M70 (audit-remediation; resolves the L-cross-cutting "stub-model CI
 tier" keystone + L1/L2/L5/L7/L8, NC4/NC5/NC6 — "CI blindness")

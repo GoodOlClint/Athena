@@ -83,9 +83,10 @@ now is the same effort as listing vision.
   8-bit; vision_tower full-precision; experts 4-bit; `vision_config` preserved). The base
   `google/gemma-4-26B-A4B` also converts + loads (vision tower intact) but its chat is blocked
   by the base's missing chat template (`missingChatTemplate` — use `-it`). Recorded in RUNBOOK
-  scenario K. **No code change** (the convert code shipped in M72.1). Known wart:
-  `missingChatTemplate` returns `500 module_load_failed` instead of a clear 400 — minor
-  follow-up.
+  scenario K. **No code change** (the convert code shipped in M72.1). ~~Known wart:
+  `missingChatTemplate` returns `500 module_load_failed` instead of a clear 400.~~
+  **RESOLVED:** the substrate `missingChatTemplate` now maps to `400 no_chat_template`
+  (`AthenaError.swift` `.noChatTemplate` + `isMissingChatTemplate`, per ADR 013 §5).
 
 ## Test bar
 
