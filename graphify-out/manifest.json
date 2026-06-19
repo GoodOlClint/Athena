@@ -10,8 +10,8 @@
     "semantic_hash": "baa0b2e6c2456a2ddc1a4b2e82592cd6"
   },
   "Sources/AthenaCore/AthenaError.swift": {
-    "mtime": 1781824270.498733,
-    "ast_hash": "cc255fefcc53d4e5094b9231cde41641",
+    "mtime": 1781834606.8772907,
+    "ast_hash": "25a0009f0f6bd9471df5a2d775d8b6c5",
     "semantic_hash": ""
   },
   "Sources/AthenaCore/AthenaProxy.swift": {
@@ -295,8 +295,8 @@
     "semantic_hash": ""
   },
   "Sources/AthenaTranscription/AudioDecode.swift": {
-    "mtime": 1781723800.5876698,
-    "ast_hash": "ae8b4f26adc2eeadd68373519df684a0",
+    "mtime": 1781834576.7635765,
+    "ast_hash": "40cb18da74f388436d3d12e2b6f28139",
     "semantic_hash": ""
   },
   "Sources/AthenaTranscription/DiarizationModule.swift": {
@@ -420,8 +420,8 @@
     "semantic_hash": "d16404614855c59c2001089f41c5bd78"
   },
   "Sources/athena/Athena.swift": {
-    "mtime": 1781824961.6777508,
-    "ast_hash": "06935c2741600fa6926a46e37c4cc1a7",
+    "mtime": 1781834650.1899393,
+    "ast_hash": "0840cd149e38b71c17011685dd3d1b5b",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Audit.swift": {
@@ -1490,8 +1490,8 @@
     "semantic_hash": ""
   },
   "Sources/AthenaTranscription/Pyannote/PyanNetSegmentation.swift": {
-    "mtime": 1781795550.9338734,
-    "ast_hash": "7f252acbb8c1ef4593e202568e50c7d2",
+    "mtime": 1781833012.4528646,
+    "ast_hash": "7bf0de810fbe4ca991dffcbe595fd7bc",
     "semantic_hash": ""
   },
   "Sources/AthenaTranscription/Pyannote/PyannoteSegmentationDecode.swift": {
@@ -1505,8 +1505,8 @@
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/PyanNetSegmentationModelTests.swift": {
-    "mtime": 1781806457.3580995,
-    "ast_hash": "a436409e4e09f957d26669e3a393575a",
+    "mtime": 1781833109.4777129,
+    "ast_hash": "0e7f228eeb49ff3feb9efe27ed7a4a74",
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/PyannoteSegmentationDecodeTests.swift": {
@@ -1515,8 +1515,8 @@
     "semantic_hash": ""
   },
   "docs/diarization.md": {
-    "mtime": 1781798422.7612715,
-    "ast_hash": "8e5b709c6b2ffb9df1b3b255503f3807",
+    "mtime": 1781834721.5371373,
+    "ast_hash": "aefa4c7943d7bcef0b5b1ce424282836",
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/TranscriptionArchTests.swift": {
@@ -1595,8 +1595,8 @@
     "semantic_hash": ""
   },
   "docs/transcription.md": {
-    "mtime": 1781818563.90316,
-    "ast_hash": "5e2a7428d44413588c4758be1019a0ea",
+    "mtime": 1781834707.5752037,
+    "ast_hash": "a41e328346ccf618a98edcd5fcbe4c36",
     "semantic_hash": ""
   },
   "docs/decisions/021-model-support-preflight.md": {
@@ -1662,6 +1662,21 @@
   "docs/model-support.md": {
     "mtime": 1781824814.5411024,
     "ast_hash": "6b64d9847336c4bdbc19f4197c06ad62",
+    "semantic_hash": ""
+  },
+  "Tests/AthenaCoreTests/PyanNetWindowingTests.swift": {
+    "mtime": 1781833058.8968856,
+    "ast_hash": "c74c41c32a4150bf225315431701aaa9",
+    "semantic_hash": ""
+  },
+  "Tests/AthenaCoreTests/QuarantineAudioSweepTests.swift": {
+    "mtime": 1781834255.5722206,
+    "ast_hash": "7192b894074fc44fafbccd51b39b23b6",
+    "semantic_hash": ""
+  },
+  "Tests/AthenaCoreTests/AudioDecodeFloorTests.swift": {
+    "mtime": 1781834642.4179351,
+    "ast_hash": "1edffda337fcaef276dc7cf52f6bfd79",
     "semantic_hash": ""
   }
 }
