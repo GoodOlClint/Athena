@@ -85,8 +85,8 @@
     "semantic_hash": "c8bec6880dd5c91f0d4a3963c9c8c04c"
   },
   "Sources/AthenaDeploy/AthenaConfig.swift": {
-    "mtime": 1781845600.343227,
-    "ast_hash": "e3f9979bcb56831c4940f79ec3bbcb2a",
+    "mtime": 1781911300.4858453,
+    "ast_hash": "27fea08a60a2c88a127f6695ca174685",
     "semantic_hash": ""
   },
   "Sources/AthenaDeploy/DefaultConfig.swift": {
@@ -100,8 +100,8 @@
     "semantic_hash": "2aaf2a90a1a70a05798c9ee570ea99d4"
   },
   "Sources/AthenaDeploy/LaunchdPlist.swift": {
-    "mtime": 1781845684.062592,
-    "ast_hash": "c4f326df09338bf5b9ff4b630d32b779",
+    "mtime": 1781911366.0261674,
+    "ast_hash": "a4264751b2455d2ce065f882b531ecc9",
     "semantic_hash": ""
   },
   "Sources/AthenaDeploy/VersionGuard.swift": {
@@ -420,8 +420,8 @@
     "semantic_hash": "d16404614855c59c2001089f41c5bd78"
   },
   "Sources/athena/Athena.swift": {
-    "mtime": 1781909025.3449883,
-    "ast_hash": "f3e9c660196f0f71cb71dd7ac25e0405",
+    "mtime": 1781911527.4271765,
+    "ast_hash": "466238a016bde76a72776acc6d861e2f",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Audit.swift": {
@@ -440,8 +440,8 @@
     "semantic_hash": ""
   },
   "Sources/athena/Commands/ConfigEditor.swift": {
-    "mtime": 1781845701.868008,
-    "ast_hash": "872c91817d9a523854a19e0e50236887",
+    "mtime": 1781911345.3481333,
+    "ast_hash": "72150db810c5598ddefca8b731310207",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Convert.swift": {
@@ -490,8 +490,8 @@
     "semantic_hash": "5f5b49d75a33c5f490e2fa462f22c6ea"
   },
   "Sources/athena/Commands/Load.swift": {
-    "mtime": 1781845658.3262627,
-    "ast_hash": "0d0142ec69e6e608d8c195db68d93e1b",
+    "mtime": 1781911406.8904018,
+    "ast_hash": "447ac873e95bcebb2fea191e72e50a2a",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Logs.swift": {
@@ -545,8 +545,8 @@
     "semantic_hash": "ba546feb975db11ee6e42e5e147b55e0"
   },
   "Sources/athena/Server/AthenaServer.swift": {
-    "mtime": 1781908883.1559849,
-    "ast_hash": "51059362cb4820ef1562983b8cb6f42b",
+    "mtime": 1781911438.6371505,
+    "ast_hash": "7cdd3080d99d61e59a1505d17986aa4e",
     "semantic_hash": ""
   },
   "Sources/athena/Server/GPUTelemetry.swift": {
@@ -880,8 +880,8 @@
     "semantic_hash": "e29565ca41e2bea1b26a9e5469e5349c"
   },
   "deploy/e2e-rbac.sh": {
-    "mtime": 1781909017.6660879,
-    "ast_hash": "ccb6699aea3af1fec25583419d150382",
+    "mtime": 1781911519.6427848,
+    "ast_hash": "642f6d1c41c45b03100f35ece5c7dd59",
     "semantic_hash": ""
   },
   "deploy/integration/e2e-embedding-select.sh": {
@@ -1345,8 +1345,8 @@
     "semantic_hash": ""
   },
   "Sources/AthenaDeploy/ConfigEditor.swift": {
-    "mtime": 1781791387.0072522,
-    "ast_hash": "42d073877dfc87f7a87368797fa23c52",
+    "mtime": 1781911330.9637897,
+    "ast_hash": "4271a4e54b251f63e1c5aa451df2d3ce",
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/CLIParseTests.swift": {
@@ -1765,8 +1765,18 @@
     "semantic_hash": ""
   },
   "docs/governor-truth-plan.md": {
-    "mtime": 1781911008.131665,
-    "ast_hash": "9910547e8cf18b7b9ddac077f5daf88c",
+    "mtime": 1781911661.9121556,
+    "ast_hash": "081a29763734188b0baac438f3f6d6d5",
+    "semantic_hash": ""
+  },
+  "Sources/AthenaCore/GovernorMemory.swift": {
+    "mtime": 1781911240.1804643,
+    "ast_hash": "7df8d0b53b44ae8d9a42df9eff2b1597",
+    "semantic_hash": ""
+  },
+  "Tests/AthenaCoreTests/GovernorMemoryTests.swift": {
+    "mtime": 1781911253.9557369,
+    "ast_hash": "636262ecde56a5a98e694df0297cb6c0",
     "semantic_hash": ""
   }
 }
