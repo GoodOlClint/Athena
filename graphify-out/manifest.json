@@ -1720,8 +1720,8 @@
     "semantic_hash": ""
   },
   "docs/decisions/023-governor-memory-accounting-truthfulness.md": {
-    "mtime": 1781895015.1904924,
-    "ast_hash": "5353f00ab514146081c7daa77305a8bb",
+    "mtime": 1781910958.767576,
+    "ast_hash": "0b080ab1ef1cf50bdca8f2b16d8846bf",
     "semantic_hash": ""
   },
   "Sources/AthenaTranscription/SpeakerWindowGate.swift": {
@@ -1762,6 +1762,11 @@
   "Sources/AthenaLLM/LogprobSink.swift": {
     "mtime": 1781908230.7945364,
     "ast_hash": "f5f58096420b971ba74891affc4afe6e",
+    "semantic_hash": ""
+  },
+  "docs/governor-truth-plan.md": {
+    "mtime": 1781911008.131665,
+    "ast_hash": "9910547e8cf18b7b9ddac077f5daf88c",
     "semantic_hash": ""
   }
 }
