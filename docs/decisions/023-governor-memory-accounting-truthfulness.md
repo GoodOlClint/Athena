@@ -115,4 +115,46 @@ and reclaimable, so that attribution is also low-value.
 - Regression: per-model measured bytes are within a tolerance of on-disk weight
   size for the resident models.
 
+## Amendment (2026-06-19) — the probe is `phys_footprint`, NOT `activeMemory`
+
+Review surfaced a conflict between fixes #2/#3 as first drafted and the standing
+**M5.5** decision ([Load.swift:459-471](../../Sources/athena/Commands/Load.swift#L459)).
+M5.5 deliberately reconciles against **process RSS, not `MLX.Memory.activeMemory`**,
+because `activeMemory` sees only the MLX allocator pool and **misses file-backed
+mmaps from the HF cache** (the embedder / whisper / diarizer / speaker weights load
+that way): on a 4B embedder the `activeMemory` delta is ~120 MB while the process
+holds ~8 GB. Metering admission against `activeMemory` would therefore *re-introduce*
+the order-of-magnitude undercount M5.5 fixed. Fixes #2 and #3 are corrected:
+
+- **The truth probe is `phys_footprint`** (`ProcessMemory.sample().physFootprint`,
+  already used by `relievePromptCachePressureIfNeeded`, M60.6), **not** `activeMemory`.
+  `phys_footprint` is the OS-level number the budget was derived from (the 96.2 GiB) and
+  captures **all three** components — MLX active + MLX cache + resident mmap'd weight
+  pages. The MLX counters `activeMemory`/`cacheMemory` are read **only** to split the
+  footprint for reporting and to size the reclaimable headroom (below), never as the
+  admission denominator.
+
+- **Admission excludes the reclaimable cache** (the concrete rule for #2's "bounded view
+  of the cache as headroom"): define `committed = phys_footprint − mlxCacheBytes` (≈ MLX
+  active + mmap'd weights = the genuinely pinned memory); `freeBytes = budget − committed`.
+  On admission pressure (`committed + estimate > budget`) the governor **`clearCache()`
+  first to actually reclaim**, re-probes, and only then evicts/rejects. This avoids both
+  failure modes — over-commit (ignoring the cache) and over-conservatism (counting
+  reclaimable cache as pinned). Fix #1's `mlx_cache_limit_bytes` keeps `mlxCacheBytes`
+  small so this correction term stays bounded.
+
+- **#3 measures via the `phys_footprint` (RSS) delta at load, not the `activeMemory`
+  delta** — same M5.5 reason. This is largely what `reconcile` already does (`memoryProbe`
+  before/after = an RSS delta); the #3 increment is (a) switching that probe to
+  `phys_footprint` for consistency, (b) surfacing the reconciled per-tenant number in
+  `athena ps`/healthz, and (c) a **warmup caveat**: mmap'd weights fault in lazily, so a
+  pre-first-decode delta under-reads until the model runs — take the measured number after
+  a warmup forward, or accept it as a lower bound the running reconcile tightens.
+
+Net: the moat-defining change is **#1 (bound the cache)** plus **#2 (meter `committed =
+phys_footprint − reclaimable cache`)**; **#3 is mostly already present** (reconcile) plus
+per-tenant surfacing. M5.5's RSS-over-`activeMemory` instinct was right; this ADR upgrades
+RSS → `phys_footprint` (its strictly-more-complete sibling), it does **not** revert to
+`activeMemory`. The honesty boundary and rejected alternatives are unchanged.
+
 Plan + slices to follow on approval (separate `docs/governor-truth-plan.md`).
