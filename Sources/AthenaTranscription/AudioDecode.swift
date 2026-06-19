@@ -73,6 +73,21 @@ public enum AudioDecode {
         }
     }
 
+    /// Pure (MLX-free) bounds verdict for a decoded/extracted sample count:
+    /// `.tooShort` below `minSamples` (`0` disables the floor), `.tooLong`
+    /// above `maxSamples`, else nil. Shared by `pcm16kMono` and the video
+    /// audio-track extractor (`VideoAudioTrack`) so both enforce the identical
+    /// floor + ceiling. Unit-pinned (ADR 008/009).
+    public static func sampleBoundError(
+        count: Int, minSamples: Int, maxSamples: Int
+    ) -> DecodeError? {
+        if minSamples > 0, count < minSamples {
+            return .tooShort(samples: count, minSamples: minSamples)
+        }
+        if count > maxSamples { return .tooLong(maxSamples: maxSamples) }
+        return nil
+    }
+
     /// Decode `url` like `pcm16kMono(from:maxSamples:)`, but translate any
     /// `DecodeError` into a classified 400 `AthenaError` tagged with `module`
     /// (issue #6). Callers on the serve path use this so the governed
@@ -190,9 +205,10 @@ public enum AudioDecode {
         // Lower bound (symmetric with the `.tooLong` ceiling): reject a
         // degenerate too-short decode once, here, so every audio route gets a
         // uniform 400 instead of a model-specific deep failure / process abort.
-        if minSamples > 0, out.count < minSamples {
-            throw DecodeError.tooShort(
-                samples: out.count, minSamples: minSamples)
+        if let e = sampleBoundError(
+            count: out.count, minSamples: minSamples, maxSamples: maxSamples)
+        {
+            throw e
         }
         return out
     }

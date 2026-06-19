@@ -31,6 +31,10 @@ public enum AthenaError: Error, Sendable, Equatable {
     /// uniformly instead of a model conv driving a degenerate MLX op (which
     /// aborts the daemon process-wide).
     case audioTooShort(module: ModuleID, seconds: Double, minSeconds: Double)
+    /// An uploaded video carries no audio track, so there is nothing to
+    /// transcribe (ADR 022). A client error (400) — the file is fine, it just
+    /// has no audio — not a decode failure or a silent empty transcript.
+    case videoNoAudioTrack(module: ModuleID)
     /// A requested audio segment is empty/out-of-range or too short to
     /// yield any feature frame. A client error (400) — never a silent
     /// zero embedding.
@@ -120,6 +124,7 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .promptCacheCapExceeded: return 503
         case .audioTooLong: return 400
         case .audioTooShort: return 400
+        case .videoNoAudioTrack: return 400
         case .audioSegmentInvalid: return 400
         case .invalidAudio: return 400
         case .audioFormatUnsupported: return 400
@@ -153,6 +158,7 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .promptCacheCapExceeded: return "prompt_cache_cap_exceeded"
         case .audioTooLong: return "audio_too_long"
         case .audioTooShort: return "audio_too_short"
+        case .videoNoAudioTrack: return "video_no_audio_track"
         case .audioSegmentInvalid: return "audio_segment_invalid"
         case .invalidAudio: return "invalid_audio"
         case .audioFormatUnsupported: return "audio_format_unsupported"
@@ -199,6 +205,9 @@ public enum AthenaError: Error, Sendable, Equatable {
                     "Audio (%.2fs) for %@ is below the %.2fs minimum. Supply a "
                     + "longer recording.",
                 seconds, module.rawValue, minSeconds)
+        case let .videoNoAudioTrack(module):
+            return "The uploaded video has no audio track for \(module.rawValue)"
+                + " — there is nothing to transcribe."
         case let .audioSegmentInvalid(module, detail):
             return "Invalid audio segment for \(module.rawValue): \(detail)"
         case .invalidAudio:
