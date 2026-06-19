@@ -6158,6 +6158,10 @@ struct HealthResponse: Encodable {
     /// tell for buffer-pool growth.
     let mlxActiveBytes: Int
     let mlxCacheBytes: Int
+    /// ADR 023 G1 — the live `MLX.Memory.cacheLimit` (the serve-path cache
+    /// bound). Lets an operator confirm the cache is bounded vs MLX's default;
+    /// `mlxCacheBytes` should plateau at/under this.
+    let mlxCacheLimitBytes: Int
     /// M60.2 — whether the daemon holds a `PreventUserIdleSystemSleep` power
     /// assertion. `false` ⇒ an unattended Mac can idle-sleep and SUSPEND
     /// inference mid-request (the root cause of the M60 throughput-decay
@@ -6213,6 +6217,7 @@ struct HealthResponse: Encodable {
         self.gpuActiveResidency = gpuActiveResidency
         self.mlxActiveBytes = MLX.Memory.activeMemory
         self.mlxCacheBytes = MLX.Memory.cacheMemory
+        self.mlxCacheLimitBytes = MLX.Memory.cacheLimit
         self.modules = snapshot.modules.map { m in
             ModuleHealth(
                 id: m.id, state: m.state, residentBytes: m.residentBytes,

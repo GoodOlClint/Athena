@@ -260,6 +260,12 @@ struct Load: AsyncParsableCommand {
     )
     var maxRequestBodyBytes: Int?
 
+    @Option(
+        help:
+            "Serve-path MLX buffer-cache limit in bytes (ADR 023). Bounds MLX.Memory.cacheLimit so the reclaimable buffer pool can't grow to fill the whole Metal budget. Absent ⇒ ~1/3 of --budget-bytes; 0 ⇒ unbounded (MLX default)."
+    )
+    var mlxCacheLimitBytes: Int?
+
     @Flag(
         help:
             "Warm every module that has a configured default model (one per LLM/embedding/transcription/diarization/speaker-embedding class with an `is_default=1` allowlist row) at startup, instead of lazily on first request. The HTTP surface still comes up immediately; warms run concurrently in the background (best-effort — a per-module failure falls back to lazy load for that module). Modules without a configured default stay lazy."
@@ -424,6 +430,19 @@ struct Load: AsyncParsableCommand {
         // M5.2: cap MLX's own allocator at the global budget so its
         // buffer pool can't overshoot the box into a Metal OOM.
         MLX.Memory.memoryLimit = config.totalBudgetBytes
+        // ADR 023 G1: bound the reclaimable MLX buffer cache so it can't grow
+        // to fill the whole budget (the field finding: 79 GiB ungoverned cache,
+        // phys_footprint at 100 GiB over a 96 GiB budget). Configured value
+        // (CLI > TOML) wins; absent ⇒ ~1/3 of budget; 0 ⇒ unbounded. nil ⇒
+        // leave MLX's default. The decision is the MLX-free unit-pinned resolver.
+        if let cacheLimit = GovernorMemory.resolveCacheLimit(
+            configured: mlxCacheLimitBytes ?? tomlCfg?.mlxCacheLimitBytes,
+            budgetBytes: config.totalBudgetBytes)
+        {
+            MLX.Memory.cacheLimit = cacheLimit
+            Logging.Logger(label: AthenaLog.daemonLabel).notice(
+                "MLX cache limit bounded to \(cacheLimit) bytes (ADR 023 G1)")
+        }
 
         // M59.2 — build the ONE shared pool instance now (when enabled), so
         // the SAME object is injected into the LLM module (reuse) and the

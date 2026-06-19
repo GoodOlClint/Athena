@@ -116,6 +116,13 @@ public struct AthenaConfig: Sendable, Equatable {
     /// configured `0`/negative is a parse error, like the audio cap.
     public var maxVideoUploadBytes: Int?
     public var maxRequestBodyBytes: Int?
+    /// Serve-path MLX buffer-cache bound (ADR 023 G1). Caps
+    /// `MLX.Memory.cacheLimit` so the reclaimable buffer pool can't grow to fill
+    /// the whole Metal budget (the field finding: 79 GiB of ungoverned cache).
+    /// Absent ⇒ a fraction (~⅓) of `budgetBytes`; `0` ⇒ unbounded (MLX default,
+    /// today's behavior — an explicit opt-out, NOT a parse error like the upload
+    /// caps).
+    public var mlxCacheLimitBytes: Int?
     /// Preload (warm) the LLM at startup instead of lazily on first
     /// request (M33.3). Optional — absent / false ⇒ lazy load (default).
     /// Opt-in: the operator trades a slower start for a warm first
@@ -179,6 +186,7 @@ public struct AthenaConfig: Sendable, Equatable {
         maxAudioUploadBytes: Int? = nil,
         maxVideoUploadBytes: Int? = nil,
         maxRequestBodyBytes: Int? = nil,
+        mlxCacheLimitBytes: Int? = nil,
         preload: Bool? = nil,
         queueResultTtlSecs: Int? = nil,
         queueMaxRows: Int? = nil,
@@ -222,6 +230,7 @@ public struct AthenaConfig: Sendable, Equatable {
         self.maxAudioUploadBytes = maxAudioUploadBytes
         self.maxVideoUploadBytes = maxVideoUploadBytes
         self.maxRequestBodyBytes = maxRequestBodyBytes
+        self.mlxCacheLimitBytes = mlxCacheLimitBytes
         self.preload = preload
         self.queueResultTtlSecs = queueResultTtlSecs
         self.queueMaxRows = queueMaxRows
@@ -380,6 +389,12 @@ public struct AthenaConfig: Sendable, Equatable {
         if let mb = scalar("max_request_body_bytes", in: toml) {
             maxRequestBody = try positiveInt("max_request_body_bytes", mb)
         }
+        // ADR 023 G1: `0` is a valid value (unbounded), so parse with `int`
+        // (allows 0/negative ⇒ treated as unbounded), NOT `positiveInt`.
+        var mlxCacheLimit: Int?
+        if let cl = scalar("mlx_cache_limit_bytes", in: toml) {
+            mlxCacheLimit = try int("mlx_cache_limit_bytes", cl)
+        }
         var queueTtl: Int?
         if let qt = scalar("queue_result_ttl_secs", in: toml) {
             queueTtl = try int("queue_result_ttl_secs", qt)
@@ -451,6 +466,7 @@ public struct AthenaConfig: Sendable, Equatable {
             maxAudioUploadBytes: maxAudioUpload,
             maxVideoUploadBytes: maxVideoUpload,
             maxRequestBodyBytes: maxRequestBody,
+            mlxCacheLimitBytes: mlxCacheLimit,
             preload: preload,
             queueResultTtlSecs: queueTtl,
             queueMaxRows: queueMax,

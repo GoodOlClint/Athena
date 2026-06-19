@@ -59,6 +59,8 @@ extension ConfigEditor {
             return cfg.maxVideoUploadBytes.map(String.init)
         case "max_request_body_bytes":
             return cfg.maxRequestBodyBytes.map(String.init)
+        case "mlx_cache_limit_bytes":
+            return cfg.mlxCacheLimitBytes.map(String.init)
         case "preload":
             return cfg.preload.map { $0 ? "true" : "false" }
         case "queue_result_ttl_secs":

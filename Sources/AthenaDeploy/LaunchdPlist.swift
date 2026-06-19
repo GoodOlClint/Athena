@@ -116,6 +116,9 @@ public enum LaunchdPlist {
         if let bodyCap = config.maxRequestBodyBytes {
             args += ["--max-request-body-bytes", String(bodyCap)]
         }
+        if let cacheLimit = config.mlxCacheLimitBytes {
+            args += ["--mlx-cache-limit-bytes", String(cacheLimit)]
+        }
         if config.preload == true {
             args += ["--preload"]  // a Flag, not an Option
         }

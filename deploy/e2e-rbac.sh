@@ -1348,6 +1348,16 @@ if te["state"] != "loaded" or te["residentBytes"] <= 0:
 ' >/dev/null \
   && ok "/healthz adds inflight/queueDepth/lastRequestAt + loaded state" \
   || bad "/healthz missing M43.1 fields or textEmbedding not loaded ($HZ1)"
+# ADR 023 G1: /healthz exposes the serve-path MLX cache bound so an operator
+# can confirm the reclaimable buffer pool is bounded (mlxCacheBytes plateaus ≤ it).
+echo "$HZ1" | python3 -c '
+import json, sys
+h = json.loads(sys.stdin.read())
+if "mlxCacheLimitBytes" not in h:
+    sys.exit("missing mlxCacheLimitBytes")
+' >/dev/null \
+  && ok "/healthz exposes mlxCacheLimitBytes (ADR 023 G1 cache bound)" \
+  || bad "/healthz missing mlxCacheLimitBytes ($HZ1)"
 # Add a second id and make it default so the next nil-model rebinds the
 # resident slot onto it.
 code 200 POST /api/models/allow "$ADMIN_TOK" \

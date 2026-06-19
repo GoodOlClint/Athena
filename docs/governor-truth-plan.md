@@ -36,8 +36,12 @@ MLX/OS counters. Each slice: `./deploy/build.sh Release` → unit + `deploy/e2e-
 
 ## Slices
 
-### G1 — bound the serve-path MLX cache (`mlx_cache_limit_bytes`) — DO FIRST
-The load-bearing fix and fully independent of G2/G3.
+### G1 — bound the serve-path MLX cache (`mlx_cache_limit_bytes`) — ✅ SHIPPED v0.10.191
+The load-bearing fix and fully independent of G2/G3. Config key `mlx_cache_limit_bytes`
+(CLI `--mlx-cache-limit-bytes` + TOML, full ConfigEditor/LaunchdPlist round-trip); the
+MLX-free `GovernorMemory.resolveCacheLimit` (default budget/3, `0`=unbounded) is
+unit-pinned (`GovernorMemoryTests`, 657/0); `Load.run` sets `MLX.Memory.cacheLimit`;
+`/healthz` exposes `mlxCacheLimitBytes` (e2e 574/0). RUNBOOK soak (plateau ≤ limit) pending.
 - New config key `mlx_cache_limit_bytes` (TOML + `AthenaConfig`), default a sensible
   fraction of the budget (~⅓; NOT convert's 256 MB, which would hurt decode throughput).
   `0` ⇒ unbounded (today's behavior, explicit opt-out). MLX-free parse + default
