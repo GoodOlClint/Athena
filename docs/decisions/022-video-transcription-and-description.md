@@ -3,8 +3,14 @@
 **Status:** Proposed (M78) — awaiting operator review. No production code yet.
 Pairs with `docs/video-support-plan.md`. Operator-set framing (interview):
 **transcription first**, a **dedicated `/v1/video/*` surface**, **keyframe-level**
-description is acceptable, and there is a **concrete consumer** (plan
-to-build-next with a real integration contract, not design-and-shelve).
+description is acceptable. Driver clarified after the interview: **video exists
+and needs ingesting, but the downstream consumer's requirements are not yet
+known.** This sharpens the phasing rather than changing it — M78.1
+(transcription) is **requirement-independent** (every consumer wants the words
+out; the output is the established OpenAI transcript shape), so it is the
+committed first slice; M78.2 (description) is **requirement-gated** — its shape
+(frame rate, summary, response contract) depends on needs that don't exist yet,
+so it stays designed-but-deferred until a consumer defines them.
 
 ## Context
 

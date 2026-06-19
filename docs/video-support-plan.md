@@ -2,9 +2,12 @@
 
 **Status:** Proposed, awaiting operator review (change gate). Pairs with ADR 022.
 No production code until approved. Operator framing: **transcription first**, a
-**dedicated `/v1/video/*` surface**, **keyframe-level** description is fine, and
-there is a **concrete consumer** (plan to-build-next with an integration
-contract).
+**dedicated `/v1/video/*` surface**, **keyframe-level** description is fine.
+**Driver:** video exists and needs ingesting; the downstream consumer's
+requirements are **not yet known**. So M78.1 (transcription) — the
+requirement-independent half — is the committed slice; M78.2 (description) is
+**requirement-gated** and stays designed-but-deferred until a consumer defines
+its needs.
 
 ## Goal
 
@@ -110,22 +113,29 @@ boundary. *Test:* drift-guard + RBAC e2e.
   `QuarantineAudioSweepTests`.
 - Drift-guard green for both new routes; RBAC e2e for both new permissions.
 
-## Integration contract (concrete consumer)
+## Integration contract (requirements not yet known)
 
-To confirm with the consumer **before S3** (drives D1/D3):
+No consumer requirements exist yet — there is just video to ingest. So M78.1 is
+deliberately built on **requirement-independent defaults** that any future
+consumer can use without rework, and M78.2 is held until requirements appear:
 
-- **Transcription I/O:** multipart `file=` (video) → the OpenAI
-  `/v1/audio/transcriptions` response shape (so an existing transcription
-  consumer reuses its parser). Confirm needed `response_format`(s) and whether
-  `diarize=true` is required.
-- **Sync vs async:** is synchronous acceptable for the consumer's typical video
-  length, or is an async `/v1/queue` job (submit → poll) required for large
-  files? (D1.)
-- **Description shape & granularity:** `{frames:[{start, caption}], summary?}` —
-  confirm frame interval expectations and whether the summary is required (D3/D4).
-- **Sizes:** typical/max video size → sets `max_video_upload_bytes` (D2).
+- **Transcription I/O (M78.1, safe default):** multipart `file=` (video) → the
+  established OpenAI `/v1/audio/transcriptions` response shape, so any
+  transcription consumer reuses its existing parser. No consumer-specific
+  contract needed — this is the same output Athena already vends for audio.
+- **Sync vs async (D1):** ship **synchronous** first (reuses existing chunking);
+  the async `/v1/queue` wrap is a follow-up, added only if a consumer's video
+  lengths make sync impractical. No decision blocked on unknown requirements.
+- **Sizes (D2):** pick a conservative `max_video_upload_bytes` default now
+  (1 GiB rec.), revisit when real sizes are known. A cap is easy to raise later.
+- **Description (M78.2):** the response shape, frame rate, and summary behavior
+  are exactly the requirement-sensitive surface — **do not finalize these
+  without a consumer.** Deferred (D3/D4 stay open).
 
 (Contract kept consumer-agnostic in code/docs; Athena stays a passive oracle.)
+
+**When a consumer appears:** revisit D1 (sync/async), D2 (real sizes), and the
+whole M78.2 description contract against its actual needs before building them.
 
 ## Risks
 
