@@ -244,14 +244,15 @@ public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule,
             rms.append((acc / Float(win)).squareRoot())
             i += hop
         }
-        let maxRMS = rms.max() ?? 0
-        let gate = maxRMS * 0.20  // keep windows ≥ 20% of the loudest
+        // Relative-silence gate decision (pure, unit-pinned — ND15):
+        // keep windows ≥ 20% of the loudest, falling back to all windows if
+        // the gate would empty everything (uniformly quiet audio).
+        let kept = SpeakerWindowGate.keptIndices(rms: rms)
 
         var out: [SpeakerSegmentEmbedding] = []
-        out.reserveCapacity(starts.count)
-        for (idx, s) in starts.enumerated() {
-            // If the gate would drop everything (uniformly quiet), keep all.
-            if maxRMS > 0, rms[idx] < gate { continue }
+        out.reserveCapacity(kept.count)
+        for idx in kept {
+            let s = starts[idx]
             let vec = model.embed(Array(pcm[s..<(s + win)]))
             out.append(
                 SpeakerSegmentEmbedding(
@@ -259,18 +260,6 @@ public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule,
                     end: Double(s + win) / sr,
                     embedding: vec,
                     durationSeconds: Double(win) / sr))
-        }
-        // Fallback: gate removed everything → embed every window ungated.
-        if out.isEmpty {
-            for s in starts {
-                let vec = model.embed(Array(pcm[s..<(s + win)]))
-                out.append(
-                    SpeakerSegmentEmbedding(
-                        start: Double(s) / sr,
-                        end: Double(s + win) / sr,
-                        embedding: vec,
-                        durationSeconds: Double(win) / sr))
-            }
         }
         return SpeakerEmbeddingResult(
             segments: out, dimension: model.embeddingDimension)
