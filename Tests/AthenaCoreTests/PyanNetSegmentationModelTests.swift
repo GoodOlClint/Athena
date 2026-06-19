@@ -61,6 +61,21 @@ final class PyanNetSegmentationModelTests: XCTestCase {
         XCTAssertLessThan(coverage, 1.5)
     }
 
+    /// Crash repro (the EXC_BREAKPOINT in `mlx_conv1d`): a tiny clip — below the
+    /// SincNet's 251-sample receptive field — must run the REAL conv without
+    /// aborting the process, returning no regions. A synthetic array is correct
+    /// here: this asserts crash-safety, not speaker accuracy. Gated because it
+    /// loads the real model + runs MLX (needs the metallib).
+    func testTinyClipDoesNotCrashTheConv() async throws {
+        guard ProcessInfo.processInfo.environment["ATHENA_RUN_MODEL_TESTS"] == "1"
+        else { throw XCTSkip("set ATHENA_RUN_MODEL_TESTS=1 (heavy)") }
+        let model = try await PyanNetSegmentationModel.fromPretrained(
+            "aufklarer/Pyannote-Segmentation-MLX")
+        // 100 samples (~6 ms) — what an accidental record+delete decodes to.
+        let regions = model.segment([Float](repeating: 0.01, count: 100))
+        XCTAssertTrue(regions.isEmpty, "tiny silent clip → no speech regions")
+    }
+
     func testFullPipelineRecoversMultipleSpeakers() async throws {
         let clip = try gate()
         let pcm = try AudioDecode.pcm16kMono(from: clip)

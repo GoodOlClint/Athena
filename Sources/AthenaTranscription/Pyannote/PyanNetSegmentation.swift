@@ -227,6 +227,50 @@ final class PyanNetSegmentationModel {
     /// Diarization-mode sliding window (50% overlap), powerset-decoded into
     /// per-window locally-tagged speaker regions. Global identity is resolved
     /// downstream (embed + cluster). `step` defaults to half the window.
+    /// Window start sample offsets for the sliding segmentation. A clip at most
+    /// one window long yields a single window at 0 (zero-padded up to `W` by
+    /// `paddedWindow`); longer clips tile by `stepSamples`, right-aligning a
+    /// final window to the end so the tail is covered exactly once. MLX-free,
+    /// unit-pinned.
+    static func windowStarts(
+        total: Int, windowSamples W: Int, stepSamples: Int
+    ) -> [Int] {
+        guard total > 0 else { return [] }
+        let step = max(1, stepSamples)
+        if total <= W { return [0] }
+        var starts: [Int] = []
+        var s = 0
+        while s + W <= total {
+            starts.append(s)
+            s += step
+        }
+        if let last = starts.last, last + W < total {
+            starts.append(total - W)
+        }
+        return starts
+    }
+
+    /// Exactly `W` samples starting at `s`, zero-padded when the clip ends
+    /// first. pyannote's SincNet has a FIXED receptive field (the first Conv1d
+    /// has kernel 251); feeding it a shorter raw window makes the convolution
+    /// degenerate (`(L-251)/10+1 ≤ 0`), MLX raises an internal error, and its
+    /// default error handler ABORTS the whole process (EXC_BREAKPOINT) — so a
+    /// short, silent, or corrupt file in a batch would crash the daemon, which
+    /// launchd then restarts "fresh". Padding to the window matches the
+    /// reference (pyannote zero-pads short chunks) and keeps the conv valid.
+    /// MLX-free, unit-pinned.
+    static func paddedWindow(
+        _ samples: [Float], start s: Int, windowSamples W: Int
+    ) -> [Float] {
+        let lo = max(0, s)
+        let hi = min(lo + W, samples.count)
+        var win = lo < hi ? Array(samples[lo..<hi]) : []
+        if win.count < W {
+            win.append(contentsOf: repeatElement(0, count: W - win.count))
+        }
+        return win
+    }
+
     func segment(
         _ samples: [Float],
         params: PyannoteSegmentationParams = .default,
@@ -238,28 +282,15 @@ final class PyanNetSegmentationModel {
         let step = max(1, stepSamples)
         let totalSeconds = Double(total) / Double(Self.sampleRate)
 
-        // Window start sample offsets. Short clips → a single window over the
-        // real samples; otherwise tile by `step`, right-aligning a final
-        // window to the end so the tail is covered exactly once.
-        var starts: [Int] = []
-        if total <= W {
-            starts = [0]
-        } else {
-            var s = 0
-            while s + W <= total {
-                starts.append(s)
-                s += step
-            }
-            if let last = starts.last, last + W < total {
-                starts.append(total - W)
-            }
-        }
+        let starts = Self.windowStarts(
+            total: total, windowSamples: W, stepSamples: step)
 
         var regions: [SpeakerActivityRegion] = []
         for (idx, s) in starts.enumerated() {
-            let end = min(s + W, total)
-            let win = Array(samples[s..<end])
-            let arr = MLXArray(win).reshaped(1, 1, win.count)
+            // Always exactly `W` samples (zero-padded) so the SincNet conv can
+            // never go degenerate and abort the process (see `paddedWindow`).
+            let win = Self.paddedWindow(samples, start: s, windowSamples: W)
+            let arr = MLXArray(win).reshaped(1, 1, W)
             let probs = network(arr)
             eval(probs)
             let frames = probs.dim(1)
