@@ -15,11 +15,23 @@ public enum AudioDecode {
     /// including the 1-hour streaming path; overridable per call.
     public static let defaultMaxSamples = sampleRate * 3600 * 4
 
+    /// Floor on decoded samples: 0.1 s (1600 @ 16 kHz), matching OpenAI's
+    /// Whisper-API minimum. A degenerate upload — an accidental record+delete,
+    /// a truncated capture, near-silence — decodes to a handful of samples that
+    /// is meaningless to transcribe/diarize/embed and can drive a model's conv
+    /// frontend into an invalid shape (MLX errors abort the whole daemon
+    /// process-wide). Enforcing the floor once HERE, at the shared decode
+    /// chokepoint every audio route funnels through, turns that class into a
+    /// uniform classified 400 instead of relying on each model's own input
+    /// handling. `0` disables it (callers that decode a deliberately tiny clip).
+    public static let defaultMinSamples = sampleRate / 10
+
     public enum DecodeError: Error, CustomStringConvertible {
         case open(String)
         case converterInit
         case convert(String)
         case tooLong(maxSamples: Int)
+        case tooShort(samples: Int, minSamples: Int)
         public var description: String {
             switch self {
             case .open(let s): return "audio open failed: \(s)"
@@ -28,6 +40,10 @@ public enum AudioDecode {
             case .tooLong(let m):
                 return "audio exceeds the \(m)-sample (~\(m / sampleRate)s) "
                     + "decode limit"
+            case let .tooShort(n, m):
+                return "audio is \(n) samples (~\(Double(n) / Double(sampleRate))"
+                    + "s), below the \(m)-sample (~\(Double(m) / Double(sampleRate))"
+                    + "s) minimum"
             }
         }
 
@@ -48,6 +64,11 @@ public enum AudioDecode {
                 let secs = Double(m) / Double(sampleRate)
                 return .audioTooLong(
                     module: module, seconds: secs, maxSeconds: secs)
+            case let .tooShort(n, m):
+                return .audioTooShort(
+                    module: module,
+                    seconds: Double(n) / Double(sampleRate),
+                    minSeconds: Double(m) / Double(sampleRate))
             }
         }
     }
@@ -57,19 +78,23 @@ public enum AudioDecode {
     /// (issue #6). Callers on the serve path use this so the governed
     /// `classified(_:module:)` seam emits a cause-naming client error.
     public static func pcm16kMono(
-        from url: URL, module: ModuleID, maxSamples: Int = defaultMaxSamples
+        from url: URL, module: ModuleID, maxSamples: Int = defaultMaxSamples,
+        minSamples: Int = defaultMinSamples
     ) throws -> [Float] {
         do {
-            return try pcm16kMono(from: url, maxSamples: maxSamples)
+            return try pcm16kMono(
+                from: url, maxSamples: maxSamples, minSamples: minSamples)
         } catch let e as DecodeError {
             throw e.athenaError(module: module)
         }
     }
 
     /// Decode `url` → `[Float]` mono @ 16 kHz, range ~[-1, 1]. Decoding
-    /// stops with `.tooLong` once `maxSamples` is exceeded.
+    /// stops with `.tooLong` once `maxSamples` is exceeded; a result below
+    /// `minSamples` is rejected with `.tooShort` (`0` ⇒ no floor).
     public static func pcm16kMono(
-        from url: URL, maxSamples: Int = defaultMaxSamples
+        from url: URL, maxSamples: Int = defaultMaxSamples,
+        minSamples: Int = defaultMinSamples
     ) throws -> [Float] {
         let file: AVAudioFile
         do {
@@ -161,6 +186,13 @@ public enum AudioDecode {
             }
             if status == .endOfStream || status == .error { break }
             if status == .inputRanDry && outBuf.frameLength == 0 { break }
+        }
+        // Lower bound (symmetric with the `.tooLong` ceiling): reject a
+        // degenerate too-short decode once, here, so every audio route gets a
+        // uniform 400 instead of a model-specific deep failure / process abort.
+        if minSamples > 0, out.count < minSamples {
+            throw DecodeError.tooShort(
+                samples: out.count, minSamples: minSamples)
         }
         return out
     }

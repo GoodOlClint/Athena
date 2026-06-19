@@ -2,6 +2,9 @@
 
 `POST /v1/audio/transcriptions` turns an uploaded audio file into text.
 Multipart form, Bearer auth, shared 100 MiB upload cap (`max_audio_upload_bytes`).
+Audio shorter than **0.1 s** (matching OpenAI's Whisper API) is rejected with a
+`400 audio_too_short` — the floor is enforced once at the shared decoder, so all
+audio routes reject a degenerate/accidental capture uniformly.
 OpenAI-compatible: `response_format` of `json` (default), `text`, `srt`, `vtt`,
 or `verbose_json`; `timestamp_granularities[]=word` adds word timings;
 `diarize=true` tags each segment with a speaker (uses the diarization slot).

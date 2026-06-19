@@ -24,6 +24,13 @@ public enum AthenaError: Error, Sendable, Equatable {
     /// (400) — split the audio into shorter segments — NOT a silent
     /// empty result.
     case audioTooLong(module: ModuleID, seconds: Double, maxSeconds: Double)
+    /// The decoded audio is below the minimum meaningful length (0.1 s,
+    /// matching OpenAI's Whisper API) — an accidental record+delete, a
+    /// truncated capture, or near-silence. A client error (400), enforced once
+    /// at the shared decode chokepoint so every audio route rejects it
+    /// uniformly instead of a model conv driving a degenerate MLX op (which
+    /// aborts the daemon process-wide).
+    case audioTooShort(module: ModuleID, seconds: Double, minSeconds: Double)
     /// A requested audio segment is empty/out-of-range or too short to
     /// yield any feature frame. A client error (400) — never a silent
     /// zero embedding.
@@ -112,6 +119,7 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .metalOutOfMemory: return 503
         case .promptCacheCapExceeded: return 503
         case .audioTooLong: return 400
+        case .audioTooShort: return 400
         case .audioSegmentInvalid: return 400
         case .invalidAudio: return 400
         case .audioFormatUnsupported: return 400
@@ -144,6 +152,7 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .metalOutOfMemory: return "metal_oom"
         case .promptCacheCapExceeded: return "prompt_cache_cap_exceeded"
         case .audioTooLong: return "audio_too_long"
+        case .audioTooShort: return "audio_too_short"
         case .audioSegmentInvalid: return "audio_segment_invalid"
         case .invalidAudio: return "invalid_audio"
         case .audioFormatUnsupported: return "audio_format_unsupported"
@@ -184,6 +193,12 @@ public enum AthenaError: Error, Sendable, Equatable {
                     + "limit of ~%.0fs. Split it into shorter segments "
                     + "and submit them separately.",
                 seconds, module.rawValue, maxSeconds)
+        case let .audioTooShort(module, seconds, minSeconds):
+            return String(
+                format:
+                    "Audio (%.2fs) for %@ is below the %.2fs minimum. Supply a "
+                    + "longer recording.",
+                seconds, module.rawValue, minSeconds)
         case let .audioSegmentInvalid(module, detail):
             return "Invalid audio segment for \(module.rawValue): \(detail)"
         case .invalidAudio:

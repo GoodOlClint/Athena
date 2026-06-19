@@ -1,7 +1,8 @@
 # Speaker diarization
 
 `POST /v1/audio/diarizations` answers "who spoke when" over an uploaded audio
-file. Multipart form, Bearer auth, shared 100 MiB upload cap. Response:
+file. Multipart form, Bearer auth, shared 100 MiB upload cap; audio shorter than
+0.1 s is rejected with a `400 audio_too_short` (shared decode floor). Response:
 
 ```json
 {"num_speakers": 5, "segments": [{"start": 1.2, "end": 4.8, "speaker": 0}, …]}
