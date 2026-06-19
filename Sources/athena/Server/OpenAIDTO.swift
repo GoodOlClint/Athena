@@ -239,15 +239,54 @@ struct ChatCompletionRequest: Codable {
     /// present params are supported.
     func unsupportedParameter() -> String? {
         if let n, n > 1 { return "n" }
-        switch logprobs {
-        case .bool(true): return "logprobs"
-        case .integer(let i) where i > 0: return "logprobs"
-        case .number(let d) where d > 0: return "logprobs"
-        default: break
-        }
-        if top_logprobs != nil { return "top_logprobs" }
+        // C2 (ADR 013 §4): `logprobs`/`top_logprobs` are now HONORED on the
+        // deterministic path (see `wantsLogprobs`/`logprobsValidationError`),
+        // no longer rejected here.
         if case .object(let o)? = logit_bias, !o.isEmpty {
             return "logit_bias"
+        }
+        return nil
+    }
+
+    /// C2 — did the caller ask for logprobs? (`logprobs:true`, or the legacy
+    /// integer/number forms some clients still send.)
+    var wantsLogprobs: Bool {
+        switch logprobs {
+        case .bool(true): return true
+        case .integer(let i) where i > 0: return true
+        case .number(let d) where d > 0: return true
+        default: return false
+        }
+    }
+
+    /// C2 — the requested number of top alternatives per token (OpenAI
+    /// `top_logprobs`); 0 when only `logprobs:true` is set.
+    var topLogprobsValue: Int { top_logprobs ?? 0 }
+
+    /// C2 — validate a logprobs request against OpenAI's rules + Athena's
+    /// determinism boundary (ADR 013 §4). Returns `(message, code)` for a 400,
+    /// or nil if the request is acceptable. `deterministic` is true when the
+    /// request will decode greedily/structured (temp==0 or a schema present) —
+    /// logprobs require it, since the sampling/substrate-stream path has no
+    /// logit-capture seam.
+    func logprobsValidationError(deterministic: Bool) -> (String, String)? {
+        if top_logprobs != nil && !wantsLogprobs {
+            return (
+                "'top_logprobs' requires 'logprobs' to be true.",
+                "invalid_top_logprobs")
+        }
+        guard wantsLogprobs else { return nil }
+        if let k = top_logprobs, k < 0 || k > 20 {
+            return (
+                "'top_logprobs' must be between 0 and 20.",
+                "invalid_top_logprobs")
+        }
+        if !deterministic {
+            return (
+                "'logprobs' is only supported on the deterministic decode "
+                    + "path: set 'temperature' to 0, or use structured output "
+                    + "(response_format / tools).",
+                "logprobs_requires_deterministic")
         }
         return nil
     }
@@ -335,10 +374,31 @@ struct ChatCompletionRequest: Codable {
     }
 }
 
+/// C2 (ADR 013 §4) — OpenAI chat `logprobs` response object. One
+/// `ChatCompletionTokenLogprob` per generated token, in order.
+struct ChatLogprobs: Codable {
+    let content: [ChatCompletionTokenLogprob]
+}
+
+struct ChatCompletionTokenLogprob: Codable {
+    let token: String
+    let logprob: Double
+    let bytes: [Int]?
+    let top_logprobs: [ChatTopLogprob]
+}
+
+struct ChatTopLogprob: Codable {
+    let token: String
+    let logprob: Double
+    let bytes: [Int]?
+}
+
 struct ChatChoice: Codable {
     let index: Int
     let message: ChatMessage
     let finish_reason: String
+    // C2 — nil (omitted) unless the request asked for logprobs.
+    var logprobs: ChatLogprobs? = nil
 }
 
 /// OpenAI `usage.prompt_tokens_details` (M59.3). Reports how many input
@@ -384,6 +444,8 @@ struct ChatChunkChoice: Codable {
     let index: Int
     let delta: ChatDelta
     let finish_reason: String?
+    // C2 — per-token logprobs for a streamed chunk (omitted unless requested).
+    var logprobs: ChatLogprobs? = nil
 }
 
 struct ChatCompletionChunk: Codable {

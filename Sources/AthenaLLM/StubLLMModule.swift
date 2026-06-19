@@ -61,7 +61,8 @@ public protocol LLMModule: InferenceModule {
         speculative: Bool?,
         chatTemplateKwargs: [String: any Sendable]?,
         promptCacheKey: String?,
-        principal: String?
+        principal: String?,
+        logprobs: LogprobsRequest?
     ) -> AsyncStream<GenChunk>
 
     /// Override-aware String variant (M24.3). `maxTokens`/`temperature`,
@@ -150,7 +151,8 @@ extension LLMModule {
             messages: messages, schemaJSON: schemaJSON, tools: tools,
             maxTokens: maxTokens, temperature: temperature,
             topP: nil, seed: nil, speculative: speculative,
-            chatTemplateKwargs: nil, promptCacheKey: nil, principal: nil)
+            chatTemplateKwargs: nil, promptCacheKey: nil, principal: nil,
+            logprobs: nil)
         return AsyncStream { continuation in
             let task = Task {
                 for await event in events {
@@ -176,7 +178,8 @@ extension LLMModule {
         speculative: Bool?,
         chatTemplateKwargs: [String: any Sendable]?,
         promptCacheKey: String? = nil,
-        principal: String? = nil
+        principal: String? = nil,
+        logprobs: LogprobsRequest? = nil
     ) -> AsyncStream<GenChunk> {
         // The model-free stub has no sampler, so topP/seed/speculative
         // are accepted and ignored; the e2e gate exercises the sampling
@@ -200,12 +203,14 @@ extension LLMModule {
             let task = Task {
                 var completion = 0
                 var truncated = false
+                var emitted: [String] = []
                 for await chunk in chunks {
                     if completion >= cap {
                         truncated = true
                         break
                     }
                     continuation.yield(.text(chunk))
+                    emitted.append(chunk)
                     completion += Self.approxTokens(chunk)
                 }
                 continuation.yield(
@@ -213,6 +218,25 @@ extension LLMModule {
                         TokenUsage(
                             promptTokens: Self.approxTokens(prompt),
                             completionTokens: completion)))
+                // C2 — the model-free stub has no logits, so synthesize a
+                // logprob record per emitted chunk (treating each as a token)
+                // with a fixed score, so the request→response→logprobs shape
+                // is exercisable under `--engine stub`. The MLX module emits
+                // real captures.
+                if let lp = logprobs {
+                    let synth = emitted.map { piece -> TokenLogprob in
+                        let bytes = Array(piece.utf8).map(Int.init)
+                        let top =
+                            lp.topLogprobs > 0
+                            ? [
+                                TopLogprob(
+                                    token: piece, logprob: -0.1, bytes: bytes)
+                            ] : []
+                        return TokenLogprob(
+                            token: piece, logprob: -0.1, bytes: bytes, top: top)
+                    }
+                    continuation.yield(.logprobs(synth))
+                }
                 continuation.yield(
                     .finish(truncated ? .length : .stop))
                 continuation.finish()

@@ -654,7 +654,8 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         speculative: Bool?,
         chatTemplateKwargs: [String: any Sendable]?,
         promptCacheKey: String? = nil,
-        principal: String? = nil
+        principal: String? = nil,
+        logprobs: LogprobsRequest? = nil
     ) -> AsyncStream<GenChunk> {
         // `messages` ([ChatTurn]) is Sendable and crosses into the actor;
         // the non-Sendable `Chat.Message` mapping happens INSIDE the actor
@@ -675,11 +676,16 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                         requestTemperature: temperature,
                         requestTopP: topP, requestSeed: seed,
                         chatTemplateKwargs: chatTemplateKwargs,
-                        promptCacheKey: promptCacheKey, principal: principal)
+                        promptCacheKey: promptCacheKey, principal: principal,
+                        logprobs: logprobs)
                     {
                         usage = speculative.usage
                         continuation.yield(.text(speculative.text))
                         continuation.yield(.usage(usage))
+                        // C2 (ADR 013 §4): per-token logprobs when requested.
+                        if let lps = speculative.logprobs {
+                            continuation.yield(.logprobs(lps))
+                        }
                     } else {
                         // runSpeculative returns nil only for UNstructured
                         // requests (no schema) — those stream from the
@@ -758,9 +764,15 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         requestSeed: Int?,
         chatTemplateKwargs: [String: any Sendable]?,
         promptCacheKey: String? = nil,
-        principal: String? = nil
-    ) async throws -> (text: String, usage: TokenUsage)? {
+        principal: String? = nil,
+        logprobs: LogprobsRequest? = nil
+    ) async throws -> (text: String, usage: TokenUsage, logprobs: [TokenLogprob]?)? {
         guard let container else { return nil }
+        // C2 (ADR 013 §4) — per-token logprob capture sink. Non-nil only when
+        // the caller asked for logprobs; the server has already enforced that
+        // this is a deterministic (greedy/structured, temp==0) request, so the
+        // capture routes through the ArgMax pick/processor seams below.
+        let logprobSink = logprobs.map { LogprobSink(topLogprobs: $0.topLogprobs) }
         // Per-request override (the consuming application intent): if the caller
         // explicitly passes `speculative=true/false`, that wins for THIS
         // request; if nil, fall back to the daemon's loaded default. An
@@ -797,7 +809,12 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         // speculative loop above when eligible. M40.3.
         let samplingEligible =
             effectiveSpec && effectiveTemp > 0 && schemaJSON == nil
-        if schemaJSON == nil && !greedyEligible && !samplingEligible {
+        // C2: a logprobs request must NOT fall through to the substrate stream
+        // (beginGeneration has no logit-capture seam). Keep it on this path so
+        // the closure below routes it to GuidedGreedy/GuidedSubstrate capture.
+        if schemaJSON == nil && !greedyEligible && !samplingEligible
+            && logprobSink == nil
+        {
             Self.log.debug(
                 """
                 dispatch path=substrate-stream spec=\(effectiveSpec) \
@@ -939,7 +956,8 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         // dispatch branch below then routes a Gemma4 target through the
         // DFlash engine. nil ⇒ unchanged behavior.
         let dflashBox: DFlashDraftBox? =
-            (dflashEnabled && schemaJSON == nil && greedyEligible)
+            (dflashEnabled && schemaJSON == nil && greedyEligible
+                && logprobSink == nil)
             ? try await ensureDFlashDraft() : nil
 
         // The closure returns the decoded text, the completion token count
@@ -947,7 +965,16 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         // prompt count is `promptTokens.count` from the outer scope. nil ⇒
         // fall back to the substrate stream.
         let decoded = try await container.perform {
-            (ctx: ModelContext) -> (text: String, completion: Int, cached: Int)? in
+            (ctx: ModelContext) -> (
+                text: String, completion: Int, cached: Int,
+                logprobs: [TokenLogprob]?
+            )? in
+            // C2: decode the captured raw logprobs (ids → token strings/bytes)
+            // here, where the tokenizer is in scope. nil sink ⇒ nil.
+            func builtLogprobs() -> [TokenLogprob]? {
+                guard let s = logprobSink else { return nil }
+                return Self.buildLogprobs(s) { ctx.tokenizer.decode(tokenIds: $0) }
+            }
 
             // Structured ⇒ NO-THINK by construction: the Guide masks
             // from token 0, so the schema is enforced immediately and
@@ -983,7 +1010,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                 // task-local's default `nil` ⇒ `KVCacheSimple` (NF2).
                 let ids: [Int]
                 var cachedTokens = 0
-                if greedyEligible && model.hasMTPHead {
+                if logprobSink == nil && greedyEligible && model.hasMTPHead {
                     let r = SpeculativeGeneration.generate(
                         model: model, promptTokens: promptTokens,
                         maxTokens: maxTokens,
@@ -991,7 +1018,9 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                         prefixCache: prefixCache, cacheScope: cacheScope)
                     ids = r.ids
                     cachedTokens = r.cachedTokens
-                } else if samplingEligible && model.hasMTPHead {
+                } else if logprobSink == nil && samplingEligible
+                    && model.hasMTPHead
+                {
                     // M40.2 sampling-mode (internal). The Guide is nil
                     // here by construction — `samplingEligible` requires
                     // `schemaJSON == nil`.
@@ -1001,18 +1030,22 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                         eosTokenId: ctx.tokenizer.eosTokenId,
                         temperature: samplingTemp,
                         topP: samplingTopP, seed: samplingSeed)
-                } else if guide != nil {
-                    // Structured but no speculative/MTP path available.
+                } else if guide != nil || logprobSink != nil {
+                    // Structured, OR a logprobs request (C2): force the
+                    // non-speculative greedy path so each token has clean
+                    // last-position logits to capture (bit-identical output;
+                    // `guide` may be nil ⇒ plain greedy capture).
                     ids = GuidedGreedy.generate(
                         model: model, promptTokens: promptTokens,
                         maxTokens: maxTokens,
-                        eosTokenId: ctx.tokenizer.eosTokenId, guide: guide)
+                        eosTokenId: ctx.tokenizer.eosTokenId, guide: guide,
+                        sink: logprobSink)
                 } else {
                     return nil  // unstructured + no MTP ⇒ substrate stream
                 }
                 return (
                     ctx.tokenizer.decode(tokenIds: ids), ids.count,
-                    cachedTokens)
+                    cachedTokens, builtLogprobs())
             }
 
             // M63.3b — DFlash lossless speculative decoding for an
@@ -1036,22 +1069,33 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                     target: target, draft: dflashBox.model,
                     promptTokens: promptTokens, maxTokens: maxTokens,
                     stopTokens: stopTokens)
-                return (ctx.tokenizer.decode(tokenIds: ids), ids.count, 0)
+                // dflashBox is nil when logprobs are requested, so no capture
+                // here (greedy logprobs route to GuidedGreedy/GuidedSubstrate).
+                return (ctx.tokenizer.decode(tokenIds: ids), ids.count, 0, nil)
             }
 
             // Any other architecture: schema-guided decoding on the
             // substrate generation path (M23 fork A). Unstructured
-            // requests (no guide) return nil → the standard substrate
-            // stream in beginGeneration. MTP speculative does not apply
-            // (no mtp.* weights) and degrades to this path cleanly.
-            guard let guide, let vt = vocabTokens,
-                let vocabSize = cfgVocab
-            else { return nil }
+            // requests with no logprobs (no guide, no sink) return nil → the
+            // standard substrate stream in beginGeneration. A logprobs request
+            // (C2) routes here with `guide` possibly nil — plain greedy capture
+            // via the LogitProcessor seam (no beginGeneration, which has no
+            // capture hook). MTP speculative does not apply (no mtp.* weights).
+            if guide == nil && logprobSink == nil { return nil }
+            // Guided needs the structured vocab (eos + vocab size); unguided
+            // capture uses the tokenizer EOS and doesn't mask, so vocab is
+            // unused there (pass 0).
+            let substrateEos = vocabTokens.map { Int($0.eos) }
+                ?? ctx.tokenizer.eosTokenId
+            let substrateVocab = cfgVocab ?? 0
+            if guide != nil && cfgVocab == nil { return nil }  // can't mask
             let ids = try GuidedSubstrate.generate(
                 model: ctx.model, promptTokens: promptTokens,
-                vocab: vocabSize, maxTokens: maxTokens,
-                eosTokenId: Int(vt.eos), guide: guide)
-            return (ctx.tokenizer.decode(tokenIds: ids), ids.count, 0)
+                vocab: substrateVocab, maxTokens: maxTokens,
+                eosTokenId: substrateEos, guide: guide, sink: logprobSink)
+            return (
+                ctx.tokenizer.decode(tokenIds: ids), ids.count, 0,
+                builtLogprobs())
         }
         guard let decoded else { return nil }
         return (
@@ -1059,7 +1103,28 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             TokenUsage(
                 promptTokens: promptTokens.count,
                 completionTokens: decoded.completion,
-                cachedTokens: decoded.cached))
+                cachedTokens: decoded.cached),
+            decoded.logprobs)
+    }
+
+    /// C2 — turn a `LogprobSink`'s numeric captures into `[TokenLogprob]` by
+    /// decoding each token id to its string/bytes via `decode` (the model's
+    /// tokenizer, passed as a closure so this stays MLX/tokenizer-type-free).
+    private static func buildLogprobs(
+        _ sink: LogprobSink, decode: ([Int]) -> String
+    ) -> [TokenLogprob] {
+        sink.committed.map { raw in
+            let tok = decode([raw.chosen])
+            let top = raw.top.map { alt -> TopLogprob in
+                let s = decode([alt.token])
+                return TopLogprob(
+                    token: s, logprob: alt.logprob,
+                    bytes: Array(s.utf8).map(Int.init))
+            }
+            return TokenLogprob(
+                token: tok, logprob: raw.logprob,
+                bytes: Array(tok.utf8).map(Int.init), top: top)
+        }
     }
 
     private func beginGeneration(

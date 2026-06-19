@@ -89,7 +89,7 @@ enum OpenAPISpec {
               "post": {
                 "tags": ["Chat"],
                 "summary": "Create a chat completion.",
-                "description": "OpenAI-compatible. Set `stream:true` for an SSE stream of `chat.completion.chunk` events terminated by `data: [DONE]`; with `stream_options.include_usage:true` a final usage-only chunk precedes it. `response_format`/`tools` route into structured output. `top_p`/`seed` are honored only on the sampling path and are inert under greedy/MTP/structured decoding. `n>1`, `logprobs`, `top_logprobs`, and non-empty `logit_bias` are rejected 400.",
+                "description": "OpenAI-compatible. Set `stream:true` for an SSE stream of `chat.completion.chunk` events terminated by `data: [DONE]`; with `stream_options.include_usage:true` a final usage-only chunk precedes it. `response_format`/`tools` route into structured output. `top_p`/`seed` are honored only on the sampling path and are inert under greedy/MTP/structured decoding. `logprobs`/`top_logprobs` (0–20) are honored on the deterministic decode path (temperature 0 or structured) and return `choices[].logprobs.content`; a sampling request (temperature>0, no schema) with `logprobs` ⇒ 400. `n>1` and non-empty `logit_bias` are rejected 400.",
                 "requestBody": {
                   "required": true,
                   "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ChatCompletionRequest" } } }
@@ -991,8 +991,8 @@ enum OpenAPISpec {
                   "seed": { "type": "integer", "description": "Honored only on the sampling path." },
                   "stop": { "description": "String or array of strings; truncates output at the first match.", "oneOf": [ { "type": "string" }, { "type": "array", "items": { "type": "string" } } ] },
                   "n": { "type": "integer", "description": "Rejected with 400 when > 1." },
-                  "logprobs": { "description": "Rejected with 400 when requested." },
-                  "top_logprobs": { "type": "integer", "description": "Rejected with 400 when present." },
+                  "logprobs": { "description": "Honored on the deterministic decode path (temperature 0 or structured); returns choices[].logprobs.content. A sampling request (temperature>0, no schema) with logprobs ⇒ 400." },
+                  "top_logprobs": { "type": "integer", "description": "0–20 top alternatives per token; requires logprobs:true. Out of range ⇒ 400." },
                   "logit_bias": { "type": "object", "description": "Rejected with 400 when non-empty." },
                   "speculative": { "type": "boolean", "description": "Athena extension. Per-request speculative-decoding override: true opts into speculative decoding — for an MTP-capable model, the bit-identical-greedy MTP loop at temperature=0 or the Leviathan/Chen sampling loop (distributionally identical to non-speculative sampling at the same temp/top_p/seed) at temperature>0; for a DFlash-enabled attention-only target (Gemma4) on the unstructured greedy path, the DFlash block draft/verify engine (lossless — every emitted token is the target's argmax under the verify forward). false forces the standard path. omit ⇒ daemon's --speculative default." }
                 }

@@ -366,6 +366,35 @@ code 400 POST /v1/chat/completions "$ALICE_TOK" \
 # n:1 is the supported single-decode case ⇒ 200.
 code 200 POST /v1/chat/completions "$ALICE_TOK" \
   '{"model":"Qwen3.5-27B-4bit-mtp","messages":[{"role":"user","content":"hi"}],"n":1}'
+
+# C2 (ADR 013 §4): logprobs is HONORED on the deterministic path. With
+# temperature:0 the request returns 200 carrying choices[].logprobs.content,
+# each entry with token/logprob/top_logprobs (synthesized by the stub).
+LP="$(curl -s -X POST -H "Authorization: Bearer $ALICE_TOK" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"Qwen3.5-27B-4bit-mtp","messages":[{"role":"user","content":"hi"}],"temperature":0,"logprobs":true,"top_logprobs":2}' \
+  "http://127.0.0.1:$PORT/v1/chat/completions")"
+{ echo "$LP" | grep -q '"logprobs"' && echo "$LP" | grep -q '"top_logprobs"' \
+  && echo "$LP" | grep -q '"content"'; } \
+  && ok "logprobs:true + temperature:0 ⇒ 200 with logprobs.content + top_logprobs" \
+  || bad "logprobs not honored on deterministic path ($LP)"
+# Streamed deterministic request emits a chunk carrying logprobs.
+LPS="$(curl -s -X POST -H "Authorization: Bearer $ALICE_TOK" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"Qwen3.5-27B-4bit-mtp","messages":[{"role":"user","content":"hi"}],"temperature":0,"logprobs":true,"stream":true}' \
+  "http://127.0.0.1:$PORT/v1/chat/completions")"
+echo "$LPS" | grep -q '"logprobs"' \
+  && ok "streamed logprobs ⇒ a chunk carries the logprobs object" \
+  || bad "no logprobs in streamed chunks ($LPS)"
+# top_logprobs out of range (0..20) ⇒ 400 invalid_top_logprobs.
+code 400 POST /v1/chat/completions "$ALICE_TOK" \
+  '{"model":"Qwen3.5-27B-4bit-mtp","messages":[{"role":"user","content":"hi"}],"temperature":0,"logprobs":true,"top_logprobs":21}'
+# top_logprobs without logprobs:true ⇒ 400.
+code 400 POST /v1/chat/completions "$ALICE_TOK" \
+  '{"model":"Qwen3.5-27B-4bit-mtp","messages":[{"role":"user","content":"hi"}],"temperature":0,"top_logprobs":2}'
+# logprobs on a sampling request (temperature>0, no schema) ⇒ 400 (no capture seam).
+code 400 POST /v1/chat/completions "$ALICE_TOK" \
+  '{"model":"Qwen3.5-27B-4bit-mtp","messages":[{"role":"user","content":"hi"}],"temperature":0.7,"logprobs":true}'
 # M46.4 — case-insensitive model resolution. The allowlist stores the
 # canonical id `Qwen3.5-27B-4bit-mtp` (mixed case); requesting it
 # fully lowercased must still resolve and serve. The truthful served-

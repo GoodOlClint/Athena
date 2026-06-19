@@ -29,6 +29,15 @@ public struct TopLogprob: Sendable, Equatable {
     }
 }
 
+/// A per-request logprobs ask (ADR 013 §4): present ⇒ the caller set
+/// `logprobs:true`; `topLogprobs` is the requested `top_logprobs` (0 ⇒ only the
+/// chosen token's logprob). Carried into the decode path so it knows how many
+/// alternatives to capture. MLX-free + Sendable so it crosses the protocol.
+public struct LogprobsRequest: Sendable, Equatable {
+    public let topLogprobs: Int
+    public init(topLogprobs: Int) { self.topLogprobs = topLogprobs }
+}
+
 /// Pure logprob math over a raw logit row — the MLX-free reference for the
 /// decode paths' per-token logprob capture (ADR 009: the decision/algebra is
 /// unit-pinned; the real paths compute the same thing with MLX kernels over the

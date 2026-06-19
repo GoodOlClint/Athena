@@ -56,4 +56,8 @@ public enum GenChunk: Sendable {
     case usage(TokenUsage)
     case finish(FinishReason)
     case error(AthenaError)
+    /// C2 (ADR 013 §4) — per-token logprobs for the deterministic
+    /// (greedy/structured) decode, emitted once after the text when the request
+    /// set `logprobs:true`. One element per emitted completion token, in order.
+    case logprobs([TokenLogprob])
 }

@@ -17,7 +17,8 @@ enum GuidedGreedy {
         promptTokens: [Int],
         maxTokens: Int,
         eosTokenId: Int?,
-        guide: StructuredGuide?
+        guide: StructuredGuide?,
+        sink: LogprobSink? = nil
     ) -> [Int] {
         let vocab = model.vocabularySize
         let backbone = model.newCache(parameters: nil)
@@ -53,7 +54,7 @@ enum GuidedGreedy {
         var out: [Int] = []
         var decoder = GuidedDecoder(
             guide: guide, vocab: vocab,
-            idleBudget: max(8, maxTokens / 2))
+            idleBudget: max(8, maxTokens / 2), sink: sink)
         var jsonStart: Int?
         func commit(_ t: Int) -> Bool {
             if t == eosTokenId {
@@ -64,13 +65,20 @@ enum GuidedGreedy {
                 return true
             }
             out.append(t)
+            // C2: the token was emitted ⇒ promote its pending logprob capture.
+            sink?.keep()
             if case .jsonStart = decoder.commit(t) {
                 jsonStart = out.count - 1
             }
             return out.count >= maxTokens
         }
         func result() -> [Int] {
-            guide == nil ? out : Array(out[(jsonStart ?? out.count)...])
+            guard guide != nil else { return out }
+            let js = jsonStart ?? out.count
+            // C2: drop the IDLE prefix from the logprobs too, so they align
+            // 1:1 with the returned (JSON-span) tokens.
+            sink?.sliceFrom(js)
+            return Array(out[js...])
         }
 
         while out.count < maxTokens {

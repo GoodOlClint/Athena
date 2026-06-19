@@ -1020,6 +1020,22 @@ struct AthenaServer {
         let schemaJSON = effective?.json
         let toolSpecs = body.toolSpecs()
 
+        // C2 (ADR 013 §4): honor logprobs on the deterministic decode path
+        // (greedy temp==0, or structured where temperature is inert); 400 on a
+        // sampling request, whose path has no logit-capture seam. Resolved here
+        // so BOTH the streamed and non-streamed branches share the verdict.
+        let deterministic = (body.temperature == 0) || (schemaJSON != nil)
+        if let (msg, code) = body.logprobsValidationError(
+            deterministic: deterministic)
+        {
+            return Self.error(
+                status: .badRequest, message: msg,
+                type: "invalid_request_error", code: code)
+        }
+        let logprobsReq =
+            body.wantsLogprobs
+            ? LogprobsRequest(topLogprobs: body.topLogprobsValue) : nil
+
         let stops = body.stopSequences()
         // M59.3 — resolve the principal once: it scopes the prompt-prefix
         // cache (so reuse never crosses callers) on BOTH the streamed and
@@ -1114,7 +1130,8 @@ struct AthenaServer {
                                     chatTemplateKwargs:
                                         body.chatTemplateKwargsContext(),
                                     promptCacheKey: body.prompt_cache_key,
-                                    principal: principal),
+                                    principal: principal,
+                                    logprobs: logprobsReq),
                                 onTimerFired: {
                                     cancelCounter.cancelGeneration()
                                     Self.log.warning(
@@ -1146,7 +1163,8 @@ struct AthenaServer {
                             chatTemplateKwargs:
                                 body.chatTemplateKwargsContext(),
                             promptCacheKey: body.prompt_cache_key,
-                            principal: principal),
+                            principal: principal,
+                            logprobs: logprobsReq),
                         onTimerFired: {
                             // E3 — a deadline truncation must reach the decode
                             // loop, not just close the wire.
@@ -1183,7 +1201,7 @@ struct AthenaServer {
                     chatTemplateKwargs:
                         body.chatTemplateKwargsContext(),
                     promptCacheKey: body.prompt_cache_key,
-                    principal: principal)
+                    principal: principal, logprobs: logprobsReq)
             }
         } catch let e as AthenaError {
             // M33.1: the only AthenaError collectMetered raises is the
@@ -1219,7 +1237,7 @@ struct AthenaServer {
             Self.chatCompletionResponse(
                 id: id, model: model, created: created, text: text,
                 isToolCall: effective?.isToolCall == true, usage: usage,
-                finish: finish))
+                finish: finish, logprobs: collected.logprobs))
     }
 
     /// Build one `ChatChoice` from generated text: a tool-call object is
@@ -1229,8 +1247,26 @@ struct AthenaServer {
     /// `finish` is the generator's stop reason (M31.2): a real tool call
     /// always reports `tool_calls`; otherwise the reason passes through
     /// (`stop` natural end, `length` max_tokens truncation).
+    /// C2 — map the module's `[TokenLogprob]` into the OpenAI response object
+    /// (`choices[].logprobs.content`). nil ⇒ nil (omitted from JSON).
+    static func chatLogprobs(_ lps: [TokenLogprob]?) -> ChatLogprobs? {
+        guard let lps else { return nil }
+        return ChatLogprobs(
+            content: lps.map { t in
+                ChatCompletionTokenLogprob(
+                    token: t.token, logprob: Double(t.logprob),
+                    bytes: t.bytes,
+                    top_logprobs: t.top.map {
+                        ChatTopLogprob(
+                            token: $0.token, logprob: Double($0.logprob),
+                            bytes: $0.bytes)
+                    })
+            })
+    }
+
     private static func chatChoice(
-        text: String, isToolCall: Bool, finish: FinishReason
+        text: String, isToolCall: Bool, finish: FinishReason,
+        logprobs: [TokenLogprob]? = nil
     ) -> ChatChoice {
         if isToolCall,
             let data = text.data(using: .utf8),
@@ -1254,26 +1290,30 @@ struct AthenaServer {
                             function: FunctionCallOut(
                                 name: name, arguments: argsJSON))
                     ]),
-                finish_reason: "tool_calls")
+                finish_reason: "tool_calls",
+                logprobs: Self.chatLogprobs(logprobs))
         }
         return ChatChoice(
             index: 0,
             message: ChatMessage(role: "assistant", content: text),
-            finish_reason: finish.rawValue)
+            finish_reason: finish.rawValue,
+            logprobs: Self.chatLogprobs(logprobs))
     }
 
     /// Assemble a full OpenAI `ChatCompletionResponse` around one choice.
     private static func chatCompletionResponse(
         id: String, model: String, created: Int, text: String,
         isToolCall: Bool, usage: TokenUsage,
-        finish: FinishReason = .stop
+        finish: FinishReason = .stop,
+        logprobs: [TokenLogprob]? = nil
     ) -> ChatCompletionResponse {
         ChatCompletionResponse(
             id: id, object: "chat.completion", created: created,
             model: model,
             choices: [
                 chatChoice(
-                    text: text, isToolCall: isToolCall, finish: finish)
+                    text: text, isToolCall: isToolCall, finish: finish,
+                    logprobs: logprobs)
             ],
             usage: Usage(
                 prompt_tokens: usage.promptTokens,
@@ -1288,6 +1328,8 @@ struct AthenaServer {
         var text = ""
         var usage = TokenUsage.zero
         var finish: FinishReason = .stop
+        // C2 — per-token logprobs when the request asked for them.
+        var logprobs: [TokenLogprob]?
     }
 
     /// NSLock-isolated state for the M46.7 heartbeat: the event-drain
@@ -1617,6 +1659,7 @@ struct AthenaServer {
                             counter.incrementToken()
                         case .usage(let u): c.usage = u
                         case .finish(let r): c.finish = r
+                        case .logprobs(let l): c.logprobs = l
                         case .error(let athenaErr):
                             // M49.5.2 — re-throw the classified error so the
                             // HTTP layer's `do { ... } catch let e as AthenaError`
@@ -3506,7 +3549,7 @@ struct AthenaServer {
                         chatTemplateKwargs:
                             req.chatTemplateKwargsContext(),
                         promptCacheKey: req.prompt_cache_key,
-                        principal: owner)
+                        principal: owner, logprobs: nil)
                 }
             } catch let e as AthenaError {
                 return (nil, e.message)  // M33.1: timeout → job error
@@ -3769,7 +3812,7 @@ struct AthenaServer {
                                 speculative: body.speculative,
                                 chatTemplateKwargs: nil,
                                 promptCacheKey: body.prompt_cache_key,
-                                principal: principal)),
+                                principal: principal, logprobs: nil)),
                         onTimerFired: {
                             cancelCounter.cancelGeneration()
                             Self.log.warning(
@@ -3796,7 +3839,7 @@ struct AthenaServer {
                     topP: nil, seed: nil, speculative: body.speculative,
                     chatTemplateKwargs: nil,
                     promptCacheKey: body.prompt_cache_key,
-                    principal: principal)
+                    principal: principal, logprobs: nil)
             }
         } catch let e as AthenaError {
             return Self.error(
@@ -5812,6 +5855,22 @@ struct AthenaServer {
                         // A stop-sequence hit wins over the generator's
                         // own length/stop reason.
                         if !stopFilter.stopped { finish = r }
+                    case .logprobs(let l):
+                        // C2 — the deterministic paths emit one terminal
+                        // logprobs list; surface it as a chunk carrying the
+                        // OpenAI logprobs object (empty delta).
+                        emit(
+                            ChatCompletionChunk(
+                                id: id, object: "chat.completion.chunk",
+                                created: created, model: model,
+                                choices: [
+                                    ChatChunkChoice(
+                                        index: 0,
+                                        delta: ChatDelta(
+                                            role: nil, content: nil),
+                                        finish_reason: nil,
+                                        logprobs: Self.chatLogprobs(l))
+                                ]))
                     case .error(let athenaErr):
                         // M49.5.2 — streaming-mode error: the HTTP 200
                         // + headers were already sent, so we can't

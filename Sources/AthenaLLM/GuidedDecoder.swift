@@ -30,26 +30,40 @@ struct GuidedDecoder {
     let guide: StructuredGuide?
     let vocab: Int
     let idleBudget: Int
+    /// C2 — optional per-token logprob capture (ADR 013 §4). nil ⇒ byte-
+    /// unchanged decode (the default chat path never allocates / asArray's).
+    let sink: LogprobSink?
     private(set) var enforcing: Bool
     private(set) var jsonStarted = false
     private var firstJSONRecorded = false
     private var idleCount = 0
     private var maskBuf: [UInt8] = []
 
-    init(guide: StructuredGuide?, vocab: Int, idleBudget: Int) {
+    init(
+        guide: StructuredGuide?, vocab: Int, idleBudget: Int,
+        sink: LogprobSink? = nil
+    ) {
         self.guide = guide
         self.vocab = vocab
         self.idleBudget = max(1, idleBudget)
+        self.sink = sink
         self.enforcing = false
     }
 
     /// Pick a token id from a `(1, vocab)` logits slice.
     mutating func pick(_ slice: MLXArray) -> Int {
+        let t: Int
         if let guide, enforcing {
-            return SpeculativeGeneration.guidedArgmax(
+            t = SpeculativeGeneration.guidedArgmax(
                 slice, vocab: vocab, guide: guide, maskBuf: &maskBuf)
+        } else {
+            t = argMax(slice, axis: -1).item(Int.self)
         }
-        return argMax(slice, axis: -1).item(Int.self)
+        // C2: capture the chosen token's logprob from the UNMASKED slice (the
+        // model's distribution for the token actually emitted). Opt-in via the
+        // sink, so the default path is untouched.
+        sink?.prepare(slice: slice, chosen: t)
+        return t
     }
 
     /// Force ENFORCING without consuming a token — called by the loop

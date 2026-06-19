@@ -25,12 +25,20 @@ enum GuidedSubstrate {
     /// token is always schema-valid, so `advance` never fails and the
     /// Guide state stays monotonic (no rollback).
     struct GuidedLogitProcessor: LogitProcessor {
-        let guide: StructuredGuide
+        let guide: StructuredGuide?
         let vocab: Int
+        /// C2 — optional per-token logprob capture (ADR 013 §4). When `guide`
+        /// is nil this processor does NO masking and exists only to capture
+        /// (the non-Qwen unguided-greedy logprobs path).
+        let sink: LogprobSink?
 
         func prompt(_ prompt: MLXArray) {}
 
         func process(logits: MLXArray) -> MLXArray {
+            // C2: stash the UNMASKED last-position slice for the chosen token's
+            // logprob (finalized in didSample once the token is known).
+            sink?.stash(slice: logits)
+            guard let guide else { return logits }
             var mask: [UInt8] = []
             _ = guide.allowedMask(into: &mask)
             // M70.3 (L5): same shared MLX-free seam as
@@ -43,27 +51,33 @@ enum GuidedSubstrate {
         }
 
         func didSample(token: MLXArray) {
-            _ = guide.advance(UInt32(token.item(Int.self)))
+            let t = token.item(Int.self)
+            sink?.finalizeStashed(chosen: t)
+            if let guide { _ = guide.advance(UInt32(t)) }
         }
     }
 
-    /// Drive the substrate `TokenIterator` with a guided processor.
-    /// `promptTokens` are post-chat-template ids (rebuilt into an `LMInput`
-    /// here so the caller never captures a non-Sendable `LMInput` across
-    /// the actor boundary). Returns the generated token ids (the JSON span
-    /// — enforcement is from token 0, so there is no prefix to drop).
-    /// Stops at the Guide's EOS (forced once the schema is satisfied) or
-    /// `maxTokens`.
+    /// Drive the substrate `TokenIterator` with a guided (and/or capturing)
+    /// processor. `promptTokens` are post-chat-template ids (rebuilt into an
+    /// `LMInput` here so the caller never captures a non-Sendable `LMInput`
+    /// across the actor boundary). Returns the generated token ids.
+    ///
+    /// `guide` non-nil ⇒ schema-enforced from token 0 (the JSON span, no prefix
+    /// to drop). `guide` nil + `sink` non-nil ⇒ plain greedy capture for the
+    /// non-Qwen unguided logprobs path (C2). Stops at the Guide's EOS (forced
+    /// once the schema is satisfied), `eosTokenId`, or `maxTokens`.
     static func generate(
         model: any LanguageModel,
         promptTokens: [Int],
         vocab: Int,
         maxTokens: Int,
         eosTokenId: Int?,
-        guide: StructuredGuide
+        guide: StructuredGuide?,
+        sink: LogprobSink? = nil
     ) throws -> [Int] {
         let input = LMInput(tokens: MLXArray(promptTokens.map { Int32($0) }))
-        let processor = GuidedLogitProcessor(guide: guide, vocab: vocab)
+        let processor = GuidedLogitProcessor(
+            guide: guide, vocab: vocab, sink: sink)
         var iterator = try TokenIterator(
             input: input, model: model, cache: nil,
             processor: processor, sampler: ArgMaxSampler(),
@@ -75,6 +89,8 @@ enum GuidedSubstrate {
             if DecodeLoopControl.isCancelled() { break }
             if let eosTokenId, token == eosTokenId { break }
             out.append(token)
+            // C2: the token was emitted ⇒ promote its pending logprob capture.
+            sink?.keep()
             // M46.8 — per-iteration progress for the heartbeat. See the
             // matching note in GuidedGreedy.generate: the substrate
             // path here is also fully synchronous and only surfaces

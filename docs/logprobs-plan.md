@@ -1,6 +1,10 @@
 # C2 — honor `logprobs`/`top_logprobs` (ADR 013 §4) — implementation plan
 
-**Status:** Plan — awaiting operator review (no code yet).
+**Status:** Shipped (v0.10.190). Uniform across all archs via the ArgMax pick /
+`LogitProcessor` capture seams — **no substrate fork needed** (the key finding below
+held). Deterministic-path only (temp>0 ⇒ 400, ADR 013 §4); non-streaming + streaming;
+`LogprobMath` numerics unit-pinned (650/0), shape e2e-validated via the stub (573/0). Real
+logprob *values* on a live Qwen + non-Qwen model remain a RUNBOOK check.
 **Decision of record:** ADR 013 §4 ("Emit `top_logprobs` on the deterministic path
 instead of 400"). **Scope (operator-chosen):** uniform support across **all** decode
 paths/architectures, not just the Qwen family.
