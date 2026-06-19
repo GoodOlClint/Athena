@@ -823,6 +823,18 @@ NROWS="$(sqlite3 "$DB" 'SELECT COUNT(*) FROM usage_counters;')"
 [ "$NROWS" -ge 2 ] \
   && ok "usage_counters holds ≥2 principal rows ($NROWS)" \
   || bad "usage_counters has <2 rows ($NROWS)"
+# D1 (ADR 007 #8): native /api/embed must meter like /v1/embeddings — the
+# embed twin previously dropped usage entirely. Prove alice's prompt_tokens
+# grow after a native /api/embed call (the embedding model is warm from 2.9).
+AEP0="$(usagecol 'u:alice' prompt_tokens)"
+curl -s -o /dev/null -X POST -H "Authorization: Bearer $ALICE_TOK" \
+  -H 'Content-Type: application/json' \
+  -d '{"input":["native embed metering check"]}' \
+  "http://127.0.0.1:$PORT/api/embed"
+AEP1="$(usagecol 'u:alice' prompt_tokens)"
+[ "$AEP1" -gt "$AEP0" ] \
+  && ok "native /api/embed meters alice prompt_tokens ($AEP0 → $AEP1)" \
+  || bad "native /api/embed did not meter ($AEP0 → $AEP1)"
 
 echo
 echo "== phase 2.11: GET /api/usage owner-scoping + CLI (M27.3) =="

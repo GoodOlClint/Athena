@@ -3836,6 +3836,14 @@ struct AthenaServer {
         {
         case .fail(let r): return r
         case .ok(let batch):
+            // Native /api metering (ADR 007 #8): mirror /v1/embeddings —
+            // embeddings have no completion, so prompt == total. Closes the
+            // gap where `handleNativeChat` metered but the embed twin dropped
+            // usage, so `/api/embed` traffic was invisible to usage_counters.
+            await meter(
+                principal: usagePrincipal(request),
+                usage: TokenUsage(
+                    promptTokens: batch.promptTokens, completionTokens: 0))
             return Self.json(
                 AthenaEmbedResponse(
                     model: batch.model, embeddings: batch.vectors))

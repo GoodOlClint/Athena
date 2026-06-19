@@ -23,13 +23,13 @@ Backlog audit (`docs/backlog-hitlist.md`) reconciled this plan against `Sources/
 |---|---|---|
 | A1 no-chat-template → 400 | ✅ shipped | `AthenaError.swift:135` `.noChatTemplate → 400`, code `no_chat_template`; `isMissingChatTemplate` maps the substrate error |
 | A2 audio-upload faults → 4xx | ✅ shipped | `AthenaError` `audioTooLong`/`invalidAudio`/`audioFormatUnsupported → 400`, wired in `AudioDecode.swift` |
-| A3 catch-all sweep (4× rebind + queue) | ⚠️ **partial** | some catch blocks converted (e.g. `AthenaServer.swift:1682`); the per-module rebind + queue-submit legs not confirmed routed through `classify()` |
+| A3 catch-all sweep (4× rebind + queue) | ✅ **shipped** (verified 2026-06-19) | all 4 rebind handlers route their generic `catch` through `Self.classified()` (embed `:1694`, transcription `:1788`, diarization `:2148`, speaker `:2251`); both queue-submit sites classify `AthenaError` + 500 only on a genuine fault (`:3189`,`:4596`); `classify()` unit-pinned in `AthenaErrorTests`. The "partial" verdict was conservative — no code change needed |
 | B1 deprecate `/api/embed` | ✅ shipped | `OpenAPISpec.swift` `deprecated:true` |
 | B2 migrate `athena run` → `/v1` | ✅ shipped | `clients/.../Run.swift:59,101-108` |
 | B3 deprecate `/api/chat` | ✅ shipped | `OpenAPISpec.swift` `deprecated:true` |
 | C1 `diarized_json` response_format | ❌ **open** | transcription switch (`AthenaServer.swift:1827,2042`) handles srt/vtt/verbose_json only; 0 hits for `diarized_json` |
 | C2 honor `logprobs`/`top_logprobs` | ❌ **open** | `OpenAIDTO.swift:242-248` still 400s both; spec still documents the rejection |
-| D native `/api/embed` metering (ADR 007 #8) | ❌ **open** | `handleNativeEmbed` (`AthenaServer.swift:3820`) calls `governedEmbed` with no `meter()` (cf. chat at `:3759`) |
+| D1 native `/api/embed` metering (ADR 007 #8) | ✅ **shipped** (v0.10.188) | `handleNativeEmbed` now calls `meter()` mirroring `/v1/embeddings`; e2e asserts alice prompt_tokens grow after `/api/embed` |
 
 **Track 2 (this batch) = the open remainder: A3-finish, D, C1, C2.** Recommended order below
 keeps the plan's low-risk/high-legibility-first principle, but **C1 is the one silently
