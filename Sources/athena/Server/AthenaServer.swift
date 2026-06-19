@@ -1840,38 +1840,11 @@ struct AthenaServer {
             // best-overlapping Sortformer speaker turn (M4.3c).
             var turns: [DiarizationTurn] = []
             if form.text("diarize") == "true" {
-                do {
-                    // M43.2: non-blocking cold-load.
-                    switch try await governor.awaitLoad(.diarization, within: coldLoadWaitSecs) {
-                    case .loaded: break
-                    case .loading: return Self.coldLoadResponse(.diarization)
-                    }
-                    // diarize=true uses the END-TO-END (Sortformer) path to tag
-                    // each segment. The diarization slot is a single global
-                    // tenant (ADR 011), so if a pyannote *segmentation* model is
-                    // resident (e.g. a prior method=pyannote request rebound it),
-                    // this can't run — surface a clear 409, not a misleading
-                    // "use method=pyannote" (there is no method param here). The
-                    // canonical source is the standalone /v1/audio/diarizations
-                    // route (ADR 013).
-                    guard await diarization.residentBackend() == .sortformer
-                    else {
-                        return Self.error(
-                            status: .conflict,
-                            message: "diarize=true needs an end-to-end "
-                                + "(Sortformer) diarization model, but a "
-                                + "segmentation model is currently resident in "
-                                + "the single diarization slot. Diarize "
-                                + "separately via POST /v1/audio/diarizations, "
-                                + "or select a Sortformer diarization model.",
-                            type: "invalid_request_error",
-                            code: "diarization_backend_conflict")
-                    }
-                    turns = try await diarization.diarize(
-                        audio: file.data, filename: file.filename
-                    ).turns
-                } catch {
-                    return Self.classified(error, module: .diarization)
+                switch await diarizeTurns(
+                    audio: file.data, filename: file.filename)
+                {
+                case .fail(let r): return r
+                case .ok(let t): turns = t
                 }
             }
             func words(_ ws: [WordTiming]?) -> [WordTimestamp]? {
@@ -1899,8 +1872,79 @@ struct AthenaServer {
                             words: words($0.element.words))
                     },
                     words: wantWords ? words(result.words) : nil))
+        case "diarized_json":
+            // ADR 013 #3 (#4a): OpenAI's diarized transcription format. Unlike
+            // verbose_json's opt-in `diarize=true`, diarized_json IMPLIES
+            // diarization — always run it and label every segment. Marked
+            // **native-flavored** per the `/v1` compatibility rule: it reuses
+            // the verbose envelope for consumer convenience, but `speaker` is
+            // Athena's Int id (not OpenAI's string label) and word timings are
+            // not emitted. The standalone /v1/audio/diarizations route stays
+            // the canonical diarization surface.
+            let dturns: [DiarizationTurn]
+            switch await diarizeTurns(
+                audio: file.data, filename: file.filename)
+            {
+            case .fail(let r): return r
+            case .ok(let t): dturns = t
+            }
+            return Self.json(
+                VerboseTranscriptionResponse(
+                    task: "transcribe", language: result.language,
+                    duration: result.duration, text: result.text,
+                    segments: result.segments.enumerated().map {
+                        VerboseSegment(
+                            id: $0.offset, start: $0.element.start,
+                            end: $0.element.end, text: $0.element.text,
+                            avg_logprob: $0.element.avgLogprob,
+                            speaker: Self.speaker(
+                                start: $0.element.start,
+                                end: $0.element.end, turns: dturns),
+                            words: nil)
+                    },
+                    words: nil))
         default:  // "json" / nil
             return Self.json(TranscriptionResponse(text: result.text))
+        }
+    }
+
+    /// Run end-to-end (Sortformer) diarization to tag transcription segments
+    /// with speaker turns — shared by `verbose_json` (opt-in `diarize=true`)
+    /// and `diarized_json` (implicit). The diarization slot is a single global
+    /// tenant (ADR 011); if a pyannote *segmentation* model is resident (e.g. a
+    /// prior `method=pyannote` request rebound it), this can't run and returns a
+    /// clear 409 rather than a misleading message (the canonical diarization
+    /// surface is the standalone /v1/audio/diarizations route, ADR 013).
+    private func diarizeTurns(
+        audio: Data, filename: String?
+    ) async -> Outcome<[DiarizationTurn]> {
+        do {
+            // M43.2: non-blocking cold-load.
+            switch try await governor.awaitLoad(
+                .diarization, within: coldLoadWaitSecs)
+            {
+            case .loaded: break
+            case .loading: return .fail(Self.coldLoadResponse(.diarization))
+            }
+            guard await diarization.residentBackend() == .sortformer else {
+                return .fail(
+                    Self.error(
+                        status: .conflict,
+                        message: "diarization needs an end-to-end "
+                            + "(Sortformer) model, but a segmentation model is "
+                            + "currently resident in the single diarization "
+                            + "slot. Diarize separately via POST "
+                            + "/v1/audio/diarizations, or select a Sortformer "
+                            + "diarization model.",
+                        type: "invalid_request_error",
+                        code: "diarization_backend_conflict"))
+            }
+            return .ok(
+                try await diarization.diarize(
+                    audio: audio, filename: filename
+                ).turns)
+        } catch {
+            return .fail(Self.classified(error, module: .diarization))
         }
     }
 
@@ -1963,13 +2007,18 @@ struct AthenaServer {
                 type: "invalid_request_error", code: "missing_file")
         }
 
-        // diarize=true on video is a 501 (not yet wired) — fail fast before any
-        // load/decode so the caller gets the clear answer immediately.
-        if form.text("diarize") == "true" {
+        // diarization on video is a 501 (not yet wired) — fail fast before any
+        // load/decode so the caller gets the clear answer immediately. Both the
+        // `diarize=true` flag and the `diarized_json` format (which implies
+        // diarization, ADR 013 #3) take this path.
+        if form.text("diarize") == "true"
+            || form.text("response_format") == "diarized_json"
+        {
             return Self.classified(
                 AthenaError.notImplemented(
-                    feature: "diarize=true on /v1/video/transcriptions — "
-                        + "transcribe, then POST the audio to "
+                    feature: "diarization on /v1/video/transcriptions "
+                        + "(diarize=true or response_format=diarized_json) — "
+                        + "transcribe, then POST the extracted audio to "
                         + "/v1/audio/diarizations"),
                 module: .transcription)
         }

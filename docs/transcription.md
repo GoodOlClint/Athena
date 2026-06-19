@@ -9,6 +9,14 @@ OpenAI-compatible: `response_format` of `json` (default), `text`, `srt`, `vtt`,
 or `verbose_json`; `timestamp_granularities[]=word` adds word timings;
 `diarize=true` tags each segment with a speaker (uses the diarization slot).
 
+`diarized_json` (Athena-native alias, ADR 013 #3) *implies* diarization — no
+`diarize` flag needed — and returns the same verbose envelope with every segment
+speaker-labeled. `speaker` is Athena's integer id (not OpenAI's string label).
+It needs an end-to-end (Sortformer) diarization model resident; a pyannote
+*segmentation* model in the slot ⇒ 409 (diarize separately via
+`/v1/audio/diarizations`). On `/v1/video/transcriptions` it ⇒ 501 (video
+diarization deferred, ADR 022).
+
 ## Backends (ADR 020)
 
 Transcription is **multi-backend**, selected by the resident model's class —

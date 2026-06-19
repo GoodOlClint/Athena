@@ -27,7 +27,7 @@ Backlog audit (`docs/backlog-hitlist.md`) reconciled this plan against `Sources/
 | B1 deprecate `/api/embed` | ✅ shipped | `OpenAPISpec.swift` `deprecated:true` |
 | B2 migrate `athena run` → `/v1` | ✅ shipped | `clients/.../Run.swift:59,101-108` |
 | B3 deprecate `/api/chat` | ✅ shipped | `OpenAPISpec.swift` `deprecated:true` |
-| C1 `diarized_json` response_format | ❌ **open** | transcription switch (`AthenaServer.swift:1827,2042`) handles srt/vtt/verbose_json only; 0 hits for `diarized_json` |
+| C1 `diarized_json` response_format | ✅ **shipped** (v0.10.189) | audio handler adds a `diarized_json` case that implies diarization via shared `diarizeTurns` helper; video ⇒ 501; OpenAPI enum + native-flavored description; e2e asserts audio-200-verbose-envelope + video-501 |
 | C2 honor `logprobs`/`top_logprobs` | ❌ **open** | `OpenAIDTO.swift:242-248` still 400s both; spec still documents the rejection |
 | D1 native `/api/embed` metering (ADR 007 #8) | ✅ **shipped** (v0.10.188) | `handleNativeEmbed` now calls `meter()` mirroring `/v1/embeddings`; e2e asserts alice prompt_tokens grow after `/api/embed` |
 

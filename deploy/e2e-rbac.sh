@@ -1189,6 +1189,29 @@ D_BAD=$(curl -s -o /tmp/dbad.json -w '%{http_code}' \
   && grep -q 'model_not_available' /tmp/dbad.json \
   && ok "diarization unknown model ⇒ 400 model_not_available" \
   || bad "diarization unknown model not refused ($D_BAD: $(cat /tmp/dbad.json))"
+# C1 (ADR 013 #3): response_format=diarized_json IMPLIES diarization (no
+# `diarize` flag) and returns the verbose envelope, NOT the bare {text} default.
+# No model= ⇒ default transcription model (skips the rebind gate). Under the stub
+# the speaker stays unlabeled (zero-width turn) — label correctness is real-model
+# RUNBOOK — but "recognized + ran the diarization tenant" is deterministic.
+DJ=$(curl -s -o /tmp/dj.json -w '%{http_code}' \
+  -H "Authorization: Bearer $ADMIN_TOK" \
+  -F "file=@$DUMMY_AUDIO;filename=x.wav" \
+  -F 'response_format=diarized_json' \
+  "http://127.0.0.1:$PORT/v1/audio/transcriptions")
+{ [ "$DJ" = "200" ] && grep -q '"task"' /tmp/dj.json && grep -q '"segments"' /tmp/dj.json; } \
+  && ok "diarized_json returns the verbose diarized envelope (not bare {text})" \
+  || bad "diarized_json not wired ($DJ: $(cat /tmp/dj.json))"
+# Video diarization is deferred (ADR 022): diarized_json on video ⇒ 501, like
+# diarize=true. The 501 fires before decode, so the dummy file is fine.
+VDJ=$(curl -s -o /tmp/vdj.json -w '%{http_code}' \
+  -H "Authorization: Bearer $ADMIN_TOK" \
+  -F "file=@$DUMMY_AUDIO;filename=x.mp4" \
+  -F 'response_format=diarized_json' \
+  "http://127.0.0.1:$PORT/v1/video/transcriptions")
+[ "$VDJ" = "501" ] \
+  && ok "video diarized_json ⇒ 501 (video diarization not wired)" \
+  || bad "video diarized_json not 501 ($VDJ: $(cat /tmp/vdj.json))"
 S_BAD=$(curl -s -o /tmp/sbad.json -w '%{http_code}' \
   -H "Authorization: Bearer $ADMIN_TOK" \
   -F "file=@$DUMMY_AUDIO;filename=x.wav" \
