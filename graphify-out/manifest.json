@@ -10,8 +10,8 @@
     "semantic_hash": "baa0b2e6c2456a2ddc1a4b2e82592cd6"
   },
   "Sources/AthenaCore/AthenaError.swift": {
-    "mtime": 1781834606.8772907,
-    "ast_hash": "25a0009f0f6bd9471df5a2d775d8b6c5",
+    "mtime": 1781844783.9052238,
+    "ast_hash": "3cde69c28a601e98018761d092b0de9e",
     "semantic_hash": ""
   },
   "Sources/AthenaCore/AthenaProxy.swift": {
@@ -85,8 +85,8 @@
     "semantic_hash": "c8bec6880dd5c91f0d4a3963c9c8c04c"
   },
   "Sources/AthenaDeploy/AthenaConfig.swift": {
-    "mtime": 1781791364.530558,
-    "ast_hash": "dc65229938e9aba3204300651ace7735",
+    "mtime": 1781845600.343227,
+    "ast_hash": "e3f9979bcb56831c4940f79ec3bbcb2a",
     "semantic_hash": ""
   },
   "Sources/AthenaDeploy/DefaultConfig.swift": {
@@ -100,8 +100,8 @@
     "semantic_hash": "2aaf2a90a1a70a05798c9ee570ea99d4"
   },
   "Sources/AthenaDeploy/LaunchdPlist.swift": {
-    "mtime": 1781791435.206126,
-    "ast_hash": "e128b524a0981d087728aa78df8adf53",
+    "mtime": 1781845684.062592,
+    "ast_hash": "c4f326df09338bf5b9ff4b630d32b779",
     "semantic_hash": ""
   },
   "Sources/AthenaDeploy/VersionGuard.swift": {
@@ -295,8 +295,8 @@
     "semantic_hash": ""
   },
   "Sources/AthenaTranscription/AudioDecode.swift": {
-    "mtime": 1781834576.7635765,
-    "ast_hash": "40cb18da74f388436d3d12e2b6f28139",
+    "mtime": 1781844734.617837,
+    "ast_hash": "715172fa7886a5cface21a751fc2643c",
     "semantic_hash": ""
   },
   "Sources/AthenaTranscription/DiarizationModule.swift": {
@@ -320,8 +320,8 @@
     "semantic_hash": ""
   },
   "Sources/AthenaTranscription/MLXTranscriptionModule.swift": {
-    "mtime": 1781824251.9521182,
-    "ast_hash": "bf15be8f4444d0ff9cf03ee9a4611813",
+    "mtime": 1781845015.815054,
+    "ast_hash": "238bd3fc137b0a5efa1706b48ce34503",
     "semantic_hash": ""
   },
   "Sources/AthenaTranscription/Sortformer/Sortformer.swift": {
@@ -355,9 +355,9 @@
     "semantic_hash": "e1ac2a0f86656cf838686ea1d58f6f15"
   },
   "Sources/AthenaTranscription/StubTranscriptionModule.swift": {
-    "mtime": 1779938296.723871,
-    "ast_hash": "f6933ca0707ffabce490cc6eaa42d379",
-    "semantic_hash": "f6933ca0707ffabce490cc6eaa42d379"
+    "mtime": 1781845065.781866,
+    "ast_hash": "608b27c75f3932749067d9753260746b",
+    "semantic_hash": ""
   },
   "Sources/AthenaTranscription/TranscriptionResult.swift": {
     "mtime": 1781310634.631527,
@@ -420,8 +420,8 @@
     "semantic_hash": "d16404614855c59c2001089f41c5bd78"
   },
   "Sources/athena/Athena.swift": {
-    "mtime": 1781834650.1899393,
-    "ast_hash": "0840cd149e38b71c17011685dd3d1b5b",
+    "mtime": 1781846321.8197603,
+    "ast_hash": "dff13b5635e2e42737528533cd4e39e9",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Audit.swift": {
@@ -440,8 +440,8 @@
     "semantic_hash": ""
   },
   "Sources/athena/Commands/ConfigEditor.swift": {
-    "mtime": 1781791398.783747,
-    "ast_hash": "dcb3d761ab183d8afc07152e73cd1e56",
+    "mtime": 1781845701.868008,
+    "ast_hash": "872c91817d9a523854a19e0e50236887",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Convert.swift": {
@@ -490,8 +490,8 @@
     "semantic_hash": "5f5b49d75a33c5f490e2fa462f22c6ea"
   },
   "Sources/athena/Commands/Load.swift": {
-    "mtime": 1781818474.2948625,
-    "ast_hash": "2effb2502b25c4d754432b6f6d5b2f93",
+    "mtime": 1781845658.3262627,
+    "ast_hash": "0d0142ec69e6e608d8c195db68d93e1b",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Logs.swift": {
@@ -545,8 +545,8 @@
     "semantic_hash": "ba546feb975db11ee6e42e5e147b55e0"
   },
   "Sources/athena/Server/AthenaServer.swift": {
-    "mtime": 1781809861.8508434,
-    "ast_hash": "d3c48bff0cf274b22a849b587c2f8b6d",
+    "mtime": 1781845468.3960793,
+    "ast_hash": "a2999ff416587584f3f86da1c35628f2",
     "semantic_hash": ""
   },
   "Sources/athena/Server/GPUTelemetry.swift": {
@@ -565,8 +565,8 @@
     "semantic_hash": ""
   },
   "Sources/athena/Server/OpenAPISpec.swift": {
-    "mtime": 1781818510.7499714,
-    "ast_hash": "6a4506ad81c466116a0c973e0a1a6722",
+    "mtime": 1781845747.4750485,
+    "ast_hash": "f2e16d8e9b04992378ad2a93f9d10444",
     "semantic_hash": ""
   },
   "Sources/athena/Server/QueueWorkerService.swift": {
@@ -585,8 +585,8 @@
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/AthenaDeployTests.swift": {
-    "mtime": 1781792340.6520088,
-    "ast_hash": "5122e39b5cfde54b066ce5946470c9c0",
+    "mtime": 1781845868.9586828,
+    "ast_hash": "cd45804e9cf72fa9a9fb2872c33ea227",
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/AthenaErrorTests.swift": {
@@ -1085,8 +1085,8 @@
     "semantic_hash": "371237f6ed34877c859b071318d9b529"
   },
   "CLAUDE.md": {
-    "mtime": 1781824945.9416907,
-    "ast_hash": "1ca1be385dde3b4bda64220649d06c02",
+    "mtime": 1781846310.5912447,
+    "ast_hash": "a4fabffc16ae29c30b9680bc8c1b4cd0",
     "semantic_hash": ""
   },
   "docs/cli-reference.md": {
@@ -1225,8 +1225,8 @@
     "semantic_hash": ""
   },
   "Sources/AthenaServerKit/Auth.swift": {
-    "mtime": 1781334868.6537929,
-    "ast_hash": "2a70eac5039589d671ca4e99e0b60398",
+    "mtime": 1781845758.8463602,
+    "ast_hash": "e17cb9b97759b9f037f1ef1697761561",
     "semantic_hash": ""
   },
   "Sources/AthenaServerKit/Metrics.swift": {
@@ -1250,8 +1250,8 @@
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/AthenaServerKitTests.swift": {
-    "mtime": 1781791959.2071102,
-    "ast_hash": "6b0063a23632ec0d2a245c33a4a06700",
+    "mtime": 1781845778.7885587,
+    "ast_hash": "c9832e3af65df3964cbbbd00ee1ec24e",
     "semantic_hash": ""
   },
   "docs/decisions/008-testable-server-seam.md": {
@@ -1677,6 +1677,41 @@
   "Tests/AthenaCoreTests/AudioDecodeFloorTests.swift": {
     "mtime": 1781834642.4179351,
     "ast_hash": "1edffda337fcaef276dc7cf52f6bfd79",
+    "semantic_hash": ""
+  },
+  "docs/decisions/022-video-transcription-and-description.md": {
+    "mtime": 1781846287.6250854,
+    "ast_hash": "2e75aeb7d0c8fd7642786586f63c5b6f",
+    "semantic_hash": ""
+  },
+  "docs/video-support-plan.md": {
+    "mtime": 1781844539.3737884,
+    "ast_hash": "64b0950618d881dfe64dd89d663c2eb4",
+    "semantic_hash": ""
+  },
+  "Sources/AthenaTranscription/VideoAudioTrack.swift": {
+    "mtime": 1781844815.2392962,
+    "ast_hash": "cb1375fbcd3668a7e6b537798955974c",
+    "semantic_hash": ""
+  },
+  "Tests/AthenaCoreTests/VideoAudioTrackTests.swift": {
+    "mtime": 1781844850.5194314,
+    "ast_hash": "28ceebe8b8e6f796e23e415e00da94e0",
+    "semantic_hash": ""
+  },
+  "Tests/AthenaCoreTests/TranscriptionPCMSeamTests.swift": {
+    "mtime": 1781845097.489682,
+    "ast_hash": "981ef2613c09ec4a0f7a6e26e4d3480a",
+    "semantic_hash": ""
+  },
+  "deploy/e2e-video.sh": {
+    "mtime": 1781846221.2195268,
+    "ast_hash": "5dc84b641f4eec0668dface6030803b6",
+    "semantic_hash": ""
+  },
+  "docs/video.md": {
+    "mtime": 1781846273.8674428,
+    "ast_hash": "e898ea2f1b1d85192a34f8fcb9fc4b3f",
     "semantic_hash": ""
   }
 }
