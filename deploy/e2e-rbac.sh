@@ -1337,24 +1337,21 @@ if r != "operator_unload":
   || bad "unloadedReason missing/wrong after allowlist drop ($HZ2)"
 
 echo
-echo "== phase 3.687: cold-load 503 Retry-After + allowlist warn + init (M43.2) =="
+echo "== phase 3.687: cold-load blocks-until-ready → 200 (ADR 015) + allowlist warn + init =="
 # Phase 3.686 ended with textEmbedding in state=unloaded after the
-# allowlist drop. The FIRST request now goes through
-# `governor.beginLoadIfNeeded` which kicks a detached load task and
-# returns .loading synchronously — so the response is 503 +
-# Retry-After: 5 instead of blocking the request thread on a multi-GB
-# HF download (the fragility #2 hang).
+# allowlist drop. ADR 015 (v0.10.164) narrowed M43.2's 503: a request for a
+# non-resident-but-ON-DISK model now BLOCKS until the (bounded, local) load
+# finishes and returns 200 — peer-runner ergonomics for arbitrary OpenAI
+# clients. 503 + Retry-After is now reserved for the download (`pulling`) and
+# `cold_load_wait_secs` timeout cases, neither of which the stub reproduces.
 CL_HEADERS="$(curl -s -D - -o /dev/null -X POST \
   -H "Authorization: Bearer $ALICE_TOK" \
   -H 'Content-Type: application/json' \
   -d '{"input":"hi"}' \
   "http://127.0.0.1:$PORT/v1/embeddings")"
-echo "$CL_HEADERS" | grep -qi '^HTTP/.* 503' \
-  && ok "cold-load returns 503 instead of blocking on first request" \
-  || bad "cold-load did not 503 ($CL_HEADERS)"
-echo "$CL_HEADERS" | grep -qi '^retry-after: *5' \
-  && ok "503 carries Retry-After: 5 hint" \
-  || bad "missing Retry-After header ($CL_HEADERS)"
+echo "$CL_HEADERS" | grep -qi '^HTTP/.* 200' \
+  && ok "cold-load blocks until ready then serves 200 (ADR 015)" \
+  || bad "cold-load did not block-then-200 ($CL_HEADERS)"
 CL_BODY="$(curl -s -X POST \
   -H "Authorization: Bearer $ALICE_TOK" \
   -H 'Content-Type: application/json' \
@@ -2497,11 +2494,12 @@ else
   grep -q "127.0.0.1:7447" "$RPG" \
     && ok "guide pins the loopback daemon target 127.0.0.1:7447" \
     || bad "guide missing 127.0.0.1:7447 loopback target"
-  # 25 MB audio cap — present in both the nginx and Caddy snippets.
-  grep -qi "client_max_body_size 25m" "$RPG" \
-    && grep -qi "max_size 25MB" "$RPG" \
-    && ok "guide sets a 25 MB body cap (matches audio upload limit)" \
-    || bad "guide missing the 25 MB body-size directive"
+  # 100 MiB audio cap (ADR 017, default max_audio_upload_bytes) — present in
+  # both the nginx and Caddy snippets.
+  grep -qi "client_max_body_size 100m" "$RPG" \
+    && grep -qi "max_size 100MB" "$RPG" \
+    && ok "guide sets a 100 MiB body cap (matches audio upload limit)" \
+    || bad "guide missing the 100 MiB body-size directive"
   grep -qi "proxy_buffering" "$RPG" \
     && ok "guide disables proxy buffering (SSE/long-poll streaming)" \
     || bad "guide missing the streaming/buffering note"
