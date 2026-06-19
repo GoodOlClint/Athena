@@ -15,7 +15,45 @@ a `deploy/e2e-rbac.sh` phase → **appVersion bump in the slice commit** → ann
 direct-to-main → `graphify update .`. Every fix lands with a regression test; the
 spec↔routes drift-guard stays green across any `OpenAPISpec.swift` change.
 
-## Slice order
+## Status (verified against code 2026-06-19, v0.10.187)
+
+Backlog audit (`docs/backlog-hitlist.md`) reconciled this plan against `Sources/`:
+
+| Slice | State | Evidence |
+|---|---|---|
+| A1 no-chat-template → 400 | ✅ shipped | `AthenaError.swift:135` `.noChatTemplate → 400`, code `no_chat_template`; `isMissingChatTemplate` maps the substrate error |
+| A2 audio-upload faults → 4xx | ✅ shipped | `AthenaError` `audioTooLong`/`invalidAudio`/`audioFormatUnsupported → 400`, wired in `AudioDecode.swift` |
+| A3 catch-all sweep (4× rebind + queue) | ⚠️ **partial** | some catch blocks converted (e.g. `AthenaServer.swift:1682`); the per-module rebind + queue-submit legs not confirmed routed through `classify()` |
+| B1 deprecate `/api/embed` | ✅ shipped | `OpenAPISpec.swift` `deprecated:true` |
+| B2 migrate `athena run` → `/v1` | ✅ shipped | `clients/.../Run.swift:59,101-108` |
+| B3 deprecate `/api/chat` | ✅ shipped | `OpenAPISpec.swift` `deprecated:true` |
+| C1 `diarized_json` response_format | ❌ **open** | transcription switch (`AthenaServer.swift:1827,2042`) handles srt/vtt/verbose_json only; 0 hits for `diarized_json` |
+| C2 honor `logprobs`/`top_logprobs` | ❌ **open** | `OpenAIDTO.swift:242-248` still 400s both; spec still documents the rejection |
+| D native `/api/embed` metering (ADR 007 #8) | ❌ **open** | `handleNativeEmbed` (`AthenaServer.swift:3820`) calls `governedEmbed` with no `meter()` (cf. chat at `:3759`) |
+
+**Track 2 (this batch) = the open remainder: A3-finish, D, C1, C2.** Recommended order below
+keeps the plan's low-risk/high-legibility-first principle, but **C1 is the one silently
+degrading a live consumer today** (a `diarized_json` request falls through to plain `{text}`,
+0 speakers) — pull it forward if external impact outranks risk-ordering.
+
+1. **A3-finish** — per-handler audit of the 4× rebind catch-alls (embed/transcribe/diarize/
+   speaker) + queue-submit; route any remaining generic `500 internal_error`/`500 queue_error`
+   through `AthenaError.classify()`. Cheapest, no contract change. *(Also closes hitlist #9.)*
+2. **D — native `/api/embed` metering** — compute `TokenUsage` from the embed batch and call
+   `meter(principal:usage:)`, mirroring `handleNativeChat`. One handler. *(Closes hitlist #6;
+   ADR 007 #8 — note `/api/embed` is itself deprecated, so this is metering-completeness, not
+   new surface.)*
+3. **C1 — `diarized_json`** — add the enum value + a switch case at both transcription sites
+   reusing the existing `diarize=true` segment+speaker path; serialize OpenAI's published
+   shape. Mark native-flavored in the op `description` (reusing an OpenAI response shape over
+   a route whose semantics are Athena's does **not** make it a drop-in — `/v1` compatibility
+   rule). Real-model RUNBOOK validation. *(Closes hitlist #4.)*
+4. **C2 — honor `logprobs`/`top_logprobs`** — remove both from `unsupportedParameter()`;
+   capture the top-k logits the greedy/structured path already computes and emit the OpenAI
+   `logprobs` response object; update the spec text (drift-guard). Keep `n>1`/`logit_bias` →
+   400. *(Closes hitlist #5; reverses M31's reject-behavior per ADR 013 §4.)*
+
+## Slice order (original; A/B shipped, C open — see Status above)
 
 ### A. Error legibility (issue #6) — cheapest, immediate operator-legibility win
 - **A1 — no-chat-template → `400 no_chat_template`** (issue #4). Model the
@@ -47,6 +85,14 @@ spec↔routes drift-guard stays green across any `OpenAPISpec.swift` change.
   computes logits); stop 400-ing in `unsupportedParameter()`; emit the OpenAI `logprobs`
   response object.
 
+### D. Native `/api` metering completion — ADR 007 #8 (added by the 2026-06-19 audit)
+- **D1 — `/api/embed` per-principal metering.** `handleNativeChat` already meters
+  (`generateMetered` + `meter()`, v0.10.140); the embed twin was missed. Compute the embed
+  `TokenUsage` and call `meter(principal:usage:)` so `/api/embed` traffic reaches
+  `usage_counters`. Regression test asserts the counter increments after an `/api/embed`
+  call. (`/api/embed` is deprecated → low urgency, but a one-handler completeness fix and a
+  prerequisite for any future token-budget quota, ADR 007 #9.)
+
 ### Deferred / out of this batch
 - **Removal of `/api/chat` + `/api/embed`** (breaking) — gate cleared (the platform N/A;
   the consuming application self-migrates), but lands as its own ratified slice **after** the deprecation
@@ -65,5 +111,7 @@ spec↔routes drift-guard stays green across any `OpenAPISpec.swift` change.
 
 ## Approval gate
 
-This plan + ADR 013 are the approval artifacts. Execution begins at **A1** (cheapest,
-lowest-risk). Breaking removal stays gated as noted.
+This plan + ADR 013 (+ ADR 007 for slice D) are the approval artifacts. Slices A1/A2 and all
+of B shipped (v0.10.x). **Track 2 execution resumes at A3-finish → D1 → C1 → C2** (see Status
+above; no new ADR required — all four are already ratified). Breaking removal stays gated as
+noted. Awaiting operator approval of this Track 2 ordering before implementation.
