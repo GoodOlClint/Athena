@@ -74,7 +74,22 @@ unit-pinned (`GovernorMemoryTests`, 657/0); `Load.run` sets `MLX.Memory.cacheLim
   reclaim-then-admit ladder; estimate fallback when probe nil; a config switch to revert
   to estimate-based admission. Effort M.
 
-### G3 — measured per-tenant footprint surfaced (visibility)
+### G3 — measured per-tenant footprint surfaced (visibility) — ✅ SHIPPED v0.10.192
+**Verified during build:** the per-module displayed number was *already* the reconciled
+measurement, not the estimate — `reconcile` (M5.1/M5.4) replaces the reservation with the
+load-time probe delta (`observed`) and records `learnedFootprint[id]`, and the snapshot
+surfaces `reservation?.bytes`. So ADR-023 #3's "numbers are estimates" premise was largely
+already addressed. The residual gap was *legibility*: a consumer couldn't tell a reconciled
+measurement from a not-yet-reconciled estimate. G3 adds that — a `measured` flag
+(`learnedFootprint[id] != nil`) on `ModuleSnapshot` → healthz `ModuleHealth.measured` →
+`athena ps` (`~` marks an estimated RESIDENT value) — unit-pinned
+(`testMeasuredFlagReflectsReconcile`, 658/0; e2e 574/0). The `phys_footprint`-delta probe
+upgrade (vs today's RSS) rides with **G2** (it touches the admission/reconcile probe), so it
+is deliberately NOT in G3 — G3 stays additive/visibility-only. Warmup caveat documented:
+mmap'd weights fault in lazily, so an at-load delta is a lower bound the running reconcile
+tightens.
+
+#### Original G3 sketch (for reference)
 - Switch the reconcile/measurement probe from RSS to `phys_footprint` (consistency with
   G2); surface the reconciled per-tenant bytes in `athena ps`/healthz (replacing the
   pre-load estimate in the display).

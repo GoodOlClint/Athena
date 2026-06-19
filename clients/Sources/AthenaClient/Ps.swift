@@ -34,6 +34,10 @@ public struct Ps: AsyncParsableCommand {
             /// unloaded). Optional so the client still renders against a daemon
             /// that predates the field.
             let model: String?
+            /// ADR 023 G3 — true ⇒ residentBytes is a measured footprint;
+            /// false/absent ⇒ the pre-load estimate. Optional for back-compat;
+            /// rendered as a leading `~` on the RESIDENT value when estimated.
+            let measured: Bool?
         }
         let totalBudgetBytes: Int
         let residentBytes: Int
@@ -85,11 +89,18 @@ public struct Ps: AsyncParsableCommand {
                     toLength: 16, withPad: " ", startingAt: 0)
                     + m.state.padding(
                         toLength: 12, withPad: " ", startingAt: 0)
-                    + humanBytes(m.residentBytes).padding(
+                    + ((m.measured == false && m.residentBytes > 0
+                        ? "~" : "") + humanBytes(m.residentBytes)).padding(
                         toLength: 12, withPad: " ", startingAt: 0)
                     + (m.model ?? "-").padding(
                         toLength: 40, withPad: " ", startingAt: 0)
                     + (m.evictable ? "yes" : "no"))
+        }
+        // ADR 023 G3 — note the marker only when something is still estimated.
+        if snap.modules.contains(where: {
+            $0.measured == false && $0.residentBytes > 0
+        }) {
+            print("(~ = estimated footprint; not yet measured at load)")
         }
     }
 }

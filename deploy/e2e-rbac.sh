@@ -1345,6 +1345,9 @@ if h["lastRequestAt"] <= 0:
 te = [m for m in h["modules"] if m["id"] == "textEmbedding"][0]
 if te["state"] != "loaded" or te["residentBytes"] <= 0:
     sys.exit("textEmbedding not loaded:" + json.dumps(te))
+# ADR 023 G3 — per-module measured-vs-estimate flag is surfaced.
+if "measured" not in te:
+    sys.exit("missing measured field:" + json.dumps(te))
 ' >/dev/null \
   && ok "/healthz adds inflight/queueDepth/lastRequestAt + loaded state" \
   || bad "/healthz missing M43.1 fields or textEmbedding not loaded ($HZ1)"

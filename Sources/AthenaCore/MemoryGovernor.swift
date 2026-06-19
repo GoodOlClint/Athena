@@ -24,6 +24,28 @@ public struct ModuleSnapshot: Sendable, Codable {
     public let residentBytes: Int
     public let evictable: Bool
     public let unloadedReason: UnloadedReason?
+    /// ADR 023 G3 — whether `residentBytes` is a **measured** footprint (the
+    /// load-time probe delta reconciled in via M5.1/M5.4, `learnedFootprint`)
+    /// rather than the pre-load **estimate**. `false` before the first reconcile
+    /// or when a concurrent-teardown deflated probe made the reconcile fall back
+    /// to the estimate (E12). Lets `athena ps`/healthz say whether a per-tenant
+    /// number is real or a guess. (Honesty boundary, ADR 023: this is the
+    /// *active* per-tenant measurement; the reclaimable MLX cache is a single
+    /// global number, never per-tenant attributed.)
+    public let measured: Bool
+
+    public init(
+        id: ModuleID, state: ModuleState, residentBytes: Int,
+        evictable: Bool, unloadedReason: UnloadedReason?,
+        measured: Bool = false
+    ) {
+        self.id = id
+        self.state = state
+        self.residentBytes = residentBytes
+        self.evictable = evictable
+        self.unloadedReason = unloadedReason
+        self.measured = measured
+    }
 }
 
 public struct GovernorSnapshot: Sendable, Codable {
@@ -788,7 +810,10 @@ public actor MemoryGovernor {
                 residentBytes: $0.reservation?.bytes ?? 0,
                 evictable: $0.evictable,
                 unloadedReason:
-                    $0.state == .loaded ? nil : $0.unloadedReason
+                    $0.state == .loaded ? nil : $0.unloadedReason,
+                // ADR 023 G3: `learnedFootprint` is set only by a successful
+                // reconcile, so its presence ⇒ residentBytes is measured.
+                measured: learnedFootprint[$0.module.id] != nil
             )
         }
         .sorted { $0.id.rawValue < $1.id.rawValue }

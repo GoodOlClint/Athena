@@ -155,6 +155,29 @@ final class MemoryGovernorTests: XCTestCase {
             s.modules.first { $0.id == .llm }?.residentBytes, 600)
     }
 
+    func testMeasuredFlagReflectsReconcile() async throws {
+        // ADR 023 G3 — a load whose probe reconciles (obs 600 vs est 400) marks
+        // the module `measured`; a registered-but-never-loaded module stays
+        // unmeasured (its number is still the estimate / 0).
+        let probe = FakeProbe([0, 0, 600])
+        let gov = MemoryGovernor(
+            totalBudgetBytes: 10_000, memoryProbe: { probe.next() })
+        await gov.register(
+            StubLLMModule(reserveBytes: 400), evictable: false)
+        await gov.register(
+            StubTranscriptionModule(reserveBytes: 200), evictable: true)
+
+        try await gov.ensureLoaded(.llm)  // transcription left unloaded
+
+        let mods = await gov.snapshot().modules
+        XCTAssertEqual(
+            mods.first { $0.id == .llm }?.measured, true,
+            "reconcile fired ⇒ residentBytes is measured")
+        XCTAssertEqual(
+            mods.first { $0.id == .transcription }?.measured, false,
+            "never loaded ⇒ no reconcile ⇒ unmeasured")
+    }
+
     func testOverBudgetReconciliationEvictsEvictable() async throws {
         // 3 reads/load. t: relief0, before0, after60 (obs 60 == est).
         // llm: relief0 (≤90 hi-water, no relief), before60, after150

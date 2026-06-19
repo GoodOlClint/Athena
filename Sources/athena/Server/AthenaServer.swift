@@ -6193,6 +6193,9 @@ struct HealthResponse: Encodable {
         let evictable: Bool
         let unloadedReason: UnloadedReason?
         let model: String?
+        /// ADR 023 G3 — true ⇒ `residentBytes` is a measured load-time
+        /// footprint; false ⇒ the pre-load estimate (not yet reconciled).
+        let measured: Bool
     }
 
     init(
@@ -6222,7 +6225,7 @@ struct HealthResponse: Encodable {
             ModuleHealth(
                 id: m.id, state: m.state, residentBytes: m.residentBytes,
                 evictable: m.evictable, unloadedReason: m.unloadedReason,
-                model: residentModels[m.id])
+                model: residentModels[m.id], measured: m.measured)
         }
         self.inflight = inflight
         self.queueDepth = queueDepth
