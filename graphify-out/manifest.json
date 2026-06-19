@@ -420,8 +420,8 @@
     "semantic_hash": "d16404614855c59c2001089f41c5bd78"
   },
   "Sources/athena/Athena.swift": {
-    "mtime": 1781899586.911149,
-    "ast_hash": "764a66266ac120794c3323853384033e",
+    "mtime": 1781903242.3432755,
+    "ast_hash": "9fe2f0dc271570b346a1227c3b7f1541",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Audit.swift": {
@@ -545,8 +545,8 @@
     "semantic_hash": "ba546feb975db11ee6e42e5e147b55e0"
   },
   "Sources/athena/Server/AthenaServer.swift": {
-    "mtime": 1781899105.5230916,
-    "ast_hash": "02f32f47fd5d487f23a4ba66719e3d22",
+    "mtime": 1781903050.2749445,
+    "ast_hash": "b51d8ba9c47fa5152a39a31fddd7783e",
     "semantic_hash": ""
   },
   "Sources/athena/Server/GPUTelemetry.swift": {
@@ -565,8 +565,8 @@
     "semantic_hash": ""
   },
   "Sources/athena/Server/OpenAPISpec.swift": {
-    "mtime": 1781845747.4750485,
-    "ast_hash": "f2e16d8e9b04992378ad2a93f9d10444",
+    "mtime": 1781903101.7325885,
+    "ast_hash": "27374e2d11d3cecd99e6a1c16fb39e9f",
     "semantic_hash": ""
   },
   "Sources/athena/Server/QueueWorkerService.swift": {
@@ -880,8 +880,8 @@
     "semantic_hash": "e29565ca41e2bea1b26a9e5469e5349c"
   },
   "deploy/e2e-rbac.sh": {
-    "mtime": 1781899735.2914624,
-    "ast_hash": "8c6b7858deb1536b26dbdaff55843012",
+    "mtime": 1781903192.797625,
+    "ast_hash": "426226860bb453e7471991d1deec207e",
     "semantic_hash": ""
   },
   "deploy/integration/e2e-embedding-select.sh": {
@@ -1400,8 +1400,8 @@
     "semantic_hash": ""
   },
   "docs/api-surface-rollout-plan.md": {
-    "mtime": 1781899575.7585394,
-    "ast_hash": "e3a2681c9507a215756a48b55b503578",
+    "mtime": 1781903234.344448,
+    "ast_hash": "28f2576d4a39d9e84fe9eebed78b6c12",
     "semantic_hash": ""
   },
   "docs/audio-input-chat-plan.md": {
@@ -1595,8 +1595,8 @@
     "semantic_hash": ""
   },
   "docs/transcription.md": {
-    "mtime": 1781834707.5752037,
-    "ast_hash": "a41e328346ccf618a98edcd5fcbe4c36",
+    "mtime": 1781903223.1718314,
+    "ast_hash": "51eade3b1045f26bfc235244ca94b903",
     "semantic_hash": ""
   },
   "docs/decisions/021-model-support-preflight.md": {
@@ -1742,6 +1742,11 @@
   "docs/backlog-hitlist.md": {
     "mtime": 1781896574.0080948,
     "ast_hash": "ddd07bfc624f3cd350ac788a82a9670d",
+    "semantic_hash": ""
+  },
+  "docs/logprobs-plan.md": {
+    "mtime": 1781906322.1518574,
+    "ast_hash": "d3efe4ae69c2b055ffa12c6485f66e22",
     "semantic_hash": ""
   }
 }

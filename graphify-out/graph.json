@@ -94,6 +94,96 @@
   },
   "nodes": [
     {
+      "label": "logprobs-plan.md",
+      "file_type": "document",
+      "source_file": "docs/logprobs-plan.md",
+      "source_location": "L1",
+      "_origin": "ast",
+      "id": "docs_logprobs_plan",
+      "community": 232,
+      "norm_label": "logprobs-plan.md"
+    },
+    {
+      "label": "C2 \u2014 honor `logprobs`/`top_logprobs` (ADR 013 \u00a74) \u2014 implementation plan",
+      "file_type": "document",
+      "source_file": "docs/logprobs-plan.md",
+      "source_location": "L1",
+      "_origin": "ast",
+      "id": "docs_logprobs_plan_c2_honor_logprobs_top_logprobs_adr_013_4_implementation_plan",
+      "community": 232,
+      "norm_label": "c2 \u2014 honor `logprobs`/`top_logprobs` (adr 013 \u00a74) \u2014 implementation plan"
+    },
+    {
+      "label": "Problem",
+      "file_type": "document",
+      "source_file": "docs/logprobs-plan.md",
+      "source_location": "L10",
+      "_origin": "ast",
+      "id": "docs_logprobs_plan_problem",
+      "community": 232,
+      "norm_label": "problem"
+    },
+    {
+      "label": "Key finding (de-risks the \"extend the substrate\" choice)",
+      "file_type": "document",
+      "source_file": "docs/logprobs-plan.md",
+      "source_location": "L18",
+      "_origin": "ast",
+      "id": "docs_logprobs_plan_key_finding_de_risks_the_extend_the_substrate_choice",
+      "community": 232,
+      "norm_label": "key finding (de-risks the \"extend the substrate\" choice)"
+    },
+    {
+      "label": "Decode paths to cover (the dispatch)",
+      "file_type": "document",
+      "source_file": "docs/logprobs-plan.md",
+      "source_location": "L30",
+      "_origin": "ast",
+      "id": "docs_logprobs_plan_decode_paths_to_cover_the_dispatch",
+      "community": 232,
+      "norm_label": "decode paths to cover (the dispatch)"
+    },
+    {
+      "label": "Architecture",
+      "file_type": "document",
+      "source_file": "docs/logprobs-plan.md",
+      "source_location": "L41",
+      "_origin": "ast",
+      "id": "docs_logprobs_plan_architecture",
+      "community": 232,
+      "norm_label": "architecture"
+    },
+    {
+      "label": "Slices (each: Release build \u2192 unit + e2e \u2192 appVersion bump \u2192 tag \u2192 graphify)",
+      "file_type": "document",
+      "source_file": "docs/logprobs-plan.md",
+      "source_location": "L86",
+      "_origin": "ast",
+      "id": "docs_logprobs_plan_slices_each_release_build_unit_e2e_appversion_bump_tag_graphify",
+      "community": 232,
+      "norm_label": "slices (each: release build \u2192 unit + e2e \u2192 appversion bump \u2192 tag \u2192 graphify)"
+    },
+    {
+      "label": "Test bar",
+      "file_type": "document",
+      "source_file": "docs/logprobs-plan.md",
+      "source_location": "L101",
+      "_origin": "ast",
+      "id": "docs_logprobs_plan_test_bar",
+      "community": 232,
+      "norm_label": "test bar"
+    },
+    {
+      "label": "Honesty boundary",
+      "file_type": "document",
+      "source_file": "docs/logprobs-plan.md",
+      "source_location": "L114",
+      "_origin": "ast",
+      "id": "docs_logprobs_plan_honesty_boundary",
+      "community": 232,
+      "norm_label": "honesty boundary"
+    },
+    {
       "label": "e2e-rbac.sh",
       "file_type": "code",
       "source_file": "deploy/e2e-rbac.sh",
@@ -103,9 +193,9 @@
         "kind": "file"
       },
       "_origin": "ast",
-      "id": "deploy_e2e_rbac",
       "community": 34,
-      "norm_label": "e2e-rbac.sh"
+      "norm_label": "e2e-rbac.sh",
+      "id": "deploy_e2e_rbac"
     },
     {
       "label": "e2e-rbac.sh script",
@@ -117,9 +207,9 @@
         "kind": "bash_entrypoint"
       },
       "_origin": "ast",
-      "id": "users_goodolclint_source_athena_deploy_e2e_rbac_sh__entry",
       "community": 34,
-      "norm_label": "e2e-rbac.sh script"
+      "norm_label": "e2e-rbac.sh script",
+      "id": "users_goodolclint_source_athena_deploy_e2e_rbac_sh__entry"
     },
     {
       "label": "cleanup()",
@@ -131,9 +221,9 @@
         "kind": "bash_function"
       },
       "_origin": "ast",
-      "id": "deploy_e2e_rbac_cleanup",
       "community": 34,
-      "norm_label": "cleanup()"
+      "norm_label": "cleanup()",
+      "id": "deploy_e2e_rbac_cleanup"
     },
     {
       "label": "ok()",
@@ -145,9 +235,9 @@
         "kind": "bash_function"
       },
       "_origin": "ast",
-      "id": "deploy_e2e_rbac_ok",
       "community": 34,
-      "norm_label": "ok()"
+      "norm_label": "ok()",
+      "id": "deploy_e2e_rbac_ok"
     },
     {
       "label": "bad()",
@@ -159,9 +249,9 @@
         "kind": "bash_function"
       },
       "_origin": "ast",
-      "id": "deploy_e2e_rbac_bad",
       "community": 34,
-      "norm_label": "bad()"
+      "norm_label": "bad()",
+      "id": "deploy_e2e_rbac_bad"
     },
     {
       "label": "code()",
@@ -173,9 +263,9 @@
         "kind": "bash_function"
       },
       "_origin": "ast",
-      "id": "deploy_e2e_rbac_code",
       "community": 34,
-      "norm_label": "code()"
+      "norm_label": "code()",
+      "id": "deploy_e2e_rbac_code"
     },
     {
       "label": "start_daemon()",
@@ -187,9 +277,9 @@
         "kind": "bash_function"
       },
       "_origin": "ast",
-      "id": "deploy_e2e_rbac_start_daemon",
       "community": 34,
-      "norm_label": "start_daemon()"
+      "norm_label": "start_daemon()",
+      "id": "deploy_e2e_rbac_start_daemon"
     },
     {
       "label": "stop_daemon()",
@@ -201,9 +291,9 @@
         "kind": "bash_function"
       },
       "_origin": "ast",
-      "id": "deploy_e2e_rbac_stop_daemon",
       "community": 34,
-      "norm_label": "stop_daemon()"
+      "norm_label": "stop_daemon()",
+      "id": "deploy_e2e_rbac_stop_daemon"
     },
     {
       "label": "warm()",
@@ -215,9 +305,9 @@
         "kind": "bash_function"
       },
       "_origin": "ast",
-      "id": "deploy_e2e_rbac_warm",
       "community": 34,
-      "norm_label": "warm()"
+      "norm_label": "warm()",
+      "id": "deploy_e2e_rbac_warm"
     },
     {
       "label": "tok()",
@@ -229,9 +319,9 @@
         "kind": "bash_function"
       },
       "_origin": "ast",
-      "id": "deploy_e2e_rbac_tok",
       "community": 34,
-      "norm_label": "tok()"
+      "norm_label": "tok()",
+      "id": "deploy_e2e_rbac_tok"
     },
     {
       "label": "uic()",
@@ -243,9 +333,9 @@
         "kind": "bash_function"
       },
       "_origin": "ast",
-      "id": "deploy_e2e_rbac_uic",
       "community": 34,
-      "norm_label": "uic()"
+      "norm_label": "uic()",
+      "id": "deploy_e2e_rbac_uic"
     },
     {
       "label": "intfield()",
@@ -257,9 +347,9 @@
         "kind": "bash_function"
       },
       "_origin": "ast",
-      "id": "deploy_e2e_rbac_intfield",
       "community": 34,
-      "norm_label": "intfield()"
+      "norm_label": "intfield()",
+      "id": "deploy_e2e_rbac_intfield"
     },
     {
       "label": "usagecol()",
@@ -271,9 +361,9 @@
         "kind": "bash_function"
       },
       "_origin": "ast",
-      "id": "deploy_e2e_rbac_usagecol",
       "community": 34,
-      "norm_label": "usagecol()"
+      "norm_label": "usagecol()",
+      "id": "deploy_e2e_rbac_usagecol"
     },
     {
       "label": "row_for()",
@@ -285,9 +375,9 @@
         "kind": "bash_function"
       },
       "_origin": "ast",
-      "id": "deploy_e2e_rbac_row_for",
       "community": 34,
-      "norm_label": "row_for()"
+      "norm_label": "row_for()",
+      "id": "deploy_e2e_rbac_row_for"
     },
     {
       "label": "t2()",
@@ -299,9 +389,9 @@
         "kind": "bash_function"
       },
       "_origin": "ast",
-      "id": "deploy_e2e_rbac_t2",
       "community": 34,
-      "norm_label": "t2()"
+      "norm_label": "t2()",
+      "id": "deploy_e2e_rbac_t2"
     },
     {
       "label": "arow()",
@@ -313,9 +403,9 @@
         "kind": "bash_function"
       },
       "_origin": "ast",
-      "id": "deploy_e2e_rbac_arow",
       "community": 34,
-      "norm_label": "arow()"
+      "norm_label": "arow()",
+      "id": "deploy_e2e_rbac_arow"
     },
     {
       "label": "clic()",
@@ -327,9 +417,9 @@
         "kind": "bash_function"
       },
       "_origin": "ast",
-      "id": "deploy_e2e_rbac_clic",
       "community": 34,
-      "norm_label": "clic()"
+      "norm_label": "clic()",
+      "id": "deploy_e2e_rbac_clic"
     },
     {
       "label": "kv_daemon()",
@@ -341,9 +431,9 @@
         "kind": "bash_function"
       },
       "_origin": "ast",
-      "id": "deploy_e2e_rbac_kv_daemon",
       "community": 34,
-      "norm_label": "kv_daemon()"
+      "norm_label": "kv_daemon()",
+      "id": "deploy_e2e_rbac_kv_daemon"
     },
     {
       "label": "mkcfg()",
@@ -355,9 +445,9 @@
         "kind": "bash_function"
       },
       "_origin": "ast",
-      "id": "deploy_e2e_rbac_mkcfg",
       "community": 34,
-      "norm_label": "mkcfg()"
+      "norm_label": "mkcfg()",
+      "id": "deploy_e2e_rbac_mkcfg"
     },
     {
       "label": "probe()",
@@ -369,9 +459,9 @@
         "kind": "bash_function"
       },
       "_origin": "ast",
-      "id": "deploy_e2e_rbac_probe",
       "community": 34,
-      "norm_label": "probe()"
+      "norm_label": "probe()",
+      "id": "deploy_e2e_rbac_probe"
     },
     {
       "label": "hold()",
@@ -383,9 +473,9 @@
         "kind": "bash_function"
       },
       "_origin": "ast",
-      "id": "deploy_e2e_rbac_hold",
       "community": 34,
-      "norm_label": "hold()"
+      "norm_label": "hold()",
+      "id": "deploy_e2e_rbac_hold"
     },
     {
       "label": "dcfg()",
@@ -397,9 +487,9 @@
         "kind": "bash_function"
       },
       "_origin": "ast",
-      "id": "deploy_e2e_rbac_dcfg",
       "community": 34,
-      "norm_label": "dcfg()"
+      "norm_label": "dcfg()",
+      "id": "deploy_e2e_rbac_dcfg"
     },
     {
       "label": "ATHENA_STUB_DELAY_MS",
@@ -411,9 +501,9 @@
         "kind": "code"
       },
       "_origin": "ast",
-      "id": "deploy_e2e_rbac_athena_stub_delay_ms",
       "community": 34,
-      "norm_label": "athena_stub_delay_ms"
+      "norm_label": "athena_stub_delay_ms",
+      "id": "deploy_e2e_rbac_athena_stub_delay_ms"
     },
     {
       "label": "vtok()",
@@ -425,9 +515,9 @@
         "kind": "bash_function"
       },
       "_origin": "ast",
-      "id": "deploy_e2e_rbac_vtok",
       "community": 34,
-      "norm_label": "vtok()"
+      "norm_label": "vtok()",
+      "id": "deploy_e2e_rbac_vtok"
     },
     {
       "label": "vpost()",
@@ -439,9 +529,9 @@
         "kind": "bash_function"
       },
       "_origin": "ast",
-      "id": "deploy_e2e_rbac_vpost",
       "community": 34,
-      "norm_label": "vpost()"
+      "norm_label": "vpost()",
+      "id": "deploy_e2e_rbac_vpost"
     },
     {
       "label": "ATHENA_STORE_KEY",
@@ -453,9 +543,9 @@
         "kind": "code"
       },
       "_origin": "ast",
-      "id": "deploy_e2e_rbac_athena_store_key",
       "community": 34,
-      "norm_label": "athena_store_key"
+      "norm_label": "athena_store_key",
+      "id": "deploy_e2e_rbac_athena_store_key"
     },
     {
       "label": "dcfg27()",
@@ -467,9 +557,9 @@
         "kind": "bash_function"
       },
       "_origin": "ast",
-      "id": "deploy_e2e_rbac_dcfg27",
       "community": 34,
-      "norm_label": "dcfg27()"
+      "norm_label": "dcfg27()",
+      "id": "deploy_e2e_rbac_dcfg27"
     },
     {
       "label": "mintt()",
@@ -481,9 +571,9 @@
         "kind": "bash_function"
       },
       "_origin": "ast",
-      "id": "deploy_e2e_rbac_mintt",
       "community": 34,
-      "norm_label": "mintt()"
+      "norm_label": "mintt()",
+      "id": "deploy_e2e_rbac_mintt"
     },
     {
       "label": "api-surface-rollout-plan.md",
@@ -831,7 +921,7 @@
       "source_file": "Sources/AthenaTranscription/MLXSpeakerEmbeddingModule.swift",
       "source_location": "L134",
       "_origin": "ast",
-      "community": 6,
+      "community": 333,
       "norm_label": "speakersegmentrequest",
       "id": "speakersegmentrequest"
     },
@@ -1371,7 +1461,7 @@
       "source_file": "",
       "source_location": "",
       "_origin": "ast",
-      "community": 120,
+      "community": 183,
       "norm_label": "sendable",
       "id": "sendable"
     },
@@ -1861,7 +1951,7 @@
       "source_file": "",
       "source_location": "",
       "_origin": "ast",
-      "community": 120,
+      "community": 183,
       "norm_label": "anyobject",
       "id": "anyobject"
     },
@@ -2141,7 +2231,7 @@
       "source_file": "Sources/AthenaCore/GovernorConfig.swift",
       "source_location": "L1",
       "_origin": "ast",
-      "community": 334,
+      "community": 183,
       "norm_label": "governorconfig.swift",
       "id": "athenacore_governorconfig"
     },
@@ -2151,7 +2241,7 @@
       "source_file": "Sources/AthenaCore/GovernorConfig.swift",
       "source_location": "L4",
       "_origin": "ast",
-      "community": 334,
+      "community": 183,
       "norm_label": "governorconfig",
       "id": "athenacore_governorconfig_governorconfig"
     },
@@ -2161,7 +2251,7 @@
       "source_file": "Sources/AthenaCore/GovernorConfig.swift",
       "source_location": "L7",
       "_origin": "ast",
-      "community": 334,
+      "community": 183,
       "norm_label": "int",
       "id": "sources_athenacore_governorconfig_swift_int"
     },
@@ -2171,7 +2261,7 @@
       "source_file": "Sources/AthenaCore/GovernorConfig.swift",
       "source_location": "L12",
       "_origin": "ast",
-      "community": 334,
+      "community": 183,
       "norm_label": "string",
       "id": "sources_athenacore_governorconfig_swift_string"
     },
@@ -2181,7 +2271,7 @@
       "source_file": "Sources/AthenaCore/GovernorConfig.swift",
       "source_location": "L24",
       "_origin": "ast",
-      "community": 334,
+      "community": 183,
       "norm_label": ".init()",
       "id": "athenacore_governorconfig_governorconfig_init"
     },
@@ -3891,7 +3981,7 @@
       "source_file": "Sources/AthenaCore/ModuleID.swift",
       "source_location": "L52",
       "_origin": "ast",
-      "community": 257,
+      "community": 72,
       "norm_label": "uuid",
       "id": "uuid"
     },
@@ -3921,7 +4011,7 @@
       "source_file": "Sources/AthenaCore/PowerAssertion.swift",
       "source_location": "L1",
       "_origin": "ast",
-      "community": 151,
+      "community": 15,
       "norm_label": "powerassertion.swift",
       "id": "athenacore_powerassertion"
     },
@@ -3931,7 +4021,7 @@
       "source_file": "Sources/AthenaCore/PowerAssertion.swift",
       "source_location": "L36",
       "_origin": "ast",
-      "community": 151,
+      "community": 15,
       "norm_label": "powerassertion",
       "id": "athenacore_powerassertion_powerassertion"
     },
@@ -3941,7 +4031,7 @@
       "source_file": "Sources/AthenaCore/PowerAssertion.swift",
       "source_location": "L38",
       "_origin": "ast",
-      "community": 151,
+      "community": 15,
       "norm_label": "uint32",
       "id": "sources_athenacore_powerassertion_swift_uint32"
     },
@@ -3951,7 +4041,7 @@
       "source_file": "Sources/AthenaCore/PowerAssertion.swift",
       "source_location": "L41",
       "_origin": "ast",
-      "community": 151,
+      "community": 15,
       "norm_label": "string",
       "id": "sources_athenacore_powerassertion_swift_string"
     },
@@ -3961,7 +4051,7 @@
       "source_file": "Sources/AthenaCore/PowerAssertion.swift",
       "source_location": "L43",
       "_origin": "ast",
-      "community": 151,
+      "community": 15,
       "norm_label": ".init()",
       "id": "athenacore_powerassertion_powerassertion_init"
     },
@@ -3971,7 +4061,7 @@
       "source_file": "Sources/AthenaCore/PowerAssertion.swift",
       "source_location": "L46",
       "_origin": "ast",
-      "community": 151,
+      "community": 15,
       "norm_label": "bool",
       "id": "sources_athenacore_powerassertion_swift_bool"
     },
@@ -3981,7 +4071,7 @@
       "source_file": "Sources/AthenaCore/PowerAssertion.swift",
       "source_location": "L55",
       "_origin": "ast",
-      "community": 151,
+      "community": 15,
       "norm_label": ".acquire()",
       "id": "athenacore_powerassertion_powerassertion_acquire"
     },
@@ -3991,7 +4081,7 @@
       "source_file": "Sources/AthenaCore/PowerAssertion.swift",
       "source_location": "L77",
       "_origin": "ast",
-      "community": 151,
+      "community": 15,
       "norm_label": ".release()",
       "id": "athenacore_powerassertion_powerassertion_release"
     },
@@ -4001,7 +4091,7 @@
       "source_file": "Sources/AthenaCore/PowerAssertion.swift",
       "source_location": "L87",
       "_origin": "ast",
-      "community": 151,
+      "community": 15,
       "norm_label": ".deinit()",
       "id": "athenacore_powerassertion_powerassertion_deinit"
     },
@@ -4301,7 +4391,7 @@
       "source_file": "Sources/AthenaCore/SpeculativeStats.swift",
       "source_location": "L1",
       "_origin": "ast",
-      "community": 120,
+      "community": 183,
       "norm_label": "speculativestats.swift",
       "id": "athenacore_speculativestats"
     },
@@ -4311,7 +4401,7 @@
       "source_file": "Sources/AthenaCore/SpeculativeStats.swift",
       "source_location": "L17",
       "_origin": "ast",
-      "community": 120,
+      "community": 183,
       "norm_label": "speculativeacceptanceobserver",
       "id": "athenacore_speculativestats_speculativeacceptanceobserver"
     },
@@ -4321,7 +4411,7 @@
       "source_file": "Sources/AthenaCore/SpeculativeStats.swift",
       "source_location": "L24",
       "_origin": "ast",
-      "community": 120,
+      "community": 183,
       "norm_label": "speculativestats",
       "id": "athenacore_speculativestats_speculativestats"
     },
@@ -4581,7 +4671,7 @@
       "source_file": "Sources/AthenaDeploy/CLIParse.swift",
       "source_location": "L1",
       "_origin": "ast",
-      "community": 70,
+      "community": 19,
       "norm_label": "cliparse.swift",
       "id": "athenadeploy_cliparse"
     },
@@ -4591,7 +4681,7 @@
       "source_file": "Sources/AthenaDeploy/CLIParse.swift",
       "source_location": "L13",
       "_origin": "ast",
-      "community": 70,
+      "community": 19,
       "norm_label": "parsettlseconds()",
       "id": "athenadeploy_cliparse_parsettlseconds"
     },
@@ -4601,7 +4691,7 @@
       "source_file": "Sources/AthenaDeploy/CLIParse.swift",
       "source_location": "L13",
       "_origin": "ast",
-      "community": 70,
+      "community": 19,
       "norm_label": "string",
       "id": "sources_athenadeploy_cliparse_swift_string"
     },
@@ -4611,7 +4701,7 @@
       "source_file": "Sources/AthenaDeploy/CLIParse.swift",
       "source_location": "L13",
       "_origin": "ast",
-      "community": 70,
+      "community": 19,
       "norm_label": "int",
       "id": "sources_athenadeploy_cliparse_swift_int"
     },
@@ -4621,7 +4711,7 @@
       "source_file": "Sources/AthenaDeploy/CLIParse.swift",
       "source_location": "L35",
       "_origin": "ast",
-      "community": 70,
+      "community": 19,
       "norm_label": "isvalidlabel()",
       "id": "athenadeploy_cliparse_isvalidlabel"
     },
@@ -4631,7 +4721,7 @@
       "source_file": "Sources/AthenaDeploy/CLIParse.swift",
       "source_location": "L35",
       "_origin": "ast",
-      "community": 70,
+      "community": 19,
       "norm_label": "bool",
       "id": "sources_athenadeploy_cliparse_swift_bool"
     },
@@ -6461,7 +6551,7 @@
       "source_file": "Sources/AthenaLLM/GuidedSubstrate.swift",
       "source_location": "L1",
       "_origin": "ast",
-      "community": 117,
+      "community": 19,
       "norm_label": "guidedsubstrate.swift",
       "id": "athenallm_guidedsubstrate"
     },
@@ -6471,7 +6561,7 @@
       "source_file": "Sources/AthenaLLM/GuidedSubstrate.swift",
       "source_location": "L20",
       "_origin": "ast",
-      "community": 117,
+      "community": 19,
       "norm_label": "guidedsubstrate",
       "id": "athenallm_guidedsubstrate_guidedsubstrate"
     },
@@ -6481,7 +6571,7 @@
       "source_file": "Sources/AthenaLLM/GuidedSubstrate.swift",
       "source_location": "L27",
       "_origin": "ast",
-      "community": 117,
+      "community": 19,
       "norm_label": "guidedlogitprocessor",
       "id": "athenallm_guidedsubstrate_guidedlogitprocessor"
     },
@@ -6491,7 +6581,7 @@
       "source_file": "",
       "source_location": "",
       "_origin": "ast",
-      "community": 117,
+      "community": 19,
       "norm_label": "logitprocessor",
       "id": "logitprocessor"
     },
@@ -6501,7 +6591,7 @@
       "source_file": "Sources/AthenaLLM/GuidedSubstrate.swift",
       "source_location": "L28",
       "_origin": "ast",
-      "community": 117,
+      "community": 19,
       "norm_label": "structuredguide",
       "id": "sources_athenallm_guidedsubstrate_swift_structuredguide"
     },
@@ -6511,7 +6601,7 @@
       "source_file": "Sources/AthenaLLM/GuidedSubstrate.swift",
       "source_location": "L29",
       "_origin": "ast",
-      "community": 117,
+      "community": 19,
       "norm_label": "int",
       "id": "sources_athenallm_guidedsubstrate_swift_int"
     },
@@ -6521,7 +6611,7 @@
       "source_file": "Sources/AthenaLLM/GuidedSubstrate.swift",
       "source_location": "L31",
       "_origin": "ast",
-      "community": 117,
+      "community": 19,
       "norm_label": ".prompt()",
       "id": "athenallm_guidedsubstrate_guidedlogitprocessor_prompt"
     },
@@ -6531,7 +6621,7 @@
       "source_file": "Sources/AthenaLLM/GuidedSubstrate.swift",
       "source_location": "L31",
       "_origin": "ast",
-      "community": 117,
+      "community": 19,
       "norm_label": "mlxarray",
       "id": "sources_athenallm_guidedsubstrate_swift_mlxarray"
     },
@@ -6541,7 +6631,7 @@
       "source_file": "Sources/AthenaLLM/GuidedSubstrate.swift",
       "source_location": "L33",
       "_origin": "ast",
-      "community": 232,
+      "community": 19,
       "norm_label": ".process()",
       "id": "athenallm_guidedsubstrate_guidedlogitprocessor_process"
     },
@@ -6551,7 +6641,7 @@
       "source_file": "Sources/AthenaLLM/GuidedSubstrate.swift",
       "source_location": "L45",
       "_origin": "ast",
-      "community": 117,
+      "community": 19,
       "norm_label": ".didsample()",
       "id": "athenallm_guidedsubstrate_guidedlogitprocessor_didsample"
     },
@@ -6561,7 +6651,7 @@
       "source_file": "Sources/AthenaLLM/GuidedSubstrate.swift",
       "source_location": "L57",
       "_origin": "ast",
-      "community": 117,
+      "community": 19,
       "norm_label": ".generate()",
       "id": "athenallm_guidedsubstrate_guidedsubstrate_generate"
     },
@@ -6571,7 +6661,7 @@
       "source_file": "Sources/AthenaLLM/GuidedSubstrate.swift",
       "source_location": "L57",
       "_origin": "ast",
-      "community": 117,
+      "community": 19,
       "norm_label": "languagemodel",
       "id": "sources_athenallm_guidedsubstrate_swift_languagemodel"
     },
@@ -8181,7 +8271,7 @@
       "source_file": "Sources/AthenaLLM/PrefixKVCache.swift",
       "source_location": "L97",
       "_origin": "ast",
-      "community": 72,
+      "community": 30,
       "norm_label": "entry",
       "id": "athenallm_prefixkvcache_entry"
     },
@@ -8201,7 +8291,7 @@
       "source_file": "Sources/AthenaLLM/PrefixKVCache.swift",
       "source_location": "L103",
       "_origin": "ast",
-      "community": 72,
+      "community": 30,
       "norm_label": "kvcache",
       "id": "sources_athenallm_prefixkvcache_swift_kvcache"
     },
@@ -8211,7 +8301,7 @@
       "source_file": "Sources/AthenaLLM/PrefixKVCache.swift",
       "source_location": "L105",
       "_origin": "ast",
-      "community": 72,
+      "community": 30,
       "norm_label": "mlxarray",
       "id": "sources_athenallm_prefixkvcache_swift_mlxarray"
     },
@@ -8221,7 +8311,7 @@
       "source_file": "Sources/AthenaLLM/PrefixKVCache.swift",
       "source_location": "L109",
       "_origin": "ast",
-      "community": 72,
+      "community": 30,
       "norm_label": "date",
       "id": "sources_athenallm_prefixkvcache_swift_date"
     },
@@ -8231,7 +8321,7 @@
       "source_file": "Sources/AthenaLLM/PrefixKVCache.swift",
       "source_location": "L112",
       "_origin": "ast",
-      "community": 72,
+      "community": 30,
       "norm_label": ".init()",
       "id": "athenallm_prefixkvcache_entry_init"
     },
@@ -8251,7 +8341,7 @@
       "source_file": "Sources/AthenaLLM/PrefixKVCache.swift",
       "source_location": "L141",
       "_origin": "ast",
-      "community": 72,
+      "community": 30,
       "norm_label": "recorder",
       "id": "athenallm_prefixkvcache_recorder"
     },
@@ -8261,7 +8351,7 @@
       "source_file": "Sources/AthenaLLM/PrefixKVCache.swift",
       "source_location": "L143",
       "_origin": "ast",
-      "community": 72,
+      "community": 30,
       "norm_label": ".init()",
       "id": "athenallm_prefixkvcache_recorder_init"
     },
@@ -8271,7 +8361,7 @@
       "source_file": "Sources/AthenaLLM/PrefixKVCache.swift",
       "source_location": "L150",
       "_origin": "ast",
-      "community": 72,
+      "community": 30,
       "norm_label": ".snapshot()",
       "id": "athenallm_prefixkvcache_recorder_snapshot"
     },
@@ -8331,7 +8421,7 @@
       "source_file": "Sources/AthenaLLM/PrefixKVCache.swift",
       "source_location": "L262",
       "_origin": "ast",
-      "community": 72,
+      "community": 30,
       "norm_label": ".makerecorder()",
       "id": "athenallm_prefixkvcache_prefixkvcache_makerecorder"
     },
@@ -8341,7 +8431,7 @@
       "source_file": "Sources/AthenaLLM/PrefixKVCache.swift",
       "source_location": "L270",
       "_origin": "ast",
-      "community": 72,
+      "community": 30,
       "norm_label": ".store()",
       "id": "athenallm_prefixkvcache_prefixkvcache_store"
     },
@@ -8371,7 +8461,7 @@
       "source_file": "Sources/AthenaLLM/PrefixKVCache.swift",
       "source_location": "L318",
       "_origin": "ast",
-      "community": 72,
+      "community": 30,
       "norm_label": ".sweepidle()",
       "id": "athenallm_prefixkvcache_prefixkvcache_sweepidle"
     },
@@ -8611,7 +8701,7 @@
       "source_file": "Sources/AthenaLLM/SpeculativeSampling.swift",
       "source_location": "L1",
       "_origin": "ast",
-      "community": 326,
+      "community": 10,
       "norm_label": "speculativesampling.swift",
       "id": "athenallm_speculativesampling"
     },
@@ -8621,7 +8711,7 @@
       "source_file": "Sources/AthenaLLM/SpeculativeSampling.swift",
       "source_location": "L25",
       "_origin": "ast",
-      "community": 333,
+      "community": 10,
       "norm_label": "splitmix64",
       "id": "athenallm_speculativesampling_splitmix64"
     },
@@ -8631,7 +8721,7 @@
       "source_file": "Sources/AthenaLLM/SpeculativeSampling.swift",
       "source_location": "L26",
       "_origin": "ast",
-      "community": 333,
+      "community": 10,
       "norm_label": "uint64",
       "id": "sources_athenallm_speculativesampling_swift_uint64"
     },
@@ -8641,7 +8731,7 @@
       "source_file": "Sources/AthenaLLM/SpeculativeSampling.swift",
       "source_location": "L27",
       "_origin": "ast",
-      "community": 333,
+      "community": 10,
       "norm_label": ".init()",
       "id": "athenallm_speculativesampling_splitmix64_init"
     },
@@ -8651,7 +8741,7 @@
       "source_file": "Sources/AthenaLLM/SpeculativeSampling.swift",
       "source_location": "L28",
       "_origin": "ast",
-      "community": 333,
+      "community": 10,
       "norm_label": ".next()",
       "id": "athenallm_speculativesampling_splitmix64_next"
     },
@@ -8681,7 +8771,7 @@
       "source_file": "Sources/AthenaLLM/SpeculativeSampling.swift",
       "source_location": "L46",
       "_origin": "ast",
-      "community": 333,
+      "community": 10,
       "norm_label": ".init()",
       "id": "athenallm_speculativesampling_samplingrng_init"
     },
@@ -8691,7 +8781,7 @@
       "source_file": "Sources/AthenaLLM/SpeculativeSampling.swift",
       "source_location": "L46",
       "_origin": "ast",
-      "community": 326,
+      "community": 10,
       "norm_label": "int",
       "id": "sources_athenallm_speculativesampling_swift_int"
     },
@@ -8701,7 +8791,7 @@
       "source_file": "Sources/AthenaLLM/SpeculativeSampling.swift",
       "source_location": "L55",
       "_origin": "ast",
-      "community": 326,
+      "community": 10,
       "norm_label": ".next64()",
       "id": "athenallm_speculativesampling_samplingrng_next64"
     },
@@ -8711,7 +8801,7 @@
       "source_file": "Sources/AthenaLLM/SpeculativeSampling.swift",
       "source_location": "L66",
       "_origin": "ast",
-      "community": 326,
+      "community": 10,
       "norm_label": ".uniform()",
       "id": "athenallm_speculativesampling_samplingrng_uniform"
     },
@@ -8721,7 +8811,7 @@
       "source_file": "Sources/AthenaLLM/SpeculativeSampling.swift",
       "source_location": "L66",
       "_origin": "ast",
-      "community": 326,
+      "community": 10,
       "norm_label": "double",
       "id": "sources_athenallm_speculativesampling_swift_double"
     },
@@ -8731,7 +8821,7 @@
       "source_file": "Sources/AthenaLLM/SpeculativeSampling.swift",
       "source_location": "L72",
       "_origin": "ast",
-      "community": 326,
+      "community": 10,
       "norm_label": "speculativesampling",
       "id": "athenallm_speculativesampling_speculativesampling"
     },
@@ -8741,7 +8831,7 @@
       "source_file": "Sources/AthenaLLM/SpeculativeSampling.swift",
       "source_location": "L80",
       "_origin": "ast",
-      "community": 326,
+      "community": 10,
       "norm_label": ".distribution()",
       "id": "athenallm_speculativesampling_speculativesampling_distribution"
     },
@@ -8751,7 +8841,7 @@
       "source_file": "Sources/AthenaLLM/SpeculativeSampling.swift",
       "source_location": "L80",
       "_origin": "ast",
-      "community": 326,
+      "community": 10,
       "norm_label": "float",
       "id": "sources_athenallm_speculativesampling_swift_float"
     },
@@ -8761,7 +8851,7 @@
       "source_file": "Sources/AthenaLLM/SpeculativeSampling.swift",
       "source_location": "L183",
       "_origin": "ast",
-      "community": 326,
+      "community": 10,
       "norm_label": ".ratio()",
       "id": "athenallm_speculativesampling_speculativesampling_ratio"
     },
@@ -8771,7 +8861,7 @@
       "source_file": "Sources/AthenaLLM/SpeculativeSampling.swift",
       "source_location": "L194",
       "_origin": "ast",
-      "community": 326,
+      "community": 10,
       "norm_label": ".acceptorreject()",
       "id": "athenallm_speculativesampling_speculativesampling_acceptorreject"
     },
@@ -8781,7 +8871,7 @@
       "source_file": "Sources/AthenaLLM/SpeculativeSampling.swift",
       "source_location": "L194",
       "_origin": "ast",
-      "community": 326,
+      "community": 10,
       "norm_label": "bool",
       "id": "sources_athenallm_speculativesampling_swift_bool"
     },
@@ -8791,7 +8881,7 @@
       "source_file": "Sources/AthenaLLM/SpeculativeSampling.swift",
       "source_location": "L212",
       "_origin": "ast",
-      "community": 326,
+      "community": 10,
       "norm_label": ".residual()",
       "id": "athenallm_speculativesampling_speculativesampling_residual"
     },
@@ -8801,7 +8891,7 @@
       "source_file": "Sources/AthenaLLM/SpeculativeSampling.swift",
       "source_location": "L232",
       "_origin": "ast",
-      "community": 326,
+      "community": 10,
       "norm_label": ".samplefromdistribution()",
       "id": "athenallm_speculativesampling_speculativesampling_samplefromdistribution"
     },
@@ -8811,7 +8901,7 @@
       "source_file": "Sources/AthenaLLM/SpeculativeSamplingGenerate.swift",
       "source_location": "L1",
       "_origin": "ast",
-      "community": 326,
+      "community": 10,
       "norm_label": "speculativesamplinggenerate.swift",
       "id": "athenallm_speculativesamplinggenerate"
     },
@@ -8821,7 +8911,7 @@
       "source_file": "Sources/AthenaLLM/SpeculativeSamplingGenerate.swift",
       "source_location": "L32",
       "_origin": "ast",
-      "community": 331,
+      "community": 10,
       "norm_label": ".generate()",
       "id": "athenallm_speculativesamplinggenerate_speculativesampling_generate"
     },
@@ -8831,7 +8921,7 @@
       "source_file": "Sources/AthenaLLM/SpeculativeSamplingGenerate.swift",
       "source_location": "L32",
       "_origin": "ast",
-      "community": 331,
+      "community": 10,
       "norm_label": "athenaqwen35model",
       "id": "sources_athenallm_speculativesamplinggenerate_swift_athenaqwen35model"
     },
@@ -8841,7 +8931,7 @@
       "source_file": "Sources/AthenaLLM/SpeculativeSamplingGenerate.swift",
       "source_location": "L32",
       "_origin": "ast",
-      "community": 331,
+      "community": 10,
       "norm_label": "int",
       "id": "sources_athenallm_speculativesamplinggenerate_swift_int"
     },
@@ -8851,7 +8941,7 @@
       "source_file": "Sources/AthenaLLM/SpeculativeSamplingGenerate.swift",
       "source_location": "L32",
       "_origin": "ast",
-      "community": 331,
+      "community": 10,
       "norm_label": "float",
       "id": "sources_athenallm_speculativesamplinggenerate_swift_float"
     },
@@ -8861,7 +8951,7 @@
       "source_file": "Sources/AthenaLLM/SpeculativeSamplingGenerate.swift",
       "source_location": "L216",
       "_origin": "ast",
-      "community": 331,
+      "community": 10,
       "norm_label": ".lastpositionfloat()",
       "id": "athenallm_speculativesamplinggenerate_speculativesampling_lastpositionfloat"
     },
@@ -8871,7 +8961,7 @@
       "source_file": "Sources/AthenaLLM/SpeculativeSamplingGenerate.swift",
       "source_location": "L216",
       "_origin": "ast",
-      "community": 331,
+      "community": 10,
       "norm_label": "mlxarray",
       "id": "sources_athenallm_speculativesamplinggenerate_swift_mlxarray"
     },
@@ -8881,7 +8971,7 @@
       "source_file": "Sources/AthenaLLM/SpeculativeSamplingGenerate.swift",
       "source_location": "L225",
       "_origin": "ast",
-      "community": 331,
+      "community": 10,
       "norm_label": ".slicetofloat()",
       "id": "athenallm_speculativesamplinggenerate_speculativesampling_slicetofloat"
     },
@@ -9151,7 +9241,7 @@
       "source_file": "Sources/AthenaLLM/StubLLMModule.swift",
       "source_location": "L119",
       "_origin": "ast",
-      "community": 120,
+      "community": 129,
       "norm_label": "sendable",
       "id": "sources_athenallm_stubllmmodule_swift_sendable"
     },
@@ -11861,7 +11951,7 @@
       "source_file": "Sources/AthenaModels/TriAttention/TriAttentionConfig.swift",
       "source_location": "L1",
       "_origin": "ast",
-      "community": 41,
+      "community": 249,
       "norm_label": "triattentionconfig.swift",
       "id": "triattention_triattentionconfig"
     },
@@ -11871,7 +11961,7 @@
       "source_file": "Sources/AthenaModels/TriAttention/TriAttentionConfig.swift",
       "source_location": "L18",
       "_origin": "ast",
-      "community": 41,
+      "community": 249,
       "norm_label": "triattentionconfig",
       "id": "triattention_triattentionconfig_triattentionconfig"
     },
@@ -11881,7 +11971,7 @@
       "source_file": "Sources/AthenaModels/TriAttention/TriAttentionConfig.swift",
       "source_location": "L20",
       "_origin": "ast",
-      "community": 41,
+      "community": 249,
       "norm_label": "int",
       "id": "sources_athenamodels_triattention_triattentionconfig_swift_int"
     },
@@ -11891,7 +11981,7 @@
       "source_file": "Sources/AthenaModels/TriAttention/TriAttentionConfig.swift",
       "source_location": "L24",
       "_origin": "ast",
-      "community": 41,
+      "community": 249,
       "norm_label": "scoreaggregation",
       "id": "scoreaggregation"
     },
@@ -11901,7 +11991,7 @@
       "source_file": "Sources/AthenaModels/TriAttention/TriAttentionConfig.swift",
       "source_location": "L26",
       "_origin": "ast",
-      "community": 41,
+      "community": 249,
       "norm_label": "bool",
       "id": "sources_athenamodels_triattention_triattentionconfig_swift_bool"
     },
@@ -11911,7 +12001,7 @@
       "source_file": "Sources/AthenaModels/TriAttention/TriAttentionConfig.swift",
       "source_location": "L28",
       "_origin": "ast",
-      "community": 41,
+      "community": 249,
       "norm_label": "scoreaggregation",
       "id": "triattention_triattentionconfig_scoreaggregation"
     },
@@ -11921,7 +12011,7 @@
       "source_file": "Sources/AthenaModels/TriAttention/TriAttentionConfig.swift",
       "source_location": "L29",
       "_origin": "ast",
-      "community": 41,
+      "community": 249,
       "norm_label": "mean",
       "id": "triattention_triattentionconfig_scoreaggregation_mean"
     },
@@ -11931,7 +12021,7 @@
       "source_file": "Sources/AthenaModels/TriAttention/TriAttentionConfig.swift",
       "source_location": "L30",
       "_origin": "ast",
-      "community": 41,
+      "community": 249,
       "norm_label": "max",
       "id": "triattention_triattentionconfig_scoreaggregation_max"
     },
@@ -11941,7 +12031,7 @@
       "source_file": "Sources/AthenaModels/TriAttention/TriAttentionConfig.swift",
       "source_location": "L33",
       "_origin": "ast",
-      "community": 41,
+      "community": 249,
       "norm_label": ".init()",
       "id": "triattention_triattentionconfig_triattentionconfig_init"
     },
@@ -11971,7 +12061,7 @@
       "source_file": "",
       "source_location": "",
       "_origin": "ast",
-      "community": 72,
+      "community": 30,
       "norm_label": "kvcache",
       "id": "kvcache"
     },
@@ -12161,7 +12251,7 @@
       "source_file": "Sources/AthenaModels/TriAttention/TriAttentionKVCache.swift",
       "source_location": "L300",
       "_origin": "ast",
-      "community": 72,
+      "community": 20,
       "norm_label": ".copy()",
       "id": "triattention_triattentionkvcache_triattentionkvcache_copy"
     },
@@ -12361,7 +12451,7 @@
       "source_file": "Sources/AthenaServerKit/AthenaLogging.swift",
       "source_location": "L1",
       "_origin": "ast",
-      "community": 26,
+      "community": 15,
       "norm_label": "athenalogging.swift",
       "id": "athenaserverkit_athenalogging"
     },
@@ -12371,7 +12461,7 @@
       "source_file": "Sources/AthenaServerKit/AthenaLogging.swift",
       "source_location": "L32",
       "_origin": "ast",
-      "community": 128,
+      "community": 15,
       "norm_label": "logscope",
       "id": "athenaserverkit_athenalogging_logscope"
     },
@@ -12381,7 +12471,7 @@
       "source_file": "Sources/AthenaServerKit/AthenaLogging.swift",
       "source_location": "L33",
       "_origin": "ast",
-      "community": 26,
+      "community": 15,
       "norm_label": "string",
       "id": "sources_athenaserverkit_athenalogging_swift_string"
     },
@@ -12391,7 +12481,7 @@
       "source_file": "Sources/AthenaServerKit/AthenaLogging.swift",
       "source_location": "L39",
       "_origin": "ast",
-      "community": 128,
+      "community": 15,
       "norm_label": ".init()",
       "id": "athenaserverkit_athenalogging_logscope_init"
     },
@@ -12401,7 +12491,7 @@
       "source_file": "Sources/AthenaServerKit/AthenaLogging.swift",
       "source_location": "L45",
       "_origin": "ast",
-      "community": 26,
+      "community": 15,
       "norm_label": "athenalog",
       "id": "athenaserverkit_athenalogging_athenalog"
     },
@@ -12411,7 +12501,7 @@
       "source_file": "Sources/AthenaServerKit/AthenaLogging.swift",
       "source_location": "L57",
       "_origin": "ast",
-      "community": 26,
+      "community": 15,
       "norm_label": ".category()",
       "id": "athenaserverkit_athenalogging_athenalog_category"
     },
@@ -12421,7 +12511,7 @@
       "source_file": "Sources/AthenaServerKit/AthenaLogging.swift",
       "source_location": "L67",
       "_origin": "ast",
-      "community": 26,
+      "community": 15,
       "norm_label": ".level()",
       "id": "athenaserverkit_athenalogging_athenalog_level"
     },
@@ -12431,7 +12521,7 @@
       "source_file": "Sources/AthenaServerKit/AthenaLogging.swift",
       "source_location": "L67",
       "_origin": "ast",
-      "community": 26,
+      "community": 15,
       "norm_label": "logging",
       "id": "logging"
     },
@@ -12441,7 +12531,7 @@
       "source_file": "Sources/AthenaServerKit/AthenaLogging.swift",
       "source_location": "L87",
       "_origin": "ast",
-      "community": 26,
+      "community": 15,
       "norm_label": ".bootstrap()",
       "id": "athenaserverkit_athenalogging_athenalog_bootstrap"
     },
@@ -12451,7 +12541,7 @@
       "source_file": "Sources/AthenaServerKit/AthenaLogging.swift",
       "source_location": "L87",
       "_origin": "ast",
-      "community": 26,
+      "community": 15,
       "norm_label": "bool",
       "id": "sources_athenaserverkit_athenalogging_swift_bool"
     },
@@ -12461,7 +12551,7 @@
       "source_file": "Sources/AthenaServerKit/AthenaLogging.swift",
       "source_location": "L140",
       "_origin": "ast",
-      "community": 26,
+      "community": 15,
       "norm_label": "terminalloghandler",
       "id": "athenaserverkit_athenalogging_terminalloghandler"
     },
@@ -12471,7 +12561,7 @@
       "source_file": "",
       "source_location": "",
       "_origin": "ast",
-      "community": 26,
+      "community": 15,
       "norm_label": "loghandler",
       "id": "loghandler"
     },
@@ -12491,7 +12581,7 @@
       "source_file": "Sources/AthenaServerKit/AthenaLogging.swift",
       "source_location": "L156",
       "_origin": "ast",
-      "community": 26,
+      "community": 15,
       "norm_label": ".subscript()",
       "id": "athenaserverkit_athenalogging_terminalloghandler_subscript"
     },
@@ -12501,7 +12591,7 @@
       "source_file": "Sources/AthenaServerKit/AthenaLogging.swift",
       "source_location": "L161",
       "_origin": "ast",
-      "community": 26,
+      "community": 15,
       "norm_label": ".log()",
       "id": "athenaserverkit_athenalogging_terminalloghandler_log"
     },
@@ -12511,7 +12601,7 @@
       "source_file": "Sources/AthenaServerKit/AthenaLogging.swift",
       "source_location": "L161",
       "_origin": "ast",
-      "community": 26,
+      "community": 15,
       "norm_label": "uint",
       "id": "uint"
     },
@@ -12521,7 +12611,7 @@
       "source_file": "Sources/AthenaServerKit/AthenaLogging.swift",
       "source_location": "L197",
       "_origin": "ast",
-      "community": 26,
+      "community": 15,
       "norm_label": "osunifiedloghandler",
       "id": "athenaserverkit_athenalogging_osunifiedloghandler"
     },
@@ -12541,7 +12631,7 @@
       "source_file": "Sources/AthenaServerKit/AthenaLogging.swift",
       "source_location": "L203",
       "_origin": "ast",
-      "community": 26,
+      "community": 15,
       "norm_label": ".init()",
       "id": "athenaserverkit_athenalogging_osunifiedloghandler_init"
     },
@@ -12551,7 +12641,7 @@
       "source_file": "Sources/AthenaServerKit/AthenaLogging.swift",
       "source_location": "L209",
       "_origin": "ast",
-      "community": 26,
+      "community": 15,
       "norm_label": ".subscript()",
       "id": "athenaserverkit_athenalogging_osunifiedloghandler_subscript"
     },
@@ -12561,7 +12651,7 @@
       "source_file": "Sources/AthenaServerKit/AthenaLogging.swift",
       "source_location": "L214",
       "_origin": "ast",
-      "community": 26,
+      "community": 15,
       "norm_label": ".log()",
       "id": "athenaserverkit_athenalogging_osunifiedloghandler_log"
     },
@@ -12571,7 +12661,7 @@
       "source_file": "Sources/AthenaServerKit/AthenaLogging.swift",
       "source_location": "L256",
       "_origin": "ast",
-      "community": 26,
+      "community": 15,
       "norm_label": ".ostype()",
       "id": "athenaserverkit_athenalogging_osunifiedloghandler_ostype"
     },
@@ -12581,7 +12671,7 @@
       "source_file": "Sources/AthenaServerKit/AthenaLogging.swift",
       "source_location": "L256",
       "_origin": "ast",
-      "community": 26,
+      "community": 15,
       "norm_label": "oslogtype",
       "id": "oslogtype"
     },
@@ -12601,7 +12691,7 @@
       "source_file": "Sources/AthenaServerKit/Auth.swift",
       "source_location": "L21",
       "_origin": "ast",
-      "community": 128,
+      "community": 14,
       "norm_label": "authsubject",
       "id": "athenaserverkit_auth_authsubject"
     },
@@ -12621,7 +12711,7 @@
       "source_file": "Sources/AthenaServerKit/Auth.swift",
       "source_location": "L23",
       "_origin": "ast",
-      "community": 128,
+      "community": 14,
       "norm_label": "set",
       "id": "sources_athenaserverkit_auth_swift_set"
     },
@@ -12631,7 +12721,7 @@
       "source_file": "Sources/AthenaServerKit/Auth.swift",
       "source_location": "L23",
       "_origin": "ast",
-      "community": 128,
+      "community": 14,
       "norm_label": "permission",
       "id": "sources_athenaserverkit_auth_swift_permission"
     },
@@ -12641,7 +12731,7 @@
       "source_file": "Sources/AthenaServerKit/Auth.swift",
       "source_location": "L25",
       "_origin": "ast",
-      "community": 128,
+      "community": 14,
       "norm_label": ".init()",
       "id": "athenaserverkit_auth_authsubject_init"
     },
@@ -12801,7 +12891,7 @@
       "source_file": "Sources/AthenaServerKit/Auth.swift",
       "source_location": "L254",
       "_origin": "ast",
-      "community": 128,
+      "community": 14,
       "norm_label": ".permissions()",
       "id": "athenaserverkit_auth_authconfig_permissions"
     },
@@ -12831,7 +12921,7 @@
       "source_file": "Sources/AthenaServerKit/Auth.swift",
       "source_location": "L280",
       "_origin": "ast",
-      "community": 81,
+      "community": 212,
       "norm_label": "authstartuperror",
       "id": "athenaserverkit_auth_authstartuperror"
     },
@@ -12841,7 +12931,7 @@
       "source_file": "Sources/AthenaServerKit/Auth.swift",
       "source_location": "L281",
       "_origin": "ast",
-      "community": 81,
+      "community": 212,
       "norm_label": "openonnonloopback",
       "id": "athenaserverkit_auth_authstartuperror_openonnonloopback"
     },
@@ -12851,7 +12941,7 @@
       "source_file": "Sources/AthenaServerKit/Auth.swift",
       "source_location": "L301",
       "_origin": "ast",
-      "community": 128,
+      "community": 14,
       "norm_label": "authpolicy",
       "id": "athenaserverkit_auth_authpolicy"
     },
@@ -12861,7 +12951,7 @@
       "source_file": "Sources/AthenaServerKit/Auth.swift",
       "source_location": "L302",
       "_origin": "ast",
-      "community": 128,
+      "community": 14,
       "norm_label": ".required()",
       "id": "athenaserverkit_auth_authpolicy_required"
     },
@@ -12871,7 +12961,7 @@
       "source_file": "Sources/AthenaServerKit/Auth.swift",
       "source_location": "L371",
       "_origin": "ast",
-      "community": 14,
+      "community": 128,
       "norm_label": "authmiddleware",
       "id": "athenaserverkit_auth_authmiddleware"
     },
@@ -12881,7 +12971,7 @@
       "source_file": "",
       "source_location": "",
       "_origin": "ast",
-      "community": 48,
+      "community": 8,
       "norm_label": "routermiddleware",
       "id": "routermiddleware"
     },
@@ -12891,7 +12981,7 @@
       "source_file": "Sources/AthenaServerKit/Auth.swift",
       "source_location": "L373",
       "_origin": "ast",
-      "community": 82,
+      "community": 128,
       "norm_label": "session",
       "id": "session"
     },
@@ -12901,7 +12991,7 @@
       "source_file": "Sources/AthenaServerKit/Auth.swift",
       "source_location": "L375",
       "_origin": "ast",
-      "community": 14,
+      "community": 128,
       "norm_label": ".init()",
       "id": "athenaserverkit_auth_authmiddleware_init"
     },
@@ -12961,7 +13051,7 @@
       "source_file": "Sources/AthenaServerKit/Auth.swift",
       "source_location": "L495",
       "_origin": "ast",
-      "community": 14,
+      "community": 128,
       "norm_label": ".deny()",
       "id": "athenaserverkit_auth_authmiddleware_deny"
     },
@@ -12971,7 +13061,7 @@
       "source_file": "Sources/AthenaServerKit/Auth.swift",
       "source_location": "L495",
       "_origin": "ast",
-      "community": 14,
+      "community": 128,
       "norm_label": "httpresponse",
       "id": "sources_athenaserverkit_auth_swift_httpresponse"
     },
@@ -13731,7 +13821,7 @@
       "source_file": "Sources/AthenaServerKit/RateLimit.swift",
       "source_location": "L246",
       "_origin": "ast",
-      "community": 48,
+      "community": 79,
       "norm_label": "responsebody",
       "id": "athenaserverkit_ratelimit_responsebody"
     },
@@ -13741,7 +13831,7 @@
       "source_file": "Sources/AthenaServerKit/RateLimit.swift",
       "source_location": "L255",
       "_origin": "ast",
-      "community": 48,
+      "community": 38,
       "norm_label": ".onbodycomplete()",
       "id": "athenaserverkit_ratelimit_responsebody_onbodycomplete"
     },
@@ -13751,7 +13841,7 @@
       "source_file": "Sources/AthenaServerKit/RateLimit.swift",
       "source_location": "L255",
       "_origin": "ast",
-      "community": 128,
+      "community": 38,
       "norm_label": "sendable",
       "id": "sources_athenaserverkit_ratelimit_swift_sendable"
     },
@@ -15701,7 +15791,7 @@
       "source_file": "Sources/AthenaStructured/StructuredSchema.swift",
       "source_location": "L58",
       "_origin": "ast",
-      "community": 120,
+      "community": 42,
       "norm_label": ".foundationvalue()",
       "id": "athenastructured_structuredschema_jsonvalue_foundationvalue"
     },
@@ -17501,7 +17591,7 @@
       "source_file": "",
       "source_location": "",
       "_origin": "ast",
-      "community": 5,
+      "community": 26,
       "norm_label": "decodable",
       "id": "decodable"
     },
@@ -18741,7 +18831,7 @@
       "source_file": "Sources/AthenaTranscription/Sortformer/Sortformer.swift",
       "source_location": "L22",
       "_origin": "ast",
-      "community": 24,
+      "community": 46,
       "norm_label": "uncheckedsendablebox",
       "id": "sortformer_sortformer_uncheckedsendablebox"
     },
@@ -18751,7 +18841,7 @@
       "source_file": "Sources/AthenaTranscription/Sortformer/Sortformer.swift",
       "source_location": "L23",
       "_origin": "ast",
-      "community": 24,
+      "community": 46,
       "norm_label": "t",
       "id": "sources_athenatranscription_sortformer_sortformer_swift_t"
     },
@@ -18761,7 +18851,7 @@
       "source_file": "Sources/AthenaTranscription/Sortformer/Sortformer.swift",
       "source_location": "L24",
       "_origin": "ast",
-      "community": 24,
+      "community": 46,
       "norm_label": ".init()",
       "id": "sortformer_sortformer_uncheckedsendablebox_init"
     },
@@ -18881,7 +18971,7 @@
       "source_file": "Sources/AthenaTranscription/Sortformer/Sortformer.swift",
       "source_location": "L133",
       "_origin": "ast",
-      "community": 24,
+      "community": 46,
       "norm_label": "relpositionmultiheadattention",
       "id": "sortformer_sortformer_relpositionmultiheadattention"
     },
@@ -18911,7 +19001,7 @@
       "source_file": "Sources/AthenaTranscription/Sortformer/Sortformer.swift",
       "source_location": "L164",
       "_origin": "ast",
-      "community": 24,
+      "community": 46,
       "norm_label": ".relshift()",
       "id": "sortformer_sortformer_relpositionmultiheadattention_relshift"
     },
@@ -18921,7 +19011,7 @@
       "source_file": "Sources/AthenaTranscription/Sortformer/Sortformer.swift",
       "source_location": "L173",
       "_origin": "ast",
-      "community": 24,
+      "community": 46,
       "norm_label": ".callasfunction()",
       "id": "sortformer_sortformer_relpositionmultiheadattention_callasfunction"
     },
@@ -18961,7 +19051,7 @@
       "source_file": "Sources/AthenaTranscription/Sortformer/Sortformer.swift",
       "source_location": "L228",
       "_origin": "ast",
-      "community": 46,
+      "community": 24,
       "norm_label": "batchnorm1d",
       "id": "sortformer_sortformer_batchnorm1d"
     },
@@ -18981,7 +19071,7 @@
       "source_file": "Sources/AthenaTranscription/Sortformer/Sortformer.swift",
       "source_location": "L245",
       "_origin": "ast",
-      "community": 46,
+      "community": 24,
       "norm_label": ".callasfunction()",
       "id": "sortformer_sortformer_batchnorm1d_callasfunction"
     },
@@ -20771,7 +20861,7 @@
       "source_file": "Sources/AthenaTranscription/SpeakerEmbeddingModule.swift",
       "source_location": "L46",
       "_origin": "ast",
-      "community": 40,
+      "community": 220,
       "norm_label": "speakerembeddingmodule",
       "id": "athenatranscription_speakerembeddingmodule_speakerembeddingmodule"
     },
@@ -22621,7 +22711,7 @@
       "source_file": "Sources/athena/Commands/Audit.swift",
       "source_location": "L1",
       "_origin": "ast",
-      "community": 310,
+      "community": 246,
       "norm_label": "audit.swift",
       "id": "commands_audit"
     },
@@ -22631,7 +22721,7 @@
       "source_file": "Sources/athena/Commands/Audit.swift",
       "source_location": "L14",
       "_origin": "ast",
-      "community": 310,
+      "community": 246,
       "norm_label": "auditcommand",
       "id": "commands_audit_auditcommand"
     },
@@ -22641,7 +22731,7 @@
       "source_file": "Sources/athena/Commands/Audit.swift",
       "source_location": "L19",
       "_origin": "ast",
-      "community": 310,
+      "community": 246,
       "norm_label": "daemonoptions",
       "id": "sources_athena_commands_audit_swift_daemonoptions"
     },
@@ -22651,7 +22741,7 @@
       "source_file": "Sources/athena/Commands/Audit.swift",
       "source_location": "L20",
       "_origin": "ast",
-      "community": 310,
+      "community": 246,
       "norm_label": "string",
       "id": "sources_athena_commands_audit_swift_string"
     },
@@ -22661,7 +22751,7 @@
       "source_file": "Sources/athena/Commands/Audit.swift",
       "source_location": "L24",
       "_origin": "ast",
-      "community": 310,
+      "community": 246,
       "norm_label": "double",
       "id": "sources_athena_commands_audit_swift_double"
     },
@@ -22671,7 +22761,7 @@
       "source_file": "Sources/athena/Commands/Audit.swift",
       "source_location": "L26",
       "_origin": "ast",
-      "community": 310,
+      "community": 246,
       "norm_label": "int",
       "id": "sources_athena_commands_audit_swift_int"
     },
@@ -22681,7 +22771,7 @@
       "source_file": "Sources/athena/Commands/Audit.swift",
       "source_location": "L31",
       "_origin": "ast",
-      "community": 310,
+      "community": 246,
       "norm_label": ".run()",
       "id": "commands_audit_auditcommand_run"
     },
@@ -24431,7 +24521,7 @@
       "source_file": "Sources/athena/Commands/Logs.swift",
       "source_location": "L1",
       "_origin": "ast",
-      "community": 232,
+      "community": 19,
       "norm_label": "logs.swift",
       "id": "commands_logs"
     },
@@ -24441,7 +24531,7 @@
       "source_file": "Sources/athena/Commands/Logs.swift",
       "source_location": "L17",
       "_origin": "ast",
-      "community": 232,
+      "community": 19,
       "norm_label": "logs",
       "id": "commands_logs_logs"
     },
@@ -24451,7 +24541,7 @@
       "source_file": "Sources/athena/Commands/Logs.swift",
       "source_location": "L23",
       "_origin": "ast",
-      "community": 232,
+      "community": 19,
       "norm_label": "daemonoptions",
       "id": "sources_athena_commands_logs_swift_daemonoptions"
     },
@@ -24461,7 +24551,7 @@
       "source_file": "Sources/athena/Commands/Logs.swift",
       "source_location": "L26",
       "_origin": "ast",
-      "community": 232,
+      "community": 19,
       "norm_label": "string",
       "id": "sources_athena_commands_logs_swift_string"
     },
@@ -24471,7 +24561,7 @@
       "source_file": "Sources/athena/Commands/Logs.swift",
       "source_location": "L43",
       "_origin": "ast",
-      "community": 232,
+      "community": 19,
       "norm_label": "int",
       "id": "sources_athena_commands_logs_swift_int"
     },
@@ -24481,7 +24571,7 @@
       "source_file": "Sources/athena/Commands/Logs.swift",
       "source_location": "L54",
       "_origin": "ast",
-      "community": 232,
+      "community": 19,
       "norm_label": ".run()",
       "id": "commands_logs_logs_run"
     },
@@ -24491,7 +24581,7 @@
       "source_file": "Sources/athena/Commands/Logs.swift",
       "source_location": "L79",
       "_origin": "ast",
-      "community": 232,
+      "community": 19,
       "norm_label": ".runoffline()",
       "id": "commands_logs_logs_runoffline"
     },
@@ -24981,7 +25071,7 @@
       "source_file": "Sources/athena/Commands/StoreKey.swift",
       "source_location": "L1",
       "_origin": "ast",
-      "community": 51,
+      "community": 151,
       "norm_label": "storekey.swift",
       "id": "commands_storekey"
     },
@@ -24991,7 +25081,7 @@
       "source_file": "Sources/athena/Commands/StoreKey.swift",
       "source_location": "L13",
       "_origin": "ast",
-      "community": 51,
+      "community": 151,
       "norm_label": "storekey",
       "id": "commands_storekey_storekey"
     },
@@ -25001,7 +25091,7 @@
       "source_file": "Sources/athena/Commands/StoreKey.swift",
       "source_location": "L27",
       "_origin": "ast",
-      "community": 51,
+      "community": 151,
       "norm_label": ".resolve()",
       "id": "commands_storekey_storekey_resolve"
     },
@@ -25011,7 +25101,7 @@
       "source_file": "Sources/athena/Commands/StoreKey.swift",
       "source_location": "L27",
       "_origin": "ast",
-      "community": 51,
+      "community": 151,
       "norm_label": "bool",
       "id": "sources_athena_commands_storekey_swift_bool"
     },
@@ -25021,7 +25111,7 @@
       "source_file": "Sources/athena/Commands/StoreKey.swift",
       "source_location": "L27",
       "_origin": "ast",
-      "community": 51,
+      "community": 151,
       "norm_label": "string",
       "id": "sources_athena_commands_storekey_swift_string"
     },
@@ -25031,7 +25121,7 @@
       "source_file": "Sources/athena/Commands/StoreKey.swift",
       "source_location": "L39",
       "_origin": "ast",
-      "community": 51,
+      "community": 151,
       "norm_label": ".ensure()",
       "id": "commands_storekey_storekey_ensure"
     },
@@ -25041,7 +25131,7 @@
       "source_file": "Sources/athena/Commands/StoreKey.swift",
       "source_location": "L55",
       "_origin": "ast",
-      "community": 51,
+      "community": 151,
       "norm_label": ".source()",
       "id": "commands_storekey_storekey_source"
     },
@@ -25051,7 +25141,7 @@
       "source_file": "Sources/athena/Commands/StoreKey.swift",
       "source_location": "L64",
       "_origin": "ast",
-      "community": 51,
+      "community": 151,
       "norm_label": "storekeyerror",
       "id": "commands_storekey_storekeyerror"
     },
@@ -25061,7 +25151,7 @@
       "source_file": "Sources/athena/Commands/StoreKey.swift",
       "source_location": "L65",
       "_origin": "ast",
-      "community": 51,
+      "community": 151,
       "norm_label": "cannotpersist",
       "id": "commands_storekey_storekeyerror_cannotpersist"
     },
@@ -25261,7 +25351,7 @@
       "source_file": "Sources/athena/Server/AthenaServer.swift",
       "source_location": "L858",
       "_origin": "ast",
-      "community": 38,
+      "community": 2,
       "norm_label": "string",
       "id": "sources_athena_server_athenaserver_swift_string"
     },
@@ -25321,7 +25411,7 @@
       "source_file": "Sources/athena/Server/AthenaServer.swift",
       "source_location": "L1232",
       "_origin": "ast",
-      "community": 38,
+      "community": 2,
       "norm_label": "bool",
       "id": "sources_athena_server_athenaserver_swift_bool"
     },
@@ -25371,7 +25461,7 @@
       "source_file": "Sources/athena/Server/AthenaServer.swift",
       "source_location": "L1287",
       "_origin": "ast",
-      "community": 120,
+      "community": 38,
       "norm_label": "gencollected",
       "id": "server_athenaserver_gencollected"
     },
@@ -25381,7 +25471,7 @@
       "source_file": "Sources/athena/Server/AthenaServer.swift",
       "source_location": "L1304",
       "_origin": "ast",
-      "community": 38,
+      "community": 70,
       "norm_label": "formatbytes()",
       "id": "server_athenaserver_formatbytes"
     },
@@ -25391,7 +25481,7 @@
       "source_file": "Sources/athena/Server/AthenaServer.swift",
       "source_location": "L1313",
       "_origin": "ast",
-      "community": 2,
+      "community": 38,
       "norm_label": "elapsedms()",
       "id": "server_athenaserver_elapsedms"
     },
@@ -25401,7 +25491,7 @@
       "source_file": "Sources/athena/Server/AthenaServer.swift",
       "source_location": "L1313",
       "_origin": "ast",
-      "community": 2,
+      "community": 38,
       "norm_label": "date",
       "id": "sources_athena_server_athenaserver_swift_date"
     },
@@ -25411,7 +25501,7 @@
       "source_file": "Sources/athena/Server/AthenaServer.swift",
       "source_location": "L1316",
       "_origin": "ast",
-      "community": 38,
+      "community": 70,
       "norm_label": "formatmodulememory()",
       "id": "server_athenaserver_formatmodulememory"
     },
@@ -25421,7 +25511,7 @@
       "source_file": "Sources/athena/Server/AthenaServer.swift",
       "source_location": "L1316",
       "_origin": "ast",
-      "community": 38,
+      "community": 70,
       "norm_label": "governorsnapshot",
       "id": "sources_athena_server_athenaserver_swift_governorsnapshot"
     },
@@ -25531,7 +25621,7 @@
       "source_file": "Sources/athena/Server/AthenaServer.swift",
       "source_location": "L1817",
       "_origin": "ast",
-      "community": 48,
+      "community": 2,
       "norm_label": "plain()",
       "id": "server_athenaserver_plain"
     },
@@ -25581,7 +25671,7 @@
       "source_file": "Sources/athena/Server/AthenaServer.swift",
       "source_location": "L1909",
       "_origin": "ast",
-      "community": 38,
+      "community": 70,
       "norm_label": "double",
       "id": "sources_athena_server_athenaserver_swift_double"
     },
@@ -25741,7 +25831,7 @@
       "source_file": "Sources/athena/Server/AthenaServer.swift",
       "source_location": "L2665",
       "_origin": "ast",
-      "community": 233,
+      "community": 38,
       "norm_label": "filebytes()",
       "id": "server_athenaserver_filebytes"
     },
@@ -25751,7 +25841,7 @@
       "source_file": "Sources/athena/Server/AthenaServer.swift",
       "source_location": "L2665",
       "_origin": "ast",
-      "community": 233,
+      "community": 38,
       "norm_label": "url",
       "id": "sources_athena_server_athenaserver_swift_url"
     },
@@ -25761,7 +25851,7 @@
       "source_file": "Sources/athena/Server/AthenaServer.swift",
       "source_location": "L2673",
       "_origin": "ast",
-      "community": 233,
+      "community": 38,
       "norm_label": "storebytes()",
       "id": "server_athenaserver_storebytes"
     },
@@ -25891,7 +25981,7 @@
       "source_file": "Sources/athena/Server/AthenaServer.swift",
       "source_location": "L3069",
       "_origin": "ast",
-      "community": 337,
+      "community": 38,
       "norm_label": "collectlogentries()",
       "id": "server_athenaserver_collectlogentries"
     },
@@ -25901,7 +25991,7 @@
       "source_file": "Sources/athena/Server/AthenaServer.swift",
       "source_location": "L3069",
       "_origin": "ast",
-      "community": 337,
+      "community": 38,
       "norm_label": "logentrydto",
       "id": "logentrydto"
     },
@@ -25911,7 +26001,7 @@
       "source_file": "Sources/athena/Server/AthenaServer.swift",
       "source_location": "L3111",
       "_origin": "ast",
-      "community": 337,
+      "community": 38,
       "norm_label": "parsendjsonlogline()",
       "id": "server_athenaserver_parsendjsonlogline"
     },
@@ -25921,7 +26011,7 @@
       "source_file": "Sources/athena/Server/AthenaServer.swift",
       "source_location": "L3111",
       "_origin": "ast",
-      "community": 337,
+      "community": 38,
       "norm_label": "data",
       "id": "sources_athena_server_athenaserver_swift_data"
     },
@@ -26041,7 +26131,7 @@
       "source_file": "Sources/athena/Server/AthenaServer.swift",
       "source_location": "L6010",
       "_origin": "ast",
-      "community": 38,
+      "community": 70,
       "norm_label": "healthresponse",
       "id": "server_athenaserver_healthresponse"
     },
@@ -26061,7 +26151,7 @@
       "source_file": "Sources/athena/Server/AthenaServer.swift",
       "source_location": "L6059",
       "_origin": "ast",
-      "community": 38,
+      "community": 70,
       "norm_label": "modulehealth",
       "id": "modulehealth"
     },
@@ -26071,7 +26161,7 @@
       "source_file": "Sources/athena/Server/AthenaServer.swift",
       "source_location": "L6069",
       "_origin": "ast",
-      "community": 38,
+      "community": 70,
       "norm_label": "modulehealth",
       "id": "server_athenaserver_modulehealth"
     },
@@ -26081,7 +26171,7 @@
       "source_file": "Sources/athena/Server/AthenaServer.swift",
       "source_location": "L6070",
       "_origin": "ast",
-      "community": 38,
+      "community": 70,
       "norm_label": "moduleid",
       "id": "sources_athena_server_athenaserver_swift_moduleid"
     },
@@ -26091,7 +26181,7 @@
       "source_file": "Sources/athena/Server/AthenaServer.swift",
       "source_location": "L6071",
       "_origin": "ast",
-      "community": 38,
+      "community": 70,
       "norm_label": "modulestate",
       "id": "sources_athena_server_athenaserver_swift_modulestate"
     },
@@ -26101,7 +26191,7 @@
       "source_file": "Sources/athena/Server/AthenaServer.swift",
       "source_location": "L6074",
       "_origin": "ast",
-      "community": 38,
+      "community": 70,
       "norm_label": "unloadedreason",
       "id": "sources_athena_server_athenaserver_swift_unloadedreason"
     },
@@ -26111,7 +26201,7 @@
       "source_file": "Sources/athena/Server/AthenaServer.swift",
       "source_location": "L6078",
       "_origin": "ast",
-      "community": 38,
+      "community": 70,
       "norm_label": ".init()",
       "id": "server_athenaserver_healthresponse_init"
     },
@@ -26121,7 +26211,7 @@
       "source_file": "Sources/athena/Server/AthenaServer.swift",
       "source_location": "L6113",
       "_origin": "ast",
-      "community": 38,
+      "community": 70,
       "norm_label": ".thermallabel()",
       "id": "server_athenaserver_healthresponse_thermallabel"
     },
@@ -26131,7 +26221,7 @@
       "source_file": "Sources/athena/Server/AthenaServer.swift",
       "source_location": "L6113",
       "_origin": "ast",
-      "community": 38,
+      "community": 70,
       "norm_label": "processinfo",
       "id": "processinfo"
     },
@@ -26141,7 +26231,7 @@
       "source_file": "Sources/athena/Server/AthenaServer.swift",
       "source_location": "L6124",
       "_origin": "ast",
-      "community": 212,
+      "community": 2,
       "norm_label": "tlsconfigerror",
       "id": "server_athenaserver_tlsconfigerror"
     },
@@ -26151,7 +26241,7 @@
       "source_file": "Sources/athena/Server/AthenaServer.swift",
       "source_location": "L6125",
       "_origin": "ast",
-      "community": 212,
+      "community": 2,
       "norm_label": "incomplete",
       "id": "server_athenaserver_tlsconfigerror_incomplete"
     },
@@ -26161,7 +26251,7 @@
       "source_file": "Sources/athena/Server/GPUTelemetry.swift",
       "source_location": "L1",
       "_origin": "ast",
-      "community": 249,
+      "community": 15,
       "norm_label": "gputelemetry.swift",
       "id": "server_gputelemetry"
     },
@@ -26171,7 +26261,7 @@
       "source_file": "Sources/athena/Server/GPUTelemetry.swift",
       "source_location": "L18",
       "_origin": "ast",
-      "community": 249,
+      "community": 15,
       "norm_label": "gputelemetryprobe",
       "id": "server_gputelemetry_gputelemetryprobe"
     },
@@ -26181,7 +26271,7 @@
       "source_file": "Sources/athena/Server/GPUTelemetry.swift",
       "source_location": "L20",
       "_origin": "ast",
-      "community": 249,
+      "community": 15,
       "norm_label": "double",
       "id": "sources_athena_server_gputelemetry_swift_double"
     },
@@ -26191,7 +26281,7 @@
       "source_file": "Sources/athena/Server/GPUTelemetry.swift",
       "source_location": "L22",
       "_origin": "ast",
-      "community": 249,
+      "community": 15,
       "norm_label": "socsampler",
       "id": "socsampler"
     },
@@ -26201,7 +26291,7 @@
       "source_file": "Sources/athena/Server/GPUTelemetry.swift",
       "source_location": "L27",
       "_origin": "ast",
-      "community": 249,
+      "community": 15,
       "norm_label": "timeinterval",
       "id": "sources_athena_server_gputelemetry_swift_timeinterval"
     },
@@ -26211,7 +26301,7 @@
       "source_file": "Sources/athena/Server/GPUTelemetry.swift",
       "source_location": "L30",
       "_origin": "ast",
-      "community": 249,
+      "community": 15,
       "norm_label": ".init()",
       "id": "server_gputelemetry_gputelemetryprobe_init"
     },
@@ -26221,7 +26311,7 @@
       "source_file": "Sources/athena/Server/GPUTelemetry.swift",
       "source_location": "L43",
       "_origin": "ast",
-      "community": 249,
+      "community": 15,
       "norm_label": "bool",
       "id": "sources_athena_server_gputelemetry_swift_bool"
     },
@@ -26231,7 +26321,7 @@
       "source_file": "Sources/athena/Server/GPUTelemetry.swift",
       "source_location": "L45",
       "_origin": "ast",
-      "community": 249,
+      "community": 15,
       "norm_label": ".startbackgroundsampling()",
       "id": "server_gputelemetry_gputelemetryprobe_startbackgroundsampling"
     },
@@ -27561,7 +27651,7 @@
       "source_file": "Sources/athena/Server/OpenAIDTO.swift",
       "source_location": "L555",
       "_origin": "ast",
-      "community": 226,
+      "community": 2,
       "norm_label": "vectoridresponse",
       "id": "server_openaidto_vectoridresponse"
     },
@@ -27671,7 +27761,7 @@
       "source_file": "Sources/athena/Server/OpenAIDTO.swift",
       "source_location": "L612",
       "_origin": "ast",
-      "community": 226,
+      "community": 26,
       "norm_label": "storeexportrequest",
       "id": "server_openaidto_storeexportrequest"
     },
@@ -29171,7 +29261,7 @@
       "source_file": "Tests/AthenaCoreTests/AthenaModelsTests.swift",
       "source_location": "L1",
       "_origin": "ast",
-      "community": 84,
+      "community": 333,
       "norm_label": "athenamodelstests.swift",
       "id": "athenacoretests_athenamodelstests"
     },
@@ -29181,7 +29271,7 @@
       "source_file": "Tests/AthenaCoreTests/AthenaModelsTests.swift",
       "source_location": "L16",
       "_origin": "ast",
-      "community": 84,
+      "community": 305,
       "norm_label": "athenamodelsconfigtests",
       "id": "athenacoretests_athenamodelstests_athenamodelsconfigtests"
     },
@@ -29191,7 +29281,7 @@
       "source_file": "Tests/AthenaCoreTests/AthenaModelsTests.swift",
       "source_location": "L22",
       "_origin": "ast",
-      "community": 84,
+      "community": 305,
       "norm_label": ".qwen35configurl()",
       "id": "athenacoretests_athenamodelstests_athenamodelsconfigtests_qwen35configurl"
     },
@@ -29201,7 +29291,7 @@
       "source_file": "Tests/AthenaCoreTests/AthenaModelsTests.swift",
       "source_location": "L22",
       "_origin": "ast",
-      "community": 84,
+      "community": 305,
       "norm_label": "url",
       "id": "tests_athenacoretests_athenamodelstests_swift_url"
     },
@@ -29211,7 +29301,7 @@
       "source_file": "Tests/AthenaCoreTests/AthenaModelsTests.swift",
       "source_location": "L32",
       "_origin": "ast",
-      "community": 84,
+      "community": 305,
       "norm_label": ".testvendoredconfigdecodesrealqwen35()",
       "id": "athenacoretests_athenamodelstests_athenamodelsconfigtests_testvendoredconfigdecodesrealqwen35"
     },
@@ -29221,7 +29311,7 @@
       "source_file": "Tests/AthenaCoreTests/AthenaModelsTests.swift",
       "source_location": "L48",
       "_origin": "ast",
-      "community": 84,
+      "community": 305,
       "norm_label": ".testinlineconfigmtpdefaultstozero()",
       "id": "athenacoretests_athenamodelstests_athenamodelsconfigtests_testinlineconfigmtpdefaultstozero"
     },
@@ -29231,7 +29321,7 @@
       "source_file": "Tests/AthenaCoreTests/AthenaModelsTests.swift",
       "source_location": "L55",
       "_origin": "ast",
-      "community": 84,
+      "community": 305,
       "norm_label": ".testinlinetextconfigdefaultsapply()",
       "id": "athenacoretests_athenamodelstests_athenamodelsconfigtests_testinlinetextconfigdefaultsapply"
     },
@@ -29241,7 +29331,7 @@
       "source_file": "Tests/AthenaCoreTests/AthenaModelsTests.swift",
       "source_location": "L73",
       "_origin": "ast",
-      "community": 84,
+      "community": 333,
       "norm_label": "triattentionscorermemoryregressiontests",
       "id": "athenacoretests_athenamodelstests_triattentionscorermemoryregressiontests"
     },
@@ -29471,7 +29561,7 @@
       "source_file": "Tests/AthenaCoreTests/AthenaServerKitTests.swift",
       "source_location": "L241",
       "_origin": "ast",
-      "community": 82,
+      "community": 128,
       "norm_label": ".testsessionmintvalidateexpiry()",
       "id": "athenacoretests_athenaserverkittests_athenaserverkittests_testsessionmintvalidateexpiry"
     },
@@ -29481,7 +29571,7 @@
       "source_file": "Tests/AthenaCoreTests/AthenaServerKitTests.swift",
       "source_location": "L260",
       "_origin": "ast",
-      "community": 82,
+      "community": 128,
       "norm_label": ".testsessioncsrf()",
       "id": "athenacoretests_athenaserverkittests_athenaserverkittests_testsessioncsrf"
     },
@@ -29691,7 +29781,7 @@
       "source_file": "Tests/AthenaCoreTests/AthenaStoreTests.swift",
       "source_location": "L147",
       "_origin": "ast",
-      "community": 257,
+      "community": 72,
       "norm_label": ".testcancelqueuedjobisconditionala23()",
       "id": "athenacoretests_athenastoretests_athenastoretests_testcancelqueuedjobisconditionala23"
     },
@@ -29701,7 +29791,7 @@
       "source_file": "Tests/AthenaCoreTests/AthenaStoreTests.swift",
       "source_location": "L180",
       "_origin": "ast",
-      "community": 257,
+      "community": 72,
       "norm_label": ".testqueueaccessqueriesm69_1()",
       "id": "athenacoretests_athenastoretests_athenastoretests_testqueueaccessqueriesm69_1"
     },
@@ -29981,7 +30071,7 @@
       "source_file": "Tests/AthenaCoreTests/CLIParseTests.swift",
       "source_location": "L1",
       "_origin": "ast",
-      "community": 70,
+      "community": 19,
       "norm_label": "cliparsetests.swift",
       "id": "athenacoretests_cliparsetests"
     },
@@ -29991,7 +30081,7 @@
       "source_file": "Tests/AthenaCoreTests/CLIParseTests.swift",
       "source_location": "L9",
       "_origin": "ast",
-      "community": 70,
+      "community": 19,
       "norm_label": "cliparsetests",
       "id": "athenacoretests_cliparsetests_cliparsetests"
     },
@@ -30001,7 +30091,7 @@
       "source_file": "Tests/AthenaCoreTests/CLIParseTests.swift",
       "source_location": "L13",
       "_origin": "ast",
-      "community": 70,
+      "community": 19,
       "norm_label": ".testttlunits()",
       "id": "athenacoretests_cliparsetests_cliparsetests_testttlunits"
     },
@@ -30011,7 +30101,7 @@
       "source_file": "Tests/AthenaCoreTests/CLIParseTests.swift",
       "source_location": "L20",
       "_origin": "ast",
-      "community": 70,
+      "community": 19,
       "norm_label": ".testttlbareintegerisseconds()",
       "id": "athenacoretests_cliparsetests_cliparsetests_testttlbareintegerisseconds"
     },
@@ -30021,7 +30111,7 @@
       "source_file": "Tests/AthenaCoreTests/CLIParseTests.swift",
       "source_location": "L24",
       "_origin": "ast",
-      "community": 70,
+      "community": 19,
       "norm_label": ".testttltrimswhitespace()",
       "id": "athenacoretests_cliparsetests_cliparsetests_testttltrimswhitespace"
     },
@@ -30031,7 +30121,7 @@
       "source_file": "Tests/AthenaCoreTests/CLIParseTests.swift",
       "source_location": "L28",
       "_origin": "ast",
-      "community": 70,
+      "community": 19,
       "norm_label": ".testttlrejectsmalformedandnonpositive()",
       "id": "athenacoretests_cliparsetests_cliparsetests_testttlrejectsmalformedandnonpositive"
     },
@@ -30041,7 +30131,7 @@
       "source_file": "Tests/AthenaCoreTests/CLIParseTests.swift",
       "source_location": "L38",
       "_origin": "ast",
-      "community": 70,
+      "community": 19,
       "norm_label": ".testttlrejectsoverflow()",
       "id": "athenacoretests_cliparsetests_cliparsetests_testttlrejectsoverflow"
     },
@@ -30051,7 +30141,7 @@
       "source_file": "Tests/AthenaCoreTests/CLIParseTests.swift",
       "source_location": "L45",
       "_origin": "ast",
-      "community": 70,
+      "community": 19,
       "norm_label": ".testvalidlabels()",
       "id": "athenacoretests_cliparsetests_cliparsetests_testvalidlabels"
     },
@@ -30061,7 +30151,7 @@
       "source_file": "Tests/AthenaCoreTests/CLIParseTests.swift",
       "source_location": "L51",
       "_origin": "ast",
-      "community": 70,
+      "community": 19,
       "norm_label": ".testinvalidlabels()",
       "id": "athenacoretests_cliparsetests_cliparsetests_testinvalidlabels"
     },
@@ -32831,7 +32921,7 @@
       "source_file": "Tests/AthenaCoreTests/LogMelTests.swift",
       "source_location": "L71",
       "_origin": "ast",
-      "community": 84,
+      "community": 72,
       "norm_label": ".testdecodesgeneratedwavtomono16k()",
       "id": "athenacoretests_logmeltests_audiodecodetests_testdecodesgeneratedwavtomono16k"
     },
@@ -33161,7 +33251,7 @@
       "source_file": "Tests/AthenaCoreTests/MLXLLMModuleTests.swift",
       "source_location": "L64",
       "_origin": "ast",
-      "community": 257,
+      "community": 72,
       "norm_label": "mlxllmmoduleestimatetests",
       "id": "athenacoretests_mlxllmmoduletests_mlxllmmoduleestimatetests"
     },
@@ -33171,7 +33261,7 @@
       "source_file": "Tests/AthenaCoreTests/MLXLLMModuleTests.swift",
       "source_location": "L66",
       "_origin": "ast",
-      "community": 257,
+      "community": 72,
       "norm_label": ".testestimatesumsonlysafetensors()",
       "id": "athenacoretests_mlxllmmoduletests_mlxllmmoduleestimatetests_testestimatesumsonlysafetensors"
     },
@@ -33181,7 +33271,7 @@
       "source_file": "Tests/AthenaCoreTests/MLXLLMModuleTests.swift",
       "source_location": "L84",
       "_origin": "ast",
-      "community": 257,
+      "community": 72,
       "norm_label": ".testestimatemissingdiriszero()",
       "id": "athenacoretests_mlxllmmoduletests_mlxllmmoduleestimatetests_testestimatemissingdiriszero"
     },
@@ -33191,7 +33281,7 @@
       "source_file": "Tests/AthenaCoreTests/MLXLLMModuleTests.swift",
       "source_location": "L94",
       "_origin": "ast",
-      "community": 257,
+      "community": 72,
       "norm_label": ".testestimatefollowsblobsymlinks()",
       "id": "athenacoretests_mlxllmmoduletests_mlxllmmoduleestimatetests_testestimatefollowsblobsymlinks"
     },
@@ -33201,7 +33291,7 @@
       "source_file": "Tests/AthenaCoreTests/MLXLLMModuleTests.swift",
       "source_location": "L125",
       "_origin": "ast",
-      "community": 257,
+      "community": 72,
       "norm_label": ".testestimatefollowsrootsymlink()",
       "id": "athenacoretests_mlxllmmoduletests_mlxllmmoduleestimatetests_testestimatefollowsrootsymlink"
     },
@@ -33491,7 +33581,7 @@
       "source_file": "Tests/AthenaCoreTests/MLXLLMModuleTests.swift",
       "source_location": "L567",
       "_origin": "ast",
-      "community": 120,
+      "community": 183,
       "norm_label": "acceptcounter",
       "id": "athenacoretests_mlxllmmoduletests_acceptcounter"
     },
@@ -33561,7 +33651,7 @@
       "source_file": "Tests/AthenaCoreTests/MemoryGovernorTests.swift",
       "source_location": "L46",
       "_origin": "ast",
-      "community": 0,
+      "community": 28,
       "norm_label": ".testevictslrutoadmit()",
       "id": "athenacoretests_memorygovernortests_memorygovernortests_testevictslrutoadmit"
     },
@@ -33701,7 +33791,7 @@
       "source_file": "Tests/AthenaCoreTests/MemoryGovernorTests.swift",
       "source_location": "L225",
       "_origin": "ast",
-      "community": 54,
+      "community": 0,
       "norm_label": ".testlivepressureshedslruevenwhenbookkeepinghasroom()",
       "id": "athenacoretests_memorygovernortests_memorygovernortests_testlivepressureshedslruevenwhenbookkeepinghasroom"
     },
@@ -35171,7 +35261,7 @@
       "source_file": "Tests/AthenaCoreTests/ModelSupportTests.swift",
       "source_location": "L253",
       "_origin": "ast",
-      "community": 257,
+      "community": 72,
       "norm_label": ".testdetectmissingconfigisunsupported()",
       "id": "athenacoretests_modelsupporttests_modelsupporttests_testdetectmissingconfigisunsupported"
     },
@@ -35511,7 +35601,7 @@
       "source_file": "Tests/AthenaCoreTests/ParakeetDecodeStepTests.swift",
       "source_location": "L1",
       "_origin": "ast",
-      "community": 84,
+      "community": 310,
       "norm_label": "parakeetdecodesteptests.swift",
       "id": "athenacoretests_parakeetdecodesteptests"
     },
@@ -35521,7 +35611,7 @@
       "source_file": "Tests/AthenaCoreTests/ParakeetDecodeStepTests.swift",
       "source_location": "L8",
       "_origin": "ast",
-      "community": 84,
+      "community": 310,
       "norm_label": "parakeetdecodesteptests",
       "id": "athenacoretests_parakeetdecodesteptests_parakeetdecodesteptests"
     },
@@ -35531,7 +35621,7 @@
       "source_file": "Tests/AthenaCoreTests/ParakeetDecodeStepTests.swift",
       "source_location": "L10",
       "_origin": "ast",
-      "community": 84,
+      "community": 310,
       "norm_label": ".testnonzerodurationadvancesandresets()",
       "id": "athenacoretests_parakeetdecodesteptests_parakeetdecodesteptests_testnonzerodurationadvancesandresets"
     },
@@ -35541,7 +35631,7 @@
       "source_file": "Tests/AthenaCoreTests/ParakeetDecodeStepTests.swift",
       "source_location": "L19",
       "_origin": "ast",
-      "community": 84,
+      "community": 310,
       "norm_label": ".testzerodurationholdspointerandcounts()",
       "id": "athenacoretests_parakeetdecodesteptests_parakeetdecodesteptests_testzerodurationholdspointerandcounts"
     },
@@ -35551,7 +35641,7 @@
       "source_file": "Tests/AthenaCoreTests/ParakeetDecodeStepTests.swift",
       "source_location": "L32",
       "_origin": "ast",
-      "community": 84,
+      "community": 310,
       "norm_label": ".testantistallforcesadvanceatcap()",
       "id": "athenacoretests_parakeetdecodesteptests_parakeetdecodesteptests_testantistallforcesadvanceatcap"
     },
@@ -35561,7 +35651,7 @@
       "source_file": "Tests/AthenaCoreTests/ParakeetDecodeStepTests.swift",
       "source_location": "L41",
       "_origin": "ast",
-      "community": 84,
+      "community": 310,
       "norm_label": ".testantistallboundeddecodeterminates()",
       "id": "athenacoretests_parakeetdecodesteptests_parakeetdecodesteptests_testantistallboundeddecodeterminates"
     },
@@ -35811,7 +35901,7 @@
       "source_file": "Tests/AthenaCoreTests/PrefixKVCacheTests.swift",
       "source_location": "L20",
       "_origin": "ast",
-      "community": 30,
+      "community": 96,
       "norm_label": ".testscopekeyprincipalmodeisolates()",
       "id": "athenacoretests_prefixkvcachetests_prefixkvcachetests_testscopekeyprincipalmodeisolates"
     },
@@ -35821,7 +35911,7 @@
       "source_file": "Tests/AthenaCoreTests/PrefixKVCacheTests.swift",
       "source_location": "L37",
       "_origin": "ast",
-      "community": 30,
+      "community": 96,
       "norm_label": ".testscopekeycachekeymode()",
       "id": "athenacoretests_prefixkvcachetests_prefixkvcachetests_testscopekeycachekeymode"
     },
@@ -35831,7 +35921,7 @@
       "source_file": "Tests/AthenaCoreTests/PrefixKVCacheTests.swift",
       "source_location": "L52",
       "_origin": "ast",
-      "community": 30,
+      "community": 96,
       "norm_label": ".testscopekeybothmode()",
       "id": "athenacoretests_prefixkvcachetests_prefixkvcachetests_testscopekeybothmode"
     },
@@ -36731,7 +36821,7 @@
       "source_file": "Tests/AthenaCoreTests/SpeculativeAcceptanceTests.swift",
       "source_location": "L1",
       "_origin": "ast",
-      "community": 327,
+      "community": 10,
       "norm_label": "speculativeacceptancetests.swift",
       "id": "athenacoretests_speculativeacceptancetests"
     },
@@ -36741,7 +36831,7 @@
       "source_file": "Tests/AthenaCoreTests/SpeculativeAcceptanceTests.swift",
       "source_location": "L16",
       "_origin": "ast",
-      "community": 327,
+      "community": 10,
       "norm_label": "speculativeacceptancetests",
       "id": "athenacoretests_speculativeacceptancetests_speculativeacceptancetests"
     },
@@ -36751,7 +36841,7 @@
       "source_file": "Tests/AthenaCoreTests/SpeculativeAcceptanceTests.swift",
       "source_location": "L20",
       "_origin": "ast",
-      "community": 327,
+      "community": 10,
       "norm_label": ".greedy()",
       "id": "athenacoretests_speculativeacceptancetests_speculativeacceptancetests_greedy"
     },
@@ -36761,7 +36851,7 @@
       "source_file": "Tests/AthenaCoreTests/SpeculativeAcceptanceTests.swift",
       "source_location": "L20",
       "_origin": "ast",
-      "community": 327,
+      "community": 10,
       "norm_label": "int",
       "id": "tests_athenacoretests_speculativeacceptancetests_swift_int"
     },
@@ -36771,7 +36861,7 @@
       "source_file": "Tests/AthenaCoreTests/SpeculativeAcceptanceTests.swift",
       "source_location": "L23",
       "_origin": "ast",
-      "community": 327,
+      "community": 10,
       "norm_label": ".referencegreedy()",
       "id": "athenacoretests_speculativeacceptancetests_speculativeacceptancetests_referencegreedy"
     },
@@ -36781,7 +36871,7 @@
       "source_file": "Tests/AthenaCoreTests/SpeculativeAcceptanceTests.swift",
       "source_location": "L40",
       "_origin": "ast",
-      "community": 327,
+      "community": 10,
       "norm_label": ".simulate()",
       "id": "athenacoretests_speculativeacceptancetests_speculativeacceptancetests_simulate"
     },
@@ -36791,7 +36881,7 @@
       "source_file": "Tests/AthenaCoreTests/SpeculativeAcceptanceTests.swift",
       "source_location": "L73",
       "_origin": "ast",
-      "community": 327,
+      "community": 10,
       "norm_label": ".testalwayscorrectdraftmatchesgreedy()",
       "id": "athenacoretests_speculativeacceptancetests_speculativeacceptancetests_testalwayscorrectdraftmatchesgreedy"
     },
@@ -36801,7 +36891,7 @@
       "source_file": "Tests/AthenaCoreTests/SpeculativeAcceptanceTests.swift",
       "source_location": "L84",
       "_origin": "ast",
-      "community": 327,
+      "community": 10,
       "norm_label": ".testalwayswrongdraftmatchesgreedy()",
       "id": "athenacoretests_speculativeacceptancetests_speculativeacceptancetests_testalwayswrongdraftmatchesgreedy"
     },
@@ -36811,7 +36901,7 @@
       "source_file": "Tests/AthenaCoreTests/SpeculativeAcceptanceTests.swift",
       "source_location": "L96",
       "_origin": "ast",
-      "community": 327,
+      "community": 10,
       "norm_label": ".testmixeddraftmatchesgreedy()",
       "id": "athenacoretests_speculativeacceptancetests_speculativeacceptancetests_testmixeddraftmatchesgreedy"
     },
@@ -36821,7 +36911,7 @@
       "source_file": "Tests/AthenaCoreTests/SpeculativeAcceptanceTests.swift",
       "source_location": "L112",
       "_origin": "ast",
-      "community": 327,
+      "community": 10,
       "norm_label": ".testacceptsisequality()",
       "id": "athenacoretests_speculativeacceptancetests_speculativeacceptancetests_testacceptsisequality"
     },
@@ -38061,7 +38151,7 @@
       "source_file": "Tests/AthenaCoreTests/TranscriptionFormatTests.swift",
       "source_location": "L1",
       "_origin": "ast",
-      "community": 256,
+      "community": 316,
       "norm_label": "transcriptionformattests.swift",
       "id": "athenacoretests_transcriptionformattests"
     },
@@ -38071,7 +38161,7 @@
       "source_file": "Tests/AthenaCoreTests/TranscriptionFormatTests.swift",
       "source_location": "L8",
       "_origin": "ast",
-      "community": 256,
+      "community": 316,
       "norm_label": "transcriptionformattests",
       "id": "athenacoretests_transcriptionformattests_transcriptionformattests"
     },
@@ -38081,7 +38171,7 @@
       "source_file": "Tests/AthenaCoreTests/TranscriptionFormatTests.swift",
       "source_location": "L16",
       "_origin": "ast",
-      "community": 256,
+      "community": 316,
       "norm_label": ".testsrt()",
       "id": "athenacoretests_transcriptionformattests_transcriptionformattests_testsrt"
     },
@@ -38091,7 +38181,7 @@
       "source_file": "Tests/AthenaCoreTests/TranscriptionFormatTests.swift",
       "source_location": "L24",
       "_origin": "ast",
-      "community": 256,
+      "community": 316,
       "norm_label": ".testvtt()",
       "id": "athenacoretests_transcriptionformattests_transcriptionformattests_testvtt"
     },
@@ -38101,7 +38191,7 @@
       "source_file": "Tests/AthenaCoreTests/TranscriptionFormatTests.swift",
       "source_location": "L33",
       "_origin": "ast",
-      "community": 256,
+      "community": 316,
       "norm_label": ".testemptysegments()",
       "id": "athenacoretests_transcriptionformattests_transcriptionformattests_testemptysegments"
     },
@@ -38111,7 +38201,7 @@
       "source_file": "Tests/AthenaCoreTests/TranscriptionFormatTests.swift",
       "source_location": "L40",
       "_origin": "ast",
-      "community": 256,
+      "community": 316,
       "norm_label": ".testinvertedsegmentclampsend()",
       "id": "athenacoretests_transcriptionformattests_transcriptionformattests_testinvertedsegmentclampsend"
     },
@@ -38961,7 +39051,7 @@
       "source_file": "Tests/AthenaCoreTests/WeSpeakerTests.swift",
       "source_location": "L1",
       "_origin": "ast",
-      "community": 6,
+      "community": 333,
       "norm_label": "wespeakertests.swift",
       "id": "athenacoretests_wespeakertests"
     },
@@ -38971,7 +39061,7 @@
       "source_file": "Tests/AthenaCoreTests/WeSpeakerTests.swift",
       "source_location": "L13",
       "_origin": "ast",
-      "community": 6,
+      "community": 333,
       "norm_label": "wespeakerstructuretests",
       "id": "athenacoretests_wespeakertests_wespeakerstructuretests"
     },
@@ -38981,7 +39071,7 @@
       "source_file": "Tests/AthenaCoreTests/WeSpeakerTests.swift",
       "source_location": "L14",
       "_origin": "ast",
-      "community": 6,
+      "community": 333,
       "norm_label": ".testnetworkforwardshapeandnorm()",
       "id": "athenacoretests_wespeakertests_wespeakerstructuretests_testnetworkforwardshapeandnorm"
     },
@@ -38991,7 +39081,7 @@
       "source_file": "Tests/AthenaCoreTests/WeSpeakerTests.swift",
       "source_location": "L42",
       "_origin": "ast",
-      "community": 6,
+      "community": 333,
       "norm_label": ".testagglomerativeclusteringrecoversgroups()",
       "id": "athenacoretests_wespeakertests_wespeakerstructuretests_testagglomerativeclusteringrecoversgroups"
     },
@@ -39001,7 +39091,7 @@
       "source_file": "Tests/AthenaCoreTests/WeSpeakerTests.swift",
       "source_location": "L71",
       "_origin": "ast",
-      "community": 6,
+      "community": 333,
       "norm_label": ".testminclustersfloorpreventsovermerge()",
       "id": "athenacoretests_wespeakertests_wespeakerstructuretests_testminclustersfloorpreventsovermerge"
     },
@@ -39011,7 +39101,7 @@
       "source_file": "Tests/AthenaCoreTests/WeSpeakerTests.swift",
       "source_location": "L82",
       "_origin": "ast",
-      "community": 6,
+      "community": 333,
       "norm_label": ".testfeatureframemathandshape()",
       "id": "athenacoretests_wespeakertests_wespeakerstructuretests_testfeatureframemathandshape"
     },
@@ -39021,7 +39111,7 @@
       "source_file": "Tests/AthenaCoreTests/WeSpeakerTests.swift",
       "source_location": "L103",
       "_origin": "ast",
-      "community": 6,
+      "community": 333,
       "norm_label": "wespeakerintegrationtests",
       "id": "athenacoretests_wespeakertests_wespeakerintegrationtests"
     },
@@ -39031,7 +39121,7 @@
       "source_file": "Tests/AthenaCoreTests/WeSpeakerTests.swift",
       "source_location": "L105",
       "_origin": "ast",
-      "community": 6,
+      "community": 333,
       "norm_label": ".sayclip()",
       "id": "athenacoretests_wespeakertests_wespeakerintegrationtests_sayclip"
     },
@@ -39041,7 +39131,7 @@
       "source_file": "Tests/AthenaCoreTests/WeSpeakerTests.swift",
       "source_location": "L105",
       "_origin": "ast",
-      "community": 6,
+      "community": 333,
       "norm_label": "string",
       "id": "tests_athenacoretests_wespeakertests_swift_string"
     },
@@ -39051,7 +39141,7 @@
       "source_file": "Tests/AthenaCoreTests/WeSpeakerTests.swift",
       "source_location": "L105",
       "_origin": "ast",
-      "community": 6,
+      "community": 333,
       "norm_label": "float",
       "id": "tests_athenacoretests_wespeakertests_swift_float"
     },
@@ -39061,7 +39151,7 @@
       "source_file": "Tests/AthenaCoreTests/WeSpeakerTests.swift",
       "source_location": "L120",
       "_origin": "ast",
-      "community": 6,
+      "community": 333,
       "norm_label": ".cosine()",
       "id": "athenacoretests_wespeakertests_wespeakerintegrationtests_cosine"
     },
@@ -39071,7 +39161,7 @@
       "source_file": "Tests/AthenaCoreTests/WeSpeakerTests.swift",
       "source_location": "L139",
       "_origin": "ast",
-      "community": 6,
+      "community": 333,
       "norm_label": ".testrealaudiocosinespread()",
       "id": "athenacoretests_wespeakertests_wespeakerintegrationtests_testrealaudiocosinespread"
     },
@@ -39081,7 +39171,7 @@
       "source_file": "Tests/AthenaCoreTests/WeSpeakerTests.swift",
       "source_location": "L176",
       "_origin": "ast",
-      "community": 6,
+      "community": 333,
       "norm_label": ".testgovernedmoduleandinvalidsegment()",
       "id": "athenacoretests_wespeakertests_wespeakerintegrationtests_testgovernedmoduleandinvalidsegment"
     },
@@ -39091,7 +39181,7 @@
       "source_file": "Tests/AthenaCoreTests/WeSpeakerTests.swift",
       "source_location": "L242",
       "_origin": "ast",
-      "community": 6,
+      "community": 333,
       "norm_label": "wespeakermemoryregressiontests",
       "id": "athenacoretests_wespeakertests_wespeakermemoryregressiontests"
     },
@@ -39101,7 +39191,7 @@
       "source_file": "Tests/AthenaCoreTests/WeSpeakerTests.swift",
       "source_location": "L244",
       "_origin": "ast",
-      "community": 6,
+      "community": 333,
       "norm_label": ".testembedpoolstaysboundedacrossmanycalls()",
       "id": "athenacoretests_wespeakertests_wespeakermemoryregressiontests_testembedpoolstaysboundedacrossmanycalls"
     },
@@ -39861,7 +39951,7 @@
       "source_file": "clients/Sources/AthenaClient/Ps.swift",
       "source_location": "L1",
       "_origin": "ast",
-      "community": 46,
+      "community": 117,
       "norm_label": "ps.swift",
       "id": "athenaclient_ps"
     },
@@ -39871,7 +39961,7 @@
       "source_file": "clients/Sources/AthenaClient/Ps.swift",
       "source_location": "L12",
       "_origin": "ast",
-      "community": 46,
+      "community": 117,
       "norm_label": "ps",
       "id": "athenaclient_ps_ps"
     },
@@ -39881,7 +39971,7 @@
       "source_file": "clients/Sources/AthenaClient/Ps.swift",
       "source_location": "L18",
       "_origin": "ast",
-      "community": 46,
+      "community": 117,
       "norm_label": "string",
       "id": "clients_sources_athenaclient_ps_swift_string"
     },
@@ -39891,7 +39981,7 @@
       "source_file": "clients/Sources/AthenaClient/Ps.swift",
       "source_location": "L21",
       "_origin": "ast",
-      "community": 46,
+      "community": 117,
       "norm_label": "int",
       "id": "clients_sources_athenaclient_ps_swift_int"
     },
@@ -39901,7 +39991,7 @@
       "source_file": "clients/Sources/AthenaClient/Ps.swift",
       "source_location": "L24",
       "_origin": "ast",
-      "community": 46,
+      "community": 117,
       "norm_label": ".init()",
       "id": "athenaclient_ps_ps_init"
     },
@@ -39911,7 +40001,7 @@
       "source_file": "clients/Sources/AthenaClient/Ps.swift",
       "source_location": "L27",
       "_origin": "ast",
-      "community": 46,
+      "community": 117,
       "norm_label": "healthsnapshot",
       "id": "athenaclient_ps_healthsnapshot"
     },
@@ -39921,7 +40011,7 @@
       "source_file": "clients/Sources/AthenaClient/Ps.swift",
       "source_location": "L28",
       "_origin": "ast",
-      "community": 46,
+      "community": 117,
       "norm_label": "module",
       "id": "athenaclient_ps_module"
     },
@@ -39931,7 +40021,7 @@
       "source_file": "clients/Sources/AthenaClient/Ps.swift",
       "source_location": "L32",
       "_origin": "ast",
-      "community": 46,
+      "community": 117,
       "norm_label": "bool",
       "id": "clients_sources_athenaclient_ps_swift_bool"
     },
@@ -39941,7 +40031,7 @@
       "source_file": "clients/Sources/AthenaClient/Ps.swift",
       "source_location": "L49",
       "_origin": "ast",
-      "community": 46,
+      "community": 117,
       "norm_label": ".run()",
       "id": "athenaclient_ps_ps_run"
     },
@@ -40991,7 +41081,7 @@
       "source_file": "clients/Sources/AthenaClient/RemoteAuth.swift",
       "source_location": "L317",
       "_origin": "ast",
-      "community": 246,
+      "community": 5,
       "norm_label": "cauthuser",
       "id": "athenaclient_remoteauth_cauthuser"
     },
@@ -41001,7 +41091,7 @@
       "source_file": "clients/Sources/AthenaClient/RemoteAuth.swift",
       "source_location": "L325",
       "_origin": "ast",
-      "community": 246,
+      "community": 5,
       "norm_label": ".init()",
       "id": "athenaclient_remoteauth_cauthuser_init"
     },
@@ -41211,7 +41301,7 @@
       "source_file": "clients/Sources/AthenaClient/RemoteAuth.swift",
       "source_location": "L418",
       "_origin": "ast",
-      "community": 246,
+      "community": 5,
       "norm_label": "cauthtoken",
       "id": "athenaclient_remoteauth_cauthtoken"
     },
@@ -41221,7 +41311,7 @@
       "source_file": "clients/Sources/AthenaClient/RemoteAuth.swift",
       "source_location": "L423",
       "_origin": "ast",
-      "community": 246,
+      "community": 5,
       "norm_label": ".init()",
       "id": "athenaclient_remoteauth_cauthtoken_init"
     },
@@ -41681,7 +41771,7 @@
       "source_file": "clients/Sources/AthenaClient/RemoteModels.swift",
       "source_location": "L1",
       "_origin": "ast",
-      "community": 52,
+      "community": 26,
       "norm_label": "remotemodels.swift",
       "id": "athenaclient_remotemodels"
     },
@@ -41701,7 +41791,7 @@
       "source_file": "clients/Sources/AthenaClient/RemoteModels.swift",
       "source_location": "L26",
       "_origin": "ast",
-      "community": 52,
+      "community": 26,
       "norm_label": "entry",
       "id": "athenaclient_remotemodels_entry"
     },
@@ -41731,7 +41821,7 @@
       "source_file": "clients/Sources/AthenaClient/RemoteModels.swift",
       "source_location": "L31",
       "_origin": "ast",
-      "community": 52,
+      "community": 26,
       "norm_label": "listresp",
       "id": "athenaclient_remotemodels_listresp"
     },
@@ -41751,7 +41841,7 @@
       "source_file": "clients/Sources/AthenaClient/RemoteModels.swift",
       "source_location": "L37",
       "_origin": "ast",
-      "community": 52,
+      "community": 26,
       "norm_label": "defaultresp",
       "id": "athenaclient_remotemodels_defaultresp"
     },
@@ -41761,7 +41851,7 @@
       "source_file": "clients/Sources/AthenaClient/RemoteModels.swift",
       "source_location": "L41",
       "_origin": "ast",
-      "community": 52,
+      "community": 26,
       "norm_label": "jobresp",
       "id": "athenaclient_remotemodels_jobresp"
     },
@@ -41881,7 +41971,7 @@
       "source_file": "clients/Sources/AthenaClient/RemoteModels.swift",
       "source_location": "L159",
       "_origin": "ast",
-      "community": 52,
+      "community": 26,
       "norm_label": "loadresp",
       "id": "athenaclient_remotemodels_loadresp"
     },
@@ -41901,7 +41991,7 @@
       "source_file": "clients/Sources/AthenaClient/RemoteModels.swift",
       "source_location": "L165",
       "_origin": "ast",
-      "community": 52,
+      "community": 26,
       "norm_label": "unloadresp",
       "id": "athenaclient_remotemodels_unloadresp"
     },
@@ -41911,7 +42001,7 @@
       "source_file": "clients/Sources/AthenaClient/RemoteModels.swift",
       "source_location": "L169",
       "_origin": "ast",
-      "community": 52,
+      "community": 26,
       "norm_label": "slotresp",
       "id": "athenaclient_remotemodels_slotresp"
     },
@@ -41921,7 +42011,7 @@
       "source_file": "clients/Sources/AthenaClient/RemoteModels.swift",
       "source_location": "L175",
       "_origin": "ast",
-      "community": 52,
+      "community": 26,
       "norm_label": "residentresp",
       "id": "athenaclient_remotemodels_residentresp"
     },
@@ -42261,7 +42351,7 @@
       "source_file": "clients/Sources/AthenaClient/RemoteModels.swift",
       "source_location": "L521",
       "_origin": "ast",
-      "community": 52,
+      "community": 26,
       "norm_label": "residentcmd",
       "id": "athenaclient_remotemodels_residentcmd"
     },
@@ -42271,7 +42361,7 @@
       "source_file": "clients/Sources/AthenaClient/RemoteModels.swift",
       "source_location": "L526",
       "_origin": "ast",
-      "community": 52,
+      "community": 26,
       "norm_label": ".init()",
       "id": "athenaclient_remotemodels_residentcmd_init"
     },
@@ -42281,7 +42371,7 @@
       "source_file": "clients/Sources/AthenaClient/RemoteModels.swift",
       "source_location": "L527",
       "_origin": "ast",
-      "community": 52,
+      "community": 26,
       "norm_label": ".run()",
       "id": "athenaclient_remotemodels_residentcmd_run"
     },
@@ -42291,7 +42381,7 @@
       "source_file": "clients/Sources/AthenaClient/RemoteModels.swift",
       "source_location": "L532",
       "_origin": "ast",
-      "community": 52,
+      "community": 26,
       "norm_label": "listcmd",
       "id": "athenaclient_remotemodels_listcmd"
     },
@@ -42301,7 +42391,7 @@
       "source_file": "clients/Sources/AthenaClient/RemoteModels.swift",
       "source_location": "L538",
       "_origin": "ast",
-      "community": 52,
+      "community": 26,
       "norm_label": ".init()",
       "id": "athenaclient_remotemodels_listcmd_init"
     },
@@ -42311,7 +42401,7 @@
       "source_file": "clients/Sources/AthenaClient/RemoteModels.swift",
       "source_location": "L539",
       "_origin": "ast",
-      "community": 52,
+      "community": 26,
       "norm_label": ".run()",
       "id": "athenaclient_remotemodels_listcmd_run"
     },
@@ -55278,6 +55368,86 @@
     }
   ],
   "links": [
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/logprobs-plan.md",
+      "source_location": "L1",
+      "weight": 1.0,
+      "source": "docs_logprobs_plan",
+      "target": "docs_logprobs_plan_c2_honor_logprobs_top_logprobs_adr_013_4_implementation_plan",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/logprobs-plan.md",
+      "source_location": "L41",
+      "weight": 1.0,
+      "source": "docs_logprobs_plan_c2_honor_logprobs_top_logprobs_adr_013_4_implementation_plan",
+      "target": "docs_logprobs_plan_architecture",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/logprobs-plan.md",
+      "source_location": "L30",
+      "weight": 1.0,
+      "source": "docs_logprobs_plan_c2_honor_logprobs_top_logprobs_adr_013_4_implementation_plan",
+      "target": "docs_logprobs_plan_decode_paths_to_cover_the_dispatch",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/logprobs-plan.md",
+      "source_location": "L114",
+      "weight": 1.0,
+      "source": "docs_logprobs_plan_c2_honor_logprobs_top_logprobs_adr_013_4_implementation_plan",
+      "target": "docs_logprobs_plan_honesty_boundary",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/logprobs-plan.md",
+      "source_location": "L18",
+      "weight": 1.0,
+      "source": "docs_logprobs_plan_c2_honor_logprobs_top_logprobs_adr_013_4_implementation_plan",
+      "target": "docs_logprobs_plan_key_finding_de_risks_the_extend_the_substrate_choice",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/logprobs-plan.md",
+      "source_location": "L10",
+      "weight": 1.0,
+      "source": "docs_logprobs_plan_c2_honor_logprobs_top_logprobs_adr_013_4_implementation_plan",
+      "target": "docs_logprobs_plan_problem",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/logprobs-plan.md",
+      "source_location": "L86",
+      "weight": 1.0,
+      "source": "docs_logprobs_plan_c2_honor_logprobs_top_logprobs_adr_013_4_implementation_plan",
+      "target": "docs_logprobs_plan_slices_each_release_build_unit_e2e_appversion_bump_tag_graphify",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/logprobs-plan.md",
+      "source_location": "L101",
+      "weight": 1.0,
+      "source": "docs_logprobs_plan_c2_honor_logprobs_top_logprobs_adr_013_4_implementation_plan",
+      "target": "docs_logprobs_plan_test_bar",
+      "confidence_score": 1.0
+    },
     {
       "relation": "defines",
       "confidence": "EXTRACTED",
@@ -161408,5 +161578,5 @@
       "source_file": "docs/structured-rss-rootcause.md"
     }
   ],
-  "built_at_commit": "6e4e99c5c55f3eb734c91cf561cba363104ccdf3"
+  "built_at_commit": "6e03fbedfed69061e0cec7d91a0f4e712b2fca06"
 }
