@@ -12,6 +12,14 @@ public protocol TranscriptionModule: InferenceModule {
         audio: Data, filename: String?, language: String?,
         wordTimestamps: Bool
     ) async throws -> TranscriptionResult
+
+    /// Transcribe already-decoded 16 kHz mono PCM — the shared engine entry
+    /// (ADR 022 M78.1 S2). The audio route reaches it after `AudioDecode`, the
+    /// video route after `VideoAudioTrack.extractPCM`; both share one dispatch
+    /// with no re-encode.
+    func transcribePCM(
+        _ pcm: [Float], language: String?, wordTimestamps: Bool
+    ) async throws -> TranscriptionResult
 }
 
 /// M0 placeholder, still used by `--engine stub`. Returns a fixed
@@ -69,6 +77,13 @@ public actor StubTranscriptionModule: TranscriptionModule, ModelSelectable {
     public func transcribe(
         audio: Data, filename: String?, language: String?,
         wordTimestamps: Bool
+    ) async throws -> TranscriptionResult {
+        try await transcribePCM(
+            [], language: language, wordTimestamps: wordTimestamps)
+    }
+
+    public func transcribePCM(
+        _ pcm: [Float], language: String?, wordTimestamps: Bool
     ) async throws -> TranscriptionResult {
         let words =
             wordTimestamps

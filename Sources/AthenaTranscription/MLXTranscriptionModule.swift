@@ -226,10 +226,6 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
         audio: Data, filename: String?, language: String?,
         wordTimestamps: Bool
     ) async throws -> TranscriptionResult {
-        guard let engine else {
-            throw AthenaError.moduleLoadFailed(
-                .transcription, reason: "transcribe called before load")
-        }
         // AVFoundation reads from a URL — stage the upload to a temp
         // file (keep the client's extension so the container is
         // detected) and always clean it up.
@@ -242,6 +238,22 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
         defer { try? FileManager.default.removeItem(at: tmp) }
 
         let pcm = try AudioDecode.pcm16kMono(from: tmp, module: .transcription)
+        return try transcribePCM(
+            pcm, language: language, wordTimestamps: wordTimestamps)
+    }
+
+    /// Transcribe already-decoded 16 kHz mono PCM — the shared engine entry
+    /// (ADR 022 M78.1 S2). The audio route reaches it after `AudioDecode`; the
+    /// video route reaches it after `VideoAudioTrack.extractPCM`, so both share
+    /// the identical Whisper/Parakeet dispatch, chunking, and timestamping with
+    /// no re-encode. Actor-isolated (reads `engine`); callers `await` it.
+    public func transcribePCM(
+        _ pcm: [Float], language: String?, wordTimestamps: Bool
+    ) throws -> TranscriptionResult {
+        guard let engine else {
+            throw AthenaError.moduleLoadFailed(
+                .transcription, reason: "transcribe called before load")
+        }
         switch engine {
         case .whisper(let model, let tokenizer):
             // PCM-level entry: >30 s is chunked into 30 s windows. nil
