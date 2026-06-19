@@ -110,6 +110,9 @@ public enum LaunchdPlist {
         if let audioCap = config.maxAudioUploadBytes {
             args += ["--max-audio-upload-bytes", String(audioCap)]
         }
+        if let videoCap = config.maxVideoUploadBytes {
+            args += ["--max-video-upload-bytes", String(videoCap)]
+        }
         if let bodyCap = config.maxRequestBodyBytes {
             args += ["--max-request-body-bytes", String(bodyCap)]
         }

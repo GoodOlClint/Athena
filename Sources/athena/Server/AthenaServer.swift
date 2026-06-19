@@ -100,6 +100,10 @@ struct AthenaServer {
     /// (`ExpectContinueHandler`) keeps `Expect:`-using clients from hanging
     /// while a large body streams.
     var maxAudioUploadBytes: Int = 104_857_600
+    /// Upload cap for the `/v1/video/*` routes (ADR 022). Video dwarfs audio,
+    /// so the default is larger (1 GiB); over it ⇒ 413 payload_too_large, same
+    /// machinery as the audio cap. `var = ` so it's a memberwise-init param.
+    var maxVideoUploadBytes: Int = 1_073_741_824
     var maxRequestBodyBytes: Int = 4_194_304
     /// Warm the LLM at startup instead of lazily on first request
     /// (M33.3). `var = false` so it's a memberwise-init param. Best-
@@ -471,6 +475,13 @@ struct AthenaServer {
 
         router.post("/v1/audio/embeddings") { request, _ -> Response in
             await handleSpeakerEmbeddings(request)
+        }
+
+        // ADR 022 — Athena-native (NOT OpenAI; OpenAI has no video API). Demux
+        // the audio track and transcribe it via the same Whisper/Parakeet
+        // tenant; the response shape mirrors /v1/audio/transcriptions.
+        router.post("/v1/video/transcriptions") { request, _ -> Response in
+            await handleVideoTranscriptions(request)
         }
 
         // Built-in vector DB (M7.2).
@@ -1906,6 +1917,155 @@ struct AthenaServer {
             }
         }
         return best?.speaker
+    }
+
+    /// ADR 022 M78.1 — `POST /v1/video/transcriptions` (Athena-native, NOT
+    /// OpenAI). Demux the audio track out of the uploaded video and transcribe
+    /// it via the same Whisper/Parakeet tenant; the response shapes mirror
+    /// `/v1/audio/transcriptions` so an existing transcription consumer reuses
+    /// its parser. Bounded by `maxVideoUploadBytes`. (`diarize=true` on video is
+    /// not yet wired — a 501; transcribe, then diarize the extracted audio via
+    /// `/v1/audio/diarizations`.)
+    private func handleVideoTranscriptions(_ request: Request) async -> Response
+    {
+        let t0 = Date()
+        guard
+            let ct = request.headers[.contentType],
+            let boundary = MultipartForm.boundary(fromContentType: ct)
+        else {
+            return Self.error(
+                status: .badRequest,
+                message: "expected multipart/form-data with a boundary",
+                type: "invalid_request_error", code: "invalid_content_type")
+        }
+        if let tooLarge = Self.payloadTooLarge(
+            request, cap: maxVideoUploadBytes)
+        {
+            return tooLarge
+        }
+        let body: Data
+        do {
+            let buffer = try await request.body.collect(upTo: maxVideoUploadBytes)
+            body = Data(buffer: buffer)
+        } catch is NIOTooManyBytesError {
+            return Self.tooLargeResponse(cap: maxVideoUploadBytes)
+        } catch {
+            return Self.error(
+                status: .badRequest, message: "invalid request body",
+                type: "invalid_request_error", code: "invalid_body")
+        }
+        guard
+            let form = MultipartForm(body: body, boundary: boundary),
+            let file = form.first("file"), !file.data.isEmpty
+        else {
+            return Self.error(
+                status: .badRequest, message: "missing required 'file' part",
+                type: "invalid_request_error", code: "missing_file")
+        }
+
+        // diarize=true on video is a 501 (not yet wired) — fail fast before any
+        // load/decode so the caller gets the clear answer immediately.
+        if form.text("diarize") == "true" {
+            return Self.classified(
+                AthenaError.notImplemented(
+                    feature: "diarize=true on /v1/video/transcriptions — "
+                        + "transcribe, then POST the audio to "
+                        + "/v1/audio/diarizations"),
+                module: .transcription)
+        }
+
+        do {
+            switch try await governor.awaitLoad(
+                .transcription, within: coldLoadWaitSecs)
+            {
+            case .loaded: break
+            case .loading: return Self.coldLoadResponse(.transcription)
+            }
+            if let m = form.text("model"), !m.isEmpty {
+                try await auditedRebind(
+                    request, module: .transcription, target: m)
+            }
+        } catch {
+            return Self.classified(error, module: .transcription)
+        }
+
+        let wantWords =
+            form.text("response_format") == "verbose_json"
+            && form.texts("timestamp_granularities[]").contains("word")
+
+        // Demux the audio track to PCM (AVAssetReader needs a file URL), then
+        // reuse the shared transcribePCM seam (S2). The extracted PCM funnels
+        // through the same floor/ceiling — a degenerate video is a 4xx here.
+        let result: TranscriptionResult
+        do {
+            let ext = (file.filename as NSString?)?.pathExtension ?? ""
+            let tmp = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "athena-vid-\(UUID().uuidString)"
+                        + (ext.isEmpty ? "" : ".\(ext)"))
+            try file.data.write(to: tmp)
+            defer { try? FileManager.default.removeItem(at: tmp) }
+            let pcm = try await VideoAudioTrack.extractPCM(
+                from: tmp, module: .transcription)
+            result = try await transcription.transcribePCM(
+                pcm, language: form.text("language"),
+                wordTimestamps: wantWords)
+        } catch {
+            return Self.classified(error, module: .transcription)
+        }
+        Logger(label: AthenaLogLabel.model(.transcription)).notice(
+            """
+            video transcription done segments=\(result.segments.count) \
+            audio_secs=\(String(format: "%.1f", result.duration)) \
+            lang=\(result.language ?? "auto") words=\(wantWords) \
+            elapsed_ms=\(Self.elapsedMs(t0))
+            """)
+
+        func plain(_ s: String, _ type: String) -> Response {
+            var headers = HTTPFields()
+            headers[.contentType] = type
+            var buf = ByteBuffer()
+            buf.writeString(s)
+            return Response(
+                status: .ok, headers: headers,
+                body: ResponseBody(byteBuffer: buf))
+        }
+        func words(_ ws: [WordTiming]?) -> [WordTimestamp]? {
+            ws.map {
+                $0.map {
+                    WordTimestamp(
+                        word: $0.word, start: $0.start, end: $0.end,
+                        probability: $0.probability)
+                }
+            }
+        }
+        switch form.text("response_format") {
+        case "text":
+            return plain(result.text, "text/plain; charset=utf-8")
+        case "srt":
+            return plain(
+                TranscriptionFormat.srt(result.segments),
+                "text/plain; charset=utf-8")
+        case "vtt":
+            return plain(
+                TranscriptionFormat.vtt(result.segments),
+                "text/vtt; charset=utf-8")
+        case "verbose_json":
+            return Self.json(
+                VerboseTranscriptionResponse(
+                    task: "transcribe", language: result.language,
+                    duration: result.duration, text: result.text,
+                    segments: result.segments.enumerated().map {
+                        VerboseSegment(
+                            id: $0.offset, start: $0.element.start,
+                            end: $0.element.end, text: $0.element.text,
+                            avg_logprob: $0.element.avgLogprob,
+                            speaker: nil, words: words($0.element.words))
+                    },
+                    words: wantWords ? words(result.words) : nil))
+        default:  // "json" / nil
+            return Self.json(TranscriptionResponse(text: result.text))
+        }
     }
 
     private func handleDiarizations(_ request: Request) async -> Response

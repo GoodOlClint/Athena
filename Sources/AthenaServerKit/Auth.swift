@@ -362,7 +362,8 @@ public enum AuthPolicy {
         }
         if path.hasPrefix("/v1/queue") { return .queueSubmit }
         // Inference surface (/v1/chat, /v1/embeddings, /v1/audio/*,
-        // native /api/chat + /api/embed) and any unlisted route.
+        // /v1/video/* (ADR 022), native /api/chat + /api/embed) and any
+        // unlisted route — all inference-tier, like the audio routes.
         return .inference
     }
 }

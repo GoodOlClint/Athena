@@ -185,6 +185,37 @@ enum OpenAPISpec {
                 }
               }
             },
+            "/v1/video/transcriptions": {
+              "post": {
+                "tags": ["Video"],
+                "summary": "Transcribe a video's audio track.",
+                "description": "**Athena-native, NOT OpenAI-compatible** (OpenAI has no video API). Multipart upload of a video container (mp4/mov/…); Athena demuxes the audio track and transcribes it via the same Whisper/Parakeet tenant as `/v1/audio/transcriptions`, returning the identical response shapes (`json` default, `text`, `srt`, `vtt`, `verbose_json`; `timestamp_granularities[]=word`). `model` selects the resident transcription model. A video with no audio track ⇒ 400 video_no_audio_track; sub-0.1 s or undecodable audio ⇒ 400 (shared decode floor). `diarize=true` on video is not yet wired ⇒ 501 not_implemented (transcribe, then POST the extracted audio to /v1/audio/diarizations). Max upload size = `max_video_upload_bytes` (default 1 GiB); over it ⇒ 413 payload_too_large.",
+                "requestBody": {
+                  "required": true,
+                  "content": { "multipart/form-data": { "schema": {
+                    "type": "object",
+                    "required": ["file"],
+                    "properties": {
+                      "file": { "type": "string", "format": "binary", "description": "Video file (any container AVFoundation reads)." },
+                      "model": { "type": "string", "description": "Selects among the transcription allowlist — a Whisper or Parakeet-TDT id (ADR 020). Omit ⇒ default." },
+                      "language": { "type": "string" },
+                      "response_format": { "type": "string", "enum": ["json", "text", "srt", "vtt", "verbose_json"] }
+                    }
+                  } } }
+                },
+                "responses": {
+                  "200": { "description": "Transcription.", "content": {
+                    "application/json": { "schema": { "$ref": "#/components/schemas/VerboseTranscriptionResponse" } },
+                    "text/plain": { "schema": { "type": "string" } }
+                  } },
+                  "400": { "$ref": "#/components/responses/BadRequest" },
+                  "401": { "$ref": "#/components/responses/Unauthorized" },
+                  "403": { "$ref": "#/components/responses/Forbidden" },
+                  "413": { "$ref": "#/components/responses/PayloadTooLarge" },
+                  "503": { "$ref": "#/components/responses/Overloaded" }
+                }
+              }
+            },
             "/v1/audio/diarizations": {
               "post": {
                 "tags": ["Audio"],

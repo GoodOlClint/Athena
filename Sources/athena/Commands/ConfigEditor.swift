@@ -55,6 +55,8 @@ extension ConfigEditor {
             return cfg.coldLoadWaitSecs.map(String.init)
         case "max_audio_upload_bytes":
             return cfg.maxAudioUploadBytes.map(String.init)
+        case "max_video_upload_bytes":
+            return cfg.maxVideoUploadBytes.map(String.init)
         case "max_request_body_bytes":
             return cfg.maxRequestBodyBytes.map(String.init)
         case "preload":

@@ -250,6 +250,12 @@ struct Load: AsyncParsableCommand {
 
     @Option(
         help:
+            "Max video upload size in bytes for /v1/video/* (ADR 022) — bounds the raw multipart body. Over the cap ⇒ 413 payload_too_large. Absent ⇒ 1 GiB (1073741824). Must be positive. Worst-case transient memory ≈ this × in-flight video requests (bound it with --max-concurrency)."
+    )
+    var maxVideoUploadBytes: Int?
+
+    @Option(
+        help:
             "Max JSON request-body size in bytes for /v1/chat/completions, /v1/embeddings, etc. (ADR 017). Over the cap ⇒ 413 payload_too_large. Absent ⇒ 4 MiB (4194304). Must be positive."
     )
     var maxRequestBodyBytes: Int?
@@ -715,6 +721,7 @@ struct Load: AsyncParsableCommand {
             requestTimeoutSecs: requestTimeoutSecs ?? 0,
             coldLoadWaitSecs: Double(coldLoadWaitSecs ?? 120),
             maxAudioUploadBytes: maxAudioUploadBytes ?? 104_857_600,
+            maxVideoUploadBytes: maxVideoUploadBytes ?? 1_073_741_824,
             maxRequestBodyBytes: maxRequestBodyBytes ?? 4_194_304,
             preload: preload,
             prefixCache: prefixCache,

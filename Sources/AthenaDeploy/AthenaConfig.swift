@@ -111,6 +111,10 @@ public struct AthenaConfig: Sendable, Equatable {
     /// the governor does not cover — set a large positive number for
     /// "effectively unlimited"). Over-cap ⇒ a clean `413 payload_too_large`.
     public var maxAudioUploadBytes: Int?
+    /// Upload cap for the `/v1/video/*` routes (ADR 022). Video dwarfs audio,
+    /// so the daemon default is larger (1 GiB). Optional — absent ⇒ default; a
+    /// configured `0`/negative is a parse error, like the audio cap.
+    public var maxVideoUploadBytes: Int?
     public var maxRequestBodyBytes: Int?
     /// Preload (warm) the LLM at startup instead of lazily on first
     /// request (M33.3). Optional — absent / false ⇒ lazy load (default).
@@ -173,6 +177,7 @@ public struct AthenaConfig: Sendable, Equatable {
         requestTimeoutSecs: Int? = nil,
         coldLoadWaitSecs: Int? = nil,
         maxAudioUploadBytes: Int? = nil,
+        maxVideoUploadBytes: Int? = nil,
         maxRequestBodyBytes: Int? = nil,
         preload: Bool? = nil,
         queueResultTtlSecs: Int? = nil,
@@ -215,6 +220,7 @@ public struct AthenaConfig: Sendable, Equatable {
         self.requestTimeoutSecs = requestTimeoutSecs
         self.coldLoadWaitSecs = coldLoadWaitSecs
         self.maxAudioUploadBytes = maxAudioUploadBytes
+        self.maxVideoUploadBytes = maxVideoUploadBytes
         self.maxRequestBodyBytes = maxRequestBodyBytes
         self.preload = preload
         self.queueResultTtlSecs = queueResultTtlSecs
@@ -366,6 +372,10 @@ public struct AthenaConfig: Sendable, Equatable {
         if let ma = scalar("max_audio_upload_bytes", in: toml) {
             maxAudioUpload = try positiveInt("max_audio_upload_bytes", ma)
         }
+        var maxVideoUpload: Int?
+        if let mv = scalar("max_video_upload_bytes", in: toml) {
+            maxVideoUpload = try positiveInt("max_video_upload_bytes", mv)
+        }
         var maxRequestBody: Int?
         if let mb = scalar("max_request_body_bytes", in: toml) {
             maxRequestBody = try positiveInt("max_request_body_bytes", mb)
@@ -439,6 +449,7 @@ public struct AthenaConfig: Sendable, Equatable {
             requestTimeoutSecs: reqTimeout,
             coldLoadWaitSecs: coldLoadWait,
             maxAudioUploadBytes: maxAudioUpload,
+            maxVideoUploadBytes: maxVideoUpload,
             maxRequestBodyBytes: maxRequestBody,
             preload: preload,
             queueResultTtlSecs: queueTtl,

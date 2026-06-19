@@ -171,6 +171,8 @@ final class AthenaServerKitTests: XCTestCase {
             // Inference catch-all (unlisted routes fail closed to .inference).
             ("POST", "/v1/chat/completions", .inference),
             ("POST", "/v1/embeddings", .inference),
+            // /v1/video/* (ADR 022) is inference-tier like /v1/audio/*.
+            ("POST", "/v1/video/transcriptions", .inference),
             ("POST", "/api/chat", .inference),
             ("GET", "/some/unknown/route", .inference),
         ]

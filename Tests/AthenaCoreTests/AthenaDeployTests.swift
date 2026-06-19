@@ -135,10 +135,12 @@ final class AthenaConfigTests: XCTestCase {
             listen_port = 7447
             log_dir = "/l"
             max_audio_upload_bytes = 104857600
+            max_video_upload_bytes = 1073741824
             max_request_body_bytes = 4194304
             """
         let c = try AthenaConfig.parse(toml: toml)
         XCTAssertEqual(c.maxAudioUploadBytes, 104_857_600)
+        XCTAssertEqual(c.maxVideoUploadBytes, 1_073_741_824)  // ADR 022
         XCTAssertEqual(c.maxRequestBodyBytes, 4_194_304)
     }
 
@@ -150,6 +152,7 @@ final class AthenaConfigTests: XCTestCase {
             """
         let c = try AthenaConfig.parse(toml: toml)
         XCTAssertNil(c.maxAudioUploadBytes)
+        XCTAssertNil(c.maxVideoUploadBytes)
         XCTAssertNil(c.maxRequestBodyBytes)
     }
 
