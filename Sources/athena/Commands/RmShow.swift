@@ -78,6 +78,11 @@ struct Show: AsyncParsableCommand {
         print("size:     \(ModelStoreOps.humanBytes(d.bytes))")
         print("type:     \(info.modelType ?? "unknown")")
         print("support:  \(SupportedModels.describe(modelType: info.modelType))")
+        // M71.3 — surface whether this checkpoint serves image input. The
+        // config-only `vision_config` signal is exactly what gates
+        // `servesVision` at load (ADR 010/012), so an operator can tell a
+        // VLM from a text-only model without loading it.
+        print("vision:   \(info.hasVisionConfig ? "yes" : "no")")
         print("config.json:")
         print(
             String(data: d.configJSON, encoding: .utf8)

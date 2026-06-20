@@ -420,8 +420,8 @@
     "semantic_hash": "d16404614855c59c2001089f41c5bd78"
   },
   "Sources/athena/Athena.swift": {
-    "mtime": 1781912419.197467,
-    "ast_hash": "116f51f9b8c392d4d83fde41b462ef37",
+    "mtime": 1781937252.902047,
+    "ast_hash": "632c9c7a5687a84bcdacae71bd12dfa9",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Audit.swift": {
@@ -1175,8 +1175,8 @@
     "semantic_hash": ""
   },
   "docs/audit-remediation-plan.md": {
-    "mtime": 1781897759.6943228,
-    "ast_hash": "b1571679c417f9e1b54d623b7674d288",
+    "mtime": 1781937356.4394612,
+    "ast_hash": "3c2a548d21de87081723b83a88322a51",
     "semantic_hash": ""
   },
   "docs/decisions/003-rust-shim-panic-strategy.md": {
@@ -1740,8 +1740,8 @@
     "semantic_hash": ""
   },
   "docs/backlog-hitlist.md": {
-    "mtime": 1781896574.0080948,
-    "ast_hash": "ddd07bfc624f3cd350ac788a82a9670d",
+    "mtime": 1781937363.5102432,
+    "ast_hash": "0785c90c9849dcb7be7fac1b6d60119f",
     "semantic_hash": ""
   },
   "docs/logprobs-plan.md": {
@@ -1777,6 +1777,11 @@
   "Tests/AthenaCoreTests/GovernorMemoryTests.swift": {
     "mtime": 1781911253.9557369,
     "ast_hash": "636262ecde56a5a98e694df0297cb6c0",
+    "semantic_hash": ""
+  },
+  "Tests/AthenaCoreTests/CredentialsArgvTests.swift": {
+    "mtime": 1781937236.0153952,
+    "ast_hash": "6e353069afae8b86f010d5677c704bb3",
     "semantic_hash": ""
   }
 }

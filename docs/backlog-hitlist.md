@@ -28,7 +28,7 @@ still live on an adjacent code path.
 | 4 | `diarized_json` response_format on `/v1/audio/transcriptions` (#4a) | ADR 013 §3; `m35-readiness:67` | Absent — enum lacks it, falls through to `{text}` 0-spk | **DO SOON** | M | low | none (shape published) |
 | 5 | Honor `logprobs`/`top_logprobs` on greedy path (stop 400-ing) | ADR 013 §4 | Code does the **opposite** — still 400s | **DO SOON** | M | low | none (ratified) |
 | 6 | Native `/api/embed` per-principal metering | ADR 007 #8; `m35-readiness:54` | `handleNativeEmbed` drops `meter()` | **DO SOON** | S | low | none |
-| 7 | `athena show` vision-capability line (M71.3) | ADR 010; `m71-vision-input-plan.md:86` | `servesVision` gates requests but `show` never prints it | **DO SOON** | S | low | none |
+| 7 | `athena show` vision-capability line (M71.3) | ADR 010; `m71-vision-input-plan.md:86` | **DONE v0.10.194** — `show` prints `vision: yes/no` from `hasVisionConfig` | **DONE** | S | low | — |
 | 8 | M70.3 CI test-debt backfill (ND14/ND15 whisper-lang/RMS/clustering) | `audit-remediation-plan.md:305` | Unchecked, no test file | **DO SOON** | S–M | low | none |
 | 9 | Finish ADR 013 §5 error reclassification (rebind catch-alls + queue-submit) | ADR 013 §5 | Audio/template legs shipped; rebind/queue legs unconfirmed | **DO SOON** | S | low | none |
 | 10 | Substrate fork+pin to a remote (release blocker R1) | `release-distribution.md:17` | `Package.swift:71` still `path: "../mlx-swift-lm"`; un-pushed delta grew | **DO SOON** | M | low | user creates org fork repo |

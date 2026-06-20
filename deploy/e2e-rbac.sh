@@ -267,6 +267,21 @@ if awk '/^\[prompt_cache\]/{seen=1} /^max_tokens/{if(seen)after=1} END{exit(afte
 else
   bad "B15: bare key landed inside [section]"
 fi
+# M71.3 — `athena show` surfaces a vision-capability line driven by the
+# config-only `vision_config` signal (== servesVision at load). Offline,
+# config-only: a VLM checkpoint reports "vision:   yes", a text model "no".
+mkdir -p "$MSTORE/vlm-model"
+printf '{"model_type":"gemma4","vision_config":{"hidden_size":1}}' \
+  > "$MSTORE/vlm-model/config.json"
+SHOW_VLM="$("$ATHENA" show vlm-model --model-store "$MSTORE" 2>&1)"
+echo "$SHOW_VLM" | grep -Eq '^vision: +yes' \
+  && ok "M71.3: show prints vision: yes for a VLM" \
+  || bad "M71.3: show missing/wrong vision line for VLM ($SHOW_VLM)"
+SHOW_TXT="$("$ATHENA" show fake-model --model-store "$MSTORE" 2>&1)"
+echo "$SHOW_TXT" | grep -Eq '^vision: +no' \
+  && ok "M71.3: show prints vision: no for a text model" \
+  || bad "M71.3: show missing/wrong vision line for text model ($SHOW_TXT)"
+rm -rf "$MSTORE/vlm-model"
 
 echo
 echo "== phase 2: permission gating (auth enforced) =="
