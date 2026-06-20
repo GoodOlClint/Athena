@@ -18,10 +18,42 @@ public enum Secrets {
     static let service = "athena"
 
     #if os(macOS)
+        /// argv for `security add-generic-password` that takes the
+        /// password on **stdin**, not argv (K7). `-w` placed at the end
+        /// (with no value) makes `security` prompt for the password —
+        /// so the secret never appears in the process table for a local
+        /// `ps`/process audit during the spawn. Pure + `internal` so the
+        /// K7 invariant ("no secret in argv") is unit-pinnable.
+        static func addPasswordArgs(account: String) -> [String] {
+            // -U updates an existing item rather than erroring.
+            [
+                "add-generic-password", "-U", "-s", service, "-a",
+                account, "-w",
+            ]
+        }
+
+        /// argv for the sudo-dropped variant (`storeAsInvokingOperator`):
+        /// same `-w`-at-end / stdin-fed contract as `addPasswordArgs`.
+        static func sudoAddPasswordArgs(user: String, account: String)
+            -> [String]
+        {
+            [
+                "-u", user, "-H", "-n",
+                "/usr/bin/security", "add-generic-password",
+                "-U", "-s", service, "-a", account, "-w",
+            ]
+        }
+
+        /// `security … -w` at end prompts for the password twice (enter +
+        /// retype confirmation); feed both lines on the child's stdin.
+        static func stdinPasswordPayload(_ value: String) -> Data {
+            Data("\(value)\n\(value)\n".utf8)
+        }
+
         @discardableResult
-        private static func security(_ args: [String]) -> (
-            Int32, String
-        ) {
+        private static func security(
+            _ args: [String], stdin: String? = nil
+        ) -> (Int32, String) {
             let p = Process()
             p.executableURL = URL(
                 fileURLWithPath: "/usr/bin/security")
@@ -29,7 +61,18 @@ public enum Secrets {
             let out = Pipe()
             p.standardOutput = out
             p.standardError = FileHandle.nullDevice
+            var inPipe: Pipe?
+            if stdin != nil {
+                let ip = Pipe()
+                p.standardInput = ip
+                inPipe = ip
+            }
             try? p.run()
+            if let stdin, let ip = inPipe {
+                ip.fileHandleForWriting.write(
+                    stdinPasswordPayload(stdin))
+                try? ip.fileHandleForWriting.close()
+            }
             p.waitUntilExit()
             let data = out.fileHandleForReading.readDataToEndOfFile()
             return (
@@ -51,11 +94,9 @@ public enum Secrets {
         public static func store(
             _ value: String, account: String
         ) throws {
-            // -U updates an existing item rather than erroring.
-            let (rc, _) = security([
-                "add-generic-password", "-U", "-s", service, "-a",
-                account, "-w", value,
-            ])
+            // K7: secret on stdin (`-w` at end), never in argv.
+            let (rc, _) = security(
+                addPasswordArgs(account: account), stdin: value)
             guard rc == 0 else {
                 throw CredentialError.keychain(
                     "security add-generic-password failed (\(rc))")
@@ -100,15 +141,18 @@ public enum Secrets {
             // `security` finds that user's login Keychain (not
             // root's). `-n` makes sudo non-interactive — root → any
             // user doesn't need a password, so this should succeed
-            // without blocking on stdin.
-            p.arguments = [
-                "-u", sudoUser, "-H", "-n",
-                "/usr/bin/security", "add-generic-password",
-                "-U", "-s", service, "-a", account, "-w", value,
-            ]
+            // without blocking on stdin. K7: the secret is fed on the
+            // child's stdin (`-w` at end), never in argv.
+            p.arguments = sudoAddPasswordArgs(
+                user: sudoUser, account: account)
+            let inPipe = Pipe()
+            p.standardInput = inPipe
             p.standardOutput = FileHandle.nullDevice
             p.standardError = FileHandle.nullDevice
             try p.run()
+            inPipe.fileHandleForWriting.write(
+                stdinPasswordPayload(value))
+            try? inPipe.fileHandleForWriting.close()
             p.waitUntilExit()
             guard p.terminationStatus == 0 else {
                 throw CredentialError.keychain(

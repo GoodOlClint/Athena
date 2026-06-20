@@ -24,7 +24,7 @@ still live on an adjacent code path.
 |---|------|--------|----------------|-------|--------|------|-------------------|
 | 1 | Reconcile stale ADR/plan status labels (016, 017, 007, 001, 008, 009; m50/convert-quant plans) | ADRs + plans | Docs say "Proposed/no-code/Not started"; code shipped | **DO NOW** | S | none | — (doc-only) |
 | 2 | Governor accounting truthfulness (ADR 023): bound serve MLX cache, reconcile admission vs real allocator, measure per-model footprint | ADR 011→023; memory `heartbeat-rss-undercounts-gpu`, `2026-06-05-watchdog-panic` | Admission still meters RSS; serve sets no `cacheLimit`; #2 conflicts w/ M5.5 | **DO SOON** | M–L | med–high | ADR 023 review + amendment (RSS-vs-activeMemory conflict) |
-| 3 | K7 — `security … -w <value>` argv secret leak | ADR 005; `audit-remediation-plan.md:128` | Live at `Credentials.swift:57,107` | **DO SOON** | S–M | low | steer to SecItem API / stdin |
+| 3 | K7 — `security … -w <value>` argv secret leak | ADR 005; `audit-remediation-plan.md:128` | **DONE v0.10.193** — secret fed on stdin (`-w` at end), never argv | **DONE** | S–M | low | — |
 | 4 | `diarized_json` response_format on `/v1/audio/transcriptions` (#4a) | ADR 013 §3; `m35-readiness:67` | Absent — enum lacks it, falls through to `{text}` 0-spk | **DO SOON** | M | low | none (shape published) |
 | 5 | Honor `logprobs`/`top_logprobs` on greedy path (stop 400-ing) | ADR 013 §4 | Code does the **opposite** — still 400s | **DO SOON** | M | low | none (ratified) |
 | 6 | Native `/api/embed` per-principal metering | ADR 007 #8; `m35-readiness:54` | `handleNativeEmbed` drops `meter()` | **DO SOON** | S | low | none |
