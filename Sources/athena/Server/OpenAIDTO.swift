@@ -464,6 +464,12 @@ struct APIErrorBody: Codable {
         let message: String
         let type: String
         let code: String
+        /// #12 / M43.4 — optional operator-facing remediation. nil ⇒
+        /// omitted from JSON (encodeIfPresent), so the canonical
+        /// `{message,type,code}` envelope is unchanged for the common
+        /// case. The CLI client renders it as a `hint:` line; non-CLI
+        /// consumers ignore it. Mirrors the auth-middleware deny hint.
+        var hint: String? = nil
     }
     let error: ErrorDetail
 }

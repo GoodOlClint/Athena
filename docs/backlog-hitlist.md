@@ -33,7 +33,7 @@ still live on an adjacent code path.
 | 9 | Finish ADR 013 §5 error reclassification (rebind catch-alls + queue-submit) | ADR 013 §5 | Audio/template legs shipped; rebind/queue legs unconfirmed | **DO SOON** | S | low | none |
 | 10 | Substrate fork+pin to a remote (release blocker R1) | `release-distribution.md:17` | `Package.swift:71` still `path: "../mlx-swift-lm"`; un-pushed delta grew | **DO SOON** | M | low | user creates org fork repo |
 | 11 | Allowlist offline `--data-dir` path (usability #3 / M43.5) | `usability-audit:52`; `m43` memory | **DONE v0.10.195** — macOS `allowlist` verb opens AthenaStore directly when `--data-dir` given | **DONE** | M | low | — |
-| 12 | Auth-deny envelopes carry no recovery `hint` (usability #5) | `usability-audit:85` | `Auth.swift` deny has no `hint` | **DO SOON** | S | low | none |
+| 12 | Auth-deny envelopes carry no recovery `hint` (usability #5) | `usability-audit:85` | **DONE v0.10.196** — middleware 401/403 hint already shipped (M43.4); filled the in-handler `deny403` gap | **DONE** | S | low | — |
 | 13 | K2 — client SSE readers don't check HTTP status (lone "High" in M71 tail) | `audit-remediation-plan.md:312` | Partially done (`RemoteLogs.swift:102`); audit others | **DO SOON** | S | low | none |
 | 14 | Token-budget quotas (#9) | ADR 007 #9; `m35-readiness:61` | Absent; counters exist, no admission check | DEFER | M | low | commercial-host posture / consumer; ADR-007 milestone never scheduled |
 | 15 | Parakeet-as-default transcription | ADR 020 open-decision #2 | Whisper default; **no WER A/B harness exists** | DEFER | M | low | a real WER+throughput A/B on a labelled set |
@@ -203,7 +203,11 @@ still live on an adjacent code path.
 ### #12 (DO SOON) — Auth-deny `hint`
 - **What:** Add a recovery `hint` to 401/403 envelopes.
 - **Why it matters:** Operator legibility — a denied call names the missing permission/recovery path instead of a bare 403.
-- **Evidence (doc → code):** `usability-audit:85` → `Auth.swift` deny path has no `hint`.
+- **Evidence (doc → code):** `usability-audit:85` → **stale**: the route-middleware deny
+  (`AthenaServerKit/Auth.swift`) already emits `hint` on 401 **and** 403 (M43.4); the genuine
+  gap was the in-handler `AthenaServer.deny403` RBAC/safety guards, which routed through
+  `error()` with no hint. **Done v0.10.196**: added optional `hint` to the error envelope +
+  `deny403` default, e2e-asserted on both the middleware 403 and the last-admin guard.
 - **Proposed first slice:** Extend the deny envelope with an optional `hint` (no schema break — additive). **Test:** route test asserting the hint on a permission-denied call. **Effort:** S · **Risk:** low.
 
 ### #13 (DO SOON) — K2: client SSE readers check HTTP status

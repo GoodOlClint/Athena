@@ -1994,6 +1994,20 @@ code 400 DELETE /api/tokens/abc "$A2"               # <6 hex
 # Last-admin protection over HTTP (D2 has exactly one admin).
 code 403 DELETE /api/users/admin "$A2"              # sole admin
 code 403 DELETE /api/users/admin/roles/admin "$A2"  # revoke sole admin
+# #12 / M43.4 — auth-deny envelopes must NAME a recovery `hint`, for BOTH
+# the route-middleware 403 (insufficient permissions) and the in-handler
+# RBAC guard (last-admin protection), matching the 401 hint asserted in
+# phase 3.688. The CLI client renders error.hint as a `hint:` line.
+H12MW="$(curl -s -X GET "http://127.0.0.1:$PORT/api/users" \
+  -H "Authorization: Bearer $M2")"
+echo "$H12MW" | grep -q '"hint"' \
+  && ok "#12: middleware 403 (insufficient perms) carries error.hint" \
+  || bad "#12: middleware 403 missing hint ($H12MW)"
+H12GUARD="$(curl -s -X DELETE "http://127.0.0.1:$PORT/api/users/admin" \
+  -H "Authorization: Bearer $A2")"
+echo "$H12GUARD" | grep -q '"hint"' \
+  && ok "#12: in-handler deny403 (last admin) carries error.hint" \
+  || bad "#12: in-handler deny403 missing hint ($H12GUARD)"
 
 echo
 echo "== phase 8.5: audit trail — admin mutations recorded (M30.1) =="

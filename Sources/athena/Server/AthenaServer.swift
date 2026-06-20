@@ -5531,10 +5531,24 @@ struct AthenaServer {
             status: .accepted)
     }
 
-    private static func deny403(_ msg: String) -> Response {
+    /// Shared remediation for the in-handler RBAC/privilege guards
+    /// (#12 / M43.4). Every `deny403` is either an "insufficient
+    /// privilege" or a "safety guard" refusal, so one hint covers them;
+    /// surfaced as `error.hint` and rendered by the CLI client. Mirrors
+    /// the auth-middleware forbidden hint for envelope parity.
+    static let privilegedActionHint =
+        "Refused: this action needs elevated privileges or trips a "
+        + "safety guard (e.g. removing the last admin). Use an admin "
+        + "token, have an admin perform it, or adjust roles with "
+        + "`athena auth role grant <user> <role>`."
+
+    private static func deny403(
+        _ msg: String, hint: String? = nil
+    ) -> Response {
         Self.error(
             status: .forbidden, message: msg,
-            type: "auth_error", code: "forbidden")
+            type: "auth_error", code: "forbidden",
+            hint: hint ?? privilegedActionHint)
     }
 
     /// The compiled-in RBAC role→perms catalog. Shared by
@@ -5974,7 +5988,7 @@ struct AthenaServer {
 
     private static func error(
         status: HTTPResponse.Status, message: String, type: String,
-        code: String
+        code: String, hint: String? = nil
     ) -> Response {
         // Operator legibility (M43.4 follow-up): every 5xx the daemon
         // sends must leave a server-side trace. Classified errors that
@@ -5993,7 +6007,9 @@ struct AthenaServer {
         }
         return json(
             APIErrorBody(
-                error: .init(message: message, type: type, code: code)),
+                error: .init(
+                    message: message, type: type, code: code,
+                    hint: hint)),
             status: status)
     }
 
