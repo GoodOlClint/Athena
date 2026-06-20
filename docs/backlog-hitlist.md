@@ -34,7 +34,7 @@ still live on an adjacent code path.
 | 10 | Substrate fork+pin to a remote (release blocker R1) | `release-distribution.md:17` | `Package.swift:71` still `path: "../mlx-swift-lm"`; un-pushed delta grew | **DO SOON** | M | low | user creates org fork repo |
 | 11 | Allowlist offline `--data-dir` path (usability #3 / M43.5) | `usability-audit:52`; `m43` memory | **DONE v0.10.195** — macOS `allowlist` verb opens AthenaStore directly when `--data-dir` given | **DONE** | M | low | — |
 | 12 | Auth-deny envelopes carry no recovery `hint` (usability #5) | `usability-audit:85` | **DONE v0.10.196** — middleware 401/403 hint already shipped (M43.4); filled the in-handler `deny403` gap | **DONE** | S | low | — |
-| 13 | K2 — client SSE readers don't check HTTP status (lone "High" in M71 tail) | `audit-remediation-plan.md:312` | Partially done (`RemoteLogs.swift:102`); audit others | **DO SOON** | S | low | none |
+| 13 | K2 — client SSE readers don't check HTTP status (lone "High" in M71 tail) | `audit-remediation-plan.md:312` | **DONE v0.10.197** — fixed the two queue-events SSE followers; `RemoteLogs` already guarded | **DONE** | S | low | — |
 | 14 | Token-budget quotas (#9) | ADR 007 #9; `m35-readiness:61` | Absent; counters exist, no admission check | DEFER | M | low | commercial-host posture / consumer; ADR-007 milestone never scheduled |
 | 15 | Parakeet-as-default transcription | ADR 020 open-decision #2 | Whisper default; **no WER A/B harness exists** | DEFER | M | low | a real WER+throughput A/B on a labelled set |
 | 16 | M78.2 video descriptions (`POST /v1/video/descriptions`) | ADR 022 | Genuinely absent (route + frame sampler) | DEFER | L | med | downstream consumer requirements |

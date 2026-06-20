@@ -2194,6 +2194,12 @@ else
   clic 0  "client cp (admin -> model.write)"    cp fake-model c9 --key "$A2"
   clic 0  "client rm c9 (admin)"                rm c9 --key "$A2"
   clic nz "client rm c9 again (404 surfaced)"   rm c9 --key "$A2"
+  # K2 — an SSE follower must check HTTP status before parsing the
+  # stream: a non-200 (here a 401 from a bogus key) is NOT an event
+  # stream and must surface as an error (nonzero exit), not parse to an
+  # empty stream and silently exit 0.
+  clic nz "K2: queue --follow surfaces non-200 (not empty stream)" \
+    queue get nojob --follow --key sk-athena-bogus
   # The client must render the server's data, not merely exit 0.
   # Asserted BEFORE the prune submit so the async prune worker can't
   # race-delete the (deliberately broken) seed first.

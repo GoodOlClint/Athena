@@ -420,8 +420,8 @@
     "semantic_hash": "d16404614855c59c2001089f41c5bd78"
   },
   "Sources/athena/Athena.swift": {
-    "mtime": 1781937877.23318,
-    "ast_hash": "c2857596492af937d75de523ec325cde",
+    "mtime": 1781938361.8875558,
+    "ast_hash": "80a2554102b9fff444c2f2e65fc0c74c",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Audit.swift": {
@@ -545,8 +545,8 @@
     "semantic_hash": "ba546feb975db11ee6e42e5e147b55e0"
   },
   "Sources/athena/Server/AthenaServer.swift": {
-    "mtime": 1781912266.0770097,
-    "ast_hash": "2f4755fdbe402067e0d56a5f829a235f",
+    "mtime": 1781938317.3300297,
+    "ast_hash": "5691147ecd2fc63491d0180024d00ae1",
     "semantic_hash": ""
   },
   "Sources/athena/Server/GPUTelemetry.swift": {
@@ -560,8 +560,8 @@
     "semantic_hash": "a48b56ea98e27d1fc6b179d620ddc223"
   },
   "Sources/athena/Server/OpenAIDTO.swift": {
-    "mtime": 1781908665.4939718,
-    "ast_hash": "85277bad02e123589ed014514d403382",
+    "mtime": 1781938299.2783372,
+    "ast_hash": "530f59e4154b7650b68058797e27e5cb",
     "semantic_hash": ""
   },
   "Sources/athena/Server/OpenAPISpec.swift": {
@@ -880,8 +880,8 @@
     "semantic_hash": "e29565ca41e2bea1b26a9e5469e5349c"
   },
   "deploy/e2e-rbac.sh": {
-    "mtime": 1781937972.8463383,
-    "ast_hash": "5cd955e46c7c32511f8502aa3f6eb13b",
+    "mtime": 1781938357.358472,
+    "ast_hash": "ef425d1db35f3f4cc7a856f1fea5f420",
     "semantic_hash": ""
   },
   "deploy/integration/e2e-embedding-select.sh": {
@@ -1740,8 +1740,8 @@
     "semantic_hash": ""
   },
   "docs/backlog-hitlist.md": {
-    "mtime": 1781938082.706602,
-    "ast_hash": "700021b92e52f79f30bac7819e75b254",
+    "mtime": 1781938480.7742016,
+    "ast_hash": "d5b778f21d3edb6a9812f7d4d7997241",
     "semantic_hash": ""
   },
   "docs/logprobs-plan.md": {

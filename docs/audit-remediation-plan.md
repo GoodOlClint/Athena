@@ -310,7 +310,7 @@ Measured on the M5 Max against the Release binary (Qwen3.5-27B-4bit-mtp, `ATHENA
 ## M71 — Conformance & polish tail (batch, low individual risk)
 
 - [ ] API-surface drift: A17/A18 OpenAPI tags + cached_tokens/usage reconcile; A20 `top_logprobs:0`; NA9 queued-vs-sync param parity; NA10 transcription response_format enum; NA11 `encoding_format` honored-or-rejected; A14 403-vs-redirect
-- [ ] Client robustness: K2 (High) SSE follows check HTTP status; K4/K9 optional DTO fields; K5/K11 terminal-status exit codes; K10 Run.swift status/error handling; K12; NK2 portable rotate/--ttl parity; K3 SSE teardown; K6 idempotency key on queue submit
+- [ ] Client robustness: **K2 DONE v0.10.197** (both Darwin SSE followers — `QueueCmd.followJob` + `JobPoll.follow` — now check HTTP status before parsing; `RemoteLogs` already did); K4/K9 optional DTO fields; K5/K11 terminal-status exit codes; K10 Run.swift status/error handling; K12; NK2 portable rotate/--ttl parity; K3 SSE teardown; K6 idempotency key on queue submit
 - [ ] CLI consistency: B9 help-text default fix; B12 user arg style; B13 `--json` + footers to stderr; B16 status exit code; B18 `\r` trim; B19 prune error detail; B21/B22 exit-code & verb collisions; NB3 `default` vs installed daemon; NB10 `--revision` honored; NB12 pid 0/negative guard; NB13 status honors TLS
 - [ ] Dedup/dead code: NA12, NB7, NC9, NC10, ND12, ND13, NK6, NK7, NG4, NH3, NF5, C15–C18, E11, E16, B24
 - [ ] Larger refactors held to last (each its own slice if taken): A6 server god-object split; C9 `runSpeculative` extraction; E10 protocol unification; A19/A27 AuthPolicy single source

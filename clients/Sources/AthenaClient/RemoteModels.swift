@@ -316,8 +316,19 @@ public enum JobPoll {
                     forHTTPHeaderField: "Authorization")
             }
             do {
-                let (bytes, _) = try await URLSession.shared.bytes(
+                let (bytes, resp) = try await URLSession.shared.bytes(
                     for: req)
+                // K2 — a non-200 (bad job id ⇒ 404, auth ⇒ 401/403) is
+                // NOT an event stream; parsing it as one silently
+                // swallows the real error. Check status before reading.
+                if let http = resp as? HTTPURLResponse,
+                    http.statusCode >= 400
+                {
+                    FailableExit.die(
+                        "error: /v1/queue/\(id)/events → "
+                            + "\(http.statusCode) (check the job id and "
+                            + "auth)")
+                }
                 for try await line in bytes.lines
                 where line.hasPrefix("data: ") {
                     let p = String(line.dropFirst(6))
