@@ -282,6 +282,33 @@ echo "$SHOW_TXT" | grep -Eq '^vision: +no' \
   && ok "M71.3: show prints vision: no for a text model" \
   || bad "M71.3: show missing/wrong vision line for text model ($SHOW_TXT)"
 rm -rf "$MSTORE/vlm-model"
+# #11 / M43.5 — `athena allowlist` edits the on-disk store directly with
+# `--data-dir` while NO daemon is running (operability for a wedged box).
+ALLOWDD="$(mktemp -d)"
+"$ATHENA" allowlist add --module llm --id m-foo --default \
+  --data-dir "$ALLOWDD" >/dev/null 2>&1 \
+  && ok "#11: offline allowlist add (daemon down)" \
+  || bad "#11: offline allowlist add failed"
+"$ATHENA" allowlist add --module llm --id m-bar --data-dir "$ALLOWDD" \
+  >/dev/null 2>&1
+ALOUT="$("$ATHENA" allowlist list --data-dir "$ALLOWDD" 2>&1)"
+echo "$ALOUT" | grep -q 'm-foo' && echo "$ALOUT" | grep -q 'm-bar' \
+  && ok "#11: offline allowlist list renders rows" \
+  || bad "#11: offline allowlist list missing rows ($ALOUT)"
+"$ATHENA" allowlist default --module llm --id m-bar --data-dir "$ALLOWDD" \
+  >/dev/null 2>&1
+"$ATHENA" allowlist list --module llm --data-dir "$ALLOWDD" 2>&1 \
+  | grep -Eq '\*\s+m-bar' \
+  && ok "#11: offline allowlist default re-points" \
+  || bad "#11: offline allowlist default did not re-point"
+"$ATHENA" allowlist rm --module llm --id m-foo --data-dir "$ALLOWDD" \
+  >/dev/null 2>&1 \
+  && ok "#11: offline allowlist rm" || bad "#11: offline allowlist rm failed"
+"$ATHENA" allowlist add --module bogus --id x --data-dir "$ALLOWDD" \
+  >/dev/null 2>&1 \
+  && bad "#11: offline allowlist accepted bad module" \
+  || ok "#11: offline allowlist rejects unknown module"
+rm -rf "$ALLOWDD"
 
 echo
 echo "== phase 2: permission gating (auth enforced) =="

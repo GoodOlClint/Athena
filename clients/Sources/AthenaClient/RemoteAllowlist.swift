@@ -52,7 +52,18 @@ public enum RemoteAllowlist {
             let r = try? JSONDecoder().decode(
                 ListResp.self, from: data)
         else { return try fail(code, data) }
-        guard !r.allowlist.isEmpty else {
+        renderList(
+            r.allowlist.map {
+                ($0.module, $0.id, $0.default)
+            })
+    }
+
+    /// Shared table renderer so the HTTP (`list`) and offline
+    /// (`--data-dir`) paths print byte-identical output (#11 / M43.5).
+    public static func renderList(
+        _ rows: [(module: String, id: String, isDefault: Bool)]
+    ) {
+        guard !rows.isEmpty else {
             print("no allowlist entries")
             return
         }
@@ -61,11 +72,11 @@ public enum RemoteAllowlist {
                 + "DEFAULT".padding(
                     toLength: 9, withPad: " ", startingAt: 0)
                 + "ID")
-        for e in r.allowlist {
+        for e in rows {
             print(
                 e.module.padding(
                     toLength: 20, withPad: " ", startingAt: 0)
-                    + (e.default ? "*" : "").padding(
+                    + (e.isDefault ? "*" : "").padding(
                         toLength: 9, withPad: " ", startingAt: 0)
                     + e.id)
         }

@@ -32,7 +32,7 @@ still live on an adjacent code path.
 | 8 | M70.3 CI test-debt backfill (ND14/ND15 whisper-lang/RMS/clustering) | `audit-remediation-plan.md:305` | Unchecked, no test file | **DO SOON** | S–M | low | none |
 | 9 | Finish ADR 013 §5 error reclassification (rebind catch-alls + queue-submit) | ADR 013 §5 | Audio/template legs shipped; rebind/queue legs unconfirmed | **DO SOON** | S | low | none |
 | 10 | Substrate fork+pin to a remote (release blocker R1) | `release-distribution.md:17` | `Package.swift:71` still `path: "../mlx-swift-lm"`; un-pushed delta grew | **DO SOON** | M | low | user creates org fork repo |
-| 11 | Allowlist offline `--data-dir` path (usability #3 / M43.5) | `usability-audit:52`; `m43` memory | `RemoteAllowlist.swift` HTTP-only | **DO SOON** | M | low | none |
+| 11 | Allowlist offline `--data-dir` path (usability #3 / M43.5) | `usability-audit:52`; `m43` memory | **DONE v0.10.195** — macOS `allowlist` verb opens AthenaStore directly when `--data-dir` given | **DONE** | M | low | — |
 | 12 | Auth-deny envelopes carry no recovery `hint` (usability #5) | `usability-audit:85` | `Auth.swift` deny has no `hint` | **DO SOON** | S | low | none |
 | 13 | K2 — client SSE readers don't check HTTP status (lone "High" in M71 tail) | `audit-remediation-plan.md:312` | Partially done (`RemoteLogs.swift:102`); audit others | **DO SOON** | S | low | none |
 | 14 | Token-budget quotas (#9) | ADR 007 #9; `m35-readiness:61` | Absent; counters exist, no admission check | DEFER | M | low | commercial-host posture / consumer; ADR-007 milestone never scheduled |
