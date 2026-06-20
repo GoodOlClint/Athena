@@ -9,6 +9,8 @@ auto-actioned, and anything "substantial" routes through the brownfield change g
 (design + ADR), not "just done".
 
 **Counts:** DO NOW 1 · DO SOON 12 · DEFER 23 · DROP 11.
+**Shipped since audit (v0.10.193–197):** #3 K7 argv-secret leak, #7 `athena show` vision
+line, #11 allowlist offline `--data-dir`, #12 auth-deny `hint`, #13 K2 SSE status check.
 **Top 3 DO-NOW / first-to-schedule:** (1) reconcile stale ADR/plan status labels — three
 docs claim "Proposed / no code yet" for *shipped* work, one is a dependency of a later
 shipped ADR; (2) the governor accounting-truthfulness work (ADR 023) is the project's own
