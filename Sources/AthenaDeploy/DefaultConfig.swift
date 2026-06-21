@@ -71,6 +71,15 @@ public enum DefaultConfig {
         # default), "cache_key" (key by the OpenAI prompt_cache_key hint),
         # or "both". The resident model id is always part of the key.
         # prompt_cache_scope = "principal"
+        # Encrypt idle cache entries at rest in RAM (ADR 024 T3). When ON,
+        # parked KV entries are held as AES-256-GCM ciphertext — only the
+        # entry currently decoding is plaintext — so sensitive reused
+        # prefixes (PHI/PAN) are never plaintext-at-rest and only ciphertext
+        # can reach swap. Opt-in hardening, default OFF; env override
+        # ATHENA_PROMPT_CACHE_ENCRYPT_IDLE (1/true/0/false). Honesty boundary:
+        # the active working set + weights stay plaintext; not a defense
+        # against a kernel/root adversary.
+        # prompt_cache_encrypt_idle = false
 
 
         # ── Storage ──────────────────────────────────────────────────

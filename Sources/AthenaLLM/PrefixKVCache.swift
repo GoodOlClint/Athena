@@ -1,3 +1,4 @@
+import AthenaCore
 import AthenaModels
 import Foundation
 import Logging
@@ -94,31 +95,51 @@ public final class PrefixKVCache: @unchecked Sendable {
 
     // MARK: - Stored entry
 
+    /// What an entry holds for its KV. With `[prompt_cache]` idle encryption OFF
+    /// (default) the entry parks the plaintext substrate caches exactly as M59
+    /// always has; with it ON (ADR 024 T3) the entry holds only AES-256-GCM
+    /// ciphertext, so the idle pool is never plaintext-at-rest. Every entry in a
+    /// given pool is the same variant (the mode is a cache-wide constant), so the
+    /// two never mix.
+    private enum Payload {
+        /// Full-length attention-cache clones (nil at recurrent layers) +
+        /// 512-boundary → layerIdx → `[conv, ssm]` recurrent checkpoints.
+        case plain(attn: [KVCache?], checkpoints: [Int: [Int: [MLXArray]]])
+        /// The same two structures, each tensor group serialized + sealed:
+        /// per-layer sealed attention state (nil at recurrent layers) +
+        /// boundary → layerIdx → sealed `[conv, ssm]`.
+        case sealed(attn: [Data?], checkpoints: [Int: [Int: Data]])
+    }
+
     private final class Entry {
         let id: Int
         let scope: String
         let tokens: [Int]
-        /// Full-length (prompt-length) attention-cache clones, indexed by
-        /// backbone layer; `nil` at recurrent (Mamba) layers.
-        let attn: [KVCache?]
-        /// boundary offset (512-multiple) → layerIdx → cloned `[conv, ssm]`.
-        let checkpoints: [Int: [Int: [MLXArray]]]
+        let payload: Payload
         let byteEstimate: Int
         /// Wall-clock of last store/hit — drives both LRU ordering (oldest
         /// evicted first) and idle-TTL expiry (M59.2).
         var lastUsed: Date
         var refcount: Int
 
+        /// Stored recurrent-checkpoint boundary offsets (512-multiples),
+        /// independent of whether the payload is plain or sealed — the hit scan
+        /// picks the largest `≤ cap`.
+        var checkpointOffsets: [Int] {
+            switch payload {
+            case .plain(_, let checkpoints): return Array(checkpoints.keys)
+            case .sealed(_, let checkpoints): return Array(checkpoints.keys)
+            }
+        }
+
         init(
-            id: Int, scope: String, tokens: [Int], attn: [KVCache?],
-            checkpoints: [Int: [Int: [MLXArray]]], byteEstimate: Int,
-            lastUsed: Date
+            id: Int, scope: String, tokens: [Int], payload: Payload,
+            byteEstimate: Int, lastUsed: Date
         ) {
             self.id = id
             self.scope = scope
             self.tokens = tokens
-            self.attn = attn
-            self.checkpoints = checkpoints
+            self.payload = payload
             self.byteEstimate = byteEstimate
             self.lastUsed = lastUsed
             self.refcount = 0
@@ -174,6 +195,11 @@ public final class PrefixKVCache: @unchecked Sendable {
     /// mirrors OpenAI's 5–10 min inactivity eviction). 0 ⇒ no idle expiry.
     private let idleTTL: TimeInterval
     private let scopeMode: ScopeMode
+    /// ADR 024 T3 — non-nil iff `prompt_cache_encrypt_idle` is on. Holds the
+    /// process-ephemeral AES-256-GCM key and seals/opens idle entries. Rotated
+    /// (key dropped + zeroed) whenever the pool drains to empty, so the key
+    /// never outlives the data it protected.
+    private let cipher: IdleKVCipher?
     private var entries: [Entry] = []
     private var nextId = 0
     private var hits = 0
@@ -184,13 +210,17 @@ public final class PrefixKVCache: @unchecked Sendable {
 
     public init(
         maxEntries: Int, maxBytes: Int = 0, idleTTLSecs: Int = 600,
-        scope: ScopeMode = .principal
+        scope: ScopeMode = .principal, encryptIdle: Bool = false
     ) {
         self.maxEntries = max(1, maxEntries)
         self.maxBytes = max(0, maxBytes)
         self.idleTTL = TimeInterval(max(0, idleTTLSecs))
         self.scopeMode = scope
+        self.cipher = encryptIdle ? IdleKVCipher() : nil
     }
+
+    /// Whether idle entries are held as AES-256-GCM ciphertext (ADR 024 T3).
+    public var encryptsIdleEntries: Bool { cipher != nil }
 
     // MARK: - Lookup / acquire
 
@@ -215,7 +245,7 @@ public final class PrefixKVCache: @unchecked Sendable {
             let l = Self.commonPrefixLength(e.tokens, promptTokens)
             let cap = min(l, cap0)
             guard cap >= Self.chunkSize else { continue }
-            guard let b = e.checkpoints.keys.filter({ $0 <= cap }).max() else {
+            guard let b = e.checkpointOffsets.filter({ $0 <= cap }).max() else {
                 continue
             }
             if best == nil || b > best!.B { best = (e, l, b) }
@@ -228,27 +258,74 @@ public final class PrefixKVCache: @unchecked Sendable {
         let b = pick.B
 
         // Build a fresh working cache (correct per-layer Mamba/attention
-        // structure), then inject the cloned attention + restored recurrent
-        // checkpoint. Nothing from the entry is aliased into the result.
-        var working = model.newCache(parameters: nil)
-        let snap = e.checkpoints[b]
-        for i in working.indices {
-            if let mc = working[i] as? MambaCache {
-                if let layer = snap?[i] {
-                    mc.state = layer.map { $0[.ellipsis] }
-                    mc.offset = b
-                }
-            } else if let cached = e.attn[i] {
-                let c = cached.copy()
-                c.trim(e.tokens.count - b)
-                working[i] = c
-            }
+        // structure), then inject the restored attention + recurrent checkpoint.
+        // Nothing from the entry is aliased into the result. A sealed entry is
+        // decrypted just-in-time here (the only place its plaintext exists, and
+        // only under this lock); on any decrypt/decode failure we fall back to a
+        // miss so the caller cold-prefills rather than serving a corrupt cache.
+        guard let working = rebuildWorking(entry: e, b: b, model: model) else {
+            misses += 1
+            return nil
         }
         e.refcount += 1
         e.lastUsed = now
         hits += 1
         return Hit(
             caches: working, startOffset: b, commonPrefix: pick.L, entryId: e.id)
+    }
+
+    /// Reconstruct the per-request working cache from an entry at boundary `b`.
+    /// `nil` only when a sealed entry fails to decrypt/decode (treated as a
+    /// miss). Plain and sealed produce the same logical cache — full prefix KV
+    /// restored then trimmed to `b` — so the resumed prefill is bit-identical.
+    private func rebuildWorking(
+        entry e: Entry, b: Int, model: AthenaQwen35Model
+    ) -> [KVCache]? {
+        var working = model.newCache(parameters: nil)
+        switch e.payload {
+        case .plain(let attn, let checkpoints):
+            let snap = checkpoints[b]
+            for i in working.indices {
+                if let mc = working[i] as? MambaCache {
+                    if let layer = snap?[i] {
+                        mc.state = layer.map { $0[.ellipsis] }
+                        mc.offset = b
+                    }
+                } else if let cached = attn[i] {
+                    let c = cached.copy()
+                    c.trim(e.tokens.count - b)
+                    working[i] = c
+                }
+            }
+        case .sealed(let sealedAttn, let sealedCheckpoints):
+            // Invariant: a sealed payload only exists when the cipher does.
+            guard let cipher else { return nil }
+            let snap = sealedCheckpoints[b]
+            for i in working.indices {
+                if let mc = working[i] as? MambaCache {
+                    if let blob = snap?[i] {
+                        guard
+                            let arrays = openArrays(
+                                blob, aad: checkpointAAD(b, i), cipher: cipher)
+                        else { return nil }
+                        mc.state = arrays
+                        mc.offset = b
+                    }
+                } else if let blob = sealedAttn[i] {
+                    guard
+                        let arrays = openArrays(
+                            blob, aad: attnAAD(i), cipher: cipher)
+                    else { return nil }
+                    // Restore the full-prefix attention state onto the fresh
+                    // KVCacheSimple (the setter takes offset to the stored
+                    // length), then trim to the resume boundary `b` — matching
+                    // the plain path's `copy().trim()`.
+                    working[i].state = arrays
+                    _ = working[i].trim(e.tokens.count - b)
+                }
+            }
+        }
+        return working
     }
 
     public func release(_ hit: Hit) {
@@ -277,26 +354,114 @@ public final class PrefixKVCache: @unchecked Sendable {
         let now = Date()
         sweepIdle(now: now)
 
-        var attn = [KVCache?](repeating: nil, count: backbone.count)
-        var bytes = 0
-        for i in backbone.indices where !(backbone[i] is MambaCache) {
-            let c = backbone[i].copy()
-            eval(c.state)
-            attn[i] = c
-            bytes += c.state.reduce(0) { $0 + $1.nbytes }
-        }
-        for layers in recorder.checkpoints.values {
-            for arrays in layers.values {
-                bytes += arrays.reduce(0) { $0 + $1.nbytes }
+        let payload: Payload
+        let bytes: Int
+        if let cipher {
+            // ADR 024 T3 — seal each tensor group; the entry holds only
+            // ciphertext, the transient plaintext byte buffers are zeroed in
+            // `sealArrays`, and the source MLXArrays are dropped (released to
+            // MLX) so no plaintext copy is parked for the idle TTL.
+            guard let s = sealEntry(backbone: backbone, recorder: recorder, cipher: cipher)
+            else { return }  // a seal failure (not expected) just skips caching
+            payload = s.payload
+            bytes = s.bytes
+        } else {
+            var attn = [KVCache?](repeating: nil, count: backbone.count)
+            var plainBytes = 0
+            for i in backbone.indices where !(backbone[i] is MambaCache) {
+                let c = backbone[i].copy()
+                eval(c.state)
+                attn[i] = c
+                plainBytes += c.state.reduce(0) { $0 + $1.nbytes }
             }
+            for layers in recorder.checkpoints.values {
+                for arrays in layers.values {
+                    plainBytes += arrays.reduce(0) { $0 + $1.nbytes }
+                }
+            }
+            payload = .plain(attn: attn, checkpoints: recorder.checkpoints)
+            bytes = plainBytes
         }
+
         nextId += 1
         let entry = Entry(
-            id: nextId, scope: scope, tokens: promptTokens, attn: attn,
-            checkpoints: recorder.checkpoints, byteEstimate: bytes,
-            lastUsed: now)
+            id: nextId, scope: scope, tokens: promptTokens, payload: payload,
+            byteEstimate: bytes, lastUsed: now)
         entries.append(entry)
         evictIfNeeded()
+    }
+
+    // MARK: - Idle-entry encryption (ADR 024 T3)
+
+    private func attnAAD(_ layer: Int) -> String { "attn:\(layer)" }
+    private func checkpointAAD(_ offset: Int, _ layer: Int) -> String {
+        "ckpt:\(offset):\(layer)"
+    }
+
+    /// Serialize + seal one tensor group. The intermediate plaintext byte buffer
+    /// is `secureZero`'d on the way out (best-effort, ADR 023/T2 boundary);
+    /// `nil` only on a seal failure (never expected — surfaced rather than
+    /// trapped).
+    private func sealArrays(
+        _ arrays: [MLXArray], aad: String, cipher: IdleKVCipher
+    ) -> Data? {
+        var plain = KVByteCodec.encode(arrays)
+        defer { ProcessHardening.secureZero(&plain) }
+        return try? cipher.seal(plain, aad: Data(aad.utf8))
+    }
+
+    /// Open + deserialize one sealed tensor group. The decrypted plaintext is
+    /// zeroed after the MLXArrays are rebuilt (MLX copies the bytes into its own
+    /// buffers). `nil` on a tampered/AAD-mismatched/rotated-key box.
+    private func openArrays(
+        _ blob: Data, aad: String, cipher: IdleKVCipher
+    ) -> [MLXArray]? {
+        guard var plain = cipher.open(blob, aad: Data(aad.utf8)) else { return nil }
+        defer { ProcessHardening.secureZero(&plain) }
+        return try? KVByteCodec.decode(plain)
+    }
+
+    /// Build a sealed payload (+ its ciphertext byte total for governor
+    /// accounting) from the post-prefill backbone. `nil` on any seal failure.
+    private func sealEntry(
+        backbone: [KVCache], recorder: Recorder, cipher: IdleKVCipher
+    ) -> (payload: Payload, bytes: Int)? {
+        var sealedAttn = [Data?](repeating: nil, count: backbone.count)
+        var bytes = 0
+        for i in backbone.indices where !(backbone[i] is MambaCache) {
+            // `state` slices to the live offset (== prompt length); the seal
+            // snapshots a contiguous byte copy, so the live backbone may keep
+            // decoding afterwards without affecting the ciphertext.
+            guard
+                let blob = sealArrays(
+                    backbone[i].state, aad: attnAAD(i), cipher: cipher)
+            else { return nil }
+            sealedAttn[i] = blob
+            bytes += blob.count
+        }
+        var sealedCheckpoints: [Int: [Int: Data]] = [:]
+        for (offset, layers) in recorder.checkpoints {
+            var sealedLayers: [Int: Data] = [:]
+            for (layer, arrays) in layers {
+                guard
+                    let blob = sealArrays(
+                        arrays, aad: checkpointAAD(offset, layer), cipher: cipher)
+                else { return nil }
+                sealedLayers[layer] = blob
+                bytes += blob.count
+            }
+            sealedCheckpoints[offset] = sealedLayers
+        }
+        return (.sealed(attn: sealedAttn, checkpoints: sealedCheckpoints), bytes)
+    }
+
+    /// ADR 024 T3 — once the encrypted pool drains to empty, rotate (drop +
+    /// zero) the key so it never outlives the data it protected. Safe only when
+    /// `entries` is empty: a still-present entry (even in-flight) may be
+    /// re-acquired and needs its blobs decryptable under the current key. Call
+    /// with `lock` held, after any path that can empty the pool.
+    private func rotateKeyIfPoolEmptyLocked() {
+        if let cipher, entries.isEmpty { cipher.rotate() }
     }
 
     // MARK: - Eviction (count + bytes + idle-TTL, refcount-protected)
@@ -325,6 +490,7 @@ public final class PrefixKVCache: @unchecked Sendable {
         entries = entries.enumerated()
             .filter { !victims.contains($0.offset) }.map { $0.element }
         evictions += before - entries.count
+        rotateKeyIfPoolEmptyLocked()
     }
 
     /// Evict LRU entries until under BOTH the count cap and the byte cap,
@@ -339,6 +505,7 @@ public final class PrefixKVCache: @unchecked Sendable {
             entries.remove(at: victimIdx)
             evictions += 1
         }
+        rotateKeyIfPoolEmptyLocked()
     }
 
     /// Drop every entry not currently in use (refcount == 0). Returns the
@@ -355,6 +522,7 @@ public final class PrefixKVCache: @unchecked Sendable {
             .filter { !victims.contains($0.offset) }.map { $0.element }
         let freed = before - entries.count
         evictions += freed
+        rotateKeyIfPoolEmptyLocked()
         return freed
     }
 

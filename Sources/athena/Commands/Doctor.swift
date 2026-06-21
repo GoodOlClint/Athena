@@ -391,13 +391,33 @@ struct Doctor: AsyncParsableCommand {
             (ProcessInfo.processInfo.environment["ATHENA_PROMPT_CACHE"]
                 .map { $0 == "1" || $0.lowercased() == "true" })
             ?? (parsed?.promptCacheEnabled ?? false)
+        let promptCacheEncryptIdle =
+            (ProcessInfo.processInfo
+                .environment["ATHENA_PROMPT_CACHE_ENCRYPT_IDLE"]
+                .map { $0 == "1" || $0.lowercased() == "true" })
+            ?? (parsed?.promptCacheEncryptIdle ?? false)
         if promptCacheOn {
             let scope = parsed?.promptCacheScope ?? "principal"
             let entries = parsed?.promptCacheMaxEntries ?? 4
             say(
                 .ok,
-                "prompt cache: ON (scope=\(scope), max_entries=\(entries)) "
+                "prompt cache: ON (scope=\(scope), max_entries=\(entries), "
+                    + "idle_encryption=\(promptCacheEncryptIdle ? "on" : "off")) "
                     + "— MTP path, bit-identical reuse")
+            if promptCacheEncryptIdle {
+                say(
+                    .ok,
+                    "prompt cache: idle entries encrypted at rest in RAM "
+                        + "(AES-256-GCM, ADR 024 T3) — only the active decoding "
+                        + "entry is plaintext")
+            } else {
+                say(
+                    .ok,
+                    "prompt cache: idle entries are PLAINTEXT in RAM. For "
+                        + "HIPAA/PCI-sensitive reused prefixes set "
+                        + "prompt_cache_encrypt_idle = true (ADR 024 T3) so only "
+                        + "ciphertext can reach swap.")
+            }
             if !anyCreds, !loopback.contains(host) {
                 say(
                     .warn,

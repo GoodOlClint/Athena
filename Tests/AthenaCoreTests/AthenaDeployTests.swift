@@ -469,6 +469,7 @@ final class DefaultConfigTests: XCTestCase {
             prompt_cache_max_bytes = 123456
             prompt_cache_idle_ttl_secs = 900
             prompt_cache_scope = "both"
+            prompt_cache_encrypt_idle = true
             """
         let c = try AthenaConfig.parse(toml: toml)
         XCTAssertEqual(c.kvCompression, "turboquant")
@@ -477,6 +478,7 @@ final class DefaultConfigTests: XCTestCase {
         XCTAssertEqual(c.promptCacheMaxBytes, 123_456)
         XCTAssertEqual(c.promptCacheIdleTtlSecs, 900)
         XCTAssertEqual(c.promptCacheScope, "both")
+        XCTAssertEqual(c.promptCacheEncryptIdle, true)  // ADR 024 T3
     }
 
     /// The contrast case: absent keys stay nil (built-in defaults apply at
@@ -495,6 +497,7 @@ final class DefaultConfigTests: XCTestCase {
         XCTAssertNil(c.promptCacheMaxBytes)
         XCTAssertNil(c.promptCacheIdleTtlSecs)
         XCTAssertNil(c.promptCacheScope)
+        XCTAssertNil(c.promptCacheEncryptIdle)
         XCTAssertNil(c.kvCompression)
     }
 }

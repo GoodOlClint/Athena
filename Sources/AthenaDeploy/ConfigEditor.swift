@@ -29,6 +29,7 @@ public enum ConfigEditor {
     public static let rawKeys: Set<String> = [
         "temperature", "speculative", "rate_limit", "preload",
         "encrypt_store", "persist_store", "prompt_cache_enabled",
+        "prompt_cache_encrypt_idle",
         "dflash_enabled", "deny_debugger_attach",
     ]
     public static let knownKeys: Set<String> = [
@@ -52,7 +53,8 @@ public enum ConfigEditor {
         "kv_compression",
         "prompt_cache_enabled", "prompt_cache_max_entries",
         "prompt_cache_max_bytes", "prompt_cache_idle_ttl_secs",
-        "prompt_cache_scope", "dflash_enabled",
+        "prompt_cache_scope", "prompt_cache_encrypt_idle",
+        "dflash_enabled",
     ]
 
     /// `--config` wins; else `$ATHENA_CONFIG`; else the installed file at
@@ -175,6 +177,10 @@ public enum ConfigEditor {
                 throw Failure.badValue(key, "true or false")
             }
             if key == "prompt_cache_enabled",
+                value != "true", value != "false" {
+                throw Failure.badValue(key, "true or false")
+            }
+            if key == "prompt_cache_encrypt_idle",
                 value != "true", value != "false" {
                 throw Failure.badValue(key, "true or false")
             }

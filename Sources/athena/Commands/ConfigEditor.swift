@@ -81,6 +81,8 @@ extension ConfigEditor {
         case "prompt_cache_idle_ttl_secs":
             return cfg.promptCacheIdleTtlSecs.map(String.init)
         case "prompt_cache_scope": return cfg.promptCacheScope
+        case "prompt_cache_encrypt_idle":
+            return cfg.promptCacheEncryptIdle.map { $0 ? "true" : "false" }
         default: FailableExit.die("error: unknown key '\(key)'")
         }
     }

@@ -60,6 +60,19 @@ final class PrefixKVCacheTests: XCTestCase {
             base, c.scopeKey(model: "m", principal: "alice", cacheKey: "k2"))
     }
 
+    // MARK: - ADR 024 T3 idle-encryption flag wiring
+
+    /// The `encryptIdle` init flag drives whether idle entries are sealed; the
+    /// seal/restore numerics are MLX-gated (the bit-identical gate), but the
+    /// flag plumbing is pure and pinned here.
+    func testEncryptIdleFlagWiring() {
+        XCTAssertFalse(
+            PrefixKVCache(maxEntries: 4).encryptsIdleEntries,
+            "default is plaintext (off)")
+        XCTAssertTrue(
+            PrefixKVCache(maxEntries: 4, encryptIdle: true).encryptsIdleEntries)
+    }
+
     // MARK: - commonPrefixLength edge cases
 
     func testCommonPrefixLength() {

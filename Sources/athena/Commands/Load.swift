@@ -402,6 +402,16 @@ struct Load: AsyncParsableCommand {
         let prefixCacheEnabled =
             prefixEnvEnabled ?? tomlCfg?.promptCacheEnabled ?? false
 
+        // ADR 024 T3 — encrypt idle prompt-cache KV at-rest-in-RAM. Same
+        // precedence: env ATHENA_PROMPT_CACHE_ENCRYPT_IDLE (1/true/0/false)
+        // > TOML prompt_cache_encrypt_idle > built-in false. Opt-in hardening;
+        // only meaningful when the prompt cache is enabled.
+        let prefixEncryptEnv = ProcessInfo.processInfo
+            .environment["ATHENA_PROMPT_CACHE_ENCRYPT_IDLE"]
+            .map { $0 == "1" || $0.lowercased() == "true" }
+        let prefixEncryptIdle =
+            prefixEncryptEnv ?? tomlCfg?.promptCacheEncryptIdle ?? false
+
         // M63 — DFlash lossless speculative decoding, default OFF. Same
         // precedence: env ATHENA_DFLASH (1/true/0/false) > TOML
         // dflash_enabled > built-in false.
@@ -471,13 +481,18 @@ struct Load: AsyncParsableCommand {
                 maxEntries: prefixMaxEntries,
                 maxBytes: prefixMaxBytes,
                 idleTTLSecs: prefixIdleTTL,
-                scope: prefixScope)
+                scope: prefixScope,
+                encryptIdle: prefixEncryptIdle)
             : nil
         var prefixPoolProbe: MemoryGovernor.PromptCachePoolProbe?
         var prefixPoolRelief: MemoryGovernor.PromptCacheReliefHook?
         if let c = prefixCache {
             prefixPoolProbe = { c.poolBytesAndEntries() }
             prefixPoolRelief = { _ = c.flushIdle(); MLX.Memory.clearCache() }
+            if c.encryptsIdleEntries {
+                Logger(label: AthenaLogLabel.daemon).notice(
+                    "hardening: prompt-cache idle entries encrypted at rest (AES-256-GCM, ADR 024 T3)")
+            }
         }
 
         // M5.1 + M5.5 (M41 follow-up): reconcile reservations to the

@@ -57,6 +57,12 @@ public struct AthenaConfig: Sendable, Equatable {
     /// Scope mode (M59.3): `principal` (default — never cross callers),
     /// `cache_key` (key by the OpenAI prompt_cache_key hint), or `both`.
     public var promptCacheScope: String?
+    /// `prompt_cache_encrypt_idle` (ADR 024 T3) — hold idle prompt-cache KV
+    /// entries as AES-256-GCM ciphertext in RAM (only ciphertext is ever
+    /// swappable; the active decoding entry stays plaintext). Default false;
+    /// opt-in hardening for HIPAA/PCI-sensitive idle prefixes, mirroring
+    /// `encrypt_store`.
+    public var promptCacheEncryptIdle: Bool?
     /// `dflash_enabled` (M63) — DFlash lossless speculative decoding for
     /// attention-only targets (Gemma4) that MTP can't accelerate. Default
     /// false. When on, a request to a target with a registered drafter
@@ -183,6 +189,7 @@ public struct AthenaConfig: Sendable, Equatable {
         promptCacheMaxBytes: Int? = nil,
         promptCacheIdleTtlSecs: Int? = nil,
         promptCacheScope: String? = nil,
+        promptCacheEncryptIdle: Bool? = nil,
         dflashEnabled: Bool? = nil,
         denyDebuggerAttach: Bool? = nil,
         authKeysFile: String? = nil,
@@ -226,6 +233,7 @@ public struct AthenaConfig: Sendable, Equatable {
         self.promptCacheMaxBytes = promptCacheMaxBytes
         self.promptCacheIdleTtlSecs = promptCacheIdleTtlSecs
         self.promptCacheScope = promptCacheScope
+        self.promptCacheEncryptIdle = promptCacheEncryptIdle
         self.dflashEnabled = dflashEnabled
         self.denyDebuggerAttach = denyDebuggerAttach
         self.authKeysFile = authKeysFile
@@ -420,6 +428,7 @@ public struct AthenaConfig: Sendable, Equatable {
         if let pt = scalar("prompt_cache_idle_ttl_secs", in: toml) {
             pcIdleTtl = try int("prompt_cache_idle_ttl_secs", pt)
         }
+        let pcEncryptIdle = try bool("prompt_cache_encrypt_idle")
         let dflashEnabled = try bool("dflash_enabled")
         let denyDebuggerAttach = try bool("deny_debugger_attach")
         let preload = try bool("preload")
@@ -449,6 +458,7 @@ public struct AthenaConfig: Sendable, Equatable {
             promptCacheMaxBytes: pcMaxBytes,
             promptCacheIdleTtlSecs: pcIdleTtl,
             promptCacheScope: scalar("prompt_cache_scope", in: toml),
+            promptCacheEncryptIdle: pcEncryptIdle,
             dflashEnabled: dflashEnabled,
             denyDebuggerAttach: denyDebuggerAttach,
             authKeysFile: scalar("auth_keys_file", in: toml),
