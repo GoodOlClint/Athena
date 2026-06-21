@@ -52,6 +52,11 @@ MODEL="${MODEL:?set MODEL to a resident MTP model id (e.g. Qwen3.5-2B-4bit-mtp)}
 PORT="${PORT:-7461}"
 MAXTOK="${MAXTOK:-200}"
 DOCWORDS="${DOCWORDS:-2400}"
+# ADR 024 T3 — set ENCRYPT_IDLE=1 to run the SAME cold-vs-warm gate with idle
+# entries held as AES-256-GCM ciphertext. Then the warm path additionally
+# exercises seal-on-store → open-on-acquire, so a byte-identical B_cold==B_warm
+# also proves the encrypt/decrypt round-trip is bit-preserving (the T3.3 gate).
+ENCRYPT_IDLE="${ENCRYPT_IDLE:-0}"
 
 if [ -z "${ATHENA_BIN:-}" ]; then
   for c in .build/xcode/Build/Products/Release/athena \
@@ -96,7 +101,8 @@ INSTR_B='List every distinct ORGANIZATION mentioned, as a JSON array of strings.
 
 # start_daemon <data-dir> <port> <logfile>
 start_daemon() {
-  ATHENA_PROMPT_CACHE=1 "$ATHENA_BIN" load --engine mlx \
+  ATHENA_PROMPT_CACHE=1 ATHENA_PROMPT_CACHE_ENCRYPT_IDLE="$ENCRYPT_IDLE" \
+    "$ATHENA_BIN" load --engine mlx \
     --host 127.0.0.1 --port "$2" --model "$MODEL" --data-dir "$1" \
     >"$3" 2>&1 &
   PIDS+=($!)
@@ -145,6 +151,8 @@ echo " M59.1 prompt-prefix cache — bit-identical gate (real MTP)"
 echo "   binary : $ATHENA_BIN"
 echo "   model  : $MODEL   maxtok=$MAXTOK   doc≈${DOCWORDS}w"
 echo "   ports  : cold=$P1  warm=$P2   (caching ON for both)"
+[ "$ENCRYPT_IDLE" = 1 ] \
+  && echo "   T3     : idle entries ENCRYPTED (AES-256-GCM) — also proves the seal/open round-trip is bit-preserving"
 echo "════════════════════════════════════════════════════════════"
 
 echo "== daemon #1 (cold reference): B first on an empty cache =="

@@ -1,13 +1,27 @@
 # ADR 024 — in-memory data protection against a co-resident adversary
 
-**Status:** **Accepted — T1 + T2 + T3** (hardening program, M80–M81; ADR 024
-tier-scope decision resolved with the operator at Phase 0, T3 gate cleared M81).
-**T3 (encrypt idle prompt-cache KV at-rest-in-RAM)** was deferred as a stretch,
-gated on whether the target deployment runs the prompt cache with sensitive idle
-entries; **that gate is now cleared** — the deployment handles HIPAA (PHI) and/or
-PCI (PAN) workloads whose reused prefixes sit in the M59 idle cache, so T3 is
-**accepted** (plan: `docs/confidential-kv-cache-plan.md`; slices M81 from
-v0.10.206). **T1 shipped v0.10.198** (process lockdown: Hardened Runtime + no
+**Status:** **Accepted — T1 + T2 + T3 ALL SHIPPED** (hardening program, M80–M81;
+ADR 024 tier-scope decision resolved with the operator at Phase 0, T3 gate
+cleared + shipped M81). **T3 (encrypt idle prompt-cache KV at-rest-in-RAM)** was
+deferred as a stretch, gated on whether the target deployment runs the prompt
+cache with sensitive idle entries; **that gate cleared** — the deployment handles
+HIPAA (PHI) and/or PCI (PAN) workloads whose reused prefixes sit in the M59 idle
+cache. **T3 shipped v0.10.206–208** (plan: `docs/confidential-kv-cache-plan.md`;
+usage: `docs/confidential-kv-cache.md`): S1 v0.10.206 = `IdleKVCipher`
+(AES-256-GCM, swift-crypto) + the MLX-free `KVFrame` wire format + the
+`KVByteCodec` MLXArray bridge (the serialize seam a future M59.5 reuses); S2
+v0.10.207 = `PrefixKVCache` holds idle entries as ciphertext-at-rest-always
+(seal-on-store, secureZero the transient plaintext, decrypt just-in-time on a hit
+into the working clone, key rotates when the pool drains), behind
+`prompt_cache_encrypt_idle` (off by default); S3 v0.10.208 = the **bit-identical
+gate re-run with encryption ON PASSED** on the real Qwen3.5-27B-4bit-mtp —
+warm-prefix-reuse over an AES-256-GCM-sealed entry (HIT at L=2868, B=2560,
+2560/2886 tokens reused) produced **byte-identical** output to a cold prefill,
+and ran *faster* end-to-end (37.0 vs 24.4 tok/s for the cold-prefill request)
+since prefill collapsed 2886→326 tokens and the per-hit decrypt added no
+measurable stall — confirming the seal→open→decode round-trip is lossless and the
+restore comfortably beats a cold re-prefill. **T1 shipped v0.10.198** (process
+lockdown: Hardened Runtime + no
 `get-task-allow`, notarization hook); **T2 shipped v0.10.200**
 (`ProcessHardening.swift`: core
 dumps off unconditionally via `setrlimit(RLIMIT_CORE,0)`; opt-in
@@ -131,8 +145,9 @@ win and the direct answer to "lock the pool from another process":
   boundary (MLX's pool may hand the page back before we touch it).
 
 **Tier 3 — encrypt the *idle* cache at-rest-in-RAM (most responsive to the
-co-resident threat). ACCEPTED M81 (gate cleared); plan
-`docs/confidential-kv-cache-plan.md`, slices from v0.10.206.** The prompt-prefix
+co-resident threat). SHIPPED M81 v0.10.206–208 (bit-identical gate PASSED with
+encryption on); plan `docs/confidential-kv-cache-plan.md`, usage
+`docs/confidential-kv-cache.md`.** The prompt-prefix
 cache is mostly **cold entries on idle-TTL waiting for reuse** — long dwell, high
 value, the prime scraping target. Keep idle/retained KV entries **encrypted in
 RAM** (AES-256-GCM via CryptoKit), decrypt only the slice being restored into a

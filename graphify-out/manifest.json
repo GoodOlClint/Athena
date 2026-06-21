@@ -415,8 +415,8 @@
     "semantic_hash": "d16404614855c59c2001089f41c5bd78"
   },
   "Sources/athena/Athena.swift": {
-    "mtime": 1782072754.8057418,
-    "ast_hash": "54dc995f6e58a89bd6c369f938f92cff",
+    "mtime": 1782073242.5860157,
+    "ast_hash": "c831b93e8a5e47b240f9fce53ea31a62",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Audit.swift": {
@@ -860,9 +860,9 @@
     "semantic_hash": "05623beb83e4e8e372f95591d7239663"
   },
   "deploy/integration/e2e-m59-prefix-cache.sh": {
-    "mtime": 1780290224.930981,
-    "ast_hash": "9562c24c978663fd88e0d3e7b0d25616",
-    "semantic_hash": "9562c24c978663fd88e0d3e7b0d25616"
+    "mtime": 1782073107.4272563,
+    "ast_hash": "d6afb309f3bb4dfd6b3209a2e9f129ab",
+    "semantic_hash": ""
   },
   "deploy/integration/macbook-env.sh": {
     "mtime": 1779192196.3925426,
@@ -1035,8 +1035,8 @@
     "semantic_hash": "371237f6ed34877c859b071318d9b529"
   },
   "CLAUDE.md": {
-    "mtime": 1782071133.3810978,
-    "ast_hash": "76a83e9c8b53e281351b40b909b256ff",
+    "mtime": 1782073230.0200493,
+    "ast_hash": "ee9a745c5f32ee68d86751e86bc2f0ac",
     "semantic_hash": ""
   },
   "docs/cli-reference.md": {
@@ -1745,8 +1745,8 @@
     "semantic_hash": ""
   },
   "docs/decisions/024-in-memory-data-protection-coresident-threat.md": {
-    "mtime": 1782071091.6042259,
-    "ast_hash": "7aff90b548e09a1eea576cf4ac68657e",
+    "mtime": 1782073217.6986873,
+    "ast_hash": "727d9eda7666047772ce83b5eb2e206a",
     "semantic_hash": ""
   },
   "docs/decisions/025-collapse-persistent-data-tenants.md": {
@@ -1832,6 +1832,11 @@
   "docs/confidential-kv-cache-plan.md": {
     "mtime": 1782071041.5444944,
     "ast_hash": "415a72c3bfa4feae3fc4e11a55feb02d",
+    "semantic_hash": ""
+  },
+  "docs/confidential-kv-cache.md": {
+    "mtime": 1782073151.041054,
+    "ast_hash": "9831a426c0c34c87dbbca86bd722311f",
     "semantic_hash": ""
   }
 }
