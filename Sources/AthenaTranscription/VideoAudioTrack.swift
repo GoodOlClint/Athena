@@ -24,95 +24,24 @@ public enum VideoAudioTrack {
         maxSamples: Int = AudioDecode.defaultMaxSamples,
         minSamples: Int = AudioDecode.defaultMinSamples
     ) async throws -> [Float] {
-        let asset = AVURLAsset(url: url)
+        try await InMemoryAsset.readFirstAudioTrackPCM(
+            asset: AVURLAsset(url: url), keepAlive: nil, module: module,
+            maxSamples: maxSamples, minSamples: minSamples,
+            onMissingTrack: .videoNoAudioTrack(module: module))
+    }
 
-        let tracks: [AVAssetTrack]
-        do {
-            tracks = try await asset.loadTracks(withMediaType: .audio)
-        } catch {
-            throw AthenaError.invalidAudio(
-                module: module,
-                detail: "video open failed: \(error.localizedDescription)")
-        }
-        guard let track = tracks.first else {
-            throw AthenaError.videoNoAudioTrack(module: module)
-        }
-
-        let reader: AVAssetReader
-        do {
-            reader = try AVAssetReader(asset: asset)
-        } catch {
-            throw AthenaError.invalidAudio(
-                module: module,
-                detail: "video reader init failed: \(error.localizedDescription)")
-        }
-
-        // Decode straight to the canonical transcription PCM format so the
-        // downstream engine path is identical to the audio route's.
-        let settings: [String: Any] = [
-            AVFormatIDKey: kAudioFormatLinearPCM,
-            AVSampleRateKey: Double(AudioDecode.sampleRate),
-            AVNumberOfChannelsKey: 1,
-            AVLinearPCMBitDepthKey: 32,
-            AVLinearPCMIsFloatKey: true,
-            AVLinearPCMIsBigEndianKey: false,
-            AVLinearPCMIsNonInterleaved: false,
-        ]
-        let output = AVAssetReaderTrackOutput(
-            track: track, outputSettings: settings)
-        output.alwaysCopiesSampleData = false
-        guard reader.canAdd(output) else {
-            throw AthenaError.invalidAudio(
-                module: module, detail: "video reader cannot add audio output")
-        }
-        reader.add(output)
-        guard reader.startReading() else {
-            throw AthenaError.invalidAudio(
-                module: module,
-                detail: "video read start failed: "
-                    + (reader.error?.localizedDescription ?? "unknown"))
-        }
-
-        var out: [Float] = []
-        while let sample = output.copyNextSampleBuffer() {
-            defer { CMSampleBufferInvalidate(sample) }
-            guard let block = CMSampleBufferGetDataBuffer(sample) else { continue }
-            let len = CMBlockBufferGetDataLength(block)
-            guard len > 0 else { continue }
-            let count = len / MemoryLayout<Float>.size
-            var tmp = [Float](repeating: 0, count: count)
-            let copied = tmp.withUnsafeMutableBytes { ptr -> OSStatus in
-                guard let base = ptr.baseAddress else { return -1 }
-                return CMBlockBufferCopyDataBytes(
-                    block, atOffset: 0, dataLength: len, destination: base)
-            }
-            guard copied == kCMBlockBufferNoErr else {
-                reader.cancelReading()
-                throw AthenaError.invalidAudio(
-                    module: module, detail: "video sample copy failed")
-            }
-            out.append(contentsOf: tmp)
-            // Decompression-bomb ceiling: stop as soon as we pass it (D4).
-            if out.count > maxSamples {
-                reader.cancelReading()
-                throw AudioDecode.DecodeError
-                    .tooLong(maxSamples: maxSamples).athenaError(module: module)
-            }
-        }
-
-        if reader.status == .failed {
-            throw AthenaError.invalidAudio(
-                module: module,
-                detail: "video read failed: "
-                    + (reader.error?.localizedDescription ?? "unknown"))
-        }
-
-        // Same floor + ceiling as the audio decode (shared verdict).
-        if let e = AudioDecode.sampleBoundError(
-            count: out.count, minSamples: minSamples, maxSamples: maxSamples)
-        {
-            throw e.athenaError(module: module)
-        }
-        return out
+    /// Demux the audio track from an in-memory video upload `Data` — the Option-D
+    /// (ADR 025 S5) entry the daemon's `/v1/video/*` route uses, so the raw video
+    /// bytes are never staged to disk. Same decode/floor/ceiling as the URL path.
+    public static func extractPCM(
+        from data: Data, filename: String?, module: ModuleID = .transcription,
+        maxSamples: Int = AudioDecode.defaultMaxSamples,
+        minSamples: Int = AudioDecode.defaultMinSamples
+    ) async throws -> [Float] {
+        let (asset, loader) = InMemoryAsset.make(data: data, filename: filename)
+        return try await InMemoryAsset.readFirstAudioTrackPCM(
+            asset: asset, keepAlive: loader, module: module,
+            maxSamples: maxSamples, minSamples: minSamples,
+            onMissingTrack: .videoNoAudioTrack(module: module))
     }
 }

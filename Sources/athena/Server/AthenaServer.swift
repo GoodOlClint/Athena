@@ -162,6 +162,11 @@ struct AthenaServer {
     let loginLimiter = RateLimiter(rate: 0.2, burst: 5)
 
     func run() async throws {
+        // ADR 025 S5 (Option D) migration insurance: the upload decode paths no
+        // longer stage temp files, but a pre-S5 crash could have orphaned an
+        // `athena-*` upload under NSTemporaryDirectory(). Sweep any on boot so no
+        // readable request bytes linger. No-op in steady state.
+        InMemoryAsset.sweepLegacyUploadTempFiles()
         // M65.6: custom context carries the TCP peer address (for the A3
         // login limiter) and lets AuthMiddleware publish the single
         // resolved caller (A5). Middlewares are generic over Context, so
@@ -2085,20 +2090,14 @@ struct AthenaServer {
             form.text("response_format") == "verbose_json"
             && form.texts("timestamp_granularities[]").contains("word")
 
-        // Demux the audio track to PCM (AVAssetReader needs a file URL), then
-        // reuse the shared transcribePCM seam (S2). The extracted PCM funnels
-        // through the same floor/ceiling — a degenerate video is a 4xx here.
+        // Demux the audio track to PCM straight from the in-memory upload bytes
+        // (Option D, ADR 025 S5 — no temp file), then reuse the shared
+        // transcribePCM seam (S2). The extracted PCM funnels through the same
+        // floor/ceiling — a degenerate video is a 4xx here.
         let result: TranscriptionResult
         do {
-            let ext = (file.filename as NSString?)?.pathExtension ?? ""
-            let tmp = FileManager.default.temporaryDirectory
-                .appendingPathComponent(
-                    "athena-vid-\(UUID().uuidString)"
-                        + (ext.isEmpty ? "" : ".\(ext)"))
-            try file.data.write(to: tmp)
-            defer { try? FileManager.default.removeItem(at: tmp) }
             let pcm = try await VideoAudioTrack.extractPCM(
-                from: tmp, module: .transcription)
+                from: file.data, filename: file.filename, module: .transcription)
             result = try await transcription.transcribePCM(
                 pcm, language: form.text("language"),
                 wordTimestamps: wantWords)

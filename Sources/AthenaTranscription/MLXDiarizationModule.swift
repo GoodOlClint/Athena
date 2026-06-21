@@ -212,15 +212,9 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
             throw AthenaError.moduleLoadFailed(
                 .diarization, reason: "diarize called before load")
         }
-        let ext = (filename as NSString?)?.pathExtension ?? ""
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent(
-                "athena-diar-\(UUID().uuidString)"
-                    + (ext.isEmpty ? "" : ".\(ext)"))
-        try audio.write(to: tmp)
-        defer { try? FileManager.default.removeItem(at: tmp) }
-
-        let pcm = try AudioDecode.pcm16kMono(from: tmp, module: .diarization)
+        // Option D (ADR 025 S5): decode from the in-memory upload bytes.
+        let pcm = try await AudioDecode.pcm16kMono(
+            from: audio, filename: filename, module: .diarization)
         let audio = MLXArray(pcm).asType(.float32)
 
         // M24.4b: the offline single-pass path is capped by the
@@ -273,14 +267,9 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
                 reason: "the loaded model is a \(backend.rawValue) model, "
                     + "which has no segmentation backend; use method=sortformer")
         }
-        let ext = (filename as NSString?)?.pathExtension ?? ""
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent(
-                "athena-pyan-\(UUID().uuidString)"
-                    + (ext.isEmpty ? "" : ".\(ext)"))
-        try audio.write(to: tmp)
-        defer { try? FileManager.default.removeItem(at: tmp) }
-        let pcm = try AudioDecode.pcm16kMono(from: tmp, module: .diarization)
+        // Option D (ADR 025 S5): decode from the in-memory upload bytes.
+        let pcm = try await AudioDecode.pcm16kMono(
+            from: audio, filename: filename, module: .diarization)
         // PyanNet is length-agnostic and stream-windowed (no positional cap),
         // so the whole file is segmented in one pass; box the non-Sendable
         // model+pcm so the detached run can capture it (the actor serialises).

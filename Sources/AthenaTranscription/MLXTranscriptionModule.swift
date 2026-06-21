@@ -226,18 +226,10 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
         audio: Data, filename: String?, language: String?,
         wordTimestamps: Bool
     ) async throws -> TranscriptionResult {
-        // AVFoundation reads from a URL — stage the upload to a temp
-        // file (keep the client's extension so the container is
-        // detected) and always clean it up.
-        let ext = (filename as NSString?)?.pathExtension ?? ""
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent(
-                "athena-stt-\(UUID().uuidString)"
-                    + (ext.isEmpty ? "" : ".\(ext)"))
-        try audio.write(to: tmp)
-        defer { try? FileManager.default.removeItem(at: tmp) }
-
-        let pcm = try AudioDecode.pcm16kMono(from: tmp, module: .transcription)
+        // Option D (ADR 025 S5): decode from the in-memory upload bytes — no
+        // temp file. `filename` carries the container hint for the decoder.
+        let pcm = try await AudioDecode.pcm16kMono(
+            from: audio, filename: filename, module: .transcription)
         return try transcribePCM(
             pcm, language: language, wordTimestamps: wordTimestamps)
     }

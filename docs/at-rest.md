@@ -20,6 +20,19 @@ Passwords, token hashes, and Keychain secrets are safe regardless of disk
 posture. The **vector and queue blobs hold inference inputs/outputs**, so
 they are the focus of both retention and at-rest encryption.
 
+## Upload bytes are never written to disk (ADR 025 S5)
+
+Audio and video uploads (`/v1/audio/*`, `/v1/video/*`) are decoded **in
+memory** — Apple's `AVAssetReader` is fed from the in-memory request `Data`
+through an `AVAssetResourceLoaderDelegate` (`InMemoryAsset.swift`), so the raw
+upload bytes are **never staged to `NSTemporaryDirectory()`**. There is no
+on-disk upload residue to leak after a crash, and a boot-time sweep clears any
+legacy `athena-*` temp file left by the pre-S5 path. The same Apple codecs and
+hardware decode are used (no format-coverage or PCM-parity change). The upload
+`Data` and decoded PCM still live in process RAM during the request — that
+in-memory exposure is the ADR-024 Tier-1 concern (process lockdown), not a
+data-at-rest one.
+
 ## Bounded retention (opt-in)
 
 Left unbounded, queue results and vectors accumulate forever. Three knobs

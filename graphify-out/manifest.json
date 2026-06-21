@@ -295,8 +295,8 @@
     "semantic_hash": ""
   },
   "Sources/AthenaTranscription/AudioDecode.swift": {
-    "mtime": 1781844734.617837,
-    "ast_hash": "715172fa7886a5cface21a751fc2643c",
+    "mtime": 1782013482.4880385,
+    "ast_hash": "c876e3beabc76b119a0e812c782c9ef0",
     "semantic_hash": ""
   },
   "Sources/AthenaTranscription/DiarizationModule.swift": {
@@ -310,18 +310,18 @@
     "semantic_hash": "0cffb5385307049bdacb79404a864fee"
   },
   "Sources/AthenaTranscription/MLXDiarizationModule.swift": {
-    "mtime": 1781795163.0623164,
-    "ast_hash": "e9d942343d07983260c05c5b682808e6",
+    "mtime": 1782013513.4023263,
+    "ast_hash": "6aac9792e7df96a2bccf7c086ac4cd7e",
     "semantic_hash": ""
   },
   "Sources/AthenaTranscription/MLXSpeakerEmbeddingModule.swift": {
-    "mtime": 1781897566.5682623,
-    "ast_hash": "10a2c5da744d0cfc6fe66b5034ca76d3",
+    "mtime": 1782013531.9796026,
+    "ast_hash": "08daae919d2bdcdd6d13c997ec439b79",
     "semantic_hash": ""
   },
   "Sources/AthenaTranscription/MLXTranscriptionModule.swift": {
-    "mtime": 1781845015.815054,
-    "ast_hash": "238bd3fc137b0a5efa1706b48ce34503",
+    "mtime": 1782013493.9835446,
+    "ast_hash": "5f4b15ab2a8c0eba640c9800f0f4bf05",
     "semantic_hash": ""
   },
   "Sources/AthenaTranscription/Sortformer/Sortformer.swift": {
@@ -420,8 +420,8 @@
     "semantic_hash": "d16404614855c59c2001089f41c5bd78"
   },
   "Sources/athena/Athena.swift": {
-    "mtime": 1782012822.0809565,
-    "ast_hash": "251bf7b02c7b6621a9555ff955274ab9",
+    "mtime": 1782013636.6998954,
+    "ast_hash": "698f1cb84b0258b4520854d1aabc50a4",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Audit.swift": {
@@ -545,8 +545,8 @@
     "semantic_hash": "ba546feb975db11ee6e42e5e147b55e0"
   },
   "Sources/athena/Server/AthenaServer.swift": {
-    "mtime": 1781938317.3300297,
-    "ast_hash": "5691147ecd2fc63491d0180024d00ae1",
+    "mtime": 1782013562.272609,
+    "ast_hash": "2f3fe4e5054079e0185add7c50f12ff2",
     "semantic_hash": ""
   },
   "Sources/athena/Server/GPUTelemetry.swift": {
@@ -965,9 +965,9 @@
     "semantic_hash": ""
   },
   "docs/at-rest.md": {
-    "mtime": 1779510844.852417,
-    "ast_hash": "62451d6dac04a36bdae6471e26d9a37b",
-    "semantic_hash": "62451d6dac04a36bdae6471e26d9a37b"
+    "mtime": 1782013903.8565388,
+    "ast_hash": "01e5658816fffdac4018cbc1c6c63060",
+    "semantic_hash": ""
   },
   "docs/the consuming application-integration.md": {
     "mtime": 1779566685.103111,
@@ -1085,8 +1085,8 @@
     "semantic_hash": "371237f6ed34877c859b071318d9b529"
   },
   "CLAUDE.md": {
-    "mtime": 1782012911.3738992,
-    "ast_hash": "98e2c38ecaa7efac085909100e02ae4b",
+    "mtime": 1782013857.146227,
+    "ast_hash": "443ebf9af3554c7be0d5368e7d09d549",
     "semantic_hash": ""
   },
   "docs/cli-reference.md": {
@@ -1690,8 +1690,8 @@
     "semantic_hash": ""
   },
   "Sources/AthenaTranscription/VideoAudioTrack.swift": {
-    "mtime": 1781844815.2392962,
-    "ast_hash": "cb1375fbcd3668a7e6b537798955974c",
+    "mtime": 1782013461.7872803,
+    "ast_hash": "0ecde8cf0902cc235e8d4f8dd0d6e82a",
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/VideoAudioTrackTests.swift": {
@@ -1795,8 +1795,8 @@
     "semantic_hash": ""
   },
   "docs/collapse-persistence-plan.md": {
-    "mtime": 1781987237.148478,
-    "ast_hash": "a58dae742aec086ac0c0b1951aa6178b",
+    "mtime": 1782013813.5549948,
+    "ast_hash": "80cc38937b8489cca271ea8c167ec15d",
     "semantic_hash": ""
   },
   "docs/decisions/024-in-memory-data-protection-coresident-threat.md": {
@@ -1805,8 +1805,8 @@
     "semantic_hash": ""
   },
   "docs/decisions/025-collapse-persistent-data-tenants.md": {
-    "mtime": 1781987189.7837913,
-    "ast_hash": "af6e027f2e07c9bb606ef213473e8486",
+    "mtime": 1782013843.2441604,
+    "ast_hash": "978e02fefd286adc9d2ad7b83e9907af",
     "semantic_hash": ""
   },
   "docs/decisions/026-retire-allowlist-store-is-registry.md": {
@@ -1817,6 +1817,16 @@
   "docs/hardening-program-plan.md": {
     "mtime": 1782012929.5084393,
     "ast_hash": "5969ae18d998f4f2afa415fae408c90f",
+    "semantic_hash": ""
+  },
+  "Sources/AthenaTranscription/InMemoryAsset.swift": {
+    "mtime": 1782013786.1088445,
+    "ast_hash": "e90191387b62e6b55735fcbcf4fd48c8",
+    "semantic_hash": ""
+  },
+  "Tests/AthenaCoreTests/InMemoryAssetTests.swift": {
+    "mtime": 1782013619.5798552,
+    "ast_hash": "aaefc9c1c5ee82319f5e81331a9980cf",
     "semantic_hash": ""
   }
 }

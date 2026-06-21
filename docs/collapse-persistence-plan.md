@@ -69,7 +69,20 @@ the slice commit.
   stateless mode, on in authed mode); inert path writes nowhere.
 - Doctor: report mode + whether a DB exists + persistence posture.
 
-### S5 — Eliminate upload temp files via in-memory decode (Option D; separable, can land first)
+### S5 — Eliminate upload temp files via in-memory decode (Option D) — SHIPPED v0.10.199
+
+**Status: shipped.** `Sources/AthenaTranscription/InMemoryAsset.swift` backs an
+`AVURLAsset` with an `AVAssetResourceLoaderDelegate` over the `athena-mem://`
+scheme; `AudioDecode.pcm16kMono(from:Data,filename:)` and
+`VideoAudioTrack.extractPCM(from:Data,filename:)` run one shared `AVAssetReader`
+core (`readFirstAudioTrackPCM`). All six serve-path call sites (transcription,
+diarization×2, speaker-embedding×2, video) pass `Data` and the temp-write/`defer`
+blocks are gone; a boot sweep (`sweepLegacyUploadTempFiles`) clears any pre-S5
+`athena-*` orphan. **Decode-parity finding:** a resource-loader-backed asset does
+not byte-sniff (unlike the old `AVAudioFile(forReading:)`), so a magic-byte
+sniffer (`sniffExtension`) recovers the container for unnamed uploads — preserving
+the pre-S5 behavior where a filename-less upload still decoded. Unit-pinned in
+`InMemoryAssetTests` (parity, nil-filename, too-short floor, garbage→400, sweep).
 
 **Decision:** feed Apple's decoders from the in-memory upload `Data` instead of
 staging a temp file. No new dependency, same Apple decoders (no format-coverage or

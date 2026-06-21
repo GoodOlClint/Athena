@@ -71,7 +71,12 @@ Key facts that shape the decision:
    unconditional — with no allowlist in SQLite, the DB is needed only for
    auth/audit/usage.
 
-6. **Eliminate the upload temp files by decoding from memory (Option D).** The
+6. **Eliminate the upload temp files by decoding from memory (Option D).**
+   **[SHIPPED v0.10.199 — `InMemoryAsset.swift`; one shared `AVAssetReader` core
+   over an `athena-mem://` resource-loader asset; all 6 serve-path call sites pass
+   `Data`, temp staging deleted, boot sweep added. Decode-parity note: the
+   resource-loader asset does not byte-sniff like `AVAudioFile`, so a magic-byte
+   `sniffExtension` recovers the container for unnamed uploads.]** The
    audio/video upload bytes are written to `NSTemporaryDirectory()` today only
    because the *current* call sites use the file-based AVFoundation APIs
    (`AVAudioFile(forReading:)`, `AVAssetReader` over a file URL). AVFoundation is

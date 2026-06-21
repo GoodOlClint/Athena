@@ -139,15 +139,9 @@ public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule,
                 .speakerEmbedding, reason: "embed called before load")
         }
 
-        let ext = (filename as NSString?)?.pathExtension ?? ""
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent(
-                "athena-spkemb-\(UUID().uuidString)"
-                    + (ext.isEmpty ? "" : ".\(ext)"))
-        try audio.write(to: tmp)
-        defer { try? FileManager.default.removeItem(at: tmp) }
-
-        let pcm = try AudioDecode.pcm16kMono(from: tmp, module: .speakerEmbedding)
+        // Option D (ADR 025 S5): decode from the in-memory upload bytes.
+        let pcm = try await AudioDecode.pcm16kMono(
+            from: audio, filename: filename, module: .speakerEmbedding)
         let sr = Double(AudioDecode.sampleRate)
         let totalSeconds = Double(pcm.count) / sr
 
@@ -208,15 +202,9 @@ public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule,
             throw AthenaError.moduleLoadFailed(
                 .speakerEmbedding, reason: "embed called before load")
         }
-        let ext = (filename as NSString?)?.pathExtension ?? ""
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent(
-                "athena-spkwin-\(UUID().uuidString)"
-                    + (ext.isEmpty ? "" : ".\(ext)"))
-        try audio.write(to: tmp)
-        defer { try? FileManager.default.removeItem(at: tmp) }
-
-        let pcm = try AudioDecode.pcm16kMono(from: tmp, module: .speakerEmbedding)
+        // Option D (ADR 025 S5): decode from the in-memory upload bytes.
+        let pcm = try await AudioDecode.pcm16kMono(
+            from: audio, filename: filename, module: .speakerEmbedding)
         let sr = Double(AudioDecode.sampleRate)
         let win = max(1, Int(windowSeconds * sr))
         let hop = max(1, Int(hopSeconds * sr))

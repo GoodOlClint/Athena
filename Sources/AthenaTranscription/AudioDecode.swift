@@ -104,6 +104,28 @@ public enum AudioDecode {
         }
     }
 
+    /// Decode an in-memory upload `Data` → `[Float]` mono @ 16 kHz, with **no
+    /// temp file** (ADR 025 S5 / Option D). Feeds Apple's `AVAssetReader` from
+    /// the bytes via `InMemoryAsset`, applying the identical floor/ceiling and
+    /// error taxonomy as the URL path. `filename` (if present) supplies the
+    /// container hint (UTI); decoding is byte-sniffed when absent. Async so the
+    /// track load yields rather than blocking the caller's executor.
+    ///
+    /// This is the entry every audio serve path (transcription, diarization,
+    /// speaker-embedding) uses; the URL overload is retained for tests that
+    /// decode generated files from disk.
+    public static func pcm16kMono(
+        from data: Data, filename: String?, module: ModuleID,
+        maxSamples: Int = defaultMaxSamples, minSamples: Int = defaultMinSamples
+    ) async throws -> [Float] {
+        let (asset, loader) = InMemoryAsset.make(data: data, filename: filename)
+        return try await InMemoryAsset.readFirstAudioTrackPCM(
+            asset: asset, keepAlive: loader, module: module,
+            maxSamples: maxSamples, minSamples: minSamples,
+            onMissingTrack: .invalidAudio(
+                module: module, detail: "no decodable audio track in upload"))
+    }
+
     /// Decode `url` → `[Float]` mono @ 16 kHz, range ~[-1, 1]. Decoding
     /// stops with `.tooLong` once `maxSamples` is exceeded; a result below
     /// `minSamples` is rejected with `.tooShort` (`0` ⇒ no floor).
