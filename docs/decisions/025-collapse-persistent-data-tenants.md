@@ -1,13 +1,16 @@
 # ADR 025 — collapse the persistent data tenants (queue + vector DB) and add a stateless loopback mode
 
-**Status:** Accepted — **in progress** (M80). Shipped: S5 in-memory decode
-(v0.10.199), S1+S3 vector DB + `/v1/store*` removal (v0.10.201), S7 allowlist
-retirement (v0.10.202, [ADR 026](decisions/026-retire-allowlist-store-is-registry.md)),
+**Status:** **Accepted — ALL SLICES SHIPPED** (M80, v0.10.199–205). S5 in-memory
+decode (v0.10.199), S1+S3 vector DB + `/v1/store*` removal (v0.10.201), S7
+allowlist retirement (v0.10.202, [ADR 026](decisions/026-retire-allowlist-store-is-registry.md)),
 **S2 queue removal + model-ops → synchronous + SSE (v0.10.203)**, **S4 stateless
 loopback (v0.10.204)** — a loopback daemon with no credentials creates no
 `athena.sqlite`; audit/usage are in-memory only (decision pinned in
-`AthenaCore/StoreMode.swift`; `persist_store` forces on-disk). Remaining: S6
-(surface/thesis reconciliation). See the change plan
+`AthenaCore/StoreMode.swift`; `persist_store` forces on-disk) — and **S6
+surface/thesis reconciliation (v0.10.205)** — ADR 011 narrowed to
+audio/embed/vision/video tenants, ADR 013 + the Stable `/v1/*` list updated for
+the 3 removed native surfaces, model ops emit a notice log; full
+`deploy/e2e-rbac.sh` green (PASS=500/FAIL=0). See the change plan
 (`docs/collapse-persistence-plan.md`).
 Motivated by ADR 024's threat model (a co-resident adversary; minimize
 data-at-rest): the fewer places the daemon persists request content, the smaller
