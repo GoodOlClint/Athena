@@ -132,6 +132,9 @@ public enum LaunchdPlist {
         if let cacheLimit = config.mlxCacheLimitBytes {
             args += ["--mlx-cache-limit-bytes", String(cacheLimit)]
         }
+        if let admissionMode = config.governorAdmissionMode {
+            args += ["--governor-admission-mode", admissionMode]
+        }
         if config.preload == true {
             args += ["--preload"]  // a Flag, not an Option
         }

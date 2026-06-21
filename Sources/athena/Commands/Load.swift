@@ -262,6 +262,12 @@ struct Load: AsyncParsableCommand {
     )
     var mlxCacheLimitBytes: Int?
 
+    @Option(
+        help:
+            "Governor admission accounting mode (ADR 023 G2): 'footprint' (default) meters admission against max(committed, reserved) where committed = phys_footprint − reclaimable MLX cache, so the governor stops overcommitting; 'estimate' reverts to the pre-G2 reservation-only denominator. Unknown ⇒ footprint."
+    )
+    var governorAdmissionMode: String?
+
     @Flag(
         help:
             "Warm every module that has a configured default model (one per LLM/embedding/transcription/diarization/speaker-embedding class with an `is_default=1` allowlist row) at startup, instead of lazily on first request. The HTTP surface still comes up immediately; warms run concurrently in the background (best-effort — a per-module failure falls back to lazy load for that module). Modules without a configured default stay lazy."
@@ -509,6 +515,16 @@ struct Load: AsyncParsableCommand {
         // honest "what's in this process" number.
         // M5.2: trim the MLX buffer pool whenever a module unloads so
         // freed bytes actually leave the process.
+        // ADR 023 G2: admission accounting mode (CLI > TOML > default
+        // `footprint`). `footprint` meters admission against the real Metal
+        // footprint (`committed = phys_footprint − reclaimable cache`) so the
+        // governor stops overcommitting; `estimate` is the revert switch.
+        let admissionMode = GovernorMemory.AdmissionMode.parse(
+            governorAdmissionMode ?? tomlCfg?.governorAdmissionMode)
+        if admissionMode == .estimate {
+            Logger(label: AthenaLogLabel.daemon).notice(
+                "governor admission mode: estimate (ADR 023 G2 revert switch — metering reservations only, not the live footprint)")
+        }
         let governor = MemoryGovernor(
             config: config,
             memoryProbe: { Self.processResidentBytes() },
@@ -518,7 +534,19 @@ struct Load: AsyncParsableCommand {
                     .notice("model \(id.rawValue) \(msg)")
             },
             promptCachePoolProbe: prefixPoolProbe,
-            promptCacheRelief: prefixPoolRelief)
+            promptCacheRelief: prefixPoolRelief,
+            // ADR 023 G2 — the live-footprint probe (phys_footprint + the
+            // reclaimable MLX cache) and the cache-reclaim hook. Both read MLX/
+            // Mach counters HERE, at the serve seam; the admission algebra they
+            // feed stays MLX-free in `GovernorMemory` (ADR 008/009).
+            footprintProbe: {
+                (
+                    physFootprint: ProcessMemory.sample().physFootprint,
+                    cacheBytes: MLX.Memory.cacheMemory
+                )
+            },
+            reclaimCache: { MLX.Memory.clearCache() },
+            admissionMode: admissionMode)
 
         let store = ModelStore(
             rootDirectory: modelStore.map {

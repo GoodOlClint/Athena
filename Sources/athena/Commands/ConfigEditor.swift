@@ -59,6 +59,8 @@ extension ConfigEditor {
             return cfg.maxRequestBodyBytes.map(String.init)
         case "mlx_cache_limit_bytes":
             return cfg.mlxCacheLimitBytes.map(String.init)
+        case "governor_admission_mode":
+            return cfg.governorAdmissionMode
         case "preload":
             return cfg.preload.map { $0 ? "true" : "false" }
         case "encrypt_store":

@@ -145,6 +145,13 @@ public struct AthenaConfig: Sendable, Equatable {
     /// today's behavior — an explicit opt-out, NOT a parse error like the upload
     /// caps).
     public var mlxCacheLimitBytes: Int?
+    /// Admission accounting mode (ADR 023 G2). `"footprint"` (default) meters
+    /// admission against `max(committed, reserved)` where `committed =
+    /// phys_footprint − reclaimable MLX cache` — the real Metal footprint, so
+    /// the governor stops overcommitting. `"estimate"` reverts to the pre-G2
+    /// reservation-only denominator (the escape hatch). Absent / unknown ⇒
+    /// `"footprint"` (the correctness default; not a parse error).
+    public var governorAdmissionMode: String?
     /// Preload (warm) the LLM at startup instead of lazily on first
     /// request (M33.3). Optional — absent / false ⇒ lazy load (default).
     /// Opt-in: the operator trades a slower start for a warm first
@@ -205,6 +212,7 @@ public struct AthenaConfig: Sendable, Equatable {
         maxVideoUploadBytes: Int? = nil,
         maxRequestBodyBytes: Int? = nil,
         mlxCacheLimitBytes: Int? = nil,
+        governorAdmissionMode: String? = nil,
         preload: Bool? = nil,
         encryptStore: Bool? = nil,
         persistStore: Bool? = nil,
@@ -251,6 +259,7 @@ public struct AthenaConfig: Sendable, Equatable {
         self.maxVideoUploadBytes = maxVideoUploadBytes
         self.maxRequestBodyBytes = maxRequestBodyBytes
         self.mlxCacheLimitBytes = mlxCacheLimitBytes
+        self.governorAdmissionMode = governorAdmissionMode
         self.preload = preload
         self.encryptStore = encryptStore
         self.persistStore = persistStore
@@ -476,6 +485,7 @@ public struct AthenaConfig: Sendable, Equatable {
             maxVideoUploadBytes: maxVideoUpload,
             maxRequestBodyBytes: maxRequestBody,
             mlxCacheLimitBytes: mlxCacheLimit,
+            governorAdmissionMode: scalar("governor_admission_mode", in: toml),
             preload: preload,
             encryptStore: encStore,
             persistStore: persistStore,

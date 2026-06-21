@@ -34,7 +34,7 @@ public enum GovernorMemory {
     ///   math was blind to.
     /// - `.estimate`: the pre-G2 path — admit against the reservation sum alone.
     ///   The revert switch (`governor_admission_mode = "estimate"`).
-    public enum AdmissionMode: String, Sendable, Codable {
+    public enum AdmissionMode: String, Sendable, Codable, CaseIterable {
         case footprint
         case estimate
 

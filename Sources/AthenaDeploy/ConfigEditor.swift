@@ -46,6 +46,8 @@ public enum ConfigEditor {
         "request_timeout_secs", "cold_load_wait_secs", "preload",
         "max_audio_upload_bytes", "max_request_body_bytes",
         "mlx_cache_limit_bytes",
+        // ADR 023 G2 — admission accounting mode (footprint | estimate).
+        "governor_admission_mode",
         "encrypt_store", "persist_store",
         // ADR 024 T2 — opt-in debugger-attach denial (bool; see rawKeys).
         "deny_debugger_attach",
@@ -205,6 +207,19 @@ public enum ConfigEditor {
                 throw Failure.badValue(
                     key, "one of "
                         + KVCompression.allCases.map(\.rawValue)
+                        .joined(separator: ", "))
+            }
+            // ADR 023 G2 — admission mode is an enum-ish string; reject a typo
+            // at set-time against the source-of-truth case list (mirrors
+            // engine / kv_compression above) so a bad value can't silently fall
+            // back to the default at the next boot.
+            if key == "governor_admission_mode",
+                !GovernorMemory.AdmissionMode.allCases.map(\.rawValue)
+                    .contains(value)
+            {
+                throw Failure.badValue(
+                    key, "one of "
+                        + GovernorMemory.AdmissionMode.allCases.map(\.rawValue)
                         .joined(separator: ", "))
             }
             // NB2 (M66.4): the value is written quoted (`key = "<value>"`).

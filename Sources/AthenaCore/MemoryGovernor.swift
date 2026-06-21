@@ -125,10 +125,27 @@ public actor MemoryGovernor {
     /// `AthenaCore` stays substrate-agnostic — the `athena` target
     /// backs it with `MLX.Memory`. nil ⇒ estimate-only (pre-M5).
     public typealias MemoryProbe = @Sendable () -> Int
+    /// ADR 023 G2 — reads the live process footprint + the reclaimable MLX
+    /// buffer cache so admission can meter `committed = phys_footprint − cache`
+    /// (the genuinely-pinned memory) instead of trusting reservation estimates
+    /// alone. Injected (like `memoryProbe`) so AthenaCore stays
+    /// substrate-agnostic; the serve path backs it with
+    /// `ProcessMemory.sample().physFootprint` + `MLX.Memory.cacheMemory`.
+    /// `nil` (or a Mach-failure `(0, …)`) ⇒ admission degrades to the
+    /// reservation-only denominator — byte-identical to the pre-G2 path and the
+    /// path taken under `swift test` (no MLX). Distinct from `memoryProbe`
+    /// (RSS, drives the relief high-water + reconcile), which is unchanged.
+    public typealias FootprintProbe = @Sendable () -> (physFootprint: Int, cacheBytes: Int)?
     /// Called after a module finishes `unload()`, so the substrate's
     /// own buffer pool can be trimmed (the freed bytes otherwise stay
     /// cached). Injected — keeps AthenaCore substrate-agnostic.
     public typealias UnloadHook = @Sendable () -> Void
+    /// ADR 023 G2 — reclaim the reclaimable MLX buffer cache (`clearCache`) as
+    /// the first rung of the admission ladder, BEFORE evicting a tenant: the
+    /// cache is headroom, not pinned memory, so reclaiming it may let the load
+    /// fit without disrupting a resident module. Injected. `nil` ⇒ skip the
+    /// reclaim rung (the reservation-only path).
+    public typealias ReclaimCacheHook = @Sendable () -> Void
     /// Model-lifecycle observer (loading/loaded/evicted/unloaded/load
     /// failed), keyed by module. Injected so AthenaCore needs no
     /// logging dependency; the `athena` target maps it to a per-module
@@ -192,6 +209,13 @@ public actor MemoryGovernor {
     private let onEvent: EventHook?
     private let promptCachePoolProbe: PromptCachePoolProbe?
     private let promptCacheRelief: PromptCacheReliefHook?
+    /// ADR 023 G2 — live-footprint probe + cache reclaim hook + the accounting
+    /// mode. When `admissionMode == .footprint` and `footprintProbe` returns a
+    /// usable sample, admission meters `max(committed, reserved)`; otherwise it
+    /// degrades to the reservation-only denominator (pre-G2 behavior).
+    private let footprintProbe: FootprintProbe?
+    private let reclaimCache: ReclaimCacheHook?
+    private let admissionMode: GovernorMemory.AdmissionMode
     /// M5.4: real footprint observed on a prior load. Subsequent
     /// admissions use this instead of the static `memoryEstimate()`, so
     /// an evicted-then-reloaded module is admitted on its true cost.
@@ -203,7 +227,10 @@ public actor MemoryGovernor {
         onEvent: EventHook? = nil,
         promptCacheCapBytes: Int? = nil,
         promptCachePoolProbe: PromptCachePoolProbe? = nil,
-        promptCacheRelief: PromptCacheReliefHook? = nil
+        promptCacheRelief: PromptCacheReliefHook? = nil,
+        footprintProbe: FootprintProbe? = nil,
+        reclaimCache: ReclaimCacheHook? = nil,
+        admissionMode: GovernorMemory.AdmissionMode = .footprint
     ) {
         let budget = Self.safeBudget(totalBudgetBytes)
         self.totalBudgetBytes = budget
@@ -214,6 +241,9 @@ public actor MemoryGovernor {
             promptCacheCapBytes ?? (budget / 4)
         self.promptCachePoolProbe = promptCachePoolProbe
         self.promptCacheRelief = promptCacheRelief
+        self.footprintProbe = footprintProbe
+        self.reclaimCache = reclaimCache
+        self.admissionMode = admissionMode
     }
 
     public init(
@@ -221,7 +251,10 @@ public actor MemoryGovernor {
         onUnloaded: UnloadHook? = nil,
         onEvent: EventHook? = nil,
         promptCachePoolProbe: PromptCachePoolProbe? = nil,
-        promptCacheRelief: PromptCacheReliefHook? = nil
+        promptCacheRelief: PromptCacheReliefHook? = nil,
+        footprintProbe: FootprintProbe? = nil,
+        reclaimCache: ReclaimCacheHook? = nil,
+        admissionMode: GovernorMemory.AdmissionMode = .footprint
     ) {
         let budget = Self.safeBudget(config.totalBudgetBytes)
         self.totalBudgetBytes = budget
@@ -235,6 +268,9 @@ public actor MemoryGovernor {
             ? config.promptCacheCapBytes : (budget / 4)
         self.promptCachePoolProbe = promptCachePoolProbe
         self.promptCacheRelief = promptCacheRelief
+        self.footprintProbe = footprintProbe
+        self.reclaimCache = reclaimCache
+        self.admissionMode = admissionMode
     }
 
     /// M68.1 (E5) — a non-positive budget (a misconfigured `totalBudgetBytes`,
@@ -681,11 +717,59 @@ public actor MemoryGovernor {
         }
     }
 
+    /// ADR 023 G2 — the admission denominator: the larger of the live
+    /// footprint ceiling (`committed = phys_footprint − reclaimable cache`) and
+    /// the reservation floor (`residentBytes`). Returns `residentBytes` verbatim
+    /// when the mode is `.estimate`, the footprint probe is absent, or the probe
+    /// failed (`physFootprint == 0`) — so the pre-G2 path and the `swift test`
+    /// path (no MLX) are byte-identical. The decision algebra itself is the
+    /// MLX-free unit-pinned `GovernorMemory` seam; this only supplies the probe.
+    private func admissionDenominator() -> Int {
+        guard admissionMode == .footprint,
+            let sample = footprintProbe?(),
+            sample.physFootprint > 0
+        else { return residentBytes }
+        let committed = GovernorMemory.committedBytes(
+            physFootprint: sample.physFootprint,
+            reclaimableCache: sample.cacheBytes)
+        return GovernorMemory.admissionDenominator(
+            mode: .footprint, committed: committed, reserved: residentBytes)
+    }
+
     /// Free budget for `estimate` bytes, evicting evictable loaded modules
     /// LRU-first. Throws if it still cannot fit after exhausting eviction.
     private func makeRoom(for estimate: Int, requestedBy id: ModuleID) throws {
-        if residentBytes + estimate <= totalBudgetBytes { return }
+        // ADR 023 G2 — front-door gate on the LIVE footprint, not the
+        // reservation sum alone, so the genuinely-pinned resident footprint the
+        // estimates were blind to can't be overcommitted.
+        // `admissionDenominator()` == `residentBytes` when the probe is absent
+        // or the mode is `.estimate`, so this line is the pre-G2 admit check
+        // unchanged on that path.
+        if GovernorMemory.fits(
+            request: estimate, denominator: admissionDenominator(),
+            budget: totalBudgetBytes)
+        { return }
 
+        // Rung 1 — reclaim reconstructible headroom WITHOUT evicting a tenant:
+        // shed the prompt-prefix KV pool (live MLX memory ⇒ counted in
+        // `committed`, so this lowers the admission ceiling) and trim the
+        // reclaimable MLX buffer cache (keeps actual `phys_footprint` under the
+        // hard MLX limit as the new model allocates). Then re-gate — if the pool
+        // was the bloat, the load now fits without disrupting a resident module.
+        // No-ops on the pure path (both hooks nil), so the re-gate just repeats
+        // the front-door verdict there.
+        promptCacheRelief?()
+        reclaimCache?()
+        if GovernorMemory.fits(
+            request: estimate, denominator: admissionDenominator(),
+            budget: totalBudgetBytes)
+        { return }
+
+        // Rung 2 — evict evictable modules LRU-first. The loop meters the
+        // SYNCHRONOUS reservation accounting (`residentBytes`): `evictSync`
+        // returns a victim's bytes immediately, whereas the live footprint only
+        // falls once the detached `unload()` runs, so reservations are the
+        // reliable within-call progress signal here.
         let candidates = entries
             .filter { $0.key != id && $0.value.evictable && $0.value.state == .loaded }
             .sorted { $0.value.lastUsed < $1.value.lastUsed }
@@ -695,13 +779,21 @@ public actor MemoryGovernor {
             evictSync(victimID)
         }
 
-        if residentBytes + estimate > totalBudgetBytes {
-            // M59.2 — last resort before refusing the load: shed the
-            // prompt-prefix KV pool (a reconstructible perf cache). It isn't
-            // in `residentBytes` (the live probe sees it instead), so this
-            // doesn't change the arithmetic here, but it frees real Metal
-            // bytes so the load that follows this admission has headroom.
-            promptCacheRelief?()
+        // Reject if we still can't fit. After eviction the reservation gate is
+        // the live signal (`committed` lags the async unloads we just issued,
+        // so re-gating on it would spuriously reject loads that WILL fit once
+        // the unloads complete). But when NOTHING was evictable, eviction
+        // changed nothing and there is no lag — so the `committed` ceiling is
+        // authoritative and rejects an overcommit the box genuinely can't fit
+        // (the G2 point: stop admitting work the reservation count says fits but
+        // the real footprint does not).
+        let reservedOver = residentBytes + estimate > totalBudgetBytes
+        let committedOver =
+            candidates.isEmpty
+            && !GovernorMemory.fits(
+                request: estimate, denominator: admissionDenominator(),
+                budget: totalBudgetBytes)
+        if reservedOver || committedOver {
             throw AthenaError.memoryBudgetExceeded(
                 requested: estimate,
                 available: totalBudgetBytes - residentBytes,
@@ -818,10 +910,18 @@ public actor MemoryGovernor {
         }
         .sorted { $0.id.rawValue < $1.id.rawValue }
         let pool = promptCachePoolProbe?() ?? (bytes: 0, entries: 0)
+        // ADR 023 G2 — report the HONEST free budget: `budget − max(committed,
+        // reserved)` so `/healthz`/`athena ps` reflect what the box can actually
+        // fit, not `budget − estimates`. Degrades to `budget − residentBytes`
+        // (clamped ≥ 0) when the probe is absent or the mode is `.estimate`.
+        // `residentBytes` itself stays the reservation sum (per-tenant
+        // attribution + the G3 `measured` flag) — the cache is never attributed
+        // to a tenant (honesty boundary).
         return GovernorSnapshot(
             totalBudgetBytes: totalBudgetBytes,
             residentBytes: residentBytes,
-            freeBytes: totalBudgetBytes - residentBytes,
+            freeBytes: GovernorMemory.freeBytes(
+                budget: totalBudgetBytes, denominator: admissionDenominator()),
             promptCacheCapBytes: promptCacheCapBytes,
             modules: mods,
             promptCachePoolBytes: pool.bytes,

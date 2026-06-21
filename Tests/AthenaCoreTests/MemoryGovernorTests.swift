@@ -634,6 +634,112 @@ final class MemoryGovernorTests: XCTestCase {
         XCTAssertEqual(s.residentBytes, 600)
     }
 
+    // MARK: - ADR 023 G2 — admission against the real footprint
+
+    /// A mutable footprint probe (phys_footprint + reclaimable cache) for the
+    /// G2 admission tests. The governor actor serialises every read, so the
+    /// plain `var` needs no locking; `@unchecked Sendable` to cross the
+    /// `@Sendable` closure boundary (mirrors `FakeProbe`).
+    private final class FakeFootprint: @unchecked Sendable {
+        var phys: Int
+        var cache: Int
+        init(phys: Int, cache: Int = 0) {
+            self.phys = phys
+            self.cache = cache
+        }
+        func sample() -> (physFootprint: Int, cacheBytes: Int) {
+            (physFootprint: phys, cacheBytes: cache)
+        }
+    }
+
+    /// The headline G2 behaviour: with the box already near-full of pinned
+    /// memory the reservation count can't see, `.footprint` mode REFUSES a load
+    /// that `.estimate` mode would admit — admission stops overcommitting. Same
+    /// setup, the two modes diverge.
+    func testFootprintModeRejectsOvercommitThatEstimateAdmits() async throws {
+        // committed = phys(950) − cache(0) = 950 already pinned; the governor
+        // has nothing reserved yet (this is the first load).
+        let fp = FakeFootprint(phys: 950, cache: 0)
+
+        // .footprint — must reject: max(950, 0) + 400 = 1350 > 1000, and there
+        // is no evictable tenant, so the committed ceiling is authoritative.
+        let strict = MemoryGovernor(
+            totalBudgetBytes: 1_000,
+            footprintProbe: { fp.sample() },
+            admissionMode: .footprint)
+        await strict.register(
+            StubLLMModule(reserveBytes: 400), evictable: false)
+        do {
+            try await strict.ensureLoaded(.llm)
+            XCTFail("footprint mode must reject the overcommit")
+        } catch let e as AthenaError {
+            guard case .memoryBudgetExceeded = e else {
+                return XCTFail("expected memoryBudgetExceeded, got \(e)")
+            }
+        }
+        let sStrict = await strict.snapshot()
+        XCTAssertEqual(
+            sStrict.modules.first { $0.id == .llm }?.state, .unloaded)
+
+        // .estimate — the revert switch ignores the live footprint entirely:
+        // 0 reserved + 400 ≤ 1000 ⇒ admit.
+        let lax = MemoryGovernor(
+            totalBudgetBytes: 1_000,
+            footprintProbe: { fp.sample() },
+            admissionMode: .estimate)
+        await lax.register(StubLLMModule(reserveBytes: 400), evictable: false)
+        try await lax.ensureLoaded(.llm)
+        let sLax = await lax.snapshot()
+        XCTAssertEqual(sLax.modules.first { $0.id == .llm }?.state, .loaded)
+    }
+
+    /// Rung 1 of the admission ladder: shedding the reconstructible prompt-KV
+    /// pool lowers the live footprint (it is live MLX memory, counted in
+    /// `committed`), so a load that didn't fit at the front door fits after the
+    /// reclaim — WITHOUT evicting a tenant.
+    func testReclaimRungAdmitsWithoutEviction() async throws {
+        // Front door: committed 950 ⇒ 950 + 400 > 1000, refuse. The relief hook
+        // drops the live footprint to 300 (the pool was the bloat) ⇒ re-gate
+        // 300 + 400 ≤ 1000, admit.
+        let fp = FakeFootprint(phys: 950, cache: 0)
+        let reliefCalled = FakeFootprint(phys: 0)  // reuse as a simple counter
+        let gov = MemoryGovernor(
+            totalBudgetBytes: 1_000,
+            promptCacheRelief: {
+                fp.phys = 300
+                reliefCalled.phys += 1
+            },
+            footprintProbe: { fp.sample() },
+            admissionMode: .footprint)
+        await gov.register(StubLLMModule(reserveBytes: 400), evictable: false)
+
+        try await gov.ensureLoaded(.llm)
+
+        let s = await gov.snapshot()
+        XCTAssertEqual(
+            s.modules.first { $0.id == .llm }?.state, .loaded,
+            "reclaiming the prompt pool should admit without eviction")
+        XCTAssertGreaterThanOrEqual(
+            reliefCalled.phys, 1, "the relief rung must have fired")
+    }
+
+    /// Honesty surfacing: `snapshot().freeBytes` reports `budget − max(committed,
+    /// reserved)` in footprint mode, so `/healthz` reflects what the box can
+    /// actually fit — not `budget − estimates`.
+    func testSnapshotFreeBytesReflectsLiveFootprint() async throws {
+        // No module loaded; the box shows 700 pinned (cache excluded) ⇒ free is
+        // 1000 − max(700, 0) = 300, even though reservations are 0.
+        let fp = FakeFootprint(phys: 800, cache: 100)  // committed 700
+        let gov = MemoryGovernor(
+            totalBudgetBytes: 1_000,
+            footprintProbe: { fp.sample() },
+            admissionMode: .footprint)
+        let s = await gov.snapshot()
+        XCTAssertEqual(s.residentBytes, 0, "nothing reserved")
+        XCTAssertEqual(
+            s.freeBytes, 300, "free reflects the live committed footprint")
+    }
+
     // MARK: - M70.3 L9 — coalescing invokes module.load exactly once
 
     /// A module that counts its `load()` invocations and sleeps briefly so
