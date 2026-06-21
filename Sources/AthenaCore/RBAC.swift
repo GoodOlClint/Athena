@@ -20,7 +20,6 @@ public enum Permission: String, Sendable, CaseIterable, Hashable,
     case usersAdmin = "users.admin"
     case tokensAdmin = "tokens.admin"
     case inference = "inference"
-    case queueSubmit = "queue.submit"
     case metricsRead = "metrics.read"
     case daemonAdmin = "daemon.admin"
 
@@ -37,9 +36,9 @@ public enum RBAC {
         "admin": Set(Permission.allCases),
         "operator": [
             .modelRead, .modelWrite, .inference,
-            .queueSubmit, .metricsRead,
+            .metricsRead,
         ],
-        "member": [.inference, .queueSubmit],
+        "member": [.inference],
         "readonly": [
             .modelRead, .usersRead, .metricsRead,
         ],

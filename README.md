@@ -1,10 +1,9 @@
 # Athena
 
 The inference appliance of Project the platform: **one** native macOS/MLX
-daemon that hosts LLM chat, text embeddings, audio
-transcription/diarization/speaker-embeddings, a built-in vector database,
-and an async job queue — all sharing a single Metal memory governor so
-the box never oversubscribes its unified memory.
+daemon that hosts LLM chat, text embeddings, and audio/video
+transcription/diarization/speaker-embeddings — all sharing a single Metal
+memory governor so the box never oversubscribes its unified memory.
 
 Athena is a **passive oracle**. The daemon answers inbound requests only;
 it never initiates outbound connections except to fetch model weights
@@ -39,10 +38,8 @@ All errors share one envelope:
 - **Embeddings** — `POST /v1/embeddings`.
 - **Audio** — transcription (`/v1/audio/transcriptions`, with word
   timestamps + SRT/VTT), diarization, and speaker embeddings.
-- **Vector DB** — `POST /v1/vectors` + `/v1/vectors/query`, governed
-  cosine search.
-- **Async queue** — submit a job, then poll or stream its status
-  (`/v1/queue`).
+- **Model lifecycle** — `POST /api/models/{pull,convert,prune}` run
+  synchronously and stream Server-Sent Events progress (ADR 025).
 - **RBAC** — token → user → roles, managed over `/api/*` or the WebUI.
 - **Usage + audit** — per-principal token metering and an append-only
   admin audit trail (both pull-only).

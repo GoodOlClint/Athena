@@ -1,6 +1,6 @@
 # Athena
 
-Single native macOS/MLX daemon providing LLM chat, text embeddings, audio transcription/diarization/speaker-embeddings, and an async job queue — all governed by one Metal memory budget. Passive oracle: answers inbound requests only.
+Single native macOS/MLX daemon providing LLM chat, text embeddings, and audio/video transcription/diarization/speaker-embeddings — all governed by one Metal memory budget. Passive oracle: answers inbound requests only.
 
 ## Architecture
 
@@ -51,8 +51,8 @@ OpenAI-compatible drop-in, **[native]** = Athena extension under `/v1`):
 - `POST /v1/video/transcriptions` **[native]** — demux a video's audio track → transcription (ADR 022); no OpenAI equivalent
 - `POST /v1/audio/diarizations` **[native]** — no OpenAI equivalent
 - `POST /v1/audio/embeddings` (speaker embeddings) **[native]** — no OpenAI equivalent
-- `/v1/queue`, `/v1/queue/{arg}`, `/v1/queue/{arg}/events` (SSE) **[native]**
 - `GET /v1/models`, `GET /v1/models/{id}` **[oai]**
+- _(ADR 025: `/v1/queue*` removed v0.10.203 — model lifecycle ops stream SSE on `POST /api/models/{pull,convert,prune}`; `/v1/vectors*` + `/v1/store*` removed v0.10.201.)_
 
 **Native `/api/*`**: model-store and RBAC admin. Surface defined in `OpenAPISpec.swift` and `NativeAPIDTO.swift`.
 

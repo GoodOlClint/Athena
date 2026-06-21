@@ -2,11 +2,13 @@
 
 Athena keeps everything on one box: an embedded SQLite store under the
 data dir (`~/.athena/athena.sqlite` by default) holds RBAC users/tokens,
-usage counters, the audit log, and the async request queue. This document
-covers **how long that data lives** and **how it's protected on disk**.
+usage counters, and the audit log. This document covers **how long that
+data lives** and **how it's protected on disk**.
 
-> ADR 025: the built-in vector DB was removed (v0.10.201) — there is no
-> longer a `vectors` table or `/v1/vectors*` surface.
+> ADR 025: the built-in vector DB (v0.10.201) and the async request queue
+> (v0.10.203) were removed — there is no longer a `vectors` or `jobs` table,
+> nor a `/v1/vectors*` / `/v1/queue*` surface. The store no longer persists
+> **any** request inputs/outputs.
 
 ## What's stored, and how it's protected
 
@@ -15,11 +17,11 @@ covers **how long that data lives** and **how it's protected on disk**.
 | User passwords | PBKDF2 salted hashes — never reversible |
 | Bearer tokens | SHA-256 hashes — the raw token is shown once, never stored |
 | Outbound secrets (HF token, proxy creds, store key) | macOS Keychain, not the DB |
-| **Queue blobs** (request prompts + result completions) | the SQLite file |
+| Audit log + usage counters | the SQLite file (principal/action/target/result + token counts — **no request content**) |
 
 Passwords, token hashes, and Keychain secrets are safe regardless of disk
-posture. The **queue blobs hold inference inputs/outputs**, so they are the
-focus of both retention and at-rest encryption.
+posture. With the queue and vector tenants gone, the store carries **no
+inference inputs/outputs** — only credentials and audit/usage metadata.
 
 ## Upload bytes are never written to disk (ADR 025 S5)
 
@@ -34,24 +36,15 @@ hardware decode are used (no format-coverage or PCM-parity change). The upload
 in-memory exposure is the ADR-024 Tier-1 concern (process lockdown), not a
 data-at-rest one.
 
-## Bounded retention (opt-in)
+## Request-content retention
 
-Left unbounded, queue results accumulate forever. Two knobs (both in
-`deploy/athena.toml`, off by default) bound them:
-
-- `queue_result_ttl_secs` — prune terminal (done/error/canceled) queue
-  results older than the window. Swept on the worker's idle path.
-- `queue_max_rows` — cap total queue rows, trimming the oldest terminal
-  results first. Pending (queued/running) jobs are never dropped.
-
-And a content opt-out:
-
-- `drop_request_content` — clear a queued job's prompt blob the moment it
-  finishes, so inference **inputs** don't sit on disk past completion. The
-  result the client polls for is retained (bounded by
-  `queue_result_ttl_secs`). Inputs to the synchronous `/v1` + `/api`
-  paths are never persisted regardless — this only affects the async
-  queue, which must store the request to run it later.
+There is none. After ADR 025 the daemon persists **no** request inputs or
+outputs: `/v1` + `/api` inference is synchronous and keeps nothing on disk,
+the queue (the only tenant that ever stored request blobs) is gone, and
+audio/video uploads are decoded in memory (S5, above). Only the audit log
+(retention bounded by `audit_retention_days`) and usage counters persist,
+and neither holds request content. (The former `queue_result_ttl_secs` /
+`queue_max_rows` / `drop_request_content` knobs are gone with the queue.)
 
 ## At-rest encryption
 
@@ -61,7 +54,7 @@ provider — no OpenSSL). It is opt-in:
 ### Option A — `encrypt_store` (recommended for sensitive content)
 
 Set `encrypt_store = true`. The daemon resolves an encryption key, opens
-the store keyed (so the whole file — vector + queue blobs included — is
+the store keyed (so the whole file — credentials + audit/usage metadata — is
 ciphertext at rest), and **migrates an existing plaintext store in place**
 on the first encrypted start (data and credentials are preserved).
 

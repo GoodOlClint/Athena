@@ -15,12 +15,12 @@ final class RBACTests: XCTestCase {
     func testRoleBundlesPerSpec() {
         XCTAssertEqual(
             RBAC.catalog["member"],
-            [.inference, .queueSubmit])
+            [.inference])
         XCTAssertEqual(
             RBAC.catalog["operator"],
             [
                 .modelRead, .modelWrite, .inference,
-                .queueSubmit, .metricsRead,
+                .metricsRead,
             ])
         // operator must NOT have user/token/daemon admin.
         let op = RBAC.catalog["operator"]!

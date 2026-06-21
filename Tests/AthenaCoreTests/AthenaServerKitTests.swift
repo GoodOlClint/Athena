@@ -163,7 +163,6 @@ final class AthenaServerKitTests: XCTestCase {
             ("POST", "/api/users", .usersAdmin),
             ("GET", "/api/tokens", .tokensAdmin),
             ("POST", "/api/tokens", .tokensAdmin),
-            ("POST", "/v1/queue", .queueSubmit),
             // Inference catch-all (unlisted routes fail closed to .inference).
             ("POST", "/v1/chat/completions", .inference),
             ("POST", "/v1/embeddings", .inference),

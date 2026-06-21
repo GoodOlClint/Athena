@@ -156,7 +156,7 @@ struct Load: AsyncParsableCommand {
 
     @Option(
         help:
-            "Data dir for the embedded store (auth/audit/usage + queue). Default ~/.athena."
+            "Data dir for the embedded store (auth/audit/usage). Default ~/.athena."
     )
     var dataDir: String?
 
@@ -267,24 +267,6 @@ struct Load: AsyncParsableCommand {
             "Warm every module that has a configured default model (one per LLM/embedding/transcription/diarization/speaker-embedding class with an `is_default=1` allowlist row) at startup, instead of lazily on first request. The HTTP surface still comes up immediately; warms run concurrently in the background (best-effort — a per-module failure falls back to lazy load for that module). Modules without a configured default stay lazy."
     )
     var preload = false
-
-    @Option(
-        help:
-            "Queue-result TTL in seconds. 0/absent ⇒ keep forever (opt-in). Terminal (done/error/canceled) results older than this are pruned on the worker idle path; pending jobs are never touched."
-    )
-    var queueResultTtlSecs: Int?
-
-    @Option(
-        help:
-            "Max total queue job rows. 0/absent ⇒ unbounded. Over the cap, the oldest terminal results are trimmed first; pending jobs are never deleted."
-    )
-    var queueMaxRows: Int?
-
-    @Flag(
-        help:
-            "Clear a queued job's prompt (request) blob once it finishes, so inference inputs don't persist on disk past completion. The result the client polls for is retained (bounded by --queue-result-ttl-secs). Off by default."
-    )
-    var dropRequestContent = false
 
     @Flag(
         help:
@@ -685,11 +667,6 @@ struct Load: AsyncParsableCommand {
             budget=\(config.totalBudgetBytes)B
             """)
 
-        // One embedded SQLite store under the data dir backs the queue.
-        // The handle was opened above (M42.1 needed it for allowlist
-        // resolution); the rest of the data plane reuses it.
-        let queue = RequestQueue(store: athenaStore)
-
         // Inbound bearer auth (M12). Fail-safe: a non-loopback bind
         // with no keys refuses to start.
         let nTokens = await athenaStore.tokenCount()
@@ -736,7 +713,7 @@ struct Load: AsyncParsableCommand {
             embedding: embedding, transcription: transcription,
             diarization: diarization,
             speakerEmbedding: speakerEmbedding,
-            queue: queue, store: athenaStore,
+            store: athenaStore,
             modelName: modelURL.lastPathComponent,
             modelStoreRoot: store.rootDirectory, auth: authConfig,
             tlsCertPath: tlsCert, tlsKeyPath: tlsKey,
@@ -750,10 +727,7 @@ struct Load: AsyncParsableCommand {
             maxVideoUploadBytes: maxVideoUploadBytes ?? 1_073_741_824,
             maxRequestBodyBytes: maxRequestBodyBytes ?? 4_194_304,
             preload: preload,
-            prefixCache: prefixCache,
-            queueResultTtlSecs: queueResultTtlSecs ?? 0,
-            queueMaxRows: queueMaxRows ?? 0,
-            dropRequestContent: dropRequestContent)
+            prefixCache: prefixCache)
         // M54.3 — operator-action pull: at startup, fetch any configured
         // model that has an HF-style id and isn't in the store, in the
         // BACKGROUND. The HTTP surface comes up immediately (server.run

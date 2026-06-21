@@ -5,7 +5,7 @@
 
 1. **Local daemon lifecycle** — `load`/`start`/`stop`/`restart`/`status`.
 2. **Apple-host operator ops** — `install`/`pull`/`convert`/`allowlist`/… (macOS only).
-3. **HTTP client verbs** — `run`/`queue`/`auth`/`cache`, which drive
+3. **HTTP client verbs** — `run`/`auth`/`cache`, which drive
    a **local OR remote** daemon. On Linux/Windows only this portable client subset
    ships (no local daemon to manage).
 
@@ -19,7 +19,7 @@ subcommand is `load`.
 
 ## Cross-cutting options (client verbs)
 
-Verbs that talk to a daemon (`run`, `ps`, `queue`, `cache`,
+Verbs that talk to a daemon (`run`, `ps`, `cache`,
 `auth …` when remote, etc.) share `DaemonOptions`:
 
 | Option | Default | Notes |
@@ -172,18 +172,9 @@ Precedence is env > TOML. Proxy auth is Basic-only.
 
 ---
 
-## Async queue (client)
-
-`queue` — Inspect and manage the async request queue (long-poll + SSE on the wire).
-
-| Subcommand | Abstract |
-|------------|----------|
-| `queue ls` | List queued/processed jobs. |
-| `queue submit` | Enqueue a job (body from `--file` or stdin). |
-| `queue get <id>` | Get a job's status/result. |
-| `queue rm <id>` | Remove (cancel/delete) a job. |
-
----
+<!-- ADR 025 S2 — the async request queue and the `athena queue` CLI were
+     removed. Model lifecycle ops (`pull`/`convert`/`prune`) run synchronously
+     and stream SSE progress; there are no jobs to inspect. -->
 
 ---
 
@@ -209,7 +200,7 @@ Precedence is env > TOML. Proxy auth is Basic-only.
 
 ## Notes
 
-- **Verb overload, not namespaces.** The same verb (e.g. `run`, `queue`) targets a
+- **Verb overload, not namespaces.** The same verb (e.g. `run`, `pull`) targets a
   local or off-box daemon depending on `--host`/`DaemonOptions.isRemote` — there is
   no `local`/`remote` command split.
 - **Passive oracle.** The only outbound surface is opt-in remote syslog; no webhooks.

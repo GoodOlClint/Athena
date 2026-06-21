@@ -144,19 +144,6 @@ public struct AthenaConfig: Sendable, Equatable {
     /// Opt-in: the operator trades a slower start for a warm first
     /// request. Best-effort — a failed warm logs and falls back to lazy.
     public var preload: Bool?
-    /// Queue-result retention (M34.1). `queueResultTtlSecs` prunes
-    /// terminal (done/error/canceled) results older than the window;
-    /// `queueMaxRows` caps total job rows (oldest terminal trimmed
-    /// first). Both optional — absent / non-positive ⇒ keep forever
-    /// (opt-in, off by default; results hold inference outputs, so
-    /// retention is the operator's call). Pending jobs are never pruned.
-    public var queueResultTtlSecs: Int?
-    public var queueMaxRows: Int?
-    /// Content opt-out (M34.2). When true, a queued job's prompt
-    /// (request) blob is cleared once it finishes so inference inputs
-    /// don't persist on disk; the result stays (bounded by the queue
-    /// TTL). Optional — absent / false ⇒ prompts retained (default).
-    public var dropRequestContent: Bool?
     /// At-rest encryption (M34.3b). When true, the SQLite store is opened
     /// (and a plaintext store migrated) under SQLCipher AES-256, keyed
     /// from `ATHENA_STORE_KEY` env or the Keychain (generated on first
@@ -205,9 +192,6 @@ public struct AthenaConfig: Sendable, Equatable {
         maxRequestBodyBytes: Int? = nil,
         mlxCacheLimitBytes: Int? = nil,
         preload: Bool? = nil,
-        queueResultTtlSecs: Int? = nil,
-        queueMaxRows: Int? = nil,
-        dropRequestContent: Bool? = nil,
         encryptStore: Bool? = nil,
         httpsProxy: String? = nil, httpProxy: String? = nil,
         allProxy: String? = nil, noProxy: String? = nil,
@@ -252,9 +236,6 @@ public struct AthenaConfig: Sendable, Equatable {
         self.maxRequestBodyBytes = maxRequestBodyBytes
         self.mlxCacheLimitBytes = mlxCacheLimitBytes
         self.preload = preload
-        self.queueResultTtlSecs = queueResultTtlSecs
-        self.queueMaxRows = queueMaxRows
-        self.dropRequestContent = dropRequestContent
         self.encryptStore = encryptStore
         self.httpsProxy = httpsProxy
         self.httpProxy = httpProxy
@@ -410,14 +391,6 @@ public struct AthenaConfig: Sendable, Equatable {
         if let cl = scalar("mlx_cache_limit_bytes", in: toml) {
             mlxCacheLimit = try int("mlx_cache_limit_bytes", cl)
         }
-        var queueTtl: Int?
-        if let qt = scalar("queue_result_ttl_secs", in: toml) {
-            queueTtl = try int("queue_result_ttl_secs", qt)
-        }
-        var queueMax: Int?
-        if let qm = scalar("queue_max_rows", in: toml) {
-            queueMax = try int("queue_max_rows", qm)
-        }
         // J1 (M66.4): all bool keys parse via the strict truthy `bool`
         // helper; an unrecognized value is a ParseError, not silent false.
         func bool(_ key: String) throws -> Bool? {
@@ -441,7 +414,6 @@ public struct AthenaConfig: Sendable, Equatable {
         let dflashEnabled = try bool("dflash_enabled")
         let denyDebuggerAttach = try bool("deny_debugger_attach")
         let preload = try bool("preload")
-        let dropReq = try bool("drop_request_content")
         let encStore = try bool("encrypt_store")
 
         return AthenaConfig(
@@ -485,9 +457,6 @@ public struct AthenaConfig: Sendable, Equatable {
             maxRequestBodyBytes: maxRequestBody,
             mlxCacheLimitBytes: mlxCacheLimit,
             preload: preload,
-            queueResultTtlSecs: queueTtl,
-            queueMaxRows: queueMax,
-            dropRequestContent: dropReq,
             encryptStore: encStore,
             httpsProxy: scalar("https_proxy", in: toml),
             httpProxy: scalar("http_proxy", in: toml),

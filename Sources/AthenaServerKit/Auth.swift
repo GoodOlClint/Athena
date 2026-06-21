@@ -16,7 +16,7 @@ import NIOCore
 // Constant-time compare. Fail-safe: no credentials on a non-loopback
 // bind ⇒ the daemon refuses to start.
 
-/// A resolved caller: a stable principal id (for queue ownership)
+/// A resolved caller: a stable principal id (for usage metering / audit)
 /// plus the effective permission set.
 public struct AuthSubject: Sendable {
     public let principal: String
@@ -218,7 +218,7 @@ public struct AuthConfig: Sendable {
         }
         if matched {
             // Synthetic, stable principal (no DB user) — the digest
-            // itself, so per-key queue ownership still works.
+            // itself, so per-key usage metering/audit still works.
             return AuthSubject(
                 principal: "t:" + Self.hex(presented),
                 permissions: RBAC.permissions(forRoles: bootRoles))
@@ -296,8 +296,7 @@ public enum AuthStartupError: Error, CustomStringConvertible {
 /// open (discovery + login). Every
 /// other route maps to exactly one `Permission`; an unlisted route
 /// fails closed to `.inference` (the minimum authenticated
-/// capability). Per-owner queue isolation is still enforced in the
-/// handlers (M12.6) on top of the `.queueSubmit` gate.
+/// capability).
 public enum AuthPolicy {
     public static func required(method: String, path: String)
         -> Permission?
@@ -355,7 +354,6 @@ public enum AuthPolicy {
             // privileged — tokens.admin for the whole surface.
             return .tokensAdmin
         }
-        if path.hasPrefix("/v1/queue") { return .queueSubmit }
         // Inference surface (/v1/chat, /v1/embeddings, /v1/audio/*,
         // /v1/video/* (ADR 022), native /api/chat + /api/embed) and any
         // unlisted route — all inference-tier, like the audio routes.

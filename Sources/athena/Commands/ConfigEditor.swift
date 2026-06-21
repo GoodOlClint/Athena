@@ -61,12 +61,6 @@ extension ConfigEditor {
             return cfg.mlxCacheLimitBytes.map(String.init)
         case "preload":
             return cfg.preload.map { $0 ? "true" : "false" }
-        case "queue_result_ttl_secs":
-            return cfg.queueResultTtlSecs.map(String.init)
-        case "queue_max_rows":
-            return cfg.queueMaxRows.map(String.init)
-        case "drop_request_content":
-            return cfg.dropRequestContent.map { $0 ? "true" : "false" }
         case "encrypt_store":
             return cfg.encryptStore.map { $0 ? "true" : "false" }
         case "https_proxy": return cfg.httpsProxy

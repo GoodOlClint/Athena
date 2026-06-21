@@ -73,10 +73,11 @@ These come from the daemon's own limits — keep the proxy in sync:
   is a clean `413 payload_too_large`; worst-case transient daemon memory ≈
   `max_audio_upload_bytes × in-flight audio requests`, so bound concurrency
   (`--max-concurrency`) if you raise the cap much further.
-- **Streaming + long-poll:** SSE chat streams (`stream: true`), the
-  queue long-poll, and `/v1/queue` SSE hold the connection open. Disable
-  response buffering and use generous read timeouts, or clients see
-  truncated/stalled streams.
+- **Streaming:** SSE chat streams (`stream: true`) and the model-op
+  progress streams (`POST /api/models/{pull,convert,prune}`, ADR 025) hold
+  the connection open — the latter for the full duration of a multi-GB pull
+  or a convert. Disable response buffering and use generous read timeouts,
+  or clients see truncated/stalled streams.
 - **Cold-load waits (ADR 015):** a request for a not-yet-resident model
   now BLOCKS until the model loads (up to `cold_load_wait_secs`, default
   120 s) instead of returning 503 immediately. Streamed requests emit
@@ -123,7 +124,7 @@ server {
         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
 
-        # Streaming: SSE chat, queue long-poll, queue SSE. Turn off
+        # Streaming: SSE chat + model-op progress SSE. Turn off
         # buffering so tokens flush to the client immediately, and allow
         # long-lived connections.
         proxy_buffering    off;

@@ -1,7 +1,11 @@
 # ADR 025 — collapse the persistent data tenants (queue + vector DB) and add a stateless loopback mode
 
-**Status:** Proposed (M80 / pre-implementation) — awaiting operator review of the
-change plan (`docs/collapse-persistence-plan.md`). **No production code yet.**
+**Status:** Accepted — **in progress** (M80). Shipped: S5 in-memory decode
+(v0.10.199), S1+S3 vector DB + `/v1/store*` removal (v0.10.201), S7 allowlist
+retirement (v0.10.202, [ADR 026](decisions/026-retire-allowlist-store-is-registry.md)),
+**S2 queue removal + model-ops → synchronous + SSE (v0.10.203)**. Remaining: S4
+(stateless loopback), S6 (surface/thesis reconciliation). See the change plan
+(`docs/collapse-persistence-plan.md`).
 Motivated by ADR 024's threat model (a co-resident adversary; minimize
 data-at-rest): the fewer places the daemon persists request content, the smaller
 the scraping/forensics surface. Operator-confirmed: **no current downstream
@@ -130,10 +134,22 @@ and resolved in the same edit window as implementation:
 
 - **Default-off toggle instead of deletion** — rejected; the capability (and thus
   the latent persistence path) would still ship. The operator chose deletion.
-- **Replacement for async model ops** (`pull`/`convert`/`prune` currently
-  enqueued) — **deferred to implementation** (S2 of the plan): either synchronous
-  + SSE progress, or a non-persisted in-memory job tracker. Decided once the call
-  sites are in front of us.
+- **Replacement for async model ops** (`pull`/`convert`/`prune` formerly
+  enqueued) — **RESOLVED at S2 implementation (v0.10.203): synchronous + SSE
+  progress.** `POST /api/models/{pull,convert,prune}` now runs the op in-process
+  and streams Server-Sent Events directly on the request — `data:
+  {"event":"progress","fraction":F}` frames during the download, a terminal
+  `{"event":"done","result":{…}}` or `{"event":"error","error":{message,type,code}}`
+  frame, then `[DONE]` (long silent tails kept alive with `: keep-alive`
+  comments). **No job id, no persistence** — the op's lifetime is the request's.
+  The non-persisted in-memory job tracker (option b) was **rejected**: with the
+  queue gone there is no durability story to preserve, and a tracker reintroduces
+  per-op state (status-by-id, restart-loss semantics) for no benefit over a
+  blocking stream. The `.modelWrite` RBAC gate and the M30 audit record are
+  retained; the WebUI console (EventSource is GET-only) calls the same handlers
+  synchronously and renders the terminal result. The CLI (`athena pull/convert/
+  prune [--host …] [--follow]`) consumes the SSE stream; `--wait` is removed
+  (there is no job to poll), `--follow` now means "print progress as it streams."
 - **Deleting `AthenaStore` wholesale** — rejected; it is the auth/audit/usage/
   allowlist persistence layer.
 - **A bespoke in-memory decoder in the Rust shim (symphonia + rubato)** —

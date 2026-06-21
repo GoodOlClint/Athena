@@ -43,18 +43,23 @@ the slice commit.
 - Delete `VectorStoreTests.swift`; trim `AthenaStoreTests.swift`; update
   `e2e-rbac.sh`; update docs (`at-rest.md`, CLAUDE.md M7 ref).
 
-### S2 — Queue out (gated on the model-ops fork)
-- **First** re-home model lifecycle ops (`pull`/`convert`/`prune`) currently using
-  `enqueueModelOp()`. **Fork (decide at this slice):**
-  - (a) synchronous + SSE progress, no job ids/persistence; or
-  - (b) non-persisted in-memory job tracker (status by id, lost on restart).
-- Then delete `RequestQueue.swift`, `QueueWorkerService.swift`, the `jobs` table +
-  helpers (`insertJob`/`updateJob`/`getJob`/`listJobs`/`nextPendingJob`/
+### S2 — Queue out — SHIPPED v0.10.203
+- **Fork RESOLVED: (a) synchronous + SSE progress, no job ids/persistence.**
+  `POST /api/models/{pull,convert,prune}` now run in-process and stream SSE
+  (`data: {"event":"progress"|"done"|"error",…}` then `[DONE]`); `.modelWrite`
+  gate + M30 audit kept. The WebUI console calls the same handlers synchronously
+  (EventSource is GET-only). The CLI consumes the SSE stream; `--wait` removed,
+  `--follow` = print progress.
+- Deleted `RequestQueue.swift`, `QueueWorkerService.swift`, the `jobs` table +
+  all helpers (`insertJob`/`updateJob`/`getJob`/`listJobs`/`nextPendingJob`/
   `cancelQueuedJob`/`deleteJob`/`clearJobRequest`/`pruneJobs`/`trimJobs`/
-  `recentJobSummaries`).
-- Remove `/v1/queue*` routes + DTOs + handlers; `athena queue` CLI; `queue_*`
-  config; `queue.submit` RBAC; queue tests; update `/ui` (recentJobSummaries
-  dashboard) and docs (`queue-prompt-cache-contract.md`, `m61-prefix-affinity-queue.md`).
+  `recentJobSummaries`/`queuedJobCount`/`jobCount`) + `JobRow`/`JobSummary`.
+- Removed `/v1/queue*` routes + DTOs + handlers + the `queuedExecute`/
+  `enqueueModelOp` dispatch; `athena queue` CLI; `queue_result_ttl_secs`/
+  `queue_max_rows`/`drop_request_content` config (all 5 touchpoints); the
+  `queue.submit` RBAC permission; the `/healthz` `queueDepth` field; the `/ui`
+  recent-jobs dashboard panel + job poller; queue tests; queue docs
+  (`queue-prompt-cache-contract.md`, `m61-prefix-affinity-queue.md`).
 
 ### S3 — Store endpoints out — SHIPPED v0.10.201 (merged with S1)
 - Remove `/v1/store/export` + `/v1/store/stats` routes, DTOs, handlers,

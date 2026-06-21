@@ -230,24 +230,41 @@ struct ModelConvertRequest: Codable {
 }
 struct ModelPruneRequest: Codable { let dry_run: Bool? }
 
-/// Returned by an async model op (202). Poll `GET /v1/queue/:job_id`
-/// for progress/result — owner-scoped, so only the submitter (or an
-/// admin) can see it.
-struct ModelJobResponse: Codable {
-    let job_id: String
-    let status: String  // "queued"
+// ADR 025 S2 — model lifecycle ops (`/api/models/{pull,convert,prune}`)
+// run **synchronously** and stream progress over Server-Sent Events; the
+// async queue (and its job ids / persistence) is gone. Each SSE `data:`
+// frame is one event:
+//   - {"event":"progress","fraction":0…1}  (download phase; pull/convert)
+//   - {"event":"done","result":{…op-specific…}}  (terminal success)
+//   - {"event":"error","error":{message,type,code}}  (terminal failure)
+// followed by the SSE `[DONE]` sentinel. Long silent tails (e.g. the
+// convert quantization phase, which has no HF progress) are kept alive
+// with `: keep-alive` comment frames.
+
+/// SSE `progress` event — the 0…1 download fraction.
+struct ModelOpProgressEvent: Codable {
+    let event: String  // "progress"
+    let fraction: Double
 }
 
-// Stored job results (surfaced under `result` on /v1/queue/:id).
-struct QueuedModelPullResult: Codable {
+/// SSE `error` event — the canonical `{message,type,code}` error detail
+/// under an `event` discriminator (the body is the same shape `/v1`+`/api`
+/// error responses use, so a consumer parses one envelope everywhere).
+struct ModelOpErrorEvent: Codable {
+    let event: String  // "error"
+    let error: APIErrorBody.ErrorDetail
+}
+
+// Terminal `result` payloads (the `result` field of a `done` event).
+struct ModelPullResult: Codable {
     let name: String
     let path: String
 }
-struct QueuedModelConvertResult: Codable {
+struct ModelConvertResult: Codable {
     let path: String
     let bytes: Int
 }
-struct QueuedModelPruneResult: Codable {
+struct ModelPruneResult: Codable {
     let candidates: [String]
     let removed: Int
     let dry_run: Bool

@@ -27,8 +27,8 @@ struct AthenaServer {
     let transcription: any TranscriptionModule
     let diarization: any DiarizationModule
     let speakerEmbedding: any SpeakerEmbeddingModule
-    let queue: RequestQueue
-    /// Shared SQLite store (auth/audit/usage/allowlist + queue).
+    /// Shared SQLite store (auth/audit/usage). ADR 025 dropped the queue
+    /// and vector tenants; ADR 026 retired the allowlist.
     let store: AthenaStore
     /// Served model's display name, echoed in native `/api/*` replies.
     let modelName: String
@@ -124,21 +124,6 @@ struct AthenaServer {
     /// unavailable). Set by `Load.run()`; read by `/healthz`. `var = nil`,
     /// set post-init.
     var gpuProbe: GPUTelemetryProbe? = nil
-    /// Queue-result retention (M34.1). `queueResultTtlSecs` > 0 ⇒ prune
-    /// terminal (done/error/canceled) results older than that window;
-    /// `queueMaxRows` > 0 ⇒ cap RETAINED RESULT (terminal) rows, deleting
-    /// the oldest first (H13: pending queued/running work is never counted
-    /// toward — or evicted by — the cap). Both 0 ⇒ keep forever (opt-in).
-    /// Swept on the worker idle path so inference outputs don't accumulate
-    /// on disk unbounded. `var = 0` so they're memberwise-init params.
-    var queueResultTtlSecs: Int = 0
-    var queueMaxRows: Int = 0
-    /// Content opt-out (M34.2). When true, the queue clears a job's
-    /// persisted `request` (prompt) blob once it reaches a terminal
-    /// state, so inference INPUTS don't sit on disk after the answer is
-    /// produced (the result the client polls for stays, bounded by the
-    /// queue TTL). `var = false` so it's a memberwise-init param.
-    var dropRequestContent: Bool = false
     /// WebUI session signer (M12.2). Per-process random secret —
     /// sessions invalidate on restart (acceptable for an appliance).
     let session = Session()
@@ -192,7 +177,7 @@ struct AthenaServer {
         }
         router.add(middleware: MetricsMiddleware(metrics: metrics))
 
-        router.get("/healthz") { [metrics, queue] _, _ -> Response in
+        router.get("/healthz") { [metrics] _, _ -> Response in
             let snapshot = await governor.snapshot()
             // Join each module slot to the id of its resident model (the
             // governor tracks bytes/state, not model identity).
@@ -203,14 +188,12 @@ struct AthenaServer {
                 }
             }
             let (inflight, lastAt, decodeTps) = await metrics.healthFields()
-            let depth = await queue.depth()
             let gpu = gpuProbe?.current ?? (mhz: nil, activeResidency: nil)
             return Self.json(
                 HealthResponse(
                     snapshot: snapshot,
                     residentModels: residentModels,
                     inflight: inflight,
-                    queueDepth: depth,
                     lastRequestAt: lastAt,
                     lastDecodeTokensPerSec: decodeTps,
                     powerAssertionHeld: powerAssertionHeld,
@@ -261,7 +244,7 @@ struct AthenaServer {
         // gates /ui* on daemonAdmin); each handler ALSO re-checks the
         // logged-in user's model.read/model.write and (mutations) the
         // CSRF token, then REUSES the M16 op methods (ModelStoreOps /
-        // enqueueModelOp) — no self-HTTP, no duplication. All static
+        // performModelOp) — no self-HTTP, no duplication. All static
         // literals ⇒ no Hummingbird trie-order hazard.
         router.get("/ui/models") { request, _ -> Response in
             await handleUIModelsPage(request)
@@ -293,50 +276,28 @@ struct AthenaServer {
                 await self.handleModelCopy($0)
             }
         }
+        // ADR 025 S2 — model ops run synchronously now (no async queue).
+        // The browser console isn't an SSE consumer (EventSource is
+        // GET-only), so these POSTs BLOCK until the op completes and return
+        // the terminal result JSON (or the error envelope). The CLI gets
+        // streamed SSE progress on the same `/api/models/*` routes.
         router.post("/ui/api/models/pull") { request, _
             -> Response in
             await uiModelMutate(request) { r in
-                await self.enqueueModelOp(
-                    kind: "model_pull", r
-                ) { d in
-                    guard
-                        let x = try? JSONDecoder().decode(
-                            ModelPullRequest.self, from: d),
-                        !x.id.isEmpty
-                    else {
-                        return "model_pull requires non-empty 'id'"
-                    }
-                    return nil
-                }
+                await self.uiModelOp(kind: "model_pull", r)
             }
         }
         router.post("/ui/api/models/convert") { request, _
             -> Response in
             await uiModelMutate(request) { r in
-                await self.enqueueModelOp(
-                    kind: "model_convert", r
-                ) { d in
-                    guard
-                        let x = try? JSONDecoder().decode(
-                            ModelConvertRequest.self, from: d),
-                        !x.id.isEmpty
-                    else {
-                        return
-                            "model_convert requires non-empty 'id'"
-                    }
-                    return nil
-                }
+                await self.uiModelOp(kind: "model_convert", r)
             }
         }
         router.post("/ui/api/models/prune") { request, _
             -> Response in
             await uiModelMutate(request) { r in
-                await self.enqueueModelOp(
-                    kind: "model_prune", r) { _ in nil }
+                await self.uiModelOp(kind: "model_prune", r)
             }
-        }
-        router.get("/ui/api/job") { request, _ -> Response in
-            await uiJobStatus(request)
         }
 
         // Daemon control console (M18.3). The WebUI runs INSIDE the
@@ -463,31 +424,9 @@ struct AthenaServer {
             await handleVideoTranscriptions(request)
         }
 
-        // Async request queue (M8.1).
-        // Same path node ⇒ one shared param name across methods
-        // (Hummingbird's trie binds the name per position).
-        router.post("/v1/queue/:arg") { request, context -> Response in
-            await handleQueueSubmit(
-                context.parameters.get("arg"), request)
-        }
-        router.get("/v1/queue") { request, _ -> Response in
-            await handleQueueList(request)
-        }
-        router.get("/v1/queue/:arg") { request, context -> Response in
-            await handleQueueStatus(
-                context.parameters.get("arg"), request)
-        }
-        router.delete("/v1/queue/:arg") { request, context -> Response in
-            await handleQueueRemove(
-                context.parameters.get("arg"), request)
-        }
-        // SSE: stream status transitions until terminal (inbound only —
-        // the passive-oracle thesis forbids outbound webhooks).
-        router.get("/v1/queue/:arg/events") { request, context
-            -> Response in
-            await handleQueueEvents(
-                context.parameters.get("arg"), request)
-        }
+        // ADR 025 S2 — the async request queue (`/v1/queue*`) was removed
+        // entirely. Inference is synchronous on `/v1/*`; long-running model
+        // ops stream SSE progress on `/api/models/{pull,convert,prune}`.
 
         // Athena-native API (M16). `/v1/*` stays OpenAI-compatible;
         // `/api/*` is Athena's OWN dialect (clean minimal JSON, NOT
@@ -559,38 +498,18 @@ struct AthenaServer {
         router.post("/api/models/copy") { request, _ -> Response in
             await handleModelCopy(request)
         }
-        // Long-running ops → enqueued (model.write-gated route);
-        // returns {job_id}, poll GET /v1/queue/:job_id.
+        // Long-running ops (model.write-gated routes). ADR 025 S2: they run
+        // SYNCHRONOUSLY and stream SSE progress directly on this route — no
+        // job id, no async queue, no persistence. `data: {"event":…}` frames
+        // (progress / done / error) end with `[DONE]`.
         router.post("/api/models/pull") { request, _ -> Response in
-            await enqueueModelOp(
-                kind: "model_pull", request
-            ) { d in
-                guard
-                    let r = try? JSONDecoder().decode(
-                        ModelPullRequest.self, from: d),
-                    !r.id.isEmpty
-                else { return "model_pull requires non-empty 'id'" }
-                return nil
-            }
+            await handleModelPull(request)
         }
         router.post("/api/models/convert") { request, _ -> Response in
-            await enqueueModelOp(
-                kind: "model_convert", request
-            ) { d in
-                guard
-                    let r = try? JSONDecoder().decode(
-                        ModelConvertRequest.self, from: d),
-                    !r.id.isEmpty
-                else {
-                    return "model_convert requires non-empty 'id'"
-                }
-                return nil
-            }
+            await handleModelConvert(request)
         }
         router.post("/api/models/prune") { request, _ -> Response in
-            await enqueueModelOp(kind: "model_prune", request) {
-                _ in nil
-            }
+            await handleModelPrune(request)
         }
         // Explicit per-module model lifecycle (M41.1): rebind a slot or
         // release it without bouncing the daemon. Generalizes M39's
@@ -667,21 +586,6 @@ struct AthenaServer {
             await handleTokenRotate(
                 context.parameters.get("prefix"), request)
         }
-
-        // Wire the queue executor to the governed module paths (M8.1).
-        // The serial worker runs as a managed Service (below) so it
-        // drains on graceful shutdown rather than being cancelled mid-job.
-        await queue.setExecutor { kind, data, owner in
-            await self.queuedExecute(
-                kind: kind, request: data, owner: owner)
-        }
-
-        // M34.1: bound retained queue results so inference outputs don't
-        // persist forever. Swept on the worker idle path (startup + each
-        // time it drains empty). 0/0 ⇒ keep forever (opt-in).
-        await queue.setRetention(
-            ttlSecs: queueResultTtlSecs, maxRows: queueMaxRows,
-            dropRequestContent: dropRequestContent)
 
         // M33.3 / M46.2: optionally warm every module that has a
         // configured default model at startup so the first request to
@@ -765,11 +669,10 @@ struct AthenaServer {
             }
         }
 
-        // M33.2: register the queue worker in the application's
-        // ServiceGroup. `runService` installs SIGTERM/SIGINT graceful
-        // shutdown; on signal the HTTP server drains its in-flight
-        // requests and the worker finishes its in-flight job, both within
-        // the stop window — no abrupt mid-request/mid-job teardown.
+        // `runService` installs SIGTERM/SIGINT graceful shutdown; on signal
+        // the HTTP server drains its in-flight requests within the stop
+        // window — no abrupt mid-request teardown. (ADR 025 S2 removed the
+        // queue worker service that previously joined this group.)
         let app = Application(
             router: router,
             server: try Self.serverBuilder(
@@ -778,8 +681,7 @@ struct AthenaServer {
                 address: .hostname(
                     config.listenHost, port: config.listenPort),
                 serverName: "athena"
-            ),
-            services: [QueueWorkerService(queue: queue)]
+            )
         )
         try await app.runService()
     }
@@ -2531,14 +2433,14 @@ struct AthenaServer {
                 dimension: result.dimension))
     }
 
-    // MARK: - Async request queue (M8.1)
+    // MARK: - Principal resolution & metering (M12.6 / M27)
 
-    /// Per-submitter queue authorization (M12.6 → M15.2). `enforced`
-    /// is auth being on; `principal` identifies the bearer's owning
-    /// subject (`u:<user>` for a managed token, `t:<hash>` for a
-    /// bootstrap key — AuthMiddleware already gated `.queueSubmit`).
-    /// `isAdmin` (sees every tenant's jobs) = the caller holds the
-    /// full permission set, i.e. the `admin` role.
+    /// Resolve the caller's principal + admin/enforced flags from the
+    /// AuthMiddleware-published resolution. `enforced` is auth being on;
+    /// `principal` identifies the bearer's owning subject (`u:<user>` for a
+    /// managed token, `t:<hash>` for a bootstrap key). `isAdmin` = the
+    /// caller holds the full permission set (the `admin` role). Used for
+    /// per-principal usage metering + the `/api/usage` admin/own scoping.
     private func queuePrincipal(_ request: Request) async -> (
         principal: String?, isAdmin: Bool, enforced: Bool
     ) {
@@ -2917,186 +2819,182 @@ struct AthenaServer {
             ts: ts, level: levelRaw, category: category, message: msg)
     }
 
-    /// May this caller see/act on `job`? Open when auth is off;
-    /// admin sees all; a nil-owner row is legacy/unowned (pre-M12.6,
-    /// back-compat); otherwise only the submitting principal.
-    private static func canAccess(
-        _ job: JobRow, principal: String?, isAdmin: Bool,
-        enforced: Bool
-    ) -> Bool {
-        if !enforced || isAdmin { return true }
-        // NA6: an ownerless job (owner==nil — e.g. submitted while auth was
-        // disabled, before an off→on transition) is NOT readable/removable
-        // by an arbitrary authenticated tenant. Under enforced auth it's
-        // admin-only; only auth-off or admin already returned true above, so
-        // reaching here means a non-admin under enforced auth → deny.
-        guard let owner = job.owner else { return isAdmin || !enforced }
-        return owner == principal
+    // MARK: - Model lifecycle ops (ADR 025 S2 — synchronous + SSE)
+
+    /// One SSE `data:` frame around an encoded JSON payload.
+    private static func sseFrame(_ bytes: Data) -> ByteBuffer {
+        var b = ByteBuffer()
+        b.writeString("data: ")
+        b.writeBytes(bytes)
+        b.writeString("\n\n")
+        return b
     }
 
-    /// H6 (M65.6): the store-layer owner scope for a queue read. An admin
-    /// or an auth-off operator sees every job (nil = unfiltered); a scoped
-    /// tenant is confined to its own principal at the SQL layer, beneath
-    /// the `canAccess` check the handlers still apply.
-    private static func ownerScope(
-        _ who: (principal: String?, isAdmin: Bool, enforced: Bool)
-    ) -> String? {
-        (who.isAdmin || !who.enforced) ? nil : who.principal
-    }
-
-    private func handleQueueSubmit(
-        _ kind: String?, _ request: Request
-    ) async -> Response {
-        guard let kind, RequestQueue.publicKinds.contains(kind) else {
-            return Self.error(
-                status: .badRequest,
-                message:
-                    "unknown queue kind; expected one of "
-                    + RequestQueue.publicKinds.sorted().joined(
-                        separator: ", "),
-                type: "invalid_request_error", code: "invalid_kind")
-        }
-        let body: Data
-        do {
-            let buf = try await request.body.collect(
-                upTo: 8 * 1024 * 1024)
-            body = Data(buffer: buf)
-        } catch {
-            return Self.error(
-                status: .badRequest,
-                message: "Invalid request body: \(error)",
-                type: "invalid_request_error", code: "invalid_body")
-        }
-        let who = await queuePrincipal(request)
-        do {
-            let id = try await queue.submit(
-                kind: kind, request: body,
-                owner: who.enforced ? who.principal : nil)
-            return Self.json(
-                QueueSubmitResponse(id: id, status: "queued"))
-        } catch let e as AthenaError {
-            // issue #6: a queued request can fail for a client reason (e.g.
-            // model_not_available) — surface it as the real 4xx, not 500.
-            return Self.classified(e, module: .llm)
-        } catch {
-            Self.log.warning("queue submit failed code=queue_error \(error)")
-            return Self.error(
-                status: .internalServerError,
-                message: "Failed to enqueue the job.",
-                type: "server_error", code: "queue_error")
-        }
-    }
-
-    private static func isTerminal(_ s: String) -> Bool {
-        s == "done" || s == "error" || s == "canceled"
-    }
-
-    private static func statusResponse(_ job: JobRow) -> Response {
-        let result = job.result.flatMap {
-            try? JSONDecoder().decode(JSONValue.self, from: $0)
-        }
-        return json(
-            QueueStatusResponse(
-                id: job.id, kind: job.kind, status: job.status,
-                result: result, error: job.error))
-    }
-
-    /// `?wait=N` long-polls up to N s (clamped 0…120) for a terminal
-    /// state before responding — inbound-only, no outbound callback.
-    private func handleQueueStatus(
-        _ id: String?, _ request: Request
-    ) async -> Response {
-        guard let id else {
-            return Self.error(
-                status: .notFound, message: "no job ''",
-                type: "invalid_request_error", code: "not_found")
-        }
-        var wait = 0
-        if let q = request.uri.query {
-            for kv in q.split(separator: "&")
-            where kv.hasPrefix("wait=") {
-                wait = min(120, max(0, Int(kv.dropFirst(5)) ?? 0))
-            }
-        }
-        let who = await queuePrincipal(request)
-        // H6: scope the store fetch to the caller for a non-admin tenant
-        // (nil = admin / auth-off see all). `canAccess` below still
-        // enforces — this is the defense-in-depth layer underneath it.
-        let scope = Self.ownerScope(who)
-        let deadline = Date().addingTimeInterval(Double(wait))
-        while true {
-            guard let job = await queue.status(id: id, owner: scope),
-                Self.canAccess(
-                    job, principal: who.principal,
-                    isAdmin: who.isAdmin, enforced: who.enforced)
+    /// Run a model store op to completion. `progress` (0…1) reports the
+    /// download fraction where the op has one (pull/convert); prune has
+    /// none. Returns the op-specific result JSON, or an error envelope
+    /// detail (`{message,type,code}`). ADR 025 S2: model ops are
+    /// synchronous now — no async queue, no job id, no persistence. Shared
+    /// by the SSE CLI handlers and the blocking `/ui` console.
+    private func performModelOp(
+        kind: String, body: Data,
+        progress: @escaping @Sendable (Double) -> Void = { _ in }
+    ) async -> (result: Data?, error: APIErrorBody.ErrorDetail?) {
+        switch kind {
+        case "model_pull":
+            // Egress (proxy + HF token) was exported process-wide at daemon
+            // startup (Load); the #hubDownloader reads it. Only sanctioned
+            // model-fetch egress — passive oracle intact.
+            guard
+                let req = try? JSONDecoder().decode(
+                    ModelPullRequest.self, from: body), !req.id.isEmpty
             else {
-                // 404 (not 403) — don't reveal another tenant's job.
-                return Self.error(
-                    status: .notFound, message: "no job '\(id)'",
-                    type: "invalid_request_error", code: "not_found")
+                return (
+                    nil,
+                    .init(
+                        message: "model_pull requires non-empty 'id'",
+                        type: "invalid_request_error", code: "invalid_body"))
             }
-            if Self.isTerminal(job.status) || Date() >= deadline {
-                return Self.statusResponse(job)
+            do {
+                let dest = try await ModelPull.pull(
+                    id: req.id, revision: req.revision,
+                    into: modelStoreRoot, progress: progress)
+                return (
+                    try? JSONEncoder().encode(
+                        ModelPullResult(
+                            name: dest.lastPathComponent, path: dest.path)),
+                    nil)
+            } catch {
+                return (
+                    nil,
+                    .init(
+                        message: "pull failed: \(ModelPull.friendlyError(error))",
+                        type: "server_error", code: "pull_failed"))
             }
-            try? await Task.sleep(nanoseconds: 250_000_000)
+        case "model_convert":
+            guard
+                let req = try? JSONDecoder().decode(
+                    ModelConvertRequest.self, from: body), !req.id.isEmpty
+            else {
+                return (
+                    nil,
+                    .init(
+                        message: "model_convert requires non-empty 'id'",
+                        type: "invalid_request_error", code: "invalid_body"))
+            }
+            do {
+                // M-conv: `bits` is opt-in (mlx_lm-style). Omit ⇒ no
+                // quantization; explicit N ⇒ quantize to N-bit.
+                let r = try await ModelConvert.convert(
+                    id: req.id, revision: req.revision, bits: req.bits,
+                    groupSize: req.group_size ?? 64,
+                    into: modelStoreRoot, name: req.name,
+                    progress: progress)
+                return (
+                    try? JSONEncoder().encode(
+                        ModelConvertResult(path: r.path.path, bytes: r.bytes)),
+                    nil)
+            } catch let e as AthenaError {
+                // Cause-naming convert errors (ADR 016 redirect / unsupported
+                // class) carry an actionable message + stable code — surface
+                // them verbatim instead of a raw substrate dump.
+                return (
+                    nil,
+                    .init(message: e.message, type: e.type, code: e.code))
+            } catch {
+                return (
+                    nil,
+                    .init(
+                        message: "convert failed: \(error)",
+                        type: "server_error", code: "convert_failed"))
+            }
+        case "model_prune":
+            let req =
+                (try? JSONDecoder().decode(
+                    ModelPruneRequest.self, from: body))
+                ?? ModelPruneRequest(dry_run: false)
+            do {
+                let pr = try ModelStoreOps.prune(
+                    root: modelStoreRoot, dryRun: req.dry_run ?? false)
+                return (
+                    try? JSONEncoder().encode(
+                        ModelPruneResult(
+                            candidates: pr.victims.map { $0.name },
+                            removed: pr.removed, dry_run: pr.dryRun)),
+                    nil)
+            } catch {
+                return (
+                    nil,
+                    .init(
+                        message: "prune failed: \(error)",
+                        type: "server_error", code: "prune_failed"))
+            }
+        default:
+            return (
+                nil,
+                .init(
+                    message: "unknown model op '\(kind)'",
+                    type: "invalid_request_error", code: "invalid_kind"))
         }
     }
 
-    private func handleQueueEvents(
-        _ id: String?, _ request: Request
-    ) async -> Response {
-        let who = await queuePrincipal(request)
-        let scope = Self.ownerScope(who)  // H6 defense-in-depth
-        if let id, let job = await queue.status(id: id, owner: scope),
-            !Self.canAccess(
-                job, principal: who.principal, isAdmin: who.isAdmin,
-                enforced: who.enforced)
-        {
-            return Self.error(
-                status: .notFound, message: "no job '\(id)'",
-                type: "invalid_request_error", code: "not_found")
-        }
-        let q = queue
+    /// Stream a model op's progress over SSE on the current request (ADR
+    /// 025 S2). Emits `data: {"event":"progress","fraction":F}` frames
+    /// during the download, `: keep-alive` comments during silent tails
+    /// (e.g. the convert quantization phase, which has no HF progress), and
+    /// a terminal `data: {"event":"done","result":…}` or
+    /// `data: {"event":"error","error":…}` frame before `[DONE]`.
+    private func streamModelOp(kind: String, body: Data) -> Response {
         let stream = AsyncStream<ByteBuffer> { continuation in
-            let task = Task {
-                func emit(_ job: JobRow) {
-                    let r = job.result.flatMap {
-                        try? JSONDecoder().decode(
-                            JSONValue.self, from: $0)
-                    }
-                    guard
-                        let data = try? JSONEncoder().encode(
-                            QueueStatusResponse(
-                                id: job.id, kind: job.kind,
-                                status: job.status, result: r,
-                                error: job.error))
-                    else { return }
+            // Keep-alive ticker so a long silent op doesn't look hung to a
+            // client/proxy idle timeout.
+            let keepAlive = Task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 15_000_000_000)
+                    if Task.isCancelled { return }
                     var b = ByteBuffer()
-                    b.writeString("data: ")
-                    b.writeBytes(data)
-                    b.writeString("\n\n")
+                    b.writeString(": keep-alive\n\n")
                     continuation.yield(b)
                 }
-                var last = ""
-                // Cap the stream so a stuck job can't hold a
-                // connection forever (~600 × 0.5 s = 5 min).
-                for _ in 0..<600 {
-                    guard let id,
-                        let job = await q.status(id: id, owner: scope)
-                    else { break }
-                    if job.status != last {
-                        emit(job)
-                        last = job.status
+            }
+            let work = Task {
+                let progress: @Sendable (Double) -> Void = { f in
+                    if let d = try? JSONEncoder().encode(
+                        ModelOpProgressEvent(event: "progress", fraction: f))
+                    {
+                        continuation.yield(Self.sseFrame(d))
                     }
-                    if Self.isTerminal(job.status) { break }
-                    try? await Task.sleep(nanoseconds: 500_000_000)
+                }
+                let (result, error) = await performModelOp(
+                    kind: kind, body: body, progress: progress)
+                keepAlive.cancel()
+                if let result {
+                    var b = ByteBuffer()
+                    b.writeString("data: {\"event\":\"done\",\"result\":")
+                    b.writeBytes(result)
+                    b.writeString("}\n\n")
+                    continuation.yield(b)
+                } else {
+                    let detail =
+                        error
+                        ?? .init(
+                            message: "model op failed",
+                            type: "server_error", code: "model_op_failed")
+                    if let d = try? JSONEncoder().encode(
+                        ModelOpErrorEvent(event: "error", error: detail))
+                    {
+                        continuation.yield(Self.sseFrame(d))
+                    }
                 }
                 var done = ByteBuffer()
                 done.writeString("data: [DONE]\n\n")
                 continuation.yield(done)
                 continuation.finish()
             }
-            continuation.onTermination = { _ in task.cancel() }
+            continuation.onTermination = { _ in
+                work.cancel()
+                keepAlive.cancel()
+            }
         }
         var headers = HTTPFields()
         headers[.contentType] = "text/event-stream"
@@ -3106,275 +3004,100 @@ struct AthenaServer {
             body: ResponseBody(asyncSequence: stream))
     }
 
-    private func handleQueueRemove(
-        _ id: String?, _ request: Request
+    /// Collect + validate a model-op body, then stream it. A bad body is a
+    /// plain `400` (the stream never opens); a healthy submit returns the
+    /// SSE stream (200). The `.modelWrite` gate is applied by the auth
+    /// middleware (route → permission); audit it here at initiation.
+    private func handleModelPull(_ request: Request) async -> Response {
+        await beginModelOp(
+            request, kind: "model_pull", action: "model.pull"
+        ) { body in
+            guard
+                let r = try? JSONDecoder().decode(
+                    ModelPullRequest.self, from: body), !r.id.isEmpty
+            else { return ("model_pull requires non-empty 'id'", nil) }
+            return (nil, r.id)
+        }
+    }
+
+    private func handleModelConvert(_ request: Request) async -> Response {
+        await beginModelOp(
+            request, kind: "model_convert", action: "model.convert"
+        ) { body in
+            guard
+                let r = try? JSONDecoder().decode(
+                    ModelConvertRequest.self, from: body), !r.id.isEmpty
+            else { return ("model_convert requires non-empty 'id'", nil) }
+            return (nil, r.id)
+        }
+    }
+
+    private func handleModelPrune(_ request: Request) async -> Response {
+        await beginModelOp(
+            request, kind: "model_prune", action: "model.prune"
+        ) { _ in (nil, nil) }
+    }
+
+    /// Shared model-op entry: collect the body (≤ 1 MiB), run `validate`
+    /// (returns an error message for a 400, or the audit target id), record
+    /// the M30 audit row, and hand off to the SSE stream.
+    private func beginModelOp(
+        _ request: Request, kind: String, action: String,
+        validate: (Data) -> (error: String?, target: String?)
     ) async -> Response {
-        guard let id else {
+        let body: Data
+        do {
+            let buf = try await request.body.collect(upTo: 1 * 1024 * 1024)
+            body = Data(buffer: buf)
+        } catch {
             return Self.error(
-                status: .badRequest, message: "missing job id",
-                type: "invalid_request_error", code: "missing_id")
+                status: .badRequest,
+                message: "Invalid request body: \(error)",
+                type: "invalid_request_error", code: "invalid_body")
         }
-        // Only the owner (or admin) may remove — and a non-owner
-        // gets 404, not 403, so job existence stays hidden.
-        let who = await queuePrincipal(request)
-        let scope = Self.ownerScope(who)  // H6 defense-in-depth
-        if let job = await queue.status(id: id, owner: scope),
-            !Self.canAccess(
-                job, principal: who.principal, isAdmin: who.isAdmin,
-                enforced: who.enforced)
-        {
+        let (problem, target) = validate(body)
+        if let problem {
             return Self.error(
-                status: .notFound, message: "no job '\(id)'",
-                type: "invalid_request_error", code: "not_found")
+                status: .badRequest, message: problem,
+                type: "invalid_request_error", code: "invalid_body")
         }
-        let removed = await queue.remove(id: id)
-        if !removed {
-            return Self.error(
-                status: .notFound, message: "no job '\(id)'",
-                type: "invalid_request_error", code: "not_found")
-        }
-        return Self.json(
-            QueueRemoveResponse(id: id, removed: true))
+        await audit(
+            request, action: action, target: target, result: "ok")
+        return streamModelOp(kind: kind, body: body)
     }
 
-    /// `GET /v1/queue[?status=...]` — job summaries, oldest first.
-    private func handleQueueList(_ request: Request) async -> Response {
-        var status: String?
-        if let qy = request.uri.query {
-            for kv in qy.split(separator: "&")
-            where kv.hasPrefix("status=") {
-                status = String(kv.dropFirst(7))
-            }
+    /// `/ui` console model op (ADR 025 S2). EventSource is GET-only, so the
+    /// browser POST BLOCKS until the op completes and returns the terminal
+    /// result JSON (or the error envelope) — no streaming, no job poll.
+    /// `.modelWrite` + CSRF are checked by `uiModelMutate`; audited here.
+    private func uiModelOp(kind: String, _ r: Request) async -> Response {
+        let body: Data
+        do {
+            let buf = try await r.body.collect(upTo: 1 * 1024 * 1024)
+            body = Data(buffer: buf)
+        } catch {
+            return Self.error(
+                status: .badRequest,
+                message: "Invalid request body: \(error)",
+                type: "invalid_request_error", code: "invalid_body")
         }
-        let who = await queuePrincipal(request)
-        // H6: the store already confines a non-admin tenant to its own
-        // rows; `canAccess` stays as the enforcing check on top.
-        let jobs = await queue.list(
-            status: status, owner: Self.ownerScope(who)
-        ).filter {
-            Self.canAccess(
-                $0, principal: who.principal, isAdmin: who.isAdmin,
-                enforced: who.enforced) && (
-                    !who.enforced || who.isAdmin
-                        || $0.owner == who.principal)
+        let action = "model." + kind.replacingOccurrences(
+            of: "model_", with: "")
+        await audit(r, action: action, target: nil, result: "ok")
+        let (result, error) = await performModelOp(kind: kind, body: body)
+        if let result {
+            return Self.jsonString(
+                String(data: result, encoding: .utf8) ?? "{}")
         }
-        return Self.json(
-            QueueListResponse(
-                jobs: jobs.map {
-                    QueueJobSummary(
-                        id: $0.id, kind: $0.kind, status: $0.status,
-                        created: $0.created, updated: $0.updated)
-                }))
-    }
-
-    /// Runs a queued job through the same governed paths as the sync
-    /// endpoints. Returns (resultJSON, nil) or (nil, errorMessage).
-    /// `owner` is the submitting principal (M12.6) so token usage is
-    /// metered against the same principal a sync request would be
-    /// (M27.2); nil ⇒ auth disabled, metered under the `xenos` sentinel.
-    private func queuedExecute(
-        kind: String, request: Data, owner: String?
-    ) async -> (result: Data?, error: String?) {
-        switch kind {
-        case "conversation":
-            // M24.2: decode the OpenAI `ChatCompletionRequest` (a superset
-            // of the native chat body — a `{messages}` job still decodes)
-            // so the queued path honors `response_format`/`tools` the SAME
-            // way the sync `/v1/chat/completions` handler does. Without
-            // this, queued generation ran unconstrained and structured
-            // jobs came back as free text.
-            guard
-                let req = try? JSONDecoder().decode(
-                    ChatCompletionRequest.self, from: request)
-            else { return (nil, "invalid conversation body") }
-            // M71.1: decode image content-parts (passive-oracle: a remote/bad
-            // image URL fails the job up front, model-independent).
-            let turns: [ChatTurn]
-            do {
-                turns = try Self.chatTurns(from: req.messages)
-            } catch {
-                return (nil, Self.imageErrorMessage(error))
-            }
-            do {
-                try await governor.ensureLoaded(.llm)
-                // M41.2: a queued job selects the LLM model the same
-                // way the sync chat handler does — rebind under the
-                // governor before the preflight + decode.
-                if let m = req.model, !m.isEmpty {
-                    try await selectable(.llm).rebind(to: m)
-                }
-                // M71.2: gate image content-parts on the RESOLVED model's
-                // vision capability (checked after the rebind, like the sync
-                // handler). An image to a text-only model fails the job.
-                if turns.contains(where: { !$0.images.isEmpty }),
-                    await llm.servesVision == false
-                {
-                    return (
-                        nil,
-                        "image input is not supported by the requested model"
-                    )
-                }
-                // NC3: same tools + kwargs the queued decode renders.
-                try await llm.preflightPromptCache(
-                    messages: turns, tools: req.toolSpecs(),
-                    chatTemplateKwargs: req.chatTemplateKwargsContext())
-            } catch let e as AthenaError {
-                return (nil, e.message)
-            } catch {
-                return (nil, String(describing: error))
-            }
-            // G4 fail-closed (queued path): a json_schema job with no
-            // usable schema errors the job instead of running unconstrained.
-            if let problem = req.structuredRequestError() {
-                return (nil, problem)
-            }
-            let effective = req.effectiveSchema()
-            let collected: GenCollected
-            do {
-                // M46.3 — per-request `timeout` overrides the
-                // daemon-wide `request_timeout_secs` for queued
-                // conversation jobs the same way it does for sync
-                // /v1/chat/completions.
-                let deadlineSecs =
-                    req.timeout.map { $0 > 0 ? $0 : 0 }
-                    ?? requestTimeoutSecs
-                collected = try await collectMetered(seconds: deadlineSecs) {
-                    llm.generateMetered(
-                        messages: turns, schemaJSON: effective?.json,
-                        tools: req.toolSpecs(), maxTokens: req.tokenCap,
-                        temperature: req.temperature,
-                        topP: req.top_p, seed: req.seed,
-                        speculative: req.speculative,
-                        chatTemplateKwargs:
-                            req.chatTemplateKwargsContext(),
-                        promptCacheKey: req.prompt_cache_key,
-                        principal: owner, logprobs: nil)
-                }
-            } catch let e as AthenaError {
-                return (nil, e.message)  // M33.1: timeout → job error
-            } catch {
-                return (nil, String(describing: error))
-            }
-            var text = collected.text
-            let usage = collected.usage
-            var finish = collected.finish
-            let stops = req.stopSequences()
-            if !stops.isEmpty {
-                let cut = StopStreamFilter.truncate(text, stops: stops)
-                if cut.stopped {
-                    text = cut.text
-                    finish = .stop
-                }
-            }
-            await meter(principal: owner, usage: usage)
-            // M24.6: store the full OpenAI ChatCompletionResponse as the
-            // job result so a polled queued job carries the SAME
-            // `choices[0].message.{content,tool_calls}` shape as the sync
-            // endpoint — one result envelope across sync and async.
-            // M27.1/.2: the envelope carries real `usage` too. M41.2: the
-            // `model` field reports the LLM actually served (post-rebind),
-            // not the unused request echo.
-            let servedModel = await servedLLMModel()
-            return (
-                try? JSONEncoder().encode(
-                    Self.chatCompletionResponse(
-                        id: "chatcmpl-\(UUID().uuidString)",
-                        model: servedModel,
-                        created: Int(Date().timeIntervalSince1970),
-                        text: text,
-                        isToolCall: effective?.isToolCall == true,
-                        usage: usage, finish: finish)), nil
-            )
-        case "embeddings":
-            guard
-                let req = try? JSONDecoder().decode(
-                    AthenaEmbedRequest.self, from: request)
-            else { return (nil, "invalid embeddings body") }
-            do {
-                try await governor.ensureLoaded(.textEmbedding)
-                // M39: select per request; report the served model in the
-                // stored result (an unknown id fails the job, not a silent
-                // wrong-dimension fallback).
-                let batch = try await embedding.embed(
-                    req.input, model: req.model)
-                await meter(
-                    principal: owner,
-                    usage: TokenUsage(
-                        promptTokens: batch.promptTokens,
-                        completionTokens: 0))
-                return (
-                    try? JSONEncoder().encode(
-                        QueuedEmbeddingResult(
-                            model: batch.model,
-                            embeddings: batch.vectors)),
-                    nil
-                )
-            } catch let e as AthenaError {
-                return (nil, e.message)
-            } catch {
-                return (nil, String(describing: error))
-            }
-        case "model_pull":
-            // Egress (proxy + HF token) was exported process-wide at
-            // daemon startup (Load); the #hubDownloader reads it. Only
-            // sanctioned model-fetch egress — passive oracle intact.
-            guard
-                let req = try? JSONDecoder().decode(
-                    ModelPullRequest.self, from: request)
-            else { return (nil, "invalid model_pull body") }
-            do {
-                let dest = try await ModelPull.pull(
-                    id: req.id, revision: req.revision,
-                    into: modelStoreRoot)
-                return (
-                    try? JSONEncoder().encode(
-                        QueuedModelPullResult(
-                            name: dest.lastPathComponent,
-                            path: dest.path)), nil)
-            } catch {
-                return (nil, "pull failed: \(error)")
-            }
-        case "model_convert":
-            guard
-                let req = try? JSONDecoder().decode(
-                    ModelConvertRequest.self, from: request)
-            else { return (nil, "invalid model_convert body") }
-            do {
-                // M-conv: `bits` is opt-in (mlx_lm-style). Omit ⇒ no
-                // quantization; explicit N ⇒ quantize to N-bit.
-                let r = try await ModelConvert.convert(
-                    id: req.id, revision: req.revision,
-                    bits: req.bits,
-                    groupSize: req.group_size ?? 64,
-                    into: modelStoreRoot, name: req.name)
-                return (
-                    try? JSONEncoder().encode(
-                        QueuedModelConvertResult(
-                            path: r.path.path, bytes: r.bytes)), nil)
-            } catch {
-                return (nil, "convert failed: \(error)")
-            }
-        case "model_prune":
-            let req =
-                (try? JSONDecoder().decode(
-                    ModelPruneRequest.self, from: request))
-                ?? ModelPruneRequest(dry_run: false)
-            do {
-                let pr = try ModelStoreOps.prune(
-                    root: modelStoreRoot,
-                    dryRun: req.dry_run ?? false)
-                return (
-                    try? JSONEncoder().encode(
-                        QueuedModelPruneResult(
-                            candidates: pr.victims.map { $0.name },
-                            removed: pr.removed, dry_run: pr.dryRun)),
-                    nil)
-            } catch {
-                return (nil, "prune failed: \(error)")
-            }
-        default:
-            return (nil, "unknown kind '\(kind)'")
-        }
+        let detail =
+            error
+            ?? .init(
+                message: "model op failed", type: "server_error",
+                code: "model_op_failed")
+        return Self.error(
+            status: HTTPResponse.Status(
+                code: detail.type == "invalid_request_error" ? 400 : 500),
+            message: detail.message, type: detail.type, code: detail.code)
     }
 
     // MARK: - Native /api inference (M16)
@@ -3574,8 +3297,8 @@ struct AthenaServer {
         }
     }
 
-    /// Governed embedding helper shared by `/api/embed`, `/v1/embeddings`,
-    /// and the queued `embeddings` kind. Returns the
+    /// Governed embedding helper shared by `/api/embed` and `/v1/embeddings`.
+    /// Returns the
     /// whole batch so callers can echo the model ACTUALLY served (M39).
     /// `model` selects among the configured set (nil ⇒ default); an
     /// unknown id surfaces as a classified 400 `model_not_available`.
@@ -3897,8 +3620,7 @@ struct AthenaServer {
     /// M41.4 — rebind `module`'s slot to `target` and audit an actual
     /// resident-id change (no-op rebinds are not audited; that would
     /// drown the trail on every request). `request` is optional so
-    /// non-HTTP-driven callers (queue worker) can skip the audit (the
-    /// queue owner is recorded on the JobRow itself).
+    /// non-HTTP-driven callers can skip the audit.
     private func auditedRebind(
         _ request: Request?, module: ModuleID, target: String
     ) async throws {
@@ -4089,50 +3811,6 @@ struct AthenaServer {
                 modules: unloaded, status: "unloaded"))
     }
 
-    /// Enqueue a long-running model op (M16.3). The route is already
-    /// `.modelWrite`-gated; the job is owner-scoped to the caller so
-    /// `GET /v1/queue/:id` only reveals it to the submitter (or an
-    /// admin). `validate` returns an error message for a 400, or nil.
-    private func enqueueModelOp(
-        kind: String, _ request: Request,
-        validate: (Data) -> String?
-    ) async -> Response {
-        let body: Data
-        do {
-            let buf = try await request.body.collect(
-                upTo: 1 * 1024 * 1024)
-            body = Data(buffer: buf)
-        } catch {
-            return Self.error(
-                status: .badRequest,
-                message: "Invalid request body: \(error)",
-                type: "invalid_request_error", code: "invalid_body")
-        }
-        if let msg = validate(body) {
-            return Self.error(
-                status: .badRequest, message: msg,
-                type: "invalid_request_error", code: "invalid_body")
-        }
-        let who = await queuePrincipal(request)
-        do {
-            let id = try await queue.submit(
-                kind: kind, request: body,
-                owner: who.enforced ? who.principal : nil)
-            return Self.json(
-                ModelJobResponse(job_id: id, status: "queued"),
-                status: .accepted)
-        } catch let e as AthenaError {
-            // issue #6: surface a client-reason failure as the real 4xx, not 500.
-            return Self.classified(e, module: .llm)
-        } catch {
-            Self.log.warning("queue submit failed code=queue_error \(error)")
-            return Self.error(
-                status: .internalServerError,
-                message: "Failed to enqueue the job.",
-                type: "server_error", code: "queue_error")
-        }
-    }
-
     // MARK: - WebUI model console reuse (M18.2)
 
     /// 403 JSON for a /ui/api/* action the logged-in user's perms
@@ -4184,7 +3862,7 @@ struct AthenaServer {
     }
 
     /// CSRF + per-action `.modelWrite` re-check, THEN delegate to
-    /// the shared M16 op (ModelStoreOps / enqueueModelOp). Mutations
+    /// the shared M16 op (ModelStoreOps / performModelOp). Mutations
     /// only. `op` is non-escaping (invoked here, never stored).
     private func uiModelMutate(
         _ r: Request, _ op: (Request) async -> Response
@@ -4208,25 +3886,6 @@ struct AthenaServer {
             }
             return await self.handleModelRemove(body.name, req)
         }
-    }
-
-    /// Console job-progress poll. /ui ops are submitted with no
-    /// bearer ⇒ nil-owner (console-scoped, visible to any console
-    /// admin — matches the legacy unowned-job semantics);
-    /// `.modelRead` gates the peek. Reuses the queue + M16 status
-    /// DTO (`statusResponse`).
-    private func uiJobStatus(_ r: Request) async -> Response {
-        guard await uiCaller(r).perms.contains(.modelRead) else {
-            return Self.uiDeny("need model.read")
-        }
-        guard let id = Self.uiQuery(r, "id"),
-            let job = await queue.status(id: id)
-        else {
-            return Self.error(
-                status: .notFound, message: "no such job",
-                type: "invalid_request_error", code: "not_found")
-        }
-        return Self.statusResponse(job)
     }
 
     // MARK: - Daemon control ops (M16 admin + M18.3 reuse)
@@ -5489,9 +5148,9 @@ struct AthenaServer {
 /// M43.1 — /healthz response, flattening `GovernorSnapshot` for
 /// consumers that read top-level `residentBytes` etc., plus three
 /// live signals so a hung daemon is legible without scraping
-/// /metrics: `inflight` (active request count), `queueDepth` (jobs
-/// in `queued` status), `lastRequestAt` (epoch seconds; 0 ⇒ none
-/// since boot).
+/// /metrics: `inflight` (active request count) and `lastRequestAt`
+/// (epoch seconds; 0 ⇒ none since boot). (The `queueDepth` field was
+/// removed with the async queue — ADR 025 S2.)
 ///
 /// M46.5 renamed the bytes field from `reservedBytes` to
 /// `residentBytes` (the governor's reconciled value tracks real
@@ -5555,7 +5214,6 @@ struct HealthResponse: Encodable {
     let gpuActiveResidency: Double?
     let modules: [ModuleHealth]
     let inflight: Int
-    let queueDepth: Int
     let lastRequestAt: Double
 
     /// A governor module snapshot enriched with the id of the model currently
@@ -5578,7 +5236,7 @@ struct HealthResponse: Encodable {
     init(
         snapshot: GovernorSnapshot, residentModels: [ModuleID: String],
         inflight: Int,
-        queueDepth: Int, lastRequestAt: Double,
+        lastRequestAt: Double,
         lastDecodeTokensPerSec: Double, powerAssertionHeld: Bool,
         gpuClockMHz: Double? = nil, gpuActiveResidency: Double? = nil
     ) {
@@ -5605,7 +5263,6 @@ struct HealthResponse: Encodable {
                 model: residentModels[m.id], measured: m.measured)
         }
         self.inflight = inflight
-        self.queueDepth = queueDepth
         self.lastRequestAt = lastRequestAt
     }
 

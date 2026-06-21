@@ -459,7 +459,7 @@ struct Doctor: AsyncParsableCommand {
                 say(
                     .warn,
                     "at-rest: store is plaintext and FileVault is OFF — "
-                        + "vector/queue blobs (inference content) are "
+                        + "credential hashes and audit/usage metadata are "
                         + "readable on disk. Enable FileVault or set "
                         + "encrypt_store.")
             case .none:
@@ -469,22 +469,9 @@ struct Doctor: AsyncParsableCommand {
                         + "— ensure FileVault is on, or set encrypt_store.")
             }
         }
-        // Retention bounds (advisory): unbounded queue growth keeps
-        // inference content on disk indefinitely.
-        let qTtl = parsed?.queueResultTtlSecs ?? 0
-        let qMax = parsed?.queueMaxRows ?? 0
-        var ret: [String] = []
-        if qTtl > 0 { ret.append("queue TTL \(qTtl)s") }
-        if qMax > 0 { ret.append("queue cap \(qMax) rows") }
-        if parsed?.dropRequestContent == true { ret.append("drop prompts") }
-        if ret.isEmpty {
-            say(
-                .ok,
-                "retention: none configured (queue results kept "
-                    + "until manually removed)")
-        } else {
-            say(.ok, "retention: " + ret.joined(separator: ", "))
-        }
+        // ADR 025 S2 — the async queue (and its result-retention knobs)
+        // was removed, so there is no request-content retention to report;
+        // the store no longer persists any inference inputs/outputs.
 
         // 14. Audit-log posture (M30): RBAC/admin mutations (user/role/
         //     token CRUD, model.remove, default_set, daemon load/unload)

@@ -1,35 +1,6 @@
 import CSQLCipher
 import Foundation
 
-/// A queued/async job row.
-public struct JobRow: Sendable {
-    public let id: String
-    public let kind: String
-    /// queued | running | done | error | canceled
-    public let status: String
-    public let request: Data
-    public let result: Data?
-    public let error: String?
-    public let created: Double
-    public let updated: Double
-    /// Submitting principal (M12.6). nil = legacy/unowned (pre-
-    /// ownership rows, or auth disabled) — readable without scoping.
-    public let owner: String?
-}
-
-/// NA5 (M69.1) — a blob-free job summary for list/dashboard views that
-/// only need the metadata (never the request/result BLOBs). Backs the /ui
-/// dashboard's recent-jobs panel so polling it doesn't materialize every
-/// row's payload.
-public struct JobSummary: Sendable {
-    public let id: String
-    public let kind: String
-    public let status: String
-    public let created: Double
-    public let updated: Double
-    public let owner: String?
-}
-
 /// One principal's cumulative token usage (M27.2).
 public struct UsageRow: Sendable, Equatable {
     public let principal: String
@@ -85,9 +56,11 @@ public struct AuditRow: Sendable, Equatable {
     }
 }
 
-/// One embedded SQLite store backing auth/audit/usage and the async
-/// request queue (M7). Zero new dependency — system `SQLite3`.
-/// Actor-isolated: SQLite access is single-threaded here.
+/// One embedded SQLite store backing auth/audit/usage (M7). The async
+/// queue (ADR 025) and vector (ADR 025) tenants and the allowlist (ADR
+/// 026) were removed; only credential/audit/usage state remains. Zero new
+/// dependency — system `SQLite3`. Actor-isolated: SQLite access is
+/// single-threaded here.
 public actor AthenaStore {
     public enum StoreError: Error, CustomStringConvertible {
         case open(String)
@@ -182,12 +155,6 @@ public actor AthenaStore {
         try Self.exec(
             db,
             """
-            CREATE TABLE IF NOT EXISTS jobs(
-              id TEXT PRIMARY KEY, kind TEXT NOT NULL,
-              status TEXT NOT NULL, request BLOB NOT NULL,
-              result BLOB, error TEXT,
-              created REAL NOT NULL, updated REAL NOT NULL,
-              owner TEXT);
             CREATE TABLE IF NOT EXISTS auth_users(
               username TEXT PRIMARY KEY, salt BLOB NOT NULL,
               hash BLOB NOT NULL, iters INTEGER NOT NULL,
@@ -211,13 +178,7 @@ public actor AthenaStore {
               action TEXT NOT NULL, target TEXT,
               result TEXT NOT NULL, detail TEXT);
             CREATE INDEX IF NOT EXISTS audit_ts ON audit_log(ts);
-            CREATE INDEX IF NOT EXISTS jobs_status_created
-              ON jobs(status, created);
             """)
-        // Migration for stores created before M12.6 (no IF NOT
-        // EXISTS for columns; the dup-column error is expected and
-        // ignored on already-migrated DBs).
-        try? Self.exec(db, "ALTER TABLE jobs ADD COLUMN owner TEXT;")
         // M36.1: tokens gained an optional expiry. Existing rows get
         // NULL expires (no expiry) — a NULL token never expires, so
         // pre-migration tokens keep working (fail-safe / backward-
@@ -425,302 +386,10 @@ public actor AthenaStore {
         }
     }
 
-    // MARK: Jobs
-
-    public func insertJob(
-        id: String, kind: String, request: Data, owner: String?
-    ) throws {
-        let now = Date().timeIntervalSince1970
-        let st = try Self.prepared(db,
-            "INSERT INTO jobs(id,kind,status,request,result,error,"
-                + "created,updated,owner) "
-                + "VALUES(?,?,'queued',?,NULL,NULL,?,?,?);")
-        defer { sqlite3_finalize(st) }
-        sqlite3_bind_text(st, 1, id, -1, Self.transient)
-        sqlite3_bind_text(st, 2, kind, -1, Self.transient)
-        Self.bindBlob(st, 3, request)
-        sqlite3_bind_double(st, 4, now)
-        sqlite3_bind_double(st, 5, now)
-        if let owner {
-            sqlite3_bind_text(st, 6, owner, -1, Self.transient)
-        } else { sqlite3_bind_null(st, 6) }
-        guard sqlite3_step(st) == SQLITE_DONE else {
-            throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
-        }
-    }
-
-    public func updateJob(
-        id: String, status: String, result: Data?, error: String?
-    ) throws {
-        let st = try Self.prepared(db,
-            "UPDATE jobs SET status=?,result=?,error=?,updated=? "
-                + "WHERE id=?;")
-        defer { sqlite3_finalize(st) }
-        sqlite3_bind_text(st, 1, status, -1, Self.transient)
-        if let r = result { Self.bindBlob(st, 2, r) } else {
-            sqlite3_bind_null(st, 2)
-        }
-        if let e = error {
-            sqlite3_bind_text(st, 3, e, -1, Self.transient)
-        } else { sqlite3_bind_null(st, 3) }
-        sqlite3_bind_double(st, 4, Date().timeIntervalSince1970)
-        sqlite3_bind_text(st, 5, id, -1, Self.transient)
-        guard sqlite3_step(st) == SQLITE_DONE else {
-            throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
-        }
-    }
-
-    /// A23 (M68.4) — atomically cancel a job ONLY if it is still `queued`,
-    /// in ONE conditional UPDATE. The previous `getJob`-check-then-`updateJob`
-    /// straddled two `await`s, so the serial worker could pick the job up
-    /// (queued → running) in between and a running/done job would be clobbered
-    /// back to `canceled`. The `WHERE … AND status='queued'` guard makes the
-    /// check-and-act a single SQLite statement; returns true iff a queued row
-    /// was actually transitioned.
-    public func cancelQueuedJob(id: String) throws -> Bool {
-        let st = try Self.prepared(db,
-            "UPDATE jobs SET status='canceled',updated=? "
-                + "WHERE id=? AND status='queued';")
-        defer { sqlite3_finalize(st) }
-        sqlite3_bind_double(st, 1, Date().timeIntervalSince1970)
-        sqlite3_bind_text(st, 2, id, -1, Self.transient)
-        guard sqlite3_step(st) == SQLITE_DONE else {
-            throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
-        }
-        return sqlite3_changes(db) > 0
-    }
-
     /// Zero-length SQLite blobs return a NULL pointer — read safely.
     private static func blob(_ st: OpaquePointer?, _ i: Int32) -> Data {
         guard let p = sqlite3_column_blob(st, i) else { return Data() }
         return Data(bytes: p, count: Int(sqlite3_column_bytes(st, i)))
-    }
-
-    private func rowToJob(_ st: OpaquePointer?) -> JobRow {
-        let result: Data? = sqlite3_column_type(st, 4) == SQLITE_NULL
-            ? nil : Self.blob(st, 4)
-        let err: String? = sqlite3_column_type(st, 5) == SQLITE_NULL
-            ? nil : String(cString: sqlite3_column_text(st, 5))
-        let owner: String? =
-            sqlite3_column_type(st, 8) == SQLITE_NULL
-            ? nil : String(cString: sqlite3_column_text(st, 8))
-        return JobRow(
-            id: String(cString: sqlite3_column_text(st, 0)),
-            kind: String(cString: sqlite3_column_text(st, 1)),
-            status: String(cString: sqlite3_column_text(st, 2)),
-            request: Self.blob(st, 3),
-            result: result, error: err,
-            created: sqlite3_column_double(st, 6),
-            updated: sqlite3_column_double(st, 7),
-            owner: owner)
-    }
-
-    private static let jobCols =
-        "id,kind,status,request,result,error,created,updated,owner"
-
-    /// One job by id. `owner` (M65.6 / audit H6) is an optional
-    /// defense-in-depth filter: when non-nil, the row matches only if its
-    /// `owner` column equals it (a NULL/ownerless row never matches, so a
-    /// scoped caller can't read pre-auth jobs — same outcome the server's
-    /// `canAccess` enforces, pushed down a layer). nil = unfiltered (admin
-    /// / worker / auth-off), preserving every existing caller.
-    public func getJob(id: String, owner: String? = nil) -> JobRow? {
-        let sql =
-            owner == nil
-            ? "SELECT \(Self.jobCols) FROM jobs WHERE id=?;"
-            : "SELECT \(Self.jobCols) FROM jobs WHERE id=? AND owner=?;"
-        guard let st = try? Self.prepared(db, sql) else { return nil }
-        defer { sqlite3_finalize(st) }
-        sqlite3_bind_text(st, 1, id, -1, Self.transient)
-        if let owner {
-            sqlite3_bind_text(st, 2, owner, -1, Self.transient)
-        }
-        return sqlite3_step(st) == SQLITE_ROW ? rowToJob(st) : nil
-    }
-
-    /// Jobs, optionally filtered by status and/or `owner`, oldest first.
-    /// `owner` is the H6 defense-in-depth scope (see `getJob`); nil leaves
-    /// the listing unfiltered.
-    public func listJobs(status: String? = nil, owner: String? = nil)
-        -> [JobRow]
-    {
-        var conds: [String] = []
-        if status != nil { conds.append("status=?") }
-        if owner != nil { conds.append("owner=?") }
-        var sql = "SELECT \(Self.jobCols) FROM jobs"
-        if !conds.isEmpty {
-            sql += " WHERE " + conds.joined(separator: " AND ")
-        }
-        sql += " ORDER BY created;"
-        guard let st = try? Self.prepared(db, sql) else { return [] }
-        defer { sqlite3_finalize(st) }
-        var idx: Int32 = 1
-        if let s = status {
-            sqlite3_bind_text(st, idx, s, -1, Self.transient)
-            idx += 1
-        }
-        if let o = owner {
-            sqlite3_bind_text(st, idx, o, -1, Self.transient)
-            idx += 1
-        }
-        var out: [JobRow] = []
-        while sqlite3_step(st) == SQLITE_ROW { out.append(rowToJob(st)) }
-        return out
-    }
-
-    /// A4/A24 (M69.1) — the single oldest job still needing work (queued or
-    /// running, FIFO by `created`), fetched in ONE indexed `LIMIT 1` query
-    /// rather than materializing EVERY row's request/result BLOBs just to pick
-    /// the head (the worker drain ran `listJobs().first { … }`). The
-    /// `ORDER BY created ASC` is explicit, so FIFO no longer rides on an
-    /// unstated default ordering, and `jobs_status_created` (H9) serves it.
-    public func nextPendingJob() -> JobRow? {
-        let sql =
-            "SELECT \(Self.jobCols) FROM jobs "
-            + "WHERE status IN ('queued','running') "
-            + "ORDER BY created ASC LIMIT 1;"
-        guard let st = try? Self.prepared(db, sql) else { return nil }
-        defer { sqlite3_finalize(st) }
-        return sqlite3_step(st) == SQLITE_ROW ? rowToJob(st) : nil
-    }
-
-    /// A15 (M69.1) — count of `queued` rows via `COUNT(*)` (no blob
-    /// materialization). Backs the `/healthz` queue depth. Uses
-    /// `jobs_status_created` (H9).
-    public func queuedJobCount() -> Int {
-        guard
-            let st = try? Self.prepared(db,
-                "SELECT COUNT(*) FROM jobs WHERE status='queued';")
-        else { return 0 }
-        defer { sqlite3_finalize(st) }
-        return sqlite3_step(st) == SQLITE_ROW
-            ? Int(sqlite3_column_int(st, 0)) : 0
-    }
-
-    /// NA5 (M69.1) — the most recent `limit` job summaries (blob-free),
-    /// newest first. Backs the /ui dashboard's recent-jobs panel so a polled
-    /// `/ui/api/state` doesn't load every row's request/result BLOBs to show
-    /// the last few. `limit <= 0` ⇒ empty.
-    public func recentJobSummaries(limit: Int) -> [JobSummary] {
-        guard limit > 0 else { return [] }
-        let sql =
-            "SELECT id,kind,status,created,updated,owner FROM jobs "
-            + "ORDER BY created DESC LIMIT ?;"
-        guard let st = try? Self.prepared(db, sql) else { return [] }
-        defer { sqlite3_finalize(st) }
-        sqlite3_bind_int(st, 1, Int32(limit))
-        var out: [JobSummary] = []
-        while sqlite3_step(st) == SQLITE_ROW {
-            let owner: String? =
-                sqlite3_column_type(st, 5) == SQLITE_NULL
-                ? nil : String(cString: sqlite3_column_text(st, 5))
-            out.append(
-                JobSummary(
-                    id: String(cString: sqlite3_column_text(st, 0)),
-                    kind: String(cString: sqlite3_column_text(st, 1)),
-                    status: String(cString: sqlite3_column_text(st, 2)),
-                    created: sqlite3_column_double(st, 3),
-                    updated: sqlite3_column_double(st, 4),
-                    owner: owner))
-        }
-        return out
-    }
-
-    @discardableResult
-    public func deleteJob(id: String) -> Bool {
-        guard let st = try? Self.prepared(db,"DELETE FROM jobs WHERE id=?;")
-        else { return false }
-        defer { sqlite3_finalize(st) }
-        sqlite3_bind_text(st, 1, id, -1, Self.transient)
-        return sqlite3_step(st) == SQLITE_DONE
-            && sqlite3_changes(db) > 0
-    }
-
-    public func jobCount() -> Int {
-        guard let st = try? Self.prepared(db,"SELECT COUNT(*) FROM jobs;")
-        else { return 0 }
-        defer { sqlite3_finalize(st) }
-        return sqlite3_step(st) == SQLITE_ROW
-            ? Int(sqlite3_column_int(st, 0)) : 0
-    }
-
-    /// Replace a job's stored `request` blob with empty bytes (M34.2
-    /// content opt-out). The prompt is no longer needed once the job
-    /// finishes; clearing it keeps the inference INPUT off disk while the
-    /// result (the output the client polls for) stays, bounded by the
-    /// queue TTL. `request` is NOT NULL, so we store zero-length bytes.
-    public func clearJobRequest(id: String) throws {
-        let st = try Self.prepared(db,
-            "UPDATE jobs SET request=? WHERE id=?;")
-        defer { sqlite3_finalize(st) }
-        Self.bindBlob(st, 1, Data())
-        sqlite3_bind_text(st, 2, id, -1, Self.transient)
-        guard sqlite3_step(st) == SQLITE_DONE else {
-            throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
-        }
-    }
-
-    /// Terminal job statuses — work is finished and the row is just a
-    /// retained result. Only these are eligible for retention pruning;
-    /// `queued`/`running` rows are pending work and never auto-deleted.
-    static let terminalJobStatuses = "'done','error','canceled'"
-
-    /// Delete terminal (done/error/canceled) jobs whose `updated`
-    /// (completion) time is older than `cutoff` (epoch seconds). Returns
-    /// the number removed. Backs the M34.1 queue-result TTL. Pending
-    /// (queued/running) jobs are never touched regardless of age.
-    @discardableResult
-    public func pruneJobs(olderThan cutoff: Double) throws -> Int {
-        let st = try Self.prepared(db,
-            "DELETE FROM jobs WHERE status IN "
-                + "(\(Self.terminalJobStatuses)) AND updated < ?;")
-        defer { sqlite3_finalize(st) }
-        sqlite3_bind_double(st, 1, cutoff)
-        guard sqlite3_step(st) == SQLITE_DONE else {
-            throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
-        }
-        return Int(sqlite3_changes(db))
-    }
-
-    /// Count of terminal (done/error/canceled) job rows — the retained
-    /// RESULTS the row cap governs (H13).
-    private func terminalJobCount() -> Int {
-        guard let st = try? Self.prepared(db,
-            "SELECT COUNT(*) FROM jobs WHERE status IN "
-                + "(\(Self.terminalJobStatuses));")
-        else { return 0 }
-        defer { sqlite3_finalize(st) }
-        return sqlite3_step(st) == SQLITE_ROW
-            ? Int(sqlite3_column_int(st, 0)) : 0
-    }
-
-    /// Bound the retained RESULT rows to `maxRows` by deleting the OLDEST
-    /// terminal jobs first (by completion time). Returns the number
-    /// removed. Backs the M34.1 queue-result row cap. Pending
-    /// (queued/running) rows are live work — never deleted AND never
-    /// counted toward the cap.
-    ///
-    /// H13 (M66.1): the excess is computed against the TERMINAL count, not
-    /// `jobCount()` (all rows). The old total-based excess over-pruned
-    /// whenever a pending backlog was present — e.g. maxRows 60 with 50
-    /// pending + 50 terminal gave excess 40 and destroyed 40 good results,
-    /// even though the 50 terminal results were already within a 60-result
-    /// budget. Now a large pending queue no longer evicts finished results.
-    @discardableResult
-    public func trimJobs(maxRows: Int) throws -> Int {
-        let excess = terminalJobCount() - maxRows
-        guard maxRows > 0, excess > 0 else { return 0 }
-        let st = try Self.prepared(db,
-            "DELETE FROM jobs WHERE id IN ("
-                + "SELECT id FROM jobs WHERE status IN "
-                + "(\(Self.terminalJobStatuses)) "
-                + "ORDER BY updated ASC LIMIT ?);")
-        defer { sqlite3_finalize(st) }
-        sqlite3_bind_int(st, 1, Int32(excess))
-        guard sqlite3_step(st) == SQLITE_DONE else {
-            throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
-        }
-        return Int(sqlite3_changes(db))
     }
 
     // MARK: Usage metering (M27.2) — cumulative per-principal token

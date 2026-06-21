@@ -135,15 +135,6 @@ public enum LaunchdPlist {
         if config.preload == true {
             args += ["--preload"]  // a Flag, not an Option
         }
-        if let queueTtl = config.queueResultTtlSecs {
-            args += ["--queue-result-ttl-secs", String(queueTtl)]
-        }
-        if let queueMax = config.queueMaxRows {
-            args += ["--queue-max-rows", String(queueMax)]
-        }
-        if config.dropRequestContent == true {
-            args += ["--drop-request-content"]  // a Flag, not an Option
-        }
         if config.encryptStore == true {
             args += ["--encrypt-store"]  // a Flag, not an Option
         }

@@ -10,7 +10,7 @@ import Foundation
 /// unit-tested in isolation.
 ///
 /// Idempotency is the safety invariant: a non-idempotent request
-/// (POST/PUT/DELETE — e.g. queue submit, vector upsert) is retried
+/// (POST/PUT/DELETE — e.g. a token mint, a model rebind) is retried
 /// ONLY when it provably did not execute. `429`/`503` mean the
 /// governed daemon REJECTED the request without doing work (M5
 /// Metal-OOM/backpressure → 503; rate-limit → 429), so those are

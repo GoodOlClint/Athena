@@ -13,180 +13,17 @@ final class AthenaStoreTests: XCTestCase {
             .appendingPathComponent("athena-store-\(UUID()).sqlite")
     }
 
-    func testJobLifecycle() async throws {
+    // ADR 025 S2 — the jobs table (queue) was removed entirely, so its
+    // lifecycle / cancel / FIFO-access tests are gone. Owner-scoping now
+    // only applies to the surviving usage table (below).
+
+    /// H6 (M65.6) — the optional store-layer principal filter on `allUsage`:
+    /// nil = the full table; a non-nil principal confines the result.
+    func testOwnerScopedUsageQueriesH6() async throws {
         let url = tmpURL()
         defer { try? FileManager.default.removeItem(at: url) }
         let s = try AthenaStore(path: url)
 
-        let req = Data("{\"prompt\":\"hi\"}".utf8)
-        try await s.insertJob(
-            id: "j1", kind: "conversation", request: req,
-            owner: "u:alice")
-        let q = await s.getJob(id: "j1")
-        XCTAssertEqual(q?.status, "queued")
-        XCTAssertEqual(q?.owner, "u:alice")
-        XCTAssertEqual(q?.kind, "conversation")
-        XCTAssertEqual(q?.request, req)
-        XCTAssertNil(q?.result)
-        XCTAssertNil(q?.error)
-        XCTAssertGreaterThan(q?.created ?? 0, 0)
-
-        let res = Data("{\"text\":\"ok\"}".utf8)
-        try await s.updateJob(
-            id: "j1", status: "done", result: res, error: nil)
-        let done = await s.getJob(id: "j1")
-        XCTAssertEqual(done?.status, "done")
-        XCTAssertEqual(done?.result, res)
-        XCTAssertGreaterThanOrEqual(
-            done?.updated ?? 0,
-            done?.created ?? .greatestFiniteMagnitude)
-
-        try await s.insertJob(
-            id: "j2", kind: "embeddings", request: Data(),
-            owner: nil)
-        let count = await s.listJobs().count
-        XCTAssertEqual(count, 2)
-        let queued = await s.listJobs(status: "queued").map { $0.id }
-        XCTAssertEqual(queued, ["j2"])
-
-        let d1 = await s.deleteJob(id: "j1")
-        XCTAssertTrue(d1)
-        let dNope = await s.deleteJob(id: "nope")
-        XCTAssertFalse(dNope)
-        let j1Gone = await s.getJob(id: "j1")
-        XCTAssertNil(j1Gone)
-        let after = await s.listJobs().count
-        XCTAssertEqual(after, 1)
-    }
-
-    /// A23 (M68.4) — `cancelQueuedJob` is a single conditional UPDATE: it
-    /// cancels ONLY a still-queued job, and a job the worker already moved to
-    /// `running`/`done` is never clobbered back to `canceled`.
-    func testCancelQueuedJobIsConditionalA23() async throws {
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("athena-a23-\(UUID()).sqlite")
-        defer { try? FileManager.default.removeItem(at: url) }
-        let s = try AthenaStore(path: url)
-
-        // A queued job cancels and transitions to canceled.
-        try await s.insertJob(
-            id: "q", kind: "conversation", request: Data(), owner: nil)
-        let okQ = try await s.cancelQueuedJob(id: "q")
-        XCTAssertTrue(okQ)
-        let qNow = await s.getJob(id: "q")
-        XCTAssertEqual(qNow?.status, "canceled")
-
-        // A job already running (the worker picked it up) is NOT cancellable;
-        // the conditional UPDATE matches no row and leaves it running.
-        try await s.insertJob(
-            id: "r", kind: "conversation", request: Data(), owner: nil)
-        try await s.updateJob(
-            id: "r", status: "running", result: nil, error: nil)
-        let okR = try await s.cancelQueuedJob(id: "r")
-        XCTAssertFalse(okR, "a running job must not be cancellable")
-        let rNow = await s.getJob(id: "r")
-        XCTAssertEqual(
-            rNow?.status, "running", "running job must NOT be clobbered")
-
-        // A missing id is simply false.
-        let okMissing = try await s.cancelQueuedJob(id: "nope")
-        XCTAssertFalse(okMissing)
-    }
-
-    /// M69.1 — the blob-free queue access paths: `nextPendingJob` (FIFO,
-    /// queued OR running), `queuedJobCount`, and `recentJobSummaries`.
-    func testQueueAccessQueriesM69_1() async throws {
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("athena-m691-\(UUID()).sqlite")
-        defer { try? FileManager.default.removeItem(at: url) }
-        let s = try AthenaStore(path: url)
-
-        // Insert with strictly increasing created times so FIFO is
-        // unambiguous (a small gap so the Date()-derived `created` differs).
-        for (i, id) in ["a", "b", "c"].enumerated() {
-            try await s.insertJob(
-                id: id, kind: "conversation",
-                request: Data("p\(i)".utf8), owner: nil)
-            try await Task.sleep(nanoseconds: 3_000_000)
-        }
-        // A4/A24 — oldest still-pending job is the head, FIFO by created.
-        let head = await s.nextPendingJob()
-        XCTAssertEqual(head?.id, "a")
-
-        // A15 — queued count via COUNT(*).
-        let count0 = await s.queuedJobCount()
-        XCTAssertEqual(count0, 3)
-
-        // Move the head to done; it drops out of queued count AND nextPending.
-        try await s.updateJob(
-            id: "a", status: "done", result: Data(), error: nil)
-        let count1 = await s.queuedJobCount()
-        XCTAssertEqual(count1, 2)
-        let head1 = await s.nextPendingJob()
-        XCTAssertEqual(head1?.id, "b")
-
-        // A running job is still "pending work" (re-picked after a restart).
-        try await s.updateJob(
-            id: "b", status: "running", result: nil, error: nil)
-        let head2 = await s.nextPendingJob()
-        XCTAssertEqual(
-            head2?.id, "b",
-            "a running job is still the head until it finishes")
-        let count2 = await s.queuedJobCount()
-        XCTAssertEqual(count2, 1, "running is not queued")
-
-        // NA5 — recent summaries are newest-first, blob-free, limit-bounded.
-        let recent = await s.recentJobSummaries(limit: 2)
-        XCTAssertEqual(recent.map(\.id), ["c", "b"])
-        XCTAssertEqual(recent.first?.kind, "conversation")
-        let none = await s.recentJobSummaries(limit: 0)
-        XCTAssertEqual(none.count, 0)
-    }
-
-    /// H6 (M65.6) — the optional store-layer owner filter on
-    /// getJob/listJobs/allUsage. nil keeps the legacy unfiltered behavior;
-    /// a non-nil owner confines the result, and an ownerless (NULL) row
-    /// never matches a scoped query (so a tenant can't read pre-auth jobs).
-    func testOwnerScopedQueriesH6() async throws {
-        let url = tmpURL()
-        defer { try? FileManager.default.removeItem(at: url) }
-        let s = try AthenaStore(path: url)
-
-        try await s.insertJob(
-            id: "a", kind: "conversation", request: Data(),
-            owner: "u:alice")
-        try await s.insertJob(
-            id: "b", kind: "conversation", request: Data(),
-            owner: "u:bob")
-        try await s.insertJob(
-            id: "legacy", kind: "conversation", request: Data(),
-            owner: nil)
-
-        // getJob: scoped to the owner; cross-owner and ownerless both miss.
-        let aScoped = await s.getJob(id: "a", owner: "u:alice")
-        XCTAssertEqual(aScoped?.id, "a")
-        let aWrong = await s.getJob(id: "a", owner: "u:bob")
-        XCTAssertNil(aWrong)
-        let legacyScoped = await s.getJob(id: "legacy", owner: "u:alice")
-        XCTAssertNil(legacyScoped)
-        // nil = unfiltered: the ownerless row is reachable (admin path).
-        let legacyUnfiltered = await s.getJob(id: "legacy")
-        XCTAssertEqual(legacyUnfiltered?.id, "legacy")
-
-        // listJobs: owner filter confines; nil sees all three.
-        let aliceList = await s.listJobs(owner: "u:alice").map(\.id)
-        XCTAssertEqual(aliceList, ["a"])
-        let allCount = await s.listJobs().count
-        XCTAssertEqual(allCount, 3)
-        // status + owner compose.
-        let bobQueued =
-            await s.listJobs(status: "queued", owner: "u:bob").map(\.id)
-        XCTAssertEqual(bobQueued, ["b"])
-        // a scoped query never returns the NULL-owner row.
-        let nobody = await s.listJobs(owner: "u:nobody")
-        XCTAssertTrue(nobody.isEmpty)
-
-        // allUsage: principal filter scopes to one row; nil = full table.
         try await s.addUsage(
             principal: "u:alice", promptTokens: 5, completionTokens: 1)
         try await s.addUsage(
@@ -325,21 +162,18 @@ final class AthenaStoreTests: XCTestCase {
         XCTAssertGreaterThan(noExp?.created ?? 0, 0)
     }
 
-    func testErrorStatusAndPersistenceAcrossOpen() async throws {
+    func testPersistenceAcrossOpen() async throws {
         let url = tmpURL()
         defer { try? FileManager.default.removeItem(at: url) }
         do {
             let s = try AthenaStore(path: url)
-            try await s.insertJob(
-                id: "e", kind: "x", request: Data("q".utf8),
-                owner: nil)
-            try await s.updateJob(
-                id: "e", status: "error", result: nil, error: "boom")
+            try await s.addUsage(
+                principal: "u:e", promptTokens: 9, completionTokens: 4)
         }
         let s2 = try AthenaStore(path: url)  // reopen same file
-        let j = await s2.getJob(id: "e")
-        XCTAssertEqual(j?.status, "error")
-        XCTAssertEqual(j?.error, "boom")
+        let row = await s2.usage(principal: "u:e")
+        XCTAssertEqual(row?.promptTokens, 9)
+        XCTAssertEqual(row?.completionTokens, 4)
     }
 
     /// M27.2 — per-principal usage counters accumulate, stay keyed by
@@ -438,88 +272,10 @@ final class AthenaStoreTests: XCTestCase {
         XCTAssertEqual(empty, 0)
     }
 
-    func testPruneJobsByAgeSkipsPending() async throws {
-        let url = tmpURL()
-        defer { try? FileManager.default.removeItem(at: url) }
-        let s = try AthenaStore(path: url)
-        // Two terminal jobs + one still-queued.
-        try await s.insertJob(
-            id: "d1", kind: "conversation", request: Data(), owner: nil)
-        try await s.updateJob(
-            id: "d1", status: "done", result: Data("r".utf8), error: nil)
-        try await s.insertJob(
-            id: "e1", kind: "conversation", request: Data(), owner: nil)
-        try await s.updateJob(
-            id: "e1", status: "error", result: nil, error: "boom")
-        try await s.insertJob(
-            id: "q1", kind: "conversation", request: Data(), owner: nil)
-        let now = Date().timeIntervalSince1970
-        // Past cutoff: nothing is old enough yet.
-        let none = try await s.pruneJobs(olderThan: now - 10_000)
-        XCTAssertEqual(none, 0)
-        // Future cutoff: both terminal results go, the queued one stays.
-        let removed = try await s.pruneJobs(olderThan: now + 10_000)
-        XCTAssertEqual(removed, 2)
-        let left = await s.listJobs().map { $0.id }
-        XCTAssertEqual(left, ["q1"], "pending job is never pruned")
-    }
-
-    func testTrimJobsToMaxRowsOldestTerminalFirst() async throws {
-        let url = tmpURL()
-        defer { try? FileManager.default.removeItem(at: url) }
-        let s = try AthenaStore(path: url)
-        // Three terminal (done) jobs, completed in id order, + a queued one.
-        for id in ["a", "b", "c"] {
-            try await s.insertJob(
-                id: id, kind: "conversation", request: Data(), owner: nil)
-            try await s.updateJob(
-                id: id, status: "done", result: Data(id.utf8), error: nil)
-        }
-        try await s.insertJob(
-            id: "q", kind: "conversation", request: Data(), owner: nil)
-        // H13: the cap governs RETAINED RESULTS (terminal rows), not total
-        // rows. 3 terminal, cap 2 ⇒ delete 1 oldest terminal (a); b, c
-        // (terminal) + q (pending, never counted) remain.
-        let trimmed = try await s.trimJobs(maxRows: 2)
-        XCTAssertEqual(trimmed, 1)
-        let left = await s.listJobs().map { $0.id }.sorted()
-        XCTAssertEqual(left, ["b", "c", "q"])
-        // maxRows 0 disables; never deletes.
-        let none = try await s.trimJobs(maxRows: 0)
-        XCTAssertEqual(none, 0)
-    }
-
-    func testTrimJobsNeverDropsPendingBelowCap() async throws {
-        let url = tmpURL()
-        defer { try? FileManager.default.removeItem(at: url) }
-        let s = try AthenaStore(path: url)
-        // H13: a large pending backlog must NOT cause terminal results to
-        // be over-pruned. Two pending + one terminal, cap 1: the single
-        // terminal result is within the 1-result budget, so nothing is
-        // trimmed — pending rows don't count toward (or trigger) the cap.
-        try await s.insertJob(
-            id: "p1", kind: "conversation", request: Data(), owner: nil)
-        try await s.insertJob(
-            id: "p2", kind: "conversation", request: Data(), owner: nil)
-        try await s.insertJob(
-            id: "t1", kind: "conversation", request: Data(), owner: nil)
-        try await s.updateJob(
-            id: "t1", status: "done", result: Data(), error: nil)
-        let trimmed = try await s.trimJobs(maxRows: 1)
-        XCTAssertEqual(trimmed, 0, "terminal count within cap ⇒ no prune")
-        let left = await s.listJobs().map { $0.id }.sorted()
-        XCTAssertEqual(left, ["p1", "p2", "t1"])
-        // Add a second terminal result: now 2 terminal > cap 1 ⇒ drop the
-        // oldest terminal (t1), keep t2 + both pending.
-        try await s.insertJob(
-            id: "t2", kind: "conversation", request: Data(), owner: nil)
-        try await s.updateJob(
-            id: "t2", status: "done", result: Data(), error: nil)
-        let trimmed2 = try await s.trimJobs(maxRows: 1)
-        XCTAssertEqual(trimmed2, 1)
-        let left2 = await s.listJobs().map { $0.id }.sorted()
-        XCTAssertEqual(left2, ["p1", "p2", "t2"])
-    }
+    // ADR 025 S2 — the queue (jobs table) and its retention/trim helpers
+    // were removed; their `testPruneJobsByAgeSkipsPending` /
+    // `testTrimJobs…` coverage went with them. Audit retention is still
+    // pinned by `testAuditPruneByAge`.
 
     // MARK: At-rest encryption (M34.3b)
 
@@ -534,8 +290,8 @@ final class AthenaStoreTests: XCTestCase {
         let key = "0123456789abcdef0123456789abcdef"
         do {
             let s = try AthenaStore(path: url, key: key)
-            try await s.insertJob(
-                id: "v", kind: "x", request: Data("secret".utf8), owner: nil)
+            try await s.addUsage(
+                principal: "u:v", promptTokens: 7, completionTokens: 3)
             await s.close()
         }
         // The on-disk file must NOT be a plaintext SQLite database.
@@ -545,8 +301,8 @@ final class AthenaStoreTests: XCTestCase {
         // Correct key reopens and reads.
         do {
             let s = try AthenaStore(path: url, key: key)
-            let got = await s.getJob(id: "v")?.request
-            XCTAssertEqual(got, Data("secret".utf8))
+            let got = await s.usage(principal: "u:v")?.promptTokens
+            XCTAssertEqual(got, 7)
             await s.close()
         }
         // Wrong key fails fast with an encryption error.
@@ -571,8 +327,8 @@ final class AthenaStoreTests: XCTestCase {
         // the migration swap (the daemon migrates BEFORE opening too).
         do {
             let s = try AthenaStore(path: url)
-            try await s.insertJob(
-                id: "keep", kind: "x", request: Data("data".utf8), owner: nil)
+            try await s.addUsage(
+                principal: "u:keep", promptTokens: 11, completionTokens: 2)
             await s.close()
         }
         XCTAssertTrue(
@@ -586,8 +342,8 @@ final class AthenaStoreTests: XCTestCase {
             "store is encrypted after migration")
         // Data survives, readable only with the key.
         let s = try AthenaStore(path: url, key: key)
-        let got = await s.getJob(id: "keep")?.request
-        XCTAssertEqual(got, Data("data".utf8))
+        let got = await s.usage(principal: "u:keep")?.promptTokens
+        XCTAssertEqual(got, 11)
     }
 
     /// NH1 (M66.1) — `recoverInterruptedMigration` finishes or rolls back
@@ -655,19 +411,4 @@ final class AthenaStoreTests: XCTestCase {
     // `testAllowlistDefaultSingleSwapH2` coverage is gone with it. Selection
     // resolution + the ambiguity rule are unit-pinned in ModelSelectionTests.
 
-    func testClearJobRequestEmptiesPrompt() async throws {
-        let url = tmpURL()
-        defer { try? FileManager.default.removeItem(at: url) }
-        let s = try AthenaStore(path: url)
-        let req = Data("{\"prompt\":\"secret\"}".utf8)
-        try await s.insertJob(
-            id: "j", kind: "conversation", request: req, owner: nil)
-        try await s.updateJob(
-            id: "j", status: "done", result: Data("r".utf8), error: nil)
-        try await s.clearJobRequest(id: "j")
-        let after = await s.getJob(id: "j")
-        XCTAssertEqual(after?.request, Data(), "prompt blob emptied")
-        XCTAssertEqual(after?.result, Data("r".utf8), "result untouched")
-        XCTAssertEqual(after?.status, "done")
-    }
 }

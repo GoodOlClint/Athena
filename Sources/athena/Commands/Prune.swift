@@ -16,11 +16,8 @@ struct Prune: AsyncParsableCommand {
     @Flag(help: "Show what would be removed; change nothing.")
     var dryRun = false
 
-    @Flag(help: "Stream job progress (remote only).")
+    @Flag(help: "Print progress as it streams (remote only).")
     var follow = false
-
-    @Option(help: "Long-poll N seconds for completion (remote only).")
-    var wait: Int?
 
     @Option(help: "Model store root. Default: ~/.athena/models.")
     var modelStore: String?
@@ -31,7 +28,7 @@ struct Prune: AsyncParsableCommand {
         if daemon.isRemote {
             try await RemoteModels.job(
                 daemon, op: "prune", body: ["dry_run": dryRun],
-                follow: follow, wait: wait)
+                progress: follow)
             return
         }
         let root =

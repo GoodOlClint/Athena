@@ -296,50 +296,9 @@ final class AthenaConfigTests: XCTestCase {
         XCTAssertNil(c.preload)
     }
 
-    func testQueueRetentionKeysParse() throws {
-        let toml = """
-            listen_host = "127.0.0.1"
-            listen_port = 7447
-            log_dir = "/l"
-            queue_result_ttl_secs = 604800
-            queue_max_rows = 10000
-            """
-        let c = try AthenaConfig.parse(toml: toml)
-        XCTAssertEqual(c.queueResultTtlSecs, 604_800)
-        XCTAssertEqual(c.queueMaxRows, 10_000)
-    }
-
-    func testQueueRetentionKeysAbsentAreNil() throws {
-        let toml = """
-            listen_host = "127.0.0.1"
-            listen_port = 7447
-            log_dir = "/l"
-            """
-        let c = try AthenaConfig.parse(toml: toml)
-        XCTAssertNil(c.queueResultTtlSecs)
-        XCTAssertNil(c.queueMaxRows)
-    }
-
-    func testContentOptOutKeyParse() throws {
-        let toml = """
-            listen_host = "127.0.0.1"
-            listen_port = 7447
-            log_dir = "/l"
-            drop_request_content = true
-            """
-        let c = try AthenaConfig.parse(toml: toml)
-        XCTAssertEqual(c.dropRequestContent, true)
-    }
-
-    func testContentOptOutKeyAbsentIsNil() throws {
-        let toml = """
-            listen_host = "127.0.0.1"
-            listen_port = 7447
-            log_dir = "/l"
-            """
-        let c = try AthenaConfig.parse(toml: toml)
-        XCTAssertNil(c.dropRequestContent)
-    }
+    // ADR 025 S2 — the queue (and its queue_result_ttl_secs / queue_max_rows
+    // / drop_request_content retention keys) was removed, so those config
+    // parse tests are gone with it.
 
     func testEncryptStoreKeyParse() throws {
         let toml = """
@@ -389,14 +348,12 @@ final class AthenaConfigTests: XCTestCase {
             preload = 1
             encrypt_store = YES
             speculative = on
-            drop_request_content = 0
             dflash_enabled = Off
             """
         let c = try AthenaConfig.parse(toml: toml)
         XCTAssertEqual(c.preload, true)
         XCTAssertEqual(c.encryptStore, true)
         XCTAssertEqual(c.speculative, true)
-        XCTAssertEqual(c.dropRequestContent, false)
         XCTAssertEqual(c.dflashEnabled, false)
     }
 
@@ -560,9 +517,6 @@ final class LaunchdPlistTests: XCTestCase {
         requestTimeoutSecs: Int? = nil,
         coldLoadWaitSecs: Int? = nil,
         preload: Bool? = nil,
-        queueResultTtlSecs: Int? = nil,
-        queueMaxRows: Int? = nil,
-        dropRequestContent: Bool? = nil,
         encryptStore: Bool? = nil
     ) -> AthenaConfig {
         AthenaConfig(
@@ -581,9 +535,6 @@ final class LaunchdPlistTests: XCTestCase {
             requestTimeoutSecs: requestTimeoutSecs,
             coldLoadWaitSecs: coldLoadWaitSecs,
             preload: preload,
-            queueResultTtlSecs: queueResultTtlSecs,
-            queueMaxRows: queueMaxRows,
-            dropRequestContent: dropRequestContent,
             encryptStore: encryptStore,
             logDir: "/var/log/athena")
     }
@@ -641,9 +592,6 @@ final class LaunchdPlistTests: XCTestCase {
                 tokenMaxAgeDays: 90,
                 requestTimeoutSecs: 120,
                 preload: true,
-                queueResultTtlSecs: 604_800,
-                queueMaxRows: 10_000,
-                dropRequestContent: true,
                 encryptStore: true))
         XCTAssertEqual(
             d["ProgramArguments"] as? [String],
@@ -666,9 +614,6 @@ final class LaunchdPlistTests: XCTestCase {
                 "--token-max-age-days", "90",
                 "--request-timeout-secs", "120",
                 "--preload",
-                "--queue-result-ttl-secs", "604800",
-                "--queue-max-rows", "10000",
-                "--drop-request-content",
                 "--encrypt-store",
             ])
     }

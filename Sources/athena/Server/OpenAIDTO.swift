@@ -612,36 +612,7 @@ struct SpeakerEmbeddingResponse: Codable {
     let dimension: Int
 }
 
-// MARK: - /v1/queue (M8.1 async request queue)
-
-struct QueueSubmitResponse: Codable {
-    let id: String
-    let status: String  // "queued"
-}
-
-struct QueueStatusResponse: Codable {
-    let id: String
-    let kind: String
-    let status: String  // queued|running|done|error|canceled
-    let result: JSONValue?
-    let error: String?
-}
-
-/// Stored job results (encoded into the job row; surfaced under
-/// `result` on status). Conversation jobs store a full
-/// `ChatCompletionResponse` (M24.6); embeddings store this. `model`
-/// (M39) is the embedding model actually served for the job.
-struct QueuedEmbeddingResult: Codable {
-    let model: String
-    let embeddings: [[Float]]
-}
-
-struct QueueJobSummary: Codable {
-    let id: String
-    let kind: String
-    let status: String
-    let created: Double
-    let updated: Double
-}
-struct QueueListResponse: Codable { let jobs: [QueueJobSummary] }
-struct QueueRemoveResponse: Codable { let id: String; let removed: Bool }
+// ADR 025 S2 — the async request queue (`/v1/queue*`) and its DTOs were
+// removed entirely. Inference is synchronous (`/v1/chat/completions`,
+// `/v1/embeddings`, …); model lifecycle ops stream SSE progress on
+// `/api/models/{pull,convert,prune}` (see NativeAPIDTO.swift).

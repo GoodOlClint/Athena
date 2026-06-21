@@ -42,11 +42,8 @@ struct Convert: AsyncParsableCommand {
     @Option(help: "Git revision / branch / tag (remote only).")
     var revision: String?
 
-    @Flag(help: "Stream job progress (remote only).")
+    @Flag(help: "Print download progress as it streams (remote only).")
     var follow = false
-
-    @Option(help: "Long-poll N seconds for completion (remote only).")
-    var wait: Int?
 
     @Option(help: "Model store root. Default: ~/.athena/models.")
     var modelStore: String?
@@ -62,8 +59,7 @@ struct Convert: AsyncParsableCommand {
             if let name { b["name"] = name }
             if let revision { b["revision"] = revision }
             try await RemoteModels.job(
-                daemon, op: "convert", body: b, follow: follow,
-                wait: wait)
+                daemon, op: "convert", body: b, progress: follow)
             return
         }
         let root =

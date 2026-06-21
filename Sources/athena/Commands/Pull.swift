@@ -18,11 +18,8 @@ struct Pull: AsyncParsableCommand {
     @Option(help: "Git revision / branch / tag (remote only).")
     var revision: String?
 
-    @Flag(help: "Stream job progress (remote only).")
+    @Flag(help: "Print download progress as it streams (remote only).")
     var follow = false
-
-    @Option(help: "Long-poll N seconds for completion (remote only).")
-    var wait: Int?
 
     @Flag(
         help: ArgumentHelp(
@@ -51,8 +48,7 @@ struct Pull: AsyncParsableCommand {
             var b: [String: Any] = ["id": model]
             if let revision { b["revision"] = revision }
             try await RemoteModels.job(
-                daemon, op: "pull", body: b, follow: follow,
-                wait: wait)
+                daemon, op: "pull", body: b, progress: follow)
             return
         }
         let root =

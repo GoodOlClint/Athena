@@ -26,7 +26,7 @@ enum OpenAPISpec {
           "info": {
             "title": "Athena",
             "summary": "Project the platform inference appliance (passive oracle).",
-            "description": "Athena is a single native macOS/MLX daemon that hosts LLM chat, embeddings, audio transcription/diarization, a built-in vector DB, and an async job queue behind one Metal memory governor. It is a **passive oracle**: the daemon answers inbound requests only and never initiates outbound connections (except fetching model weights and an opt-in remote-syslog sink). Anything a client needs is delivered by pull / long-poll / SSE — there are no result or billing webhooks.\n\nTwo HTTP dialects are served:\n- `/v1/*` — OpenAI-compatible (drop-in for OpenAI SDKs).\n- `/api/*` — Athena's own minimal native dialect.\n\nAll errors share the envelope `{\"error\":{\"message\",\"type\",\"code\"}}`. Authentication is a bearer token (`Authorization: Bearer <token>`); each route requires a single RBAC permission. When auth is disabled (loopback, no seeded users) every route is open.",
+            "description": "Athena is a single native macOS/MLX daemon that hosts LLM chat, embeddings, and audio/video transcription/diarization behind one Metal memory governor. It is a **passive oracle**: the daemon answers inbound requests only and never initiates outbound connections (except fetching model weights and an opt-in remote-syslog sink). Anything a client needs is delivered by pull / long-poll / SSE — there are no result or billing webhooks.\n\nTwo HTTP dialects are served:\n- `/v1/*` — OpenAI-compatible (drop-in for OpenAI SDKs).\n- `/api/*` — Athena's own minimal native dialect.\n\nAll errors share the envelope `{\"error\":{\"message\",\"type\",\"code\"}}`. Authentication is a bearer token (`Authorization: Bearer <token>`); each route requires a single RBAC permission. When auth is disabled (loopback, no seeded users) every route is open.",
             "version": "\#(version)",
             "license": { "name": "Proprietary" }
           },
@@ -40,7 +40,6 @@ enum OpenAPISpec {
             { "name": "Models", "description": "OpenAI-compatible model discovery." },
             { "name": "Embeddings", "description": "OpenAI-compatible text embeddings." },
             { "name": "Audio", "description": "Transcription, diarization, and speaker embeddings (multipart)." },
-            { "name": "Queue", "description": "Async job queue (submit / poll / SSE / cancel)." },
             { "name": "Native", "description": "Athena-native /api chat + embed." },
             { "name": "Admin", "description": "Daemon administration." },
             { "name": "Model store", "description": "Native model-store read + lifecycle ops." },
@@ -53,7 +52,7 @@ enum OpenAPISpec {
               "get": {
                 "tags": ["Operational"],
                 "summary": "Liveness + memory-governor snapshot + live signals.",
-                "description": "Always open (no auth). Returns the governor's current reservations and budget, plus `inflight` (live request count), `queueDepth` (jobs in queued status), and `lastRequestAt` (unix-epoch seconds; 0 ⇒ none since boot) for at-a-glance diagnosis of a hung daemon (M43.1). M60.1 adds `thermalState` (`nominal`/`fair`/`serious`/`critical` from macOS thermal pressure — the throttle indicator to back off on), `lastDecodeTokensPerSec` (most recent decode throughput), and `mlxActiveBytes`/`mlxCacheBytes` (MLX allocator counters). M60.2 adds `powerAssertionHeld` (whether the daemon holds a PreventUserIdleSystemSleep assertion; `false` means an unattended Mac can sleep and suspend inference). M60.3 adds `gpuClockMHz` and `gpuActiveResidency` (sudoless in-process GPU telemetry via IOReport; `null` when unavailable).",
+                "description": "Always open (no auth). Returns the governor's current reservations and budget, plus `inflight` (live request count) and `lastRequestAt` (unix-epoch seconds; 0 ⇒ none since boot) for at-a-glance diagnosis of a hung daemon (M43.1). M60.1 adds `thermalState` (`nominal`/`fair`/`serious`/`critical` from macOS thermal pressure — the throttle indicator to back off on), `lastDecodeTokensPerSec` (most recent decode throughput), and `mlxActiveBytes`/`mlxCacheBytes` (MLX allocator counters). M60.2 adds `powerAssertionHeld` (whether the daemon holds a PreventUserIdleSystemSleep assertion; `false` means an unattended Mac can sleep and suspend inference). M60.3 adds `gpuClockMHz` and `gpuActiveResidency` (sudoless in-process GPU telemetry via IOReport; `null` when unavailable).",
                 "security": [],
                 "responses": {
                   "200": { "description": "Governor snapshot + live signals.", "content": { "application/json": { "schema": { "type": "object" } } } }
@@ -273,71 +272,6 @@ enum OpenAPISpec {
                 }
               }
             },
-            "/v1/queue/{arg}": {
-              "post": {
-                "tags": ["Queue"],
-                "summary": "Submit an async job.",
-                "description": "`{arg}` is the job kind (e.g. `chat`, `embed`). Returns a job id to poll. Requires `queue.submit`. Jobs are owner-scoped.",
-                "parameters": [ { "name": "arg", "in": "path", "required": true, "schema": { "type": "string" }, "description": "On POST: the job kind. On GET/DELETE: the job id." } ],
-                "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "description": "The same body the synchronous endpoint of this kind accepts." } } } },
-                "responses": {
-                  "202": { "description": "Job accepted.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QueueSubmitResponse" } } } },
-                  "400": { "$ref": "#/components/responses/BadRequest" },
-                  "401": { "$ref": "#/components/responses/Unauthorized" },
-                  "403": { "$ref": "#/components/responses/Forbidden" }
-                }
-              },
-              "get": {
-                "tags": ["Queue"],
-                "summary": "Get job status/result.",
-                "description": "`{arg}` is the job id. Owner-scoped. Requires `queue.submit`.",
-                "parameters": [ { "name": "arg", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Job id." } ],
-                "responses": {
-                  "200": { "description": "Job status.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QueueStatusResponse" } } } },
-                  "404": { "$ref": "#/components/responses/NotFound" },
-                  "401": { "$ref": "#/components/responses/Unauthorized" },
-                  "403": { "$ref": "#/components/responses/Forbidden" }
-                }
-              },
-              "delete": {
-                "tags": ["Queue"],
-                "summary": "Cancel/remove a job.",
-                "description": "`{arg}` is the job id. Owner-scoped. Requires `queue.submit`.",
-                "parameters": [ { "name": "arg", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Job id." } ],
-                "responses": {
-                  "200": { "description": "Removal result.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QueueRemoveResponse" } } } },
-                  "404": { "$ref": "#/components/responses/NotFound" },
-                  "401": { "$ref": "#/components/responses/Unauthorized" },
-                  "403": { "$ref": "#/components/responses/Forbidden" }
-                }
-              }
-            },
-            "/v1/queue": {
-              "get": {
-                "tags": ["Queue"],
-                "summary": "List the caller's jobs.",
-                "description": "Owner-scoped. Requires `queue.submit`.",
-                "responses": {
-                  "200": { "description": "Jobs.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QueueListResponse" } } } },
-                  "401": { "$ref": "#/components/responses/Unauthorized" },
-                  "403": { "$ref": "#/components/responses/Forbidden" }
-                }
-              }
-            },
-            "/v1/queue/{arg}/events": {
-              "get": {
-                "tags": ["Queue"],
-                "summary": "Stream a job's status transitions (SSE).",
-                "description": "`{arg}` is the job id. An inbound long-lived SSE stream until the job reaches a terminal state — the passive-oracle alternative to a webhook. Requires `queue.submit`.",
-                "parameters": [ { "name": "arg", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Job id." } ],
-                "responses": {
-                  "200": { "description": "SSE stream of status objects.", "content": { "text/event-stream": { "schema": { "type": "string" } } } },
-                  "404": { "$ref": "#/components/responses/NotFound" },
-                  "401": { "$ref": "#/components/responses/Unauthorized" },
-                  "403": { "$ref": "#/components/responses/Forbidden" }
-                }
-              }
-            },
             "/api/chat": {
               "post": {
                 "tags": ["Native"],
@@ -536,11 +470,11 @@ enum OpenAPISpec {
             "/api/models/pull": {
               "post": {
                 "tags": ["Model store"],
-                "summary": "Pull a model from Hugging Face (async).",
-                "description": "Dispatched to the queue; poll the returned job id. Requires `model.write`.",
+                "summary": "Pull a model from Hugging Face (synchronous, SSE progress).",
+                "description": "Athena-native (ADR 025 S2): runs synchronously and streams Server-Sent Events directly — no async queue, no job id. Each `data:` frame is `{\"event\":\"progress\",\"fraction\":F}`, then a terminal `{\"event\":\"done\",\"result\":{…}}` or `{\"event\":\"error\",\"error\":{message,type,code}}`, ending with `[DONE]`. Requires `model.write`.",
                 "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ModelPullRequest" } } } },
                 "responses": {
-                  "202": { "description": "Job accepted.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ModelJobResponse" } } } },
+                  "200": { "description": "SSE stream of progress + terminal event.", "content": { "text/event-stream": { "schema": { "type": "string" } } } },
                   "400": { "$ref": "#/components/responses/BadRequest" },
                   "401": { "$ref": "#/components/responses/Unauthorized" },
                   "403": { "$ref": "#/components/responses/Forbidden" }
@@ -550,11 +484,11 @@ enum OpenAPISpec {
             "/api/models/convert": {
               "post": {
                 "tags": ["Model store"],
-                "summary": "Convert/quantize a model (async).",
-                "description": "Dispatched to the queue. Requires `model.write`.",
+                "summary": "Convert/quantize a model (synchronous, SSE progress).",
+                "description": "Athena-native (ADR 025 S2): synchronous, streams SSE progress + a terminal done/error event (see POST /api/models/pull). Requires `model.write`.",
                 "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ModelConvertRequest" } } } },
                 "responses": {
-                  "202": { "description": "Job accepted.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ModelJobResponse" } } } },
+                  "200": { "description": "SSE stream of progress + terminal event.", "content": { "text/event-stream": { "schema": { "type": "string" } } } },
                   "400": { "$ref": "#/components/responses/BadRequest" },
                   "401": { "$ref": "#/components/responses/Unauthorized" },
                   "403": { "$ref": "#/components/responses/Forbidden" }
@@ -564,11 +498,11 @@ enum OpenAPISpec {
             "/api/models/prune": {
               "post": {
                 "tags": ["Model store"],
-                "summary": "Prune unreferenced model blobs (async).",
-                "description": "Dispatched to the queue; `dry_run:true` lists candidates only. Requires `model.write`.",
+                "summary": "Prune unreferenced model blobs (synchronous, SSE progress).",
+                "description": "Athena-native (ADR 025 S2): synchronous, streams a terminal done/error SSE event (see POST /api/models/pull); `dry_run:true` lists candidates only. Requires `model.write`.",
                 "requestBody": { "required": false, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ModelPruneRequest" } } } },
                 "responses": {
-                  "202": { "description": "Job accepted.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ModelJobResponse" } } } },
+                  "200": { "description": "SSE stream of the terminal event.", "content": { "text/event-stream": { "schema": { "type": "string" } } } },
                   "401": { "$ref": "#/components/responses/Unauthorized" },
                   "403": { "$ref": "#/components/responses/Forbidden" }
                 }
@@ -937,16 +871,6 @@ enum OpenAPISpec {
                   "dimension": { "type": "integer" }
                 }
               },
-              "QueueSubmitResponse": { "type": "object", "properties": { "id": { "type": "string" }, "status": { "type": "string" } } },
-              "QueueStatusResponse": {
-                "type": "object",
-                "properties": { "id": { "type": "string" }, "kind": { "type": "string" }, "status": { "type": "string", "enum": ["queued", "running", "done", "error", "canceled"] }, "result": {}, "error": { "type": "string", "nullable": true } }
-              },
-              "QueueListResponse": {
-                "type": "object",
-                "properties": { "jobs": { "type": "array", "items": { "type": "object", "properties": { "id": { "type": "string" }, "kind": { "type": "string" }, "status": { "type": "string" }, "created": { "type": "number" }, "updated": { "type": "number" } } } } }
-              },
-              "QueueRemoveResponse": { "type": "object", "properties": { "id": { "type": "string" }, "removed": { "type": "boolean" } } },
               "AthenaChatRequest": {
                 "type": "object",
                 "required": ["messages"],
@@ -998,7 +922,6 @@ enum OpenAPISpec {
               "ModelPullRequest": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string" }, "revision": { "type": "string" } } },
               "ModelConvertRequest": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string" }, "revision": { "type": "string" }, "bits": { "type": "integer" }, "group_size": { "type": "integer" }, "name": { "type": "string" } } },
               "ModelPruneRequest": { "type": "object", "properties": { "dry_run": { "type": "boolean" } } },
-              "ModelJobResponse": { "type": "object", "properties": { "job_id": { "type": "string" }, "status": { "type": "string" } } },
               "ModelSlot": { "type": "object", "properties": { "module": { "type": "string", "enum": ["llm", "textEmbedding", "transcription", "diarization", "speakerEmbedding"] }, "allowed": { "type": "array", "items": { "type": "string" } }, "default": { "type": "string" }, "resident": { "type": "string", "nullable": true } } },
               "ModelResidentResponse": { "type": "object", "properties": { "slots": { "type": "array", "items": { "$ref": "#/components/schemas/ModelSlot" } } } },
               "ModelLoadRequest": { "type": "object", "required": ["module"], "properties": { "module": { "type": "string", "enum": ["llm", "textEmbedding", "transcription", "diarization", "speakerEmbedding"] }, "id": { "type": "string", "description": "Model id within the module's store models. Omit ⇒ the module's configured default." } } },

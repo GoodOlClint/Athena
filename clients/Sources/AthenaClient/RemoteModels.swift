@@ -38,11 +38,6 @@ public enum RemoteModels {
         let model: String
         let source: String
     }
-    private struct JobResp: Decodable {
-        let job_id: String
-        let status: String
-    }
-
     private static func fail(_ code: Int, _ data: Data) throws {
         HTTPClient.printJSON(data)
         if code >= 400 { throw ExitCode.failure }
@@ -250,39 +245,20 @@ public enum RemoteModels {
         }
     }
 
-    /// Submit a long-running op (pull/convert/prune). The route is
-    /// `model.write`-gated server-side; the reply is `202 {job_id}`.
-    /// Then `--follow` streams `/v1/queue/:id` transitions, `--wait N`
-    /// long-polls once, otherwise just the id is printed.
+    /// Submit a long-running op (pull/convert/prune). ADR 025 S2: the
+    /// `model.write`-gated route runs the op SYNCHRONOUSLY and streams SSE
+    /// progress (no async queue, no job id). We consume the stream to
+    /// completion, blocking until the op finishes. `progress` (the old
+    /// `--follow`) prints progress events as they arrive; either way the
+    /// terminal `done` result (or `error` envelope) is printed, and an
+    /// error exits non-zero.
     public static func job(
         _ d: DaemonOptions, op: String, body: [String: Any],
-        follow: Bool, wait: Int?
+        progress: Bool
     ) async throws {
         let payload = try JSONSerialization.data(withJSONObject: body)
-        let (code, data): (Int, Data)
-        do {
-            (code, data) = try await HTTPClient.send(
-                "POST", d.base + "/api/models/\(op)", body: payload,
-                key: d.authKey)
-        } catch { HTTPClient.noDaemon(d, error) }
-        guard code < 400,
-            let j = try? JSONDecoder().decode(JobResp.self, from: data)
-        else { return try fail(code, data) }
-        print("\(op) job \(j.job_id) (\(j.status))")
-        if follow {
-            try await JobPoll.follow(d, id: j.job_id)
-        } else if let wait {
-            let (c2, d2): (Int, Data)
-            do {
-                (c2, d2) = try await HTTPClient.send(
-                    "GET",
-                    d.base + "/v1/queue/\(j.job_id)?wait=\(wait)",
-                    key: d.authKey)
-            } catch { HTTPClient.noDaemon(d, error) }
-            try fail(c2, d2)
-        } else {
-            print("poll: athena queue get \(j.job_id) --follow")
-        }
+        try await ModelOpStream.run(
+            d, op: op, body: payload, progress: progress)
     }
 
     /// Percent-escape a path segment (model/job names are validated
@@ -293,75 +269,116 @@ public enum RemoteModels {
     }
 }
 
-/// Poll a queue job until terminal. Apple: native SSE
-/// (`/v1/queue/:id/events`); Linux (FoundationNetworking lacks
-/// `URLSession.bytes`): status-poll fallback — same observable
-/// transitions. Mirrors `QueueGet`'s pattern, factored out so the
-/// model-op verbs reuse it.
-public enum JobPoll {
-    private static let terminal: Set<String> = [
-        "done", "error", "canceled",
-    ]
-
-    public static func follow(_ d: DaemonOptions, id: String)
-        async throws
-    {
+/// Consume a model-op SSE stream from `POST /api/models/{op}` (ADR 025
+/// S2 — synchronous + SSE; no async queue, no job id). Apple: incremental
+/// via `URLSession.bytes` (live progress). Linux (FoundationNetworking
+/// lacks `URLSession.bytes`): the streaming body is buffered by
+/// `URLSession.data` and parsed once the op finishes — same terminal
+/// outcome, no mid-flight progress. Either way it BLOCKS until the op
+/// completes; an `error` event exits non-zero.
+public enum ModelOpStream {
+    public static func run(
+        _ d: DaemonOptions, op: String, body: Data, progress: Bool
+    ) async throws {
+        let url = d.base + "/api/models/\(op)"
+        var sawError = false
         #if canImport(Darwin)
-            var req = URLRequest(
-                url: URL(
-                    string: d.base + "/v1/queue/\(id)/events")!)
+            var req = URLRequest(url: URL(string: url)!)
+            req.httpMethod = "POST"
+            req.httpBody = body
+            req.setValue(
+                "application/json", forHTTPHeaderField: "Content-Type")
             if let k = d.authKey, !k.isEmpty {
                 req.setValue(
-                    "Bearer \(k)",
-                    forHTTPHeaderField: "Authorization")
+                    "Bearer \(k)", forHTTPHeaderField: "Authorization")
             }
             do {
                 let (bytes, resp) = try await URLSession.shared.bytes(
                     for: req)
-                // K2 — a non-200 (bad job id ⇒ 404, auth ⇒ 401/403) is
-                // NOT an event stream; parsing it as one silently
-                // swallows the real error. Check status before reading.
+                // A non-200 (bad body ⇒ 400, auth ⇒ 401/403) is NOT an
+                // event stream — surface the real error, not a silent swallow.
                 if let http = resp as? HTTPURLResponse,
                     http.statusCode >= 400
                 {
-                    FailableExit.die(
-                        "error: /v1/queue/\(id)/events → "
-                            + "\(http.statusCode) (check the job id and "
-                            + "auth)")
+                    var buf = Data()
+                    for try await b in bytes { buf.append(b) }
+                    HTTPClient.printJSON(buf)
+                    throw ExitCode.failure
                 }
                 for try await line in bytes.lines
                 where line.hasPrefix("data: ") {
-                    let p = String(line.dropFirst(6))
-                    if p == "[DONE]" { return }
-                    print(p)
+                    if handleFrame(
+                        String(line.dropFirst(6)), op: op,
+                        progress: progress, sawError: &sawError)
+                    { break }
                 }
+            } catch let e as ExitCode {
+                throw e
             } catch { HTTPClient.noDaemon(d, error) }
         #else
-            struct S: Decodable { let status: String }
-            var last = ""
-            for _ in 0..<600 {
-                let (code, data): (Int, Data)
-                do {
-                    (code, data) = try await HTTPClient.send(
-                        "GET", d.base + "/v1/queue/\(id)",
-                        key: d.authKey)
-                } catch { HTTPClient.noDaemon(d, error) }
-                guard code < 400,
-                    let s = try? JSONDecoder().decode(
-                        S.self, from: data)
-                else {
-                    HTTPClient.printJSON(data)
-                    if code >= 400 { throw ExitCode.failure }
-                    return
-                }
-                if s.status != last {
-                    HTTPClient.printJSON(data)
-                    last = s.status
-                }
-                if terminal.contains(s.status) { return }
-                try await Task.sleep(nanoseconds: 1_000_000_000)
+            let (code, data): (Int, Data)
+            do {
+                (code, data) = try await HTTPClient.send(
+                    "POST", url, body: body, key: d.authKey)
+            } catch { HTTPClient.noDaemon(d, error) }
+            guard code < 400 else {
+                HTTPClient.printJSON(data)
+                throw ExitCode.failure
+            }
+            let text = String(data: data, encoding: .utf8) ?? ""
+            for line in text.split(separator: "\n", omittingEmptySubsequences: true)
+            where line.hasPrefix("data: ") {
+                if handleFrame(
+                    String(line.dropFirst(6)), op: op,
+                    progress: progress, sawError: &sawError)
+                { break }
             }
         #endif
+        if sawError { throw ExitCode.failure }
+    }
+
+    /// Render one `data:` frame. Returns true on the terminal `[DONE]`
+    /// sentinel. Sets `sawError` if the frame is an `error` event.
+    private static func handleFrame(
+        _ json: String, op: String, progress: Bool, sawError: inout Bool
+    ) -> Bool {
+        if json == "[DONE]" { return true }
+        guard let data = json.data(using: .utf8),
+            let obj = try? JSONSerialization.jsonObject(with: data)
+                as? [String: Any],
+            let event = obj["event"] as? String
+        else { return false }
+        switch event {
+        case "progress":
+            if progress, let f = obj["fraction"] as? Double {
+                FileHandle.standardError.write(
+                    Data(
+                        String(format: "  %@ %.0f%%\r", op, f * 100).utf8))
+            }
+        case "done":
+            if progress {
+                FileHandle.standardError.write(Data("\n".utf8))
+            }
+            if let result = obj["result"],
+                let d = try? JSONSerialization.data(withJSONObject: result)
+            {
+                HTTPClient.printJSON(d)
+            } else {
+                print("\(op): done")
+            }
+        case "error":
+            sawError = true
+            let env: [String: Any] = [
+                "error": obj["error"]
+                    ?? ["message": "model op failed"]
+            ]
+            if let d = try? JSONSerialization.data(withJSONObject: env) {
+                HTTPClient.printJSON(d)
+            }
+        default:
+            break
+        }
+        return false
     }
 }
 
@@ -382,16 +399,14 @@ public struct PullCmd: AsyncParsableCommand {
     @Argument(help: "HF repo id.") public var model: String
     @Option(help: "Git revision / branch / tag.")
     public var revision: String?
-    @Flag(help: "Stream job progress until it finishes.")
+    @Flag(help: "Print download progress as it streams.")
     public var follow = false
-    @Option(help: "Long-poll up to N seconds for completion.")
-    public var wait: Int?
     public init() {}
     public func run() async throws {
         var b: [String: Any] = ["id": model]
         if let revision { b["revision"] = revision }
         try await RemoteModels.job(
-            daemon, op: "pull", body: b, follow: follow, wait: wait)
+            daemon, op: "pull", body: b, progress: follow)
     }
 }
 
@@ -408,10 +423,8 @@ public struct ConvertCmd: AsyncParsableCommand {
     public var qGroupSize: Int?
     @Option(help: "Output name in the store.")
     public var name: String?
-    @Flag(help: "Stream job progress until it finishes.")
+    @Flag(help: "Print download progress as it streams.")
     public var follow = false
-    @Option(help: "Long-poll up to N seconds for completion.")
-    public var wait: Int?
     public init() {}
     public func run() async throws {
         var b: [String: Any] = ["id": model]
@@ -420,8 +433,7 @@ public struct ConvertCmd: AsyncParsableCommand {
         if let qGroupSize { b["group_size"] = qGroupSize }
         if let name { b["name"] = name }
         try await RemoteModels.job(
-            daemon, op: "convert", body: b, follow: follow,
-            wait: wait)
+            daemon, op: "convert", body: b, progress: follow)
     }
 }
 
@@ -432,15 +444,13 @@ public struct PruneCmd: AsyncParsableCommand {
     @OptionGroup public var daemon: DaemonOptions
     @Flag(help: "Show what would be removed; change nothing.")
     public var dryRun = false
-    @Flag(help: "Stream job progress until it finishes.")
+    @Flag(help: "Print progress as it streams.")
     public var follow = false
-    @Option(help: "Long-poll up to N seconds for completion.")
-    public var wait: Int?
     public init() {}
     public func run() async throws {
         try await RemoteModels.job(
             daemon, op: "prune", body: ["dry_run": dryRun],
-            follow: follow, wait: wait)
+            progress: follow)
     }
 }
 

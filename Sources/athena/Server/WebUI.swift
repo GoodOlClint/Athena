@@ -17,9 +17,7 @@ extension AthenaServer {
     struct UIState: Codable {
         let governor: GovernorSnapshot
         let metrics: AthenaMetrics.Snapshot
-        let jobsTotal: Int
         let dbPath: String
-        let queue: [QueueJobSummary]
         let model: String
         /// M59 follow-up — live resident model id per module class
         /// (module rawValue → the model actually loaded right now, e.g.
@@ -33,20 +31,10 @@ extension AthenaServer {
         let gov = await governor.snapshot()
         let met = await metrics.snapshot()
         let resident = await residentModelMap()
-        let jobsTotal = await store.jobCount()
-        // NA5 (M69.1) — the recent-jobs panel only needs summaries; fetch the
-        // newest 25 blob-free (DESC) and reverse to the prior oldest-first
-        // display order, instead of loading the whole jobs table with BLOBs.
-        let jobs = await queue.recentSummaries(limit: 25).reversed().map {
-            QueueJobSummary(
-                id: $0.id, kind: $0.kind, status: $0.status,
-                created: $0.created, updated: $0.updated)
-        }
         return Self.json(
             UIState(
                 governor: gov, metrics: met,
-                jobsTotal: jobsTotal, dbPath: store.dbPath.path,
-                queue: Array(jobs), model: modelName,
+                dbPath: store.dbPath.path, model: modelName,
                 residentModels: resident))
     }
 
@@ -325,8 +313,6 @@ extension AthenaServer {
           <div class="card"><h2>Requests</h2>
             <div id="met"></div><table id="bykind"></table></div>
           <div class="card"><h2>Store</h2><div id="store"></div></div>
-          <div class="card"><h2>Queue (recent)</h2>
-            <table id="queue"></table></div>
         </div>
         <script>
         const $=i=>document.getElementById(i);
@@ -370,15 +356,7 @@ extension AthenaServer {
             Object.entries(m.byKind).map(([k,v])=>
             `<tr><td>${k}</td><td>${v}</td></tr>`).join("");
           $("store").innerHTML="<table>"+
-            row("jobs",s.jobsTotal)+
             row("path",s.dbPath)+"</table>";
-          $("queue").innerHTML="<tr><th>id</th><th>kind</th>"+
-            "<th>status</th></tr>"+(s.queue.length?s.queue.slice()
-            .reverse().map(j=>`<tr><td>${j.id.slice(0,8)}</td>
-            <td>${j.kind}</td><td class=${
-              j.status=="error"?"err":j.status=="done"?"ok":"warn"
-            }>${j.status}</td></tr>`).join("")
-            :"<tr><td class=k>no jobs</td></tr>");
         }
         tick();setInterval(tick,2000);
         </script>
@@ -525,24 +503,16 @@ extension AthenaServer {
             "<th>modified</th>"+(WRITE?"<th></th>":"")+"</tr>"+
             (rows||"<tr><td class=k>no models</td></tr>");
         }
-        async function poll(id){
-          const j=await jget("/ui/api/job?id="+
-            encodeURIComponent(id));
-          const cl=j.status=="error"?"err":
-            j.status=="done"?"ok":"warn";
-          $("job").innerHTML="job "+id.slice(0,8)+" · "+
-            `<span class=${cl}>${j.status}</span>`+
-            (j.error?(" · "+j.error):"");
-          if(j.status!="done"&&j.status!="error"&&
-             j.status!="canceled")setTimeout(()=>poll(id),2000);
-          else load();
-        }
         async function op(kind,inp){
           const id=$(inp).value.trim(); if(!id)return;
+          // ADR 025 S2 — model ops are synchronous: the POST BLOCKS until
+          // the op finishes and returns the result (or error envelope).
+          $("job").innerHTML="<span class=warn>"+kind+" '"+id+
+            "' running… (this can take a while)</span>";
           const r=await jpost("/ui/api/models/"+kind,{id:id});
           const j=await r.json();
-          if(r.ok&&j.job_id){$("job").textContent=
-            "queued "+j.job_id; poll(j.job_id);}
+          if(r.ok){$("job").innerHTML=
+            "<span class=ok>"+kind+" done</span>"; load();}
           else $("job").innerHTML=
             "<span class=err>"+em(j)+"</span>";
         }
