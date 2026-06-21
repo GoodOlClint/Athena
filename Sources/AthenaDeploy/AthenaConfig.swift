@@ -150,6 +150,13 @@ public struct AthenaConfig: Sendable, Equatable {
     /// run). Optional — absent / false ⇒ plaintext store on disk relying
     /// on FileVault (default).
     public var encryptStore: Bool?
+    /// Force a persistent on-disk store even in stateless-loopback conditions
+    /// (ADR 025 S4). Absent / false ⇒ a loopback dev daemon with no
+    /// credentials runs stateless (no `athena.sqlite`); true ⇒ keep audit/
+    /// usage on disk anyway. Inert (always persistent) when auth keys exist,
+    /// a store file already exists, `encrypt_store` is on, or the bind is
+    /// non-loopback.
+    public var persistStore: Bool?
     /// `[network]` egress-proxy keys (M13.2). An operator-set
     /// `*_PROXY` env var always wins over these.
     public var httpsProxy: String?
@@ -193,6 +200,7 @@ public struct AthenaConfig: Sendable, Equatable {
         mlxCacheLimitBytes: Int? = nil,
         preload: Bool? = nil,
         encryptStore: Bool? = nil,
+        persistStore: Bool? = nil,
         httpsProxy: String? = nil, httpProxy: String? = nil,
         allProxy: String? = nil, noProxy: String? = nil,
         logDir: String
@@ -237,6 +245,7 @@ public struct AthenaConfig: Sendable, Equatable {
         self.mlxCacheLimitBytes = mlxCacheLimitBytes
         self.preload = preload
         self.encryptStore = encryptStore
+        self.persistStore = persistStore
         self.httpsProxy = httpsProxy
         self.httpProxy = httpProxy
         self.allProxy = allProxy
@@ -415,6 +424,7 @@ public struct AthenaConfig: Sendable, Equatable {
         let denyDebuggerAttach = try bool("deny_debugger_attach")
         let preload = try bool("preload")
         let encStore = try bool("encrypt_store")
+        let persistStore = try bool("persist_store")
 
         return AthenaConfig(
             listenHost: host,
@@ -458,6 +468,7 @@ public struct AthenaConfig: Sendable, Equatable {
             mlxCacheLimitBytes: mlxCacheLimit,
             preload: preload,
             encryptStore: encStore,
+            persistStore: persistStore,
             httpsProxy: scalar("https_proxy", in: toml),
             httpProxy: scalar("http_proxy", in: toml),
             allProxy: scalar("all_proxy", in: toml),

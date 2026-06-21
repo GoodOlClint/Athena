@@ -198,9 +198,14 @@ struct Doctor: AsyncParsableCommand {
         var nTok = 0
         var nUsr = 0
         var nAdmins = 0
-        if let db = try? AthenaStore(
-            path: dataDir.appendingPathComponent("athena.sqlite"),
-            key: StoreKey.resolve(trustEnv: geteuid() != 0))
+        // ADR 025 S4 — only OPEN the store if it already exists on disk; a
+        // stateless-loopback daemon writes none, and doctor must not be the
+        // thing that creates a phantom `athena.sqlite` (`SQLITE_OPEN_CREATE`).
+        let dctStoreFile = dataDir.appendingPathComponent("athena.sqlite")
+        if fm.fileExists(atPath: dctStoreFile.path),
+            let db = try? AthenaStore(
+                path: dctStoreFile,
+                key: StoreKey.resolve(trustEnv: geteuid() != 0))
         {
             nTok = await db.tokenCount()
             nUsr = await db.userCount()
@@ -405,68 +410,92 @@ struct Doctor: AsyncParsableCommand {
             say(.ok, "prompt cache: off")
         }
 
-        // 13. Data-at-rest posture (M34): SQLite store encryption (or the
-        //     FileVault fallback) + retention bounds. Passwords (PBKDF2),
-        //     token hashes (SHA-256) and outbound secrets (Keychain) are
-        //     already safe; the concern is the vector + queue blobs, which
-        //     hold inference inputs/outputs.
+        // 13. Data-at-rest posture (M34/ADR 025): store-persistence mode +
+        //     SQLite encryption (or the FileVault fallback). Passwords
+        //     (PBKDF2), token hashes (SHA-256) and outbound secrets (Keychain)
+        //     are already safe; after ADR 025 the store carries no request
+        //     content (queue + vector tenants gone) — only auth/audit/usage.
         let storeFile = dataDir.appendingPathComponent("athena.sqlite")
         let storeExists = fm.fileExists(atPath: storeFile.path)
-        let onDiskEncrypted =
-            storeExists && !AthenaStore.isPlaintextDatabase(at: storeFile)
-        if parsed?.encryptStore == true {
-            let keySrc = StoreKey.source(trustEnv: geteuid() != 0)
-            if !storeExists {
-                say(
-                    .ok,
-                    "at-rest: encryption enabled (SQLCipher) — store not "
-                        + "yet created; key from \(keySrc)")
+
+        // ADR 025 S4 — report whether the daemon persists the store at all.
+        let storeMode = StoreMode.resolve(
+            hasBootstrapKeys: envKeys || fileKeys,
+            dbFileExists: storeExists,
+            isLoopback: StoreMode.isLoopback(host),
+            encryptStore: parsed?.encryptStore == true,
+            persistOverride: parsed?.persistStore == true)
+        if storeMode == .ephemeral {
+            // Nothing on disk to encrypt or bound — the at-rest checks are
+            // moot, but doctor still reports the audit/usage posture below.
+            say(
+                .ok,
+                "store: STATELESS (loopback, no credentials) — the daemon "
+                    + "creates no athena.sqlite; audit/usage live in memory "
+                    + "only. Zero request-related data at rest.")
+        } else {
+            say(
+                .ok,
+                "store: persistent at \(storeFile.path)"
+                    + (parsed?.persistStore == true
+                        ? " (persist_store forces on-disk even in loopback)"
+                        : ""))
+            let onDiskEncrypted =
+                storeExists && !AthenaStore.isPlaintextDatabase(at: storeFile)
+            if parsed?.encryptStore == true {
+                let keySrc = StoreKey.source(trustEnv: geteuid() != 0)
+                if !storeExists {
+                    say(
+                        .ok,
+                        "at-rest: encryption enabled (SQLCipher) — store not "
+                            + "yet created; key from \(keySrc)")
+                } else if onDiskEncrypted {
+                    say(
+                        .ok,
+                        "at-rest: store encrypted (SQLCipher); key from "
+                            + "\(keySrc)")
+                } else {
+                    say(
+                        .warn,
+                        "at-rest: encrypt_store is set but the store is still "
+                            + "plaintext — it migrates on the next daemon "
+                            + "start (key from \(keySrc))")
+                }
+                if keySrc == "none" {
+                    say(
+                        .warn,
+                        "at-rest: no key resolvable yet — the daemon will mint "
+                            + "one in the Keychain on start. Back up "
+                            + "ATHENA_STORE_KEY / the Keychain item; without "
+                            + "it an encrypted store is unrecoverable.")
+                }
             } else if onDiskEncrypted {
                 say(
-                    .ok,
-                    "at-rest: store encrypted (SQLCipher); key from "
-                        + "\(keySrc)")
+                    .warn,
+                    "at-rest: the store on disk is encrypted but encrypt_store "
+                        + "is not set — set encrypt_store (or ATHENA_STORE_KEY) "
+                        + "so the daemon can open it")
             } else {
-                say(
-                    .warn,
-                    "at-rest: encrypt_store is set but the store is still "
-                        + "plaintext — it migrates on the next daemon "
-                        + "start (key from \(keySrc))")
-            }
-            if keySrc == "none" {
-                say(
-                    .warn,
-                    "at-rest: no key resolvable yet — the daemon will mint "
-                        + "one in the Keychain on start. Back up "
-                        + "ATHENA_STORE_KEY / the Keychain item; without "
-                        + "it an encrypted store is unrecoverable.")
-            }
-        } else if onDiskEncrypted {
-            say(
-                .warn,
-                "at-rest: the store on disk is encrypted but encrypt_store "
-                    + "is not set — set encrypt_store (or ATHENA_STORE_KEY) "
-                    + "so the daemon can open it")
-        } else {
-            switch Self.fileVaultOn() {
-            case .some(true):
-                say(
-                    .ok,
-                    "at-rest: store is plaintext but FileVault is ON "
-                        + "(full-disk encrypted). Set encrypt_store for "
-                        + "defense-in-depth.")
-            case .some(false):
-                say(
-                    .warn,
-                    "at-rest: store is plaintext and FileVault is OFF — "
-                        + "credential hashes and audit/usage metadata are "
-                        + "readable on disk. Enable FileVault or set "
-                        + "encrypt_store.")
-            case .none:
-                say(
-                    .warn,
-                    "at-rest: store is plaintext; FileVault status unknown "
-                        + "— ensure FileVault is on, or set encrypt_store.")
+                switch Self.fileVaultOn() {
+                case .some(true):
+                    say(
+                        .ok,
+                        "at-rest: store is plaintext but FileVault is ON "
+                            + "(full-disk encrypted). Set encrypt_store for "
+                            + "defense-in-depth.")
+                case .some(false):
+                    say(
+                        .warn,
+                        "at-rest: store is plaintext and FileVault is OFF — "
+                            + "credential hashes and audit/usage metadata are "
+                            + "readable on disk. Enable FileVault or set "
+                            + "encrypt_store.")
+                case .none:
+                    say(
+                        .warn,
+                        "at-rest: store is plaintext; FileVault status unknown "
+                            + "— ensure FileVault is on, or set encrypt_store.")
+                }
             }
         }
         // ADR 025 S2 — the async queue (and its result-retention knobs)
@@ -481,8 +510,12 @@ struct Doctor: AsyncParsableCommand {
         //     is normally kept for compliance, so it's a day-based
         //     retention (which PRUNES the trail) that's worth surfacing.
         var nAudit = 0
-        if let db = try? AthenaStore(
-            path: storeFile, key: StoreKey.resolve(trustEnv: geteuid() != 0))
+        // ADR 025 S4 — don't create a phantom store just to count audit rows;
+        // a stateless run has none on disk.
+        if storeExists,
+            let db = try? AthenaStore(
+                path: storeFile,
+                key: StoreKey.resolve(trustEnv: geteuid() != 0))
         {
             nAudit = await db.auditCount()
         }

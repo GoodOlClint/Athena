@@ -34,7 +34,7 @@ extension AthenaServer {
         return Self.json(
             UIState(
                 governor: gov, metrics: met,
-                dbPath: store.dbPath.path, model: modelName,
+                dbPath: store.dbLocationLabel, model: modelName,
                 residentModels: resident))
     }
 

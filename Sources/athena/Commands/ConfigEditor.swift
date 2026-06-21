@@ -63,6 +63,8 @@ extension ConfigEditor {
             return cfg.preload.map { $0 ? "true" : "false" }
         case "encrypt_store":
             return cfg.encryptStore.map { $0 ? "true" : "false" }
+        case "persist_store":
+            return cfg.persistStore.map { $0 ? "true" : "false" }
         case "https_proxy": return cfg.httpsProxy
         case "http_proxy": return cfg.httpProxy
         case "all_proxy": return cfg.allProxy

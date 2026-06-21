@@ -115,6 +115,16 @@ engine = "mlx"
 # keeps nothing on disk. (The former queue_result_ttl_secs / queue_max_rows
 # / drop_request_content retention knobs are gone.)
 
+# Stateless loopback (ADR 025 S4). A loopback daemon with NO credentials
+# (no auth keys, no existing store) creates NO athena.sqlite at all —
+# audit/usage are kept in memory and vanish on exit, so there is zero
+# request-related data at rest. Persistence turns on automatically the
+# moment anything needs durable state (auth keys configured, a store file
+# already present, encrypt_store on, or a non-loopback bind). Set
+# persist_store = true to FORCE an on-disk store even in the stateless case
+# (e.g. to retain audit/usage across restarts in a dev run).
+# persist_store = true
+
 
 # ── At-rest encryption ───────────────────────────────────────────────
 

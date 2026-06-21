@@ -274,6 +274,12 @@ struct Load: AsyncParsableCommand {
     )
     var encryptStore = false
 
+    @Flag(
+        help:
+            "Force a persistent on-disk SQLite store even in loopback dev mode with no credentials (ADR 025 S4). By default such a run is STATELESS — no athena.sqlite is created and audit/usage are not persisted. Set this to keep audit/usage on disk anyway. Off by default; ignored (always persistent) when auth keys are configured, a store already exists, encrypt_store is on, or the bind is non-loopback."
+    )
+    var persistStore = false
+
     @Option(
         name: .customLong("module"),
         help: """
@@ -504,35 +510,62 @@ struct Load: AsyncParsableCommand {
                 URL(fileURLWithPath: $0, isDirectory: true)
             } ?? ModelStore.defaultRoot)
 
-        // M42.1: open the SQLite store BEFORE building modules so each
-        // module's allowlist resolves from the persisted
-        // `model_allowlist` table. An empty table seeds from the
-        // operator CLI flags (so a fresh install is never blank) and
-        // every later edit via `/api/models/allow` survives a restart.
+        // Open the auth/audit/usage SQLite store (ADR 025/026: queue, vector,
+        // and allowlist tenants are gone) before building modules. ADR 025 S4
+        // may make this an ephemeral in-memory store (see the mode decision
+        // below) — a loopback dev daemon with no credentials writes no file.
         let dataRoot =
             dataDir.map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? AthenaEnv.userHome()
                 .appendingPathComponent(".athena", isDirectory: true)
         let dbPath = dataRoot.appendingPathComponent("athena.sqlite")
-        let storeKey: String?
-        if encryptStore {
-            let key = try StoreKey.ensure()
-            // NH1 (M66.1): if a prior encrypt-migration was interrupted
-            // mid-swap, finish or roll it back before probing — so a crash
-            // never leaves the daemon without a usable database.
-            try AthenaStore.recoverInterruptedMigration(at: dbPath)
-            if AthenaStore.isPlaintextDatabase(at: dbPath) {
-                Logger(label: AthenaLogLabel.daemon).notice(
-                    "encrypt_store: migrating plaintext store to encrypted")
-                try AthenaStore.migrateToEncrypted(at: dbPath, key: key)
-                Logger(label: AthenaLogLabel.daemon).notice(
-                    "encrypt_store: store is now encrypted at rest")
+
+        // ADR 025 S4 — decide whether to persist the auth/audit/usage store
+        // on disk or run STATELESS (in-memory, no file). Bootstrap auth keys
+        // are loaded here once (reused below for `.bound`) so the decision can
+        // see whether anything actually needs to authenticate. A loopback dev
+        // daemon with no credentials creates no `athena.sqlite` at all.
+        let bootstrapAuth = AuthConfig.load(
+            file: authKeysFile,
+            env: ProcessInfo.processInfo.environment,
+            log: Logger(label: AthenaLogLabel.daemon))
+        let storeMode = StoreMode.resolve(
+            hasBootstrapKeys: bootstrapAuth.isEnabled,
+            dbFileExists: FileManager.default.fileExists(atPath: dbPath.path),
+            isLoopback: StoreMode.isLoopback(config.listenHost),
+            encryptStore: encryptStore,
+            persistOverride: persistStore)
+
+        let athenaStore: AthenaStore
+        switch storeMode {
+        case .ephemeral:
+            Logger(label: AthenaLogLabel.daemon).notice(
+                """
+                store: ephemeral (stateless loopback) — no athena.sqlite on \
+                disk; audit/usage are kept in memory only and not persisted
+                """)
+            athenaStore = try AthenaStore(ephemeral: true)
+        case .persistent:
+            let storeKey: String?
+            if encryptStore {
+                let key = try StoreKey.ensure()
+                // NH1 (M66.1): if a prior encrypt-migration was interrupted
+                // mid-swap, finish or roll it back before probing — so a crash
+                // never leaves the daemon without a usable database.
+                try AthenaStore.recoverInterruptedMigration(at: dbPath)
+                if AthenaStore.isPlaintextDatabase(at: dbPath) {
+                    Logger(label: AthenaLogLabel.daemon).notice(
+                        "encrypt_store: migrating plaintext store to encrypted")
+                    try AthenaStore.migrateToEncrypted(at: dbPath, key: key)
+                    Logger(label: AthenaLogLabel.daemon).notice(
+                        "encrypt_store: store is now encrypted at rest")
+                }
+                storeKey = key
+            } else {
+                storeKey = StoreKey.resolve()
             }
-            storeKey = key
-        } else {
-            storeKey = StoreKey.resolve()
+            athenaStore = try AthenaStore(path: dbPath, key: storeKey)
         }
-        let athenaStore = try AthenaStore(path: dbPath, key: storeKey)
 
         // ADR 026 — selection is store-backed; there is no allowlist. Each
         // module's per-request selectable set is the store classified by
@@ -672,11 +705,9 @@ struct Load: AsyncParsableCommand {
         let nTokens = await athenaStore.tokenCount()
         let nUsers = await athenaStore.userCount()
         let dbHasCreds = nTokens > 0 || nUsers > 0
-        let authConfig = AuthConfig.load(
-            file: authKeysFile,
-            env: ProcessInfo.processInfo.environment,
-            log: Logger(label: AthenaLogLabel.daemon)
-        ).bound(
+        // Reuse the bootstrap auth loaded above for the store-mode decision
+        // (ADR 025 S4) — same file/env keys, now bound to the store + DB rows.
+        let authConfig = bootstrapAuth.bound(
             to: athenaStore, dbHasCredentials: dbHasCreds,
             tokenMaxAgeDays: tokenMaxAgeDays ?? 0)
         try authConfig.validateStartup(

@@ -3,8 +3,11 @@
 **Status:** Accepted — **in progress** (M80). Shipped: S5 in-memory decode
 (v0.10.199), S1+S3 vector DB + `/v1/store*` removal (v0.10.201), S7 allowlist
 retirement (v0.10.202, [ADR 026](decisions/026-retire-allowlist-store-is-registry.md)),
-**S2 queue removal + model-ops → synchronous + SSE (v0.10.203)**. Remaining: S4
-(stateless loopback), S6 (surface/thesis reconciliation). See the change plan
+**S2 queue removal + model-ops → synchronous + SSE (v0.10.203)**, **S4 stateless
+loopback (v0.10.204)** — a loopback daemon with no credentials creates no
+`athena.sqlite`; audit/usage are in-memory only (decision pinned in
+`AthenaCore/StoreMode.swift`; `persist_store` forces on-disk). Remaining: S6
+(surface/thesis reconciliation). See the change plan
 (`docs/collapse-persistence-plan.md`).
 Motivated by ADR 024's threat model (a co-resident adversary; minimize
 data-at-rest): the fewer places the daemon persists request content, the smaller
@@ -56,11 +59,15 @@ Key facts that shape the decision:
    dump/stat the queue+vectors container; with those gone they have no purpose.
    `AthenaStore` (the type) stays for auth/audit/usage/allowlist.
 
-3. **Add a stateless loopback mode.** When auth is off (loopback dev mode, no
-   seeded users), the daemon creates **no `athena.sqlite`**: the model allowlist is
-   read from config/in-memory, and audit/usage do not persist. With nothing to
-   authenticate, audit, meter, or queue, there is **zero request-related
-   data-at-rest** except the transient (hardened) temp upload files.
+3. **Add a stateless loopback mode.** **[SHIPPED v0.10.204 — S4.]** When auth is
+   off (loopback dev mode, no seeded users, no existing store, no
+   `encrypt_store`), the daemon creates **no `athena.sqlite`**: it opens an
+   ephemeral in-memory store (`AthenaStore(ephemeral:)`), so audit/usage live in
+   RAM and vanish on exit. The decision is the MLX-free, unit-pinned
+   `AthenaCore/StoreMode.resolve(...)`; a `persist_store` switch forces an
+   on-disk store anyway. With nothing to authenticate, audit, or meter, there is
+   **zero request-related data-at-rest** except the transient (hardened) temp
+   upload files — and after S5, even those are gone.
 
 4. **Make `audit_log` + `usage_counters` opt-out / ephemeral.** In authed/installed
    mode they persist as today (operational necessity for a multi-tenant authed

@@ -28,7 +28,7 @@ public enum ConfigEditor {
     /// Written bare (unquoted), like ints: floats and bools.
     public static let rawKeys: Set<String> = [
         "temperature", "speculative", "rate_limit", "preload",
-        "encrypt_store", "prompt_cache_enabled",
+        "encrypt_store", "persist_store", "prompt_cache_enabled",
         "dflash_enabled", "deny_debugger_attach",
     ]
     public static let knownKeys: Set<String> = [
@@ -45,7 +45,7 @@ public enum ConfigEditor {
         "request_timeout_secs", "cold_load_wait_secs", "preload",
         "max_audio_upload_bytes", "max_request_body_bytes",
         "mlx_cache_limit_bytes",
-        "encrypt_store",
+        "encrypt_store", "persist_store",
         // ADR 024 T2 — opt-in debugger-attach denial (bool; see rawKeys).
         "deny_debugger_attach",
         "https_proxy", "http_proxy", "all_proxy", "no_proxy",
@@ -167,6 +167,10 @@ public enum ConfigEditor {
                 throw Failure.badValue(key, "true or false")
             }
             if key == "encrypt_store",
+                value != "true", value != "false" {
+                throw Failure.badValue(key, "true or false")
+            }
+            if key == "persist_store",
                 value != "true", value != "false" {
                 throw Failure.badValue(key, "true or false")
             }

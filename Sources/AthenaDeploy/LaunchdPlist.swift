@@ -138,6 +138,9 @@ public enum LaunchdPlist {
         if config.encryptStore == true {
             args += ["--encrypt-store"]  // a Flag, not an Option
         }
+        if config.persistStore == true {
+            args += ["--persist-store"]  // a Flag, not an Option
+        }
 
         // Diagnostic surface is the macOS unified log (M45.1). The
         // daemon emits nothing to stdout under launchd, so

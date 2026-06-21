@@ -66,13 +66,26 @@ the slice commit.
   `athena store` CLI, `store.admin` RBAC. Keep `AthenaStore` (auth/audit/usage/
   allowlist). Path-confinement export code goes with it.
 
-### S4 — Stateless loopback mode + audit/usage opt-out (depends on S7)
-- Mode selection (MLX-free, unit-pinned): if auth is off / no seeded users →
-  **do not open or create `athena.sqlite`**. After S7 (allowlist retired) the only
-  remaining DB tenants are auth/audit/usage, so this becomes unconditional.
-- `audit_log` + `usage_counters`: add a persistence switch (default off in
-  stateless mode, on in authed mode); inert path writes nowhere.
-- Doctor: report mode + whether a DB exists + persistence posture.
+### S4 — Stateless loopback mode + audit/usage opt-out — SHIPPED v0.10.204
+- Mode selection is the MLX-free, unit-pinned `AthenaCore/StoreMode.swift`
+  (`resolve` + `isLoopback`, pinned in `StoreModeTests`): **ephemeral** (no
+  `athena.sqlite`) iff a loopback bind with no bootstrap keys, no existing DB
+  file, no `encrypt_store`, and no `persist_store` override — anything that
+  needs durable state forces **persistent**. With S7 (allowlist retired) the
+  only remaining DB tenants are auth/audit/usage, so a credential-less loopback
+  daemon writes nothing.
+- `AthenaStore(ephemeral:)` opens an in-memory SQLite store (`:memory:`
+  sentinel, `isEphemeral`/`dbLocationLabel` helpers); the schema is factored
+  into a shared `createSchema`. Audit/usage exist in RAM and vanish on exit —
+  inert, never on disk.
+- `persist_store` config switch (5 touchpoints + `--persist-store` flag) forces
+  a persistent store even in the stateless case (the ADR-025 "config switch
+  controls persistence independent of mode" lever).
+- Doctor reports the mode (`store: STATELESS …` vs `store: persistent at …`)
+  and no longer creates a phantom `athena.sqlite` just to count rows.
+- Verified end-to-end: a fresh loopback run with no keys serves `/healthz` and
+  creates no `athena.sqlite`; the same run with `ATHENA_ADMIN_KEYS` set creates
+  the DB and enables auth.
 
 ### S5 — Eliminate upload temp files via in-memory decode (Option D) — SHIPPED v0.10.199
 

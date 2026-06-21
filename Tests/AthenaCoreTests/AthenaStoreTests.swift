@@ -411,4 +411,27 @@ final class AthenaStoreTests: XCTestCase {
     // `testAllowlistDefaultSingleSwapH2` coverage is gone with it. Selection
     // resolution + the ambiguity rule are unit-pinned in ModelSelectionTests.
 
+    /// ADR 025 S4 — an ephemeral (in-memory) store carries the same
+    /// auth/audit/usage schema, accepts reads/writes, reports a `:memory:`
+    /// `dbPath`, and never touches disk.
+    func testEphemeralStoreIsInMemoryAndUsable() async throws {
+        let s = try AthenaStore(ephemeral: true)
+        XCTAssertTrue(s.isEphemeral)
+        XCTAssertEqual(s.dbLocationLabel, ":memory:")
+        // The store is fully usable: audit + usage tables exist and persist
+        // for the process lifetime.
+        try await s.addUsage(
+            principal: "u:x", promptTokens: 3, completionTokens: 1)
+        let u = await s.usage(principal: "u:x")
+        XCTAssertEqual(u?.promptTokens, 3)
+        try await s.addAudit(
+            principal: "u:x", action: "model.pull", target: "m",
+            result: "ok", detail: nil)
+        let n = await s.auditCount()
+        XCTAssertEqual(n, 1)
+        // Nothing was written to disk at the sentinel path.
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: s.dbPath.path))
+    }
+
 }

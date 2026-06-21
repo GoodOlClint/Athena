@@ -100,7 +100,22 @@ public actor AthenaStore {
     // `deinit` (no live refs) reads it outside isolation, to close.
     private nonisolated(unsafe) var db: OpaquePointer?
     /// The backing SQLite file. Immutable + Sendable ⇒ readable off-actor.
+    /// For an ephemeral store (ADR 025 S4) this is the `:memory:` sentinel —
+    /// see `isEphemeral`; no file is ever written.
     public nonisolated let dbPath: URL
+
+    /// True when this store is in-memory only (ADR 025 S4 stateless loopback):
+    /// nothing is persisted to disk. Callers (`/ui`, doctor) read this to
+    /// report the mode rather than a misleading absolute path.
+    public nonisolated var isEphemeral: Bool {
+        dbPath.lastPathComponent == ":memory:"
+    }
+
+    /// A display string for the store location: `:memory:` for an ephemeral
+    /// store, otherwise the on-disk path.
+    public nonisolated var dbLocationLabel: String {
+        isEphemeral ? ":memory:" : dbPath.path
+    }
     // SQLite asks the binding to copy (buffer is freed after the call).
     private static let transient = unsafeBitCast(
         -1, to: sqlite3_destructor_type.self)
@@ -152,7 +167,37 @@ public actor AthenaStore {
             }
         }
         try Self.exec(db, "PRAGMA journal_mode=WAL;")
-        try Self.exec(
+        try Self.createSchema(db)
+    }
+
+    /// Open an **ephemeral** in-memory store (ADR 025 S4 — stateless
+    /// loopback): no file is ever written to disk, so auth/audit/usage live
+    /// only for the process lifetime. `dbPath` is a `:memory:` sentinel so
+    /// callers (`/ui`, doctor) can report the mode without special-casing.
+    /// Never keyed — there is nothing on disk to encrypt.
+    public init(ephemeral: Bool) throws {
+        precondition(ephemeral, "use init(path:key:) for a file-backed store")
+        self.dbPath = URL(fileURLWithPath: ":memory:")
+        // The `:memory:` filename is what makes the database in-memory; the
+        // flags mirror the file path (FULLMUTEX for the actor's serialised
+        // access).
+        guard
+            sqlite3_open_v2(
+                ":memory:", &db,
+                SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE
+                    | SQLITE_OPEN_FULLMUTEX, nil)
+                == SQLITE_OK
+        else {
+            throw StoreError.open(String(cString: sqlite3_errmsg(db)))
+        }
+        try Self.createSchema(db)
+    }
+
+    /// Create the auth/audit/usage schema + run additive migrations. Shared
+    /// by the file-backed and in-memory initializers so both carry the same
+    /// tables (ADR 025: queue + vector tables removed; ADR 026: allowlist).
+    private static func createSchema(_ db: OpaquePointer?) throws {
+        try exec(
             db,
             """
             CREATE TABLE IF NOT EXISTS auth_users(
@@ -183,7 +228,7 @@ public actor AthenaStore {
         // NULL expires (no expiry) — a NULL token never expires, so
         // pre-migration tokens keep working (fail-safe / backward-
         // compatible). Only tokens minted with a TTL carry a timestamp.
-        try? Self.exec(db, "ALTER TABLE auth_tokens ADD COLUMN expires REAL;")
+        try? exec(db, "ALTER TABLE auth_tokens ADD COLUMN expires REAL;")
     }
 
     deinit { sqlite3_close(db) }
