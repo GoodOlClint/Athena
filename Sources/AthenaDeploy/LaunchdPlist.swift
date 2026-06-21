@@ -69,9 +69,6 @@ public enum LaunchdPlist {
         if config.speculative == true {
             args += ["--speculative"]  // a Flag, not an Option
         }
-        if let vectorCapBytes = config.vectorCapBytes {
-            args += ["--vector-cap-bytes", String(vectorCapBytes)]
-        }
         if let authKeysFile = config.authKeysFile {
             args += ["--auth-keys-file", authKeysFile]
         }
@@ -127,9 +124,6 @@ public enum LaunchdPlist {
         }
         if let queueMax = config.queueMaxRows {
             args += ["--queue-max-rows", String(queueMax)]
-        }
-        if let vectorTtl = config.vectorTtlSecs {
-            args += ["--vector-ttl-secs", String(vectorTtl)]
         }
         if config.dropRequestContent == true {
             args += ["--drop-request-content"]  // a Flag, not an Option

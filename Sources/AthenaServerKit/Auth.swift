@@ -314,7 +314,6 @@ public enum AuthPolicy {
         if path == "/ui" || path.hasPrefix("/ui/") {
             return .daemonAdmin
         }
-        if path.hasPrefix("/v1/store") { return .storeAdmin }
         // OpenAI model discovery is a read-only store projection (M31.1),
         // gated like the native `/api/models` reads — model.read, never
         // the inference catch-all.
@@ -355,10 +354,6 @@ public enum AuthPolicy {
             // Listing exposes ownership/scope; minting/removing are
             // privileged — tokens.admin for the whole surface.
             return .tokensAdmin
-        }
-        if path.hasPrefix("/v1/vectors") {
-            if path == "/v1/vectors/query" { return .vectorsRead }
-            return mutating ? .vectorsWrite : .vectorsRead
         }
         if path.hasPrefix("/v1/queue") { return .queueSubmit }
         // Inference surface (/v1/chat, /v1/embeddings, /v1/audio/*,

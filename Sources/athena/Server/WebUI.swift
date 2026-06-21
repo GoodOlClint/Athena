@@ -17,8 +17,8 @@ extension AthenaServer {
     struct UIState: Codable {
         let governor: GovernorSnapshot
         let metrics: AthenaMetrics.Snapshot
-        let vectors: VectorStatsResponse
-        let store: StoreStatsResponse
+        let jobsTotal: Int
+        let dbPath: String
         let queue: [QueueJobSummary]
         let model: String
         /// M59 follow-up — live resident model id per module class
@@ -33,12 +33,7 @@ extension AthenaServer {
         let gov = await governor.snapshot()
         let met = await metrics.snapshot()
         let resident = await residentModelMap()
-        let vs = await vectorStore.stats()
-        let st = StoreStatsResponse(
-            vectors: await store.vectorCount(),
-            jobs: await store.jobCount(),
-            bytes: storeBytes(),
-            path: store.dbPath.path)
+        let jobsTotal = await store.jobCount()
         // NA5 (M69.1) — the recent-jobs panel only needs summaries; fetch the
         // newest 25 blob-free (DESC) and reverse to the prior oldest-first
         // display order, instead of loading the whole jobs table with BLOBs.
@@ -50,10 +45,8 @@ extension AthenaServer {
         return Self.json(
             UIState(
                 governor: gov, metrics: met,
-                vectors: VectorStatsResponse(
-                    count: vs.count, dim: vs.dim, bytes: vs.bytes,
-                    cap_bytes: vs.capBytes),
-                store: st, queue: Array(jobs), model: modelName,
+                jobsTotal: jobsTotal, dbPath: store.dbPath.path,
+                queue: Array(jobs), model: modelName,
                 residentModels: resident))
     }
 
@@ -380,11 +373,8 @@ extension AthenaServer {
             Object.entries(m.byKind).map(([k,v])=>
             `<tr><td>${k}</td><td>${v}</td></tr>`).join("");
           $("store").innerHTML="<table>"+
-            row("vectors",s.store.vectors+" (dim "+s.vectors.dim+")")+
-            row("jobs",s.store.jobs)+
-            row("db size",mb(s.store.bytes))+
-            row("vec cap",mb(s.vectors.cap_bytes))+
-            row("path",s.store.path)+"</table>";
+            row("jobs",s.jobsTotal)+
+            row("path",s.dbPath)+"</table>";
           $("queue").innerHTML="<tr><th>id</th><th>kind</th>"+
             "<th>status</th></tr>"+(s.queue.length?s.queue.slice()
             .reverse().map(j=>`<tr><td>${j.id.slice(0,8)}</td>

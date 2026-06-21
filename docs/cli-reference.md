@@ -5,7 +5,7 @@
 
 1. **Local daemon lifecycle** — `load`/`start`/`stop`/`restart`/`status`.
 2. **Apple-host operator ops** — `install`/`pull`/`convert`/`allowlist`/… (macOS only).
-3. **HTTP client verbs** — `run`/`queue`/`vectors`/`store`/`auth`/`cache`, which drive
+3. **HTTP client verbs** — `run`/`queue`/`auth`/`cache`, which drive
    a **local OR remote** daemon. On Linux/Windows only this portable client subset
    ships (no local daemon to manage).
 
@@ -19,7 +19,7 @@ subcommand is `load`.
 
 ## Cross-cutting options (client verbs)
 
-Verbs that talk to a daemon (`run`, `ps`, `queue`, `vectors`, `store`, `cache`,
+Verbs that talk to a daemon (`run`, `ps`, `queue`, `cache`,
 `auth …` when remote, etc.) share `DaemonOptions`:
 
 | Option | Default | Notes |
@@ -184,29 +184,6 @@ Precedence is env > TOML. Proxy auth is Basic-only.
 | `queue rm <id>` | Remove (cancel/delete) a job. |
 
 ---
-
-## Vector DB (client)
-
-`vectors` — Built-in vector store (`/v1/vectors`).
-
-| Subcommand | Abstract |
-|------------|----------|
-| `vectors add` | Add a vector (by `--text` to embed, or raw `--vector`). |
-| `vectors query` | k-NN search by `--text` or `--vector`. |
-| `vectors rm <id>` | Delete a vector by id. |
-| `vectors stats` | Vector count, dimension, and byte footprint. |
-
----
-
-## Shared store (client)
-
-`store` — Export, import, and inspect the shared store.
-
-| Subcommand | Abstract |
-|------------|----------|
-| `store export <path>` | Snapshot the live store (`VACUUM INTO`) to a path. |
-| `store import <path>` | Import a store snapshot. |
-| `store stats` | Vector + job counts and on-disk size. |
 
 ---
 

@@ -40,8 +40,6 @@ enum OpenAPISpec {
             { "name": "Models", "description": "OpenAI-compatible model discovery." },
             { "name": "Embeddings", "description": "OpenAI-compatible text embeddings." },
             { "name": "Audio", "description": "Transcription, diarization, and speaker embeddings (multipart)." },
-            { "name": "Vectors", "description": "Built-in vector database." },
-            { "name": "Store", "description": "Shared-store admin (export/stats)." },
             { "name": "Queue", "description": "Async job queue (submit / poll / SSE / cancel)." },
             { "name": "Native", "description": "Athena-native /api chat + embed." },
             { "name": "Admin", "description": "Daemon administration." },
@@ -272,86 +270,6 @@ enum OpenAPISpec {
                   "403": { "$ref": "#/components/responses/Forbidden" },
                   "413": { "$ref": "#/components/responses/PayloadTooLarge" },
                   "503": { "$ref": "#/components/responses/Overloaded" }
-                }
-              }
-            },
-            "/v1/vectors": {
-              "post": {
-                "tags": ["Vectors"],
-                "summary": "Upsert a vector.",
-                "description": "Provide `vector` directly, or `text` to embed server-side. Requires `vectors.write`. Owner-scoped: the vector is stored under the authenticated principal; upserting an id another principal owns returns 409. Auth-off loopback shares one space.",
-                "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VectorUpsertRequest" } } } },
-                "responses": {
-                  "200": { "description": "Upserted.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VectorIdResponse" } } } },
-                  "400": { "$ref": "#/components/responses/BadRequest" },
-                  "401": { "$ref": "#/components/responses/Unauthorized" },
-                  "403": { "$ref": "#/components/responses/Forbidden" }
-                }
-              }
-            },
-            "/v1/vectors/{id}": {
-              "delete": {
-                "tags": ["Vectors"],
-                "summary": "Delete a vector by id.",
-                "description": "Requires `vectors.write`. Owner-scoped: deletes only the caller's own vector (an admin deletes across owners); another principal's id returns 404.",
-                "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } } ],
-                "responses": {
-                  "200": { "description": "Delete result.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VectorIdResponse" } } } },
-                  "401": { "$ref": "#/components/responses/Unauthorized" },
-                  "403": { "$ref": "#/components/responses/Forbidden" }
-                }
-              }
-            },
-            "/v1/vectors/query": {
-              "post": {
-                "tags": ["Vectors"],
-                "summary": "Nearest-neighbour query.",
-                "description": "Provide `vector` or `text`; `k` results (default server-side). Requires `vectors.read`. Owner-scoped: searches only the caller's own vectors (an admin searches across owners).",
-                "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VectorQueryRequest" } } } },
-                "responses": {
-                  "200": { "description": "Matches.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VectorQueryResponse" } } } },
-                  "400": { "$ref": "#/components/responses/BadRequest" },
-                  "401": { "$ref": "#/components/responses/Unauthorized" },
-                  "403": { "$ref": "#/components/responses/Forbidden" }
-                }
-              }
-            },
-            "/v1/vectors/stats": {
-              "get": {
-                "tags": ["Vectors"],
-                "summary": "Vector DB statistics.",
-                "description": "Requires `vectors.read`. Owner-scoped: counts/bytes reflect the caller's own vectors (an admin sees all); `cap_bytes` is the shared global cap.",
-                "responses": {
-                  "200": { "description": "Stats.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VectorStatsResponse" } } } },
-                  "401": { "$ref": "#/components/responses/Unauthorized" },
-                  "403": { "$ref": "#/components/responses/Forbidden" }
-                }
-              }
-            },
-            "/v1/store/export": {
-              "post": {
-                "tags": ["Store"],
-                "summary": "Export the shared store to a file.",
-                "description": "Requires `store.admin`. `path` is a bare filename; the backup is written under the daemon's `exports/` directory (no absolute paths, `~`, or `..`), and an existing target is not overwritten.",
-                "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StoreExportRequest" } } } },
-                "responses": {
-                  "200": { "description": "Export result.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StoreExportResponse" } } } },
-                  "400": { "$ref": "#/components/responses/BadRequest" },
-                  "401": { "$ref": "#/components/responses/Unauthorized" },
-                  "403": { "$ref": "#/components/responses/Forbidden" },
-                  "409": { "description": "Export target already exists." }
-                }
-              }
-            },
-            "/v1/store/stats": {
-              "get": {
-                "tags": ["Store"],
-                "summary": "Shared-store statistics.",
-                "description": "Requires `store.admin`.",
-                "responses": {
-                  "200": { "description": "Stats.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StoreStatsResponse" } } } },
-                  "401": { "$ref": "#/components/responses/Unauthorized" },
-                  "403": { "$ref": "#/components/responses/Forbidden" }
                 }
               }
             },
@@ -1077,36 +995,6 @@ enum OpenAPISpec {
                   "dimension": { "type": "integer" }
                 }
               },
-              "VectorUpsertRequest": {
-                "type": "object",
-                "required": ["id"],
-                "properties": {
-                  "id": { "type": "string" },
-                  "vector": { "type": "array", "items": { "type": "number" } },
-                  "text": { "type": "string" },
-                  "metadata": {}
-                }
-              },
-              "VectorIdResponse": { "type": "object", "properties": { "id": { "type": "string" } } },
-              "VectorQueryRequest": {
-                "type": "object",
-                "properties": {
-                  "vector": { "type": "array", "items": { "type": "number" } },
-                  "text": { "type": "string" },
-                  "k": { "type": "integer" }
-                }
-              },
-              "VectorQueryResponse": {
-                "type": "object",
-                "properties": { "matches": { "type": "array", "items": { "type": "object", "properties": { "id": { "type": "string" }, "score": { "type": "number" }, "metadata": {} } } } }
-              },
-              "VectorStatsResponse": {
-                "type": "object",
-                "properties": { "count": { "type": "integer" }, "dim": { "type": "integer" }, "bytes": { "type": "integer" }, "cap_bytes": { "type": "integer" } }
-              },
-              "StoreExportRequest": { "type": "object", "required": ["path"], "properties": { "path": { "type": "string" } } },
-              "StoreExportResponse": { "type": "object", "properties": { "path": { "type": "string" }, "bytes": { "type": "integer" } } },
-              "StoreStatsResponse": { "type": "object", "properties": { "vectors": { "type": "integer" }, "jobs": { "type": "integer" }, "bytes": { "type": "integer" }, "path": { "type": "string" } } },
               "QueueSubmitResponse": { "type": "object", "properties": { "id": { "type": "string" }, "status": { "type": "string" } } },
               "QueueStatusResponse": {
                 "type": "object",

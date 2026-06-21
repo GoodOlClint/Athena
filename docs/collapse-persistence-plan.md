@@ -30,7 +30,7 @@ Each slice is a test-pinned commit (house style: stacked, regression test per fi
 pre-commit pipeline Tests → Security → Quality → Refactor). `appVersion` bump in
 the slice commit.
 
-### S1 — Vector DB out
+### S1 — Vector DB out — SHIPPED v0.10.201 (merged with S3)
 - Delete `Sources/AthenaStore/VectorStore.swift`; `vectors` table + index +
   migrations in `AthenaStore.swift`; `allVectors`/`putVector`/`getVector`/
   `deleteVector`/`pruneVectors`.
@@ -56,7 +56,7 @@ the slice commit.
   config; `queue.submit` RBAC; queue tests; update `/ui` (recentJobSummaries
   dashboard) and docs (`queue-prompt-cache-contract.md`, `m61-prefix-affinity-queue.md`).
 
-### S3 — Store endpoints out
+### S3 — Store endpoints out — SHIPPED v0.10.201 (merged with S1)
 - Remove `/v1/store/export` + `/v1/store/stats` routes, DTOs, handlers,
   `athena store` CLI, `store.admin` RBAC. Keep `AthenaStore` (auth/audit/usage/
   allowlist). Path-confinement export code goes with it.

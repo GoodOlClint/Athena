@@ -15,17 +15,17 @@ final class RBACTests: XCTestCase {
     func testRoleBundlesPerSpec() {
         XCTAssertEqual(
             RBAC.catalog["member"],
-            [.inference, .queueSubmit, .vectorsRead])
+            [.inference, .queueSubmit])
         XCTAssertEqual(
             RBAC.catalog["operator"],
             [
-                .modelRead, .modelWrite, .inference, .vectorsRead,
-                .vectorsWrite, .queueSubmit, .metricsRead,
+                .modelRead, .modelWrite, .inference,
+                .queueSubmit, .metricsRead,
             ])
-        // operator must NOT have user/token/store/daemon admin.
+        // operator must NOT have user/token/daemon admin.
         let op = RBAC.catalog["operator"]!
         for p: Permission in [
-            .usersAdmin, .tokensAdmin, .storeAdmin, .daemonAdmin,
+            .usersAdmin, .tokensAdmin, .daemonAdmin,
             .usersRead,
         ] {
             XCTAssertFalse(op.contains(p), "operator leaked \(p)")
@@ -33,7 +33,7 @@ final class RBACTests: XCTestCase {
         // readonly = exactly the *.read perms.
         XCTAssertEqual(
             RBAC.catalog["readonly"],
-            [.modelRead, .usersRead, .vectorsRead, .metricsRead])
+            [.modelRead, .usersRead, .metricsRead])
     }
 
     func testUnknownRoleContributesNothing() {

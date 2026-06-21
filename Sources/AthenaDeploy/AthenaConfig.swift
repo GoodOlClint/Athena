@@ -25,13 +25,12 @@ public struct AthenaConfig: Sendable, Equatable {
     /// the runtime gate for the unified-log side.
     public var logLevel: String?
     /// Inference tuning. All optional — daemon defaults apply when
-    /// absent (max 1024 tokens, temp 0.7, speculative off,
-    /// vector cap = budget/8). Kept as the raw scalar for
-    /// temperature so the value passes straight to `--temperature`.
+    /// absent (max 1024 tokens, temp 0.7, speculative off). Kept as the
+    /// raw scalar for temperature so the value passes straight to
+    /// `--temperature`.
     public var maxTokens: Int?
     public var temperature: String?
     public var speculative: Bool?
-    public var vectorCapBytes: Int?
     /// KV-cache compression codec: `none` (default), `turboquant`, or
     /// `triattention`. Optional — daemon defaults to `none` when absent.
     /// The `ATHENA_KV_COMPRESSION` env var overrides this at startup.
@@ -144,11 +143,6 @@ public struct AthenaConfig: Sendable, Equatable {
     /// retention is the operator's call). Pending jobs are never pruned.
     public var queueResultTtlSecs: Int?
     public var queueMaxRows: Int?
-    /// Vector-store retention (M34.2). Prunes vectors written longer ago
-    /// than the window on each upsert. Optional — absent / non-positive ⇒
-    /// keep forever (opt-in, off by default). Vectors stored before the
-    /// feature (no timestamp) are never auto-pruned.
-    public var vectorTtlSecs: Int?
     /// Content opt-out (M34.2). When true, a queued job's prompt
     /// (request) blob is cleared once it finishes so inference inputs
     /// don't persist on disk; the result stays (bounded by the queue
@@ -174,7 +168,7 @@ public struct AthenaConfig: Sendable, Equatable {
         dataDir: String? = nil,
         logLevel: String? = nil,
         maxTokens: Int? = nil, temperature: String? = nil,
-        speculative: Bool? = nil, vectorCapBytes: Int? = nil,
+        speculative: Bool? = nil,
         kvCompression: String? = nil,
         promptCacheEnabled: Bool? = nil,
         promptCacheMaxEntries: Int? = nil,
@@ -199,7 +193,6 @@ public struct AthenaConfig: Sendable, Equatable {
         preload: Bool? = nil,
         queueResultTtlSecs: Int? = nil,
         queueMaxRows: Int? = nil,
-        vectorTtlSecs: Int? = nil,
         dropRequestContent: Bool? = nil,
         encryptStore: Bool? = nil,
         httpsProxy: String? = nil, httpProxy: String? = nil,
@@ -217,7 +210,6 @@ public struct AthenaConfig: Sendable, Equatable {
         self.maxTokens = maxTokens
         self.temperature = temperature
         self.speculative = speculative
-        self.vectorCapBytes = vectorCapBytes
         self.kvCompression = kvCompression
         self.promptCacheEnabled = promptCacheEnabled
         self.promptCacheMaxEntries = promptCacheMaxEntries
@@ -244,7 +236,6 @@ public struct AthenaConfig: Sendable, Equatable {
         self.preload = preload
         self.queueResultTtlSecs = queueResultTtlSecs
         self.queueMaxRows = queueMaxRows
-        self.vectorTtlSecs = vectorTtlSecs
         self.dropRequestContent = dropRequestContent
         self.encryptStore = encryptStore
         self.httpsProxy = httpsProxy
@@ -355,10 +346,6 @@ public struct AthenaConfig: Sendable, Equatable {
         if let m = scalar("max_tokens", in: toml) {
             maxTok = try int("max_tokens", m)
         }
-        var vecCap: Int?
-        if let v = scalar("vector_cap_bytes", in: toml) {
-            vecCap = try int("vector_cap_bytes", v)
-        }
         var rateBurst: Int?
         if let rb = scalar("rate_burst", in: toml) {
             rateBurst = try int("rate_burst", rb)
@@ -413,10 +400,6 @@ public struct AthenaConfig: Sendable, Equatable {
         if let qm = scalar("queue_max_rows", in: toml) {
             queueMax = try int("queue_max_rows", qm)
         }
-        var vectorTtl: Int?
-        if let vt = scalar("vector_ttl_secs", in: toml) {
-            vectorTtl = try int("vector_ttl_secs", vt)
-        }
         // J1 (M66.4): all bool keys parse via the strict truthy `bool`
         // helper; an unrecognized value is a ParseError, not silent false.
         func bool(_ key: String) throws -> Bool? {
@@ -455,7 +438,6 @@ public struct AthenaConfig: Sendable, Equatable {
             maxTokens: maxTok,
             temperature: scalar("temperature", in: toml),
             speculative: spec,
-            vectorCapBytes: vecCap,
             kvCompression: scalar("kv_compression", in: toml),
             promptCacheEnabled: pcEnabled,
             promptCacheMaxEntries: pcMaxEntries,
@@ -482,7 +464,6 @@ public struct AthenaConfig: Sendable, Equatable {
             preload: preload,
             queueResultTtlSecs: queueTtl,
             queueMaxRows: queueMax,
-            vectorTtlSecs: vectorTtl,
             dropRequestContent: dropReq,
             encryptStore: encStore,
             httpsProxy: scalar("https_proxy", in: toml),

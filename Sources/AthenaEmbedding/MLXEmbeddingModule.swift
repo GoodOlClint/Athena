@@ -406,8 +406,8 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
                 // value. `normalize: true` stays — Athena's documented
                 // L2-normalized-vector contract, and both configured models
                 // ship a Normalize module. NOTE: this changes every produced
-                // vector vs ≤v0.10.129; persisted /v1/vectors indexes must be
-                // re-embedded to stay comparable with new queries.
+                // vector vs ≤v0.10.129; any externally persisted embedding
+                // index must be re-embedded to stay comparable with new queries.
                 let result = ctx.pooling(
                     out, mask: mask, normalize: true, applyLayerNorm: false)
                 result.eval()

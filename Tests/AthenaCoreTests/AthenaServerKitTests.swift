@@ -148,7 +148,6 @@ final class AthenaServerKitTests: XCTestCase {
             ("GET", "/metrics", .metricsRead),
             ("GET", "/ui", .daemonAdmin),
             ("GET", "/ui/users", .daemonAdmin),
-            ("POST", "/v1/store/export", .storeAdmin),
             ("GET", "/v1/models", .modelRead),
             ("GET", "/v1/models/abc", .modelRead),
             ("GET", "/api/admin", .daemonAdmin),
@@ -164,9 +163,6 @@ final class AthenaServerKitTests: XCTestCase {
             ("POST", "/api/users", .usersAdmin),
             ("GET", "/api/tokens", .tokensAdmin),
             ("POST", "/api/tokens", .tokensAdmin),
-            ("POST", "/v1/vectors/query", .vectorsRead),
-            ("POST", "/v1/vectors", .vectorsWrite),
-            ("GET", "/v1/vectors/abc", .vectorsRead),
             ("POST", "/v1/queue", .queueSubmit),
             // Inference catch-all (unlisted routes fail closed to .inference).
             ("POST", "/v1/chat/completions", .inference),

@@ -27,9 +27,8 @@ struct AthenaServer {
     let transcription: any TranscriptionModule
     let diarization: any DiarizationModule
     let speakerEmbedding: any SpeakerEmbeddingModule
-    let vectorStore: VectorStore
     let queue: RequestQueue
-    /// Shared SQLite store (vectors + queue) — backs `/v1/store/*`.
+    /// Shared SQLite store (auth/audit/usage/allowlist + queue).
     let store: AthenaStore
     /// Served model's display name, echoed in native `/api/*` replies.
     let modelName: String
@@ -134,13 +133,6 @@ struct AthenaServer {
     /// on disk unbounded. `var = 0` so they're memberwise-init params.
     var queueResultTtlSecs: Int = 0
     var queueMaxRows: Int = 0
-    /// Vector-store retention (M34.2). > 0 ⇒ on each upsert, prune
-    /// persisted vectors whose last-write time is older than the window
-    /// (prune-on-write, like the M30 audit prune — a daemon actively
-    /// writing vectors keeps itself bounded; an idle one accrues
-    /// nothing). 0 ⇒ keep forever (opt-in). `var = 0` so it's a
-    /// memberwise-init param.
-    var vectorTtlSecs: Int = 0
     /// Content opt-out (M34.2). When true, the queue clears a job's
     /// persisted `request` (prompt) blob once it reaches a terminal
     /// state, so inference INPUTS don't sit on disk after the answer is
@@ -487,35 +479,6 @@ struct AthenaServer {
         // tenant; the response shape mirrors /v1/audio/transcriptions.
         router.post("/v1/video/transcriptions") { request, _ -> Response in
             await handleVideoTranscriptions(request)
-        }
-
-        // Built-in vector DB (M7.2).
-        router.post("/v1/vectors") { request, _ -> Response in
-            await handleVectorUpsert(request)
-        }
-        router.post("/v1/vectors/query") { request, _ -> Response in
-            await handleVectorQuery(request)
-        }
-        router.get("/v1/vectors/stats") { request, _ -> Response in
-            let st = await vectorStore.stats(
-                caller: await vectorCaller(request))
-            return Self.json(
-                VectorStatsResponse(
-                    count: st.count, dim: st.dim, bytes: st.bytes,
-                    cap_bytes: st.capBytes))
-        }
-        router.delete("/v1/vectors/:id") { request, context -> Response in
-            await handleVectorDelete(
-                context.parameters.get("id"), request)
-        }
-
-        // Shared SQLite store admin (M9.3). Export = a live, consistent
-        // snapshot via VACUUM INTO (safe while serving).
-        router.post("/v1/store/export") { request, _ -> Response in
-            await handleStoreExport(request)
-        }
-        router.get("/v1/store/stats") { _, _ -> Response in
-            await handleStoreStats()
         }
 
         // Async request queue (M8.1).
@@ -2602,236 +2565,6 @@ struct AthenaServer {
                 dimension: result.dimension))
     }
 
-    // MARK: - Built-in vector DB (M7.2)
-
-    /// Resolve a request's vector: explicit `vector`, else embed
-    /// `text` via the governed embedding module.
-    private func resolveVector(
-        _ vector: [Float]?, _ text: String?
-    ) async -> Outcome<[Float]> {
-        if let vector { return .ok(vector) }
-        guard let text, !text.isEmpty else {
-            return .fail(
-                Self.error(
-                    status: .badRequest,
-                    message: "provide 'vector' or non-empty 'text'",
-                    type: "invalid_request_error",
-                    code: "missing_vector"))
-        }
-        switch await governedEmbed([text], module: .textEmbedding) {
-        case .fail(let r): return .fail(r)
-        case .ok(let batch):
-            return .ok(batch.vectors.first ?? [])
-        }
-    }
-
-    private static func vectorErrorResponse(
-        _ error: any Error
-    ) -> Response {
-        if let e = error as? VectorStore.VectorError {
-            switch e {
-            case .capExceeded:
-                return Self.error(
-                    status: .serviceUnavailable, message: e.description,
-                    type: "server_error",
-                    code: "vector_store_cap_exceeded")
-            case .dimMismatch:
-                return Self.error(
-                    status: .badRequest, message: e.description,
-                    type: "invalid_request_error",
-                    code: "dimension_mismatch")
-            case .zeroLengthVector:
-                // H10 — a zero-length vector is a client error (400), not a
-                // 500; mirrors the dim-mismatch shape.
-                return Self.error(
-                    status: .badRequest, message: e.description,
-                    type: "invalid_request_error",
-                    code: "zero_length_vector")
-            case .ownerConflict:
-                // H5: another principal owns this id. Don't reveal more
-                // than "you can't write here".
-                return Self.error(
-                    status: .conflict,
-                    message: "vector id is owned by another principal",
-                    type: "invalid_request_error",
-                    code: "vector_owner_conflict")
-            }
-        }
-        return Self.classified(error, module: .textEmbedding)
-    }
-
-    /// H5 (M66.6): the owner-scope for a `/v1/vectors` op, from the same
-    /// per-principal resolution the queue uses (admin/auth-off see all).
-    private func vectorCaller(_ request: Request) async
-        -> VectorStore.Caller
-    {
-        let who = await queuePrincipal(request)
-        return VectorStore.Caller(
-            principal: who.principal, isAdmin: who.isAdmin,
-            enforced: who.enforced)
-    }
-
-    private func handleVectorUpsert(_ request: Request) async
-        -> Response
-    {
-        let decoded = await decodeJSON(
-            request, VectorUpsertRequest.self)
-        guard case .ok(let body) = decoded else {
-            if case .fail(let r) = decoded { return r }
-            fatalError()
-        }
-        let vec: [Float]
-        switch await resolveVector(body.vector, body.text) {
-        case .fail(let r): return r
-        case .ok(let v): vec = v
-        }
-        let meta = body.metadata.flatMap { try? JSONEncoder().encode($0) }
-        do {
-            try await vectorStore.upsert(
-                id: body.id, vector: vec, metadata: meta,
-                caller: await vectorCaller(request))
-        } catch {
-            return Self.vectorErrorResponse(error)
-        }
-        // M34.2: opportunistic age-based retention (prune-on-write).
-        // 0 ⇒ keep forever. Non-fatal — never fails the upsert.
-        if vectorTtlSecs > 0 {
-            let cutoff = Date().timeIntervalSince1970
-                - Double(vectorTtlSecs)
-            let removed = await vectorStore.sweepExpired(olderThan: cutoff)
-            if removed > 0 {
-                Logger(label: AthenaLogLabel.daemon).notice(
-                    "vector retention: pruned \(removed) vector(s) older than \(vectorTtlSecs)s")
-            }
-        }
-        return Self.json(VectorIdResponse(id: body.id))
-    }
-
-    private func handleVectorQuery(_ request: Request) async -> Response
-    {
-        let decoded = await decodeJSON(request, VectorQueryRequest.self)
-        guard case .ok(let body) = decoded else {
-            if case .fail(let r) = decoded { return r }
-            fatalError()
-        }
-        let vec: [Float]
-        switch await resolveVector(body.vector, body.text) {
-        case .fail(let r): return r
-        case .ok(let v): vec = v
-        }
-        let hits = await vectorStore.query(
-            vector: vec, k: body.k ?? 5,
-            caller: await vectorCaller(request))
-        return Self.json(
-            VectorQueryResponse(
-                matches: hits.map {
-                    VectorMatch(
-                        id: $0.id, score: $0.score,
-                        metadata: $0.metadata.flatMap {
-                            try? JSONDecoder().decode(
-                                JSONValue.self, from: $0)
-                        })
-                }))
-    }
-
-    private func handleVectorDelete(_ id: String?, _ request: Request)
-        async -> Response
-    {
-        guard let id, !id.isEmpty else {
-            return Self.error(
-                status: .badRequest, message: "missing vector id",
-                type: "invalid_request_error", code: "missing_id")
-        }
-        let ok = await vectorStore.delete(
-            id: id, caller: await vectorCaller(request))
-        if !ok {
-            return Self.error(
-                status: .notFound, message: "no vector '\(id)'",
-                type: "invalid_request_error", code: "not_found")
-        }
-        return Self.json(VectorIdResponse(id: id))
-    }
-
-    // MARK: - Shared store admin (M9.3)
-
-    private static func fileBytes(_ url: URL) -> Int {
-        let attrs = try? FileManager.default.attributesOfItem(
-            atPath: url.path)
-        return (attrs?[.size] as? Int) ?? 0
-    }
-
-    /// On-disk footprint = main DB + the WAL/SHM sidecars (a hot DB's
-    /// recent writes live in `-wal` until checkpoint).
-    func storeBytes() -> Int {
-        let base = store.dbPath
-        return Self.fileBytes(base)
-            + Self.fileBytes(base.appendingPathExtension("wal"))
-            + Self.fileBytes(base.appendingPathExtension("shm"))
-    }
-
-    private func handleStoreExport(_ request: Request) async -> Response {
-        let decoded = await decodeJSON(request, StoreExportRequest.self)
-        guard case .ok(let body) = decoded else {
-            if case .fail(let r) = decoded { return r }
-            fatalError()
-        }
-        // A1: confine the backup under a dedicated `exports/` dir beside
-        // the store DB. The request path is reduced to a bare filename —
-        // no absolute paths, no `~`, no `..`, no `/` — so a storeAdmin
-        // caller can't turn a DB backup into an arbitrary file write as
-        // the daemon user, and we refuse to overwrite an existing target.
-        let filename = (body.path as NSString).lastPathComponent
-        guard !filename.isEmpty, filename != ".", filename != "..",
-            !filename.hasPrefix("."), !filename.contains("/")
-        else {
-            return Self.error(
-                status: .badRequest,
-                message:
-                    "export 'path' must be a bare filename (the backup "
-                    + "is written under the daemon's exports directory)",
-                type: "invalid_request_error", code: "invalid_path")
-        }
-        let exportRoot = store.dbPath.deletingLastPathComponent()
-            .appendingPathComponent("exports", isDirectory: true)
-        let dest = exportRoot.appendingPathComponent(filename)
-        do {
-            try FileManager.default.createDirectory(
-                at: exportRoot, withIntermediateDirectories: true)
-        } catch {
-            return Self.error(
-                status: .internalServerError,
-                message: "could not prepare exports dir: \(error)",
-                type: "server_error", code: "export_failed")
-        }
-        guard !FileManager.default.fileExists(atPath: dest.path) else {
-            return Self.error(
-                status: .conflict,
-                message: "export target already exists: \(filename)",
-                type: "invalid_request_error", code: "export_exists")
-        }
-        do {
-            try await store.backup(to: dest)
-        } catch {
-            return Self.error(
-                status: .internalServerError,
-                message: "export failed: \(error)",
-                type: "server_error", code: "export_failed")
-        }
-        return Self.json(
-            StoreExportResponse(
-                path: dest.path, bytes: Self.fileBytes(dest)))
-    }
-
-    private func handleStoreStats() async -> Response {
-        let vectors = await store.vectorCount()
-        let jobs = await store.jobCount()
-        let bytes = storeBytes()
-        let path = store.dbPath.path
-        return Self.json(
-            StoreStatsResponse(
-                vectors: vectors, jobs: jobs, bytes: bytes, path: path))
-    }
-
     // MARK: - Async request queue (M8.1)
 
     /// Per-submitter queue authorization (M12.6 → M15.2). `enforced`
@@ -3875,8 +3608,8 @@ struct AthenaServer {
         }
     }
 
-    /// Governed embedding helper shared by `/api/embed`, `/v1/vectors`
-    /// text resolution, and the queued `embeddings` kind. Returns the
+    /// Governed embedding helper shared by `/api/embed`, `/v1/embeddings`,
+    /// and the queued `embeddings` kind. Returns the
     /// whole batch so callers can echo the model ACTUALLY served (M39).
     /// `model` selects among the configured set (nil ⇒ default); an
     /// unknown id surfaces as a classified 400 `model_not_available`.

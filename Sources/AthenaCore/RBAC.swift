@@ -20,9 +20,6 @@ public enum Permission: String, Sendable, CaseIterable, Hashable,
     case usersAdmin = "users.admin"
     case tokensAdmin = "tokens.admin"
     case inference = "inference"
-    case vectorsRead = "vectors.read"
-    case vectorsWrite = "vectors.write"
-    case storeAdmin = "store.admin"
     case queueSubmit = "queue.submit"
     case metricsRead = "metrics.read"
     case daemonAdmin = "daemon.admin"
@@ -39,12 +36,12 @@ public enum RBAC {
     public static let catalog: [String: Set<Permission>] = [
         "admin": Set(Permission.allCases),
         "operator": [
-            .modelRead, .modelWrite, .inference, .vectorsRead,
-            .vectorsWrite, .queueSubmit, .metricsRead,
+            .modelRead, .modelWrite, .inference,
+            .queueSubmit, .metricsRead,
         ],
-        "member": [.inference, .queueSubmit, .vectorsRead],
+        "member": [.inference, .queueSubmit],
         "readonly": [
-            .modelRead, .usersRead, .vectorsRead, .metricsRead,
+            .modelRead, .usersRead, .metricsRead,
         ],
     ]
 

@@ -320,27 +320,24 @@ final class AthenaConfigTests: XCTestCase {
         XCTAssertNil(c.queueMaxRows)
     }
 
-    func testVectorTtlAndContentOptOutKeysParse() throws {
+    func testContentOptOutKeyParse() throws {
         let toml = """
             listen_host = "127.0.0.1"
             listen_port = 7447
             log_dir = "/l"
-            vector_ttl_secs = 2592000
             drop_request_content = true
             """
         let c = try AthenaConfig.parse(toml: toml)
-        XCTAssertEqual(c.vectorTtlSecs, 2_592_000)
         XCTAssertEqual(c.dropRequestContent, true)
     }
 
-    func testVectorTtlAndContentOptOutKeysAbsentAreNil() throws {
+    func testContentOptOutKeyAbsentIsNil() throws {
         let toml = """
             listen_host = "127.0.0.1"
             listen_port = 7447
             log_dir = "/l"
             """
         let c = try AthenaConfig.parse(toml: toml)
-        XCTAssertNil(c.vectorTtlSecs)
         XCTAssertNil(c.dropRequestContent)
     }
 
@@ -552,7 +549,7 @@ final class LaunchdPlistTests: XCTestCase {
         modelStore: String? = nil, dataDir: String? = nil,
         logLevel: String? = nil,
         maxTokens: Int? = nil, temperature: String? = nil,
-        speculative: Bool? = nil, vectorCapBytes: Int? = nil,
+        speculative: Bool? = nil,
         authKeysFile: String? = nil,
         tlsCert: String? = nil, tlsKey: String? = nil,
         rateLimit: String? = nil, rateBurst: Int? = nil,
@@ -565,7 +562,6 @@ final class LaunchdPlistTests: XCTestCase {
         preload: Bool? = nil,
         queueResultTtlSecs: Int? = nil,
         queueMaxRows: Int? = nil,
-        vectorTtlSecs: Int? = nil,
         dropRequestContent: Bool? = nil,
         encryptStore: Bool? = nil
     ) -> AthenaConfig {
@@ -575,7 +571,6 @@ final class LaunchdPlistTests: XCTestCase {
             dataDir: dataDir, logLevel: logLevel,
             maxTokens: maxTokens,
             temperature: temperature, speculative: speculative,
-            vectorCapBytes: vectorCapBytes,
             authKeysFile: authKeysFile,
             tlsCert: tlsCert, tlsKey: tlsKey,
             rateLimit: rateLimit, rateBurst: rateBurst,
@@ -588,7 +583,6 @@ final class LaunchdPlistTests: XCTestCase {
             preload: preload,
             queueResultTtlSecs: queueResultTtlSecs,
             queueMaxRows: queueMaxRows,
-            vectorTtlSecs: vectorTtlSecs,
             dropRequestContent: dropRequestContent,
             encryptStore: encryptStore,
             logDir: "/var/log/athena")
@@ -636,7 +630,7 @@ final class LaunchdPlistTests: XCTestCase {
                 modelStore: "/srv/models", dataDir: "/srv/a",
                 logLevel: "debug",
                 maxTokens: 2048, temperature: "0.2",
-                speculative: true, vectorCapBytes: 1_000_000,
+                speculative: true,
                 authKeysFile: "/etc/athena/auth.keys",
                 tlsCert: "/etc/athena/tls/fullchain.pem",
                 tlsKey: "/etc/athena/tls/privkey.pem",
@@ -649,7 +643,6 @@ final class LaunchdPlistTests: XCTestCase {
                 preload: true,
                 queueResultTtlSecs: 604_800,
                 queueMaxRows: 10_000,
-                vectorTtlSecs: 2_592_000,
                 dropRequestContent: true,
                 encryptStore: true))
         XCTAssertEqual(
@@ -662,7 +655,7 @@ final class LaunchdPlistTests: XCTestCase {
                 "--model-store", "/srv/models",
                 "--data-dir", "/srv/a", "--log-level", "debug",
                 "--max-tokens", "2048", "--temperature", "0.2",
-                "--speculative", "--vector-cap-bytes", "1000000",
+                "--speculative",
                 "--auth-keys-file", "/etc/athena/auth.keys",
                 "--tls-cert", "/etc/athena/tls/fullchain.pem",
                 "--tls-key", "/etc/athena/tls/privkey.pem",
@@ -675,7 +668,6 @@ final class LaunchdPlistTests: XCTestCase {
                 "--preload",
                 "--queue-result-ttl-secs", "604800",
                 "--queue-max-rows", "10000",
-                "--vector-ttl-secs", "2592000",
                 "--drop-request-content",
                 "--encrypt-store",
             ])

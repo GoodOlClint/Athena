@@ -352,7 +352,7 @@ echo "$DENYBODY" | grep -q "athena auth login" \
   && ok 'auth hint mentions "athena auth login" (Keychain cache)' \
   || bad "auth hint omits the Keychain-cache remediation"
 FORBODY="$(curl -s -H "Authorization: Bearer $ALICE_TOK" \
-  "http://127.0.0.1:$PORT/v1/store/stats")"
+  "http://127.0.0.1:$PORT/metrics")"
 echo "$FORBODY" | grep -q '"hint":' \
   && ok "forbidden envelope carries hint field" \
   || bad "forbidden envelope missing hint ($FORBODY)"
@@ -361,8 +361,6 @@ code 200 GET  /metrics "$ADMIN_TOK"                     # admin: all
 code 403 GET  /metrics "$ALICE_TOK"                     # member ∌ metricsRead
 code 200 GET  /metrics "$RO_TOK"                        # readonly ∋ metricsRead
 code 403 POST /v1/chat/completions "$RO_TOK" "$CHAT"    # readonly ∌ inference
-code 200 GET  /v1/store/stats "$ADMIN_TOK"              # storeAdmin
-code 403 GET  /v1/store/stats "$ALICE_TOK"              # member ∌ storeAdmin
 code 303 GET  /ui "$ALICE_TOK"                          # ∌ daemonAdmin → login
 code 200 GET  /healthz ""                               # always open
 
@@ -1031,7 +1029,6 @@ echo
 echo "== phase 3: scoped-token downgrade =="
 # boss is an admin USER, but BOSS_SCOPED narrows to member.
 code 403 GET  /metrics "$BOSS_SCOPED"                   # member perms only
-code 403 GET  /v1/store/stats "$BOSS_SCOPED"
 code 200 POST /v1/chat/completions "$BOSS_SCOPED" "$CHAT"  # inference ok
 
 echo
@@ -3035,87 +3032,6 @@ stop_daemon
 rm -rf "$D5"; D5=""
 
 echo
-echo "== phase 25.2: vector-store TTL (prune-on-write, M34.2) =="
-# vector_ttl_secs prunes vectors written longer ago than the window; the
-# sweep runs opportunistically on each upsert. Backdate one vector's
-# write time, then upsert another to trigger the prune. Auth off.
-D6="$(mktemp -d)"
-vdb6="$D6/athena.sqlite"
-start_daemon "$D6" 127.0.0.1 --vector-ttl-secs 1 \
-  || { echo "vector-ttl daemon failed"; cat "$D/daemon.log"; exit 1; }
-curl -s -o /dev/null -X POST "http://127.0.0.1:$PORT/v1/vectors" \
-  -H "Content-Type: application/json" \
-  -d '{"id":"v1","vector":[1,2,3]}'
-V1="$(sqlite3 "$vdb6" "SELECT COUNT(*) FROM vectors WHERE id='v1';")"
-[ "$V1" = "1" ] && ok "vector v1 upserted" || bad "v1 upsert ($V1)"
-# Backdate v1's write time ~10 days so the 1 s TTL must reap it.
-OLDV=$(( $(date +%s) - 864000 ))
-sqlite3 "$vdb6" "UPDATE vectors SET created=$OLDV WHERE id='v1';"
-# A second upsert triggers the opportunistic prune.
-curl -s -o /dev/null -X POST "http://127.0.0.1:$PORT/v1/vectors" \
-  -H "Content-Type: application/json" \
-  -d '{"id":"v2","vector":[4,5,6]}'
-GONEV="$(sqlite3 "$vdb6" "SELECT COUNT(*) FROM vectors WHERE id='v1';")"
-[ "$GONEV" = "0" ] \
-  && ok "stale vector pruned past the TTL window" \
-  || bad "stale vector survived TTL ($GONEV)"
-KEPTV="$(sqlite3 "$vdb6" "SELECT COUNT(*) FROM vectors WHERE id='v2';")"
-[ "$KEPTV" = "1" ] \
-  && ok "fresh vector retained within the window" \
-  || bad "fresh vector missing after sweep ($KEPTV)"
-stop_daemon
-rm -rf "$D6"; D6=""
-
-echo
-echo "== phase 25.2b: vector owner-scoping cross-tenant (H5/ADR 006) =="
-# Two operator tenants (vectors.read+write, non-admin) + an admin, auth
-# enabled. Each tenant's vectors are private; an admin sees across owners.
-DV="$(mktemp -d)"
-ATHENA_PASSWORD=opapass123 "$ATHENA" auth user add opa --role operator \
-  --data-dir "$DV" >/dev/null 2>&1
-ATHENA_PASSWORD=opbpass123 "$ATHENA" auth user add opb --role operator \
-  --data-dir "$DV" >/dev/null 2>&1
-ATHENA_PASSWORD=admpass123 "$ATHENA" auth user add vadm --role admin \
-  --data-dir "$DV" >/dev/null 2>&1
-vtok() { "$ATHENA" auth token add --user "$1" --data-dir "$DV" 2>/dev/null \
-  | grep -o 'sk-athena-[A-Za-z0-9_-]*' | head -1; }
-TOKA="$(vtok opa)"; TOKB="$(vtok opb)"; TOKADM="$(vtok vadm)"
-start_daemon "$DV" 127.0.0.1 \
-  || { echo "vector-owner daemon failed"; cat "$DV/daemon.log"; exit 1; }
-BV="http://127.0.0.1:$PORT"
-vpost() { curl -s -o /dev/null -w '%{http_code}' -X POST "$BV/v1/vectors" \
-  -H "Authorization: Bearer $1" -H 'Content-Type: application/json' \
-  -d "$2"; }
-[ "$(vpost "$TOKA" '{"id":"oa","vector":[1,0,0]}')" = 200 ] \
-  && ok "opa upserts its vector" || bad "opa upsert failed"
-[ "$(vpost "$TOKB" '{"id":"ob","vector":[0,1,0]}')" = 200 ] \
-  && ok "opb upserts its vector" || bad "opb upsert failed"
-# Query isolation: opa's search sees only opa's vector, never opb's.
-QA="$(curl -s -X POST "$BV/v1/vectors/query" \
-  -H "Authorization: Bearer $TOKA" -H 'Content-Type: application/json' \
-  -d '{"vector":[1,0,0],"k":10}')"
-echo "$QA" | grep -q '"id":"oa"' && ! echo "$QA" | grep -q '"id":"ob"' \
-  && ok "opa query returns only its own vectors" \
-  || bad "opa query leaked cross-tenant ($QA)"
-# Stats are owner-scoped; admin sees across owners.
-SA="$(curl -s "$BV/v1/vectors/stats" -H "Authorization: Bearer $TOKA")"
-echo "$SA" | grep -q '"count":1' \
-  && ok "opa stats count=1 (own only)" || bad "opa stats not scoped ($SA)"
-SADM="$(curl -s "$BV/v1/vectors/stats" -H "Authorization: Bearer $TOKADM")"
-echo "$SADM" | grep -q '"count":2' \
-  && ok "admin stats count=2 (all owners)" || bad "admin stats ($SADM)"
-# opb cannot delete or overwrite opa's vector.
-code 404 DELETE /v1/vectors/oa "$TOKB"          # cross-tenant delete hidden
-[ "$(vpost "$TOKB" '{"id":"oa","vector":[9,9,9]}')" = 409 ] \
-  && ok "cross-tenant overwrite → 409 owner_conflict" \
-  || bad "cross-tenant overwrite not blocked"
-# opa still owns the original; admin can delete it.
-code 200 DELETE /v1/vectors/oa "$TOKADM"
-code 404 DELETE /v1/vectors/oa "$TOKA"          # already gone
-stop_daemon
-rm -rf "$DV"; DV=""
-
-echo
 echo "== phase 25.3: content opt-out — drop prompt on completion (M34.2) =="
 # With --drop-request-content the queue wipes a job's request (prompt)
 # blob the moment it finishes; the result the client polls for stays.
@@ -3253,7 +3169,7 @@ echo "$OP" | grep -qi "at-rest: store is plaintext" \
 rm -rf "$PDD"
 # 27c: retention knobs are surfaced.
 CR="$DOC3/ret.toml"
-dcfg27 "$CR" "$D" "queue_result_ttl_secs = 604800" "vector_ttl_secs = 2592000"
+dcfg27 "$CR" "$D" "queue_result_ttl_secs = 604800"
 OR="$("$ATHENA" doctor --config "$CR" --model-store "$MSTORE" 2>&1)"
 echo "$OR" | grep -qi "retention:.*queue TTL 604800s" \
   && ok "doctor reports configured retention bounds" \

@@ -52,7 +52,6 @@ public enum DefaultConfig {
         # speculative = false
         # KV-cache compression: "none" | "turboquant" | "triattention".
         # kv_compression = "none"
-        # vector_cap_bytes = 4294967296
 
         # ── [prompt_cache] cross-request prompt-prefix KV reuse (M59) ──
         # Transparent reuse of a previously-computed KV prefix across chat
@@ -75,8 +74,8 @@ public enum DefaultConfig {
 
 
         # ── Storage ──────────────────────────────────────────────────
-        # Embedded SQLite store (vectors + queue). Commented ⇒ "~/.athena"
-        # of the daemon's user.
+        # Embedded SQLite store (auth/audit/usage + queue). Commented ⇒
+        # "~/.athena" of the daemon's user.
         # data_dir = "/usr/local/var/athena/data"
 
 

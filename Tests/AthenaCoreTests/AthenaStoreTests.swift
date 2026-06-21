@@ -13,88 +13,6 @@ final class AthenaStoreTests: XCTestCase {
             .appendingPathComponent("athena-store-\(UUID()).sqlite")
     }
 
-    func testVectorRoundTripDeleteCount() async throws {
-        let url = tmpURL()
-        defer { try? FileManager.default.removeItem(at: url) }
-        let s = try AthenaStore(path: url)
-
-        let v = (0..<8).map { Float($0) * 0.5 }
-        let meta = Data(#"{"src":"unit"}"#.utf8)
-        try await s.putVector(id: "a", vector: v, metadata: meta)
-        try await s.putVector(id: "b", vector: [1, 2, 3], metadata: nil)
-
-        let a = await s.getVector(id: "a")
-        XCTAssertEqual(a?.vector, v, "exact float round-trip")
-        XCTAssertEqual(a?.metadata, meta)
-        let bMeta = await s.getVector(id: "b")?.metadata
-        XCTAssertNil(bMeta)
-        var cnt = await s.vectorCount()
-        XCTAssertEqual(cnt, 2)
-
-        // INSERT OR REPLACE.
-        try await s.putVector(id: "a", vector: [9], metadata: nil)
-        let aReplaced = await s.getVector(id: "a")?.vector
-        XCTAssertEqual(aReplaced, [9])
-        cnt = await s.vectorCount()
-        XCTAssertEqual(cnt, 2)
-
-        let ids = await s.allVectors().map { $0.id }
-        XCTAssertEqual(ids, ["a", "b"])  // ORDER BY id
-
-        let delA = await s.deleteVector(id: "a")
-        XCTAssertTrue(delA)
-        let delMissing = await s.deleteVector(id: "missing")
-        XCTAssertFalse(delMissing)
-        cnt = await s.vectorCount()
-        XCTAssertEqual(cnt, 1)
-        let gone = await s.getVector(id: "a")
-        XCTAssertNil(gone)
-    }
-
-    /// H5 (M66.6 / ADR 006) — the vectors `owner` column: round-trip via
-    /// `allVectors`, and the optional owner filter on `getVector`/
-    /// `deleteVector` (a NULL/legacy row never matches a scoped owner).
-    func testVectorOwnerColumnH5() async throws {
-        let url = tmpURL()
-        defer { try? FileManager.default.removeItem(at: url) }
-        let s = try AthenaStore(path: url)
-        try await s.putVector(
-            id: "av", vector: [1, 0], metadata: nil, owner: "u:alice")
-        try await s.putVector(
-            id: "legacy", vector: [0, 1], metadata: nil)  // NULL owner
-
-        let owners = Dictionary(
-            uniqueKeysWithValues:
-                await s.allVectors().map { ($0.id, $0.owner) })
-        XCTAssertEqual(owners["av"], "u:alice")
-        XCTAssertNil(owners["legacy"] ?? nil)
-
-        // Owner filter: alice sees her row; the NULL row never matches a
-        // scoped owner; unfiltered (nil) sees both.
-        let avAlice = await s.getVector(id: "av", owner: "u:alice")
-        XCTAssertNotNil(avAlice)
-        let avBob = await s.getVector(id: "av", owner: "u:bob")
-        XCTAssertNil(avBob)
-        let legacyScoped = await s.getVector(id: "legacy", owner: "u:alice")
-        XCTAssertNil(legacyScoped)
-        let legacyUnfiltered = await s.getVector(id: "legacy")
-        XCTAssertNotNil(legacyUnfiltered)
-
-        // Scoped delete confines to the owner; the NULL row resists a
-        // scoped delete but yields to an unscoped (admin) one.
-        let crossDel = await s.deleteVector(id: "av", owner: "u:bob")
-        XCTAssertFalse(crossDel)
-        let legacyScopedDel =
-            await s.deleteVector(id: "legacy", owner: "u:alice")
-        XCTAssertFalse(legacyScopedDel)
-        let ownDel = await s.deleteVector(id: "av", owner: "u:alice")
-        XCTAssertTrue(ownDel)
-        let legacyAdminDel = await s.deleteVector(id: "legacy")
-        XCTAssertTrue(legacyAdminDel)
-        let cnt2 = await s.vectorCount()
-        XCTAssertEqual(cnt2, 0)
-    }
-
     func testJobLifecycle() async throws {
         let url = tmpURL()
         defer { try? FileManager.default.removeItem(at: url) }
@@ -417,15 +335,11 @@ final class AthenaStoreTests: XCTestCase {
                 owner: nil)
             try await s.updateJob(
                 id: "e", status: "error", result: nil, error: "boom")
-            try await s.putVector(
-                id: "persist", vector: [3, 1, 4], metadata: nil)
         }
         let s2 = try AthenaStore(path: url)  // reopen same file
         let j = await s2.getJob(id: "e")
         XCTAssertEqual(j?.status, "error")
         XCTAssertEqual(j?.error, "boom")
-        let pv = await s2.getVector(id: "persist")?.vector
-        XCTAssertEqual(pv, [3, 1, 4])
     }
 
     /// M27.2 — per-principal usage counters accumulate, stay keyed by
@@ -620,7 +534,8 @@ final class AthenaStoreTests: XCTestCase {
         let key = "0123456789abcdef0123456789abcdef"
         do {
             let s = try AthenaStore(path: url, key: key)
-            try await s.putVector(id: "v", vector: [1, 2, 3], metadata: nil)
+            try await s.insertJob(
+                id: "v", kind: "x", request: Data("secret".utf8), owner: nil)
             await s.close()
         }
         // The on-disk file must NOT be a plaintext SQLite database.
@@ -630,8 +545,8 @@ final class AthenaStoreTests: XCTestCase {
         // Correct key reopens and reads.
         do {
             let s = try AthenaStore(path: url, key: key)
-            let got = await s.getVector(id: "v")?.vector
-            XCTAssertEqual(got, [1, 2, 3])
+            let got = await s.getJob(id: "v")?.request
+            XCTAssertEqual(got, Data("secret".utf8))
             await s.close()
         }
         // Wrong key fails fast with an encryption error.
@@ -656,7 +571,8 @@ final class AthenaStoreTests: XCTestCase {
         // the migration swap (the daemon migrates BEFORE opening too).
         do {
             let s = try AthenaStore(path: url)
-            try await s.putVector(id: "keep", vector: [7, 8], metadata: nil)
+            try await s.insertJob(
+                id: "keep", kind: "x", request: Data("data".utf8), owner: nil)
             await s.close()
         }
         XCTAssertTrue(
@@ -670,8 +586,8 @@ final class AthenaStoreTests: XCTestCase {
             "store is encrypted after migration")
         // Data survives, readable only with the key.
         let s = try AthenaStore(path: url, key: key)
-        let got = await s.getVector(id: "keep")?.vector
-        XCTAssertEqual(got, [7, 8])
+        let got = await s.getJob(id: "keep")?.request
+        XCTAssertEqual(got, Data("data".utf8))
     }
 
     /// NH1 (M66.1) — `recoverInterruptedMigration` finishes or rolls back
@@ -767,25 +683,6 @@ final class AthenaStoreTests: XCTestCase {
         }
         let d3 = await defaults()
         XCTAssertEqual(d3, ["c"], "rejected swap left default intact")
-    }
-
-    func testPruneVectorsByAge() async throws {
-        let url = tmpURL()
-        defer { try? FileManager.default.removeItem(at: url) }
-        let s = try AthenaStore(path: url)
-        try await s.putVector(id: "a", vector: [1, 2, 3], metadata: nil)
-        try await s.putVector(id: "b", vector: [4, 5, 6], metadata: nil)
-        let now = Date().timeIntervalSince1970
-        // Past cutoff: both were just written, nothing is old enough.
-        let none = try await s.pruneVectors(olderThan: now - 10_000)
-        XCTAssertEqual(none, 0)
-        var cnt = await s.vectorCount()
-        XCTAssertEqual(cnt, 2)
-        // Future cutoff: both are "older", both go.
-        let all = try await s.pruneVectors(olderThan: now + 10_000)
-        XCTAssertEqual(all, 2)
-        cnt = await s.vectorCount()
-        XCTAssertEqual(cnt, 0)
     }
 
     func testClearJobRequestEmptiesPrompt() async throws {

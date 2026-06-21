@@ -612,35 +612,6 @@ struct SpeakerEmbeddingResponse: Codable {
     let dimension: Int
 }
 
-// MARK: - /v1/vectors (M7.2 built-in vector DB)
-
-struct VectorUpsertRequest: Decodable {
-    let id: String
-    let vector: [Float]?
-    let text: String?
-    let metadata: JSONValue?
-}
-struct VectorIdResponse: Codable { let id: String }
-
-struct VectorQueryRequest: Decodable {
-    let vector: [Float]?
-    let text: String?
-    let k: Int?
-}
-struct VectorMatch: Codable {
-    let id: String
-    let score: Float
-    let metadata: JSONValue?
-}
-struct VectorQueryResponse: Codable { let matches: [VectorMatch] }
-
-struct VectorStatsResponse: Codable {
-    let count: Int
-    let dim: Int
-    let bytes: Int
-    let cap_bytes: Int
-}
-
 // MARK: - /v1/queue (M8.1 async request queue)
 
 struct QueueSubmitResponse: Codable {
@@ -674,17 +645,3 @@ struct QueueJobSummary: Codable {
 }
 struct QueueListResponse: Codable { let jobs: [QueueJobSummary] }
 struct QueueRemoveResponse: Codable { let id: String; let removed: Bool }
-
-// MARK: - /v1/store (M9.3 shared-store admin)
-
-struct StoreExportRequest: Decodable { let path: String }
-struct StoreExportResponse: Codable {
-    let path: String
-    let bytes: Int
-}
-struct StoreStatsResponse: Codable {
-    let vectors: Int
-    let jobs: Int
-    let bytes: Int
-    let path: String
-}

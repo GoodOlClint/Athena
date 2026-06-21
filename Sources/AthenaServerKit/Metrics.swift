@@ -211,9 +211,7 @@ public struct MetricsMiddleware<Context: RequestContext>: RouterMiddleware {
         if path == "/v1/audio/transcriptions" { return "transcription" }
         if path == "/v1/audio/diarizations" { return "diarization" }
         if path == "/v1/audio/embeddings" { return "speaker_embeddings" }
-        if path.hasPrefix("/v1/vectors") { return "vectors" }
         if path.hasPrefix("/v1/queue") { return "queue" }
-        if path.hasPrefix("/v1/store") { return "store" }
         if path.hasPrefix("/api/") { return "ollama" }
         return nil  // /healthz, /ui*, /metrics, etc. — not work
     }

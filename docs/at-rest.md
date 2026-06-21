@@ -2,9 +2,11 @@
 
 Athena keeps everything on one box: an embedded SQLite store under the
 data dir (`~/.athena/athena.sqlite` by default) holds RBAC users/tokens,
-usage counters, the audit log, the built-in vector DB, and the async
-request queue. This document covers **how long that data lives** and
-**how it's protected on disk**.
+usage counters, the audit log, and the async request queue. This document
+covers **how long that data lives** and **how it's protected on disk**.
+
+> ADR 025: the built-in vector DB was removed (v0.10.201) — there is no
+> longer a `vectors` table or `/v1/vectors*` surface.
 
 ## What's stored, and how it's protected
 
@@ -13,12 +15,11 @@ request queue. This document covers **how long that data lives** and
 | User passwords | PBKDF2 salted hashes — never reversible |
 | Bearer tokens | SHA-256 hashes — the raw token is shown once, never stored |
 | Outbound secrets (HF token, proxy creds, store key) | macOS Keychain, not the DB |
-| **Vector blobs** (embeddings + metadata) | the SQLite file |
 | **Queue blobs** (request prompts + result completions) | the SQLite file |
 
 Passwords, token hashes, and Keychain secrets are safe regardless of disk
-posture. The **vector and queue blobs hold inference inputs/outputs**, so
-they are the focus of both retention and at-rest encryption.
+posture. The **queue blobs hold inference inputs/outputs**, so they are the
+focus of both retention and at-rest encryption.
 
 ## Upload bytes are never written to disk (ADR 025 S5)
 
@@ -35,16 +36,13 @@ data-at-rest one.
 
 ## Bounded retention (opt-in)
 
-Left unbounded, queue results and vectors accumulate forever. Three knobs
-(all in `deploy/athena.toml`, all off by default) bound them:
+Left unbounded, queue results accumulate forever. Two knobs (both in
+`deploy/athena.toml`, off by default) bound them:
 
 - `queue_result_ttl_secs` — prune terminal (done/error/canceled) queue
   results older than the window. Swept on the worker's idle path.
 - `queue_max_rows` — cap total queue rows, trimming the oldest terminal
   results first. Pending (queued/running) jobs are never dropped.
-- `vector_ttl_secs` — prune vectors written longer ago than the window,
-  swept opportunistically on each upsert. Vectors written before this
-  feature (no timestamp) are never auto-pruned.
 
 And a content opt-out:
 

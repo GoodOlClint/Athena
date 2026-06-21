@@ -34,8 +34,6 @@ extension ConfigEditor {
         case "temperature": return cfg.temperature
         case "speculative":
             return cfg.speculative.map { $0 ? "true" : "false" }
-        case "vector_cap_bytes":
-            return cfg.vectorCapBytes.map(String.init)
         case "auth_keys_file": return cfg.authKeysFile
         case "tls_cert": return cfg.tlsCert
         case "tls_key": return cfg.tlsKey
@@ -67,8 +65,6 @@ extension ConfigEditor {
             return cfg.queueResultTtlSecs.map(String.init)
         case "queue_max_rows":
             return cfg.queueMaxRows.map(String.init)
-        case "vector_ttl_secs":
-            return cfg.vectorTtlSecs.map(String.init)
         case "drop_request_content":
             return cfg.dropRequestContent.map { $0 ? "true" : "false" }
         case "encrypt_store":

@@ -87,15 +87,12 @@ engine = "mlx"
 # a non-Qwen model) warns and runs uncompressed.
 # kv_compression = "none"
 
-# Built-in vector-store byte cap (default: memory budget / 8).
-# vector_cap_bytes = 4294967296
-
 
 # ── Storage ──────────────────────────────────────────────────────────
 
-# Directory for the embedded SQLite store (vector DB + async queue +
-# job rows). Commented ⇒ "~/.athena" of the daemon's user. Set this to
-# a stable, backed-up path for any real deployment.
+# Directory for the embedded SQLite store (auth/audit/usage + async
+# queue/job rows). Commented ⇒ "~/.athena" of the daemon's user. Set
+# this to a stable, backed-up path for any real deployment.
 # data_dir = "/usr/local/var/athena/data"
 
 
@@ -114,15 +111,6 @@ engine = "mlx"
 # queue_result_ttl_secs = 604800       # drop results older than 7 days
 # queue_max_rows = 10000               # cap total queue rows
 
-# Built-in vector-DB retention. vector_ttl_secs prunes vectors written
-# longer ago than the window; the sweep runs opportunistically on each
-# upsert (a daemon actively writing vectors keeps itself bounded).
-# Vectors stored before this feature existed (no write timestamp) are
-# never auto-pruned. Commented / non-positive ⇒ keep forever (default).
-# Use it for ephemeral/RAG working sets, NOT a vector DB you treat as a
-# durable knowledge base.
-# vector_ttl_secs = 2592000            # drop vectors older than 30 days
-
 # Content opt-out (zero prompt retention). With it on, a queued job's
 # request (the prompt) is wiped from disk the moment the job finishes —
 # only the result the client polls for is kept (and that is bounded by
@@ -137,7 +125,7 @@ engine = "mlx"
 
 # Encrypt the SQLite store on disk with SQLCipher (AES-256). Passwords
 # (PBKDF2), token hashes (SHA-256) and outbound secrets (Keychain) are
-# already protected; this additionally encrypts the vector + queue blobs,
+# already protected; this additionally encrypts the queue job blobs,
 # which hold inference inputs/outputs. The key is resolved from the
 # ATHENA_STORE_KEY environment variable, else the login Keychain (service
 # "athena", account "store:key"); when neither exists the daemon mints a
@@ -173,7 +161,7 @@ engine = "mlx"
 # (comma-separated). Commented + loopback bind ⇒ auth OFF (dev).
 # Commented + non-loopback bind ⇒ the daemon REFUSES to start.
 # Any keys present ⇒ enforced. admin ⊇ inference; admin also gates
-# the WebUI, /metrics, /v1/store, and mutating queue/vector ops.
+# the WebUI, /metrics, and mutating queue ops.
 # auth_keys_file = "/usr/local/etc/athena/auth.keys"
 # Generate keys with `athena auth add admin|inference` — the raw
 # key is shown ONCE and only its sha256:<hex> is written here (no

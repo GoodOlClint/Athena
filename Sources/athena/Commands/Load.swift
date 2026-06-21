@@ -156,13 +156,9 @@ struct Load: AsyncParsableCommand {
 
     @Option(
         help:
-            "Data dir for the embedded store (vectors + queue). Default ~/.athena."
+            "Data dir for the embedded store (auth/audit/usage + queue). Default ~/.athena."
     )
     var dataDir: String?
-
-    @Option(
-        help: "Built-in vector store byte cap. Default: budget/8.")
-    var vectorCapBytes: Int?
 
     @Option(
         help:
@@ -283,12 +279,6 @@ struct Load: AsyncParsableCommand {
             "Max total queue job rows. 0/absent ⇒ unbounded. Over the cap, the oldest terminal results are trimmed first; pending jobs are never deleted."
     )
     var queueMaxRows: Int?
-
-    @Option(
-        help:
-            "Vector-store TTL in seconds. 0/absent ⇒ keep forever (opt-in). On each upsert, vectors written longer ago than this are pruned. Vectors stored before this feature (no timestamp) are never auto-pruned."
-    )
-    var vectorTtlSecs: Int?
 
     @Flag(
         help:
@@ -700,13 +690,9 @@ struct Load: AsyncParsableCommand {
             budget=\(config.totalBudgetBytes)B
             """)
 
-        // M7: one embedded SQLite store (vectors + queue) under the
-        // data dir. The handle was opened above (M42.1 needed it for
-        // allowlist resolution); the rest of the data plane reuses it.
-        let vectorStore = VectorStore(
-            store: athenaStore,
-            capBytes: vectorCapBytes
-                ?? (config.totalBudgetBytes / 8))
+        // One embedded SQLite store under the data dir backs the queue.
+        // The handle was opened above (M42.1 needed it for allowlist
+        // resolution); the rest of the data plane reuses it.
         let queue = RequestQueue(store: athenaStore)
 
         // Inbound bearer auth (M12). Fail-safe: a non-loopback bind
@@ -755,7 +741,6 @@ struct Load: AsyncParsableCommand {
             embedding: embedding, transcription: transcription,
             diarization: diarization,
             speakerEmbedding: speakerEmbedding,
-            vectorStore: vectorStore,
             queue: queue, store: athenaStore,
             modelName: modelURL.lastPathComponent,
             modelStoreRoot: store.rootDirectory, auth: authConfig,
@@ -773,7 +758,6 @@ struct Load: AsyncParsableCommand {
             prefixCache: prefixCache,
             queueResultTtlSecs: queueResultTtlSecs ?? 0,
             queueMaxRows: queueMaxRows ?? 0,
-            vectorTtlSecs: vectorTtlSecs ?? 0,
             dropRequestContent: dropRequestContent)
         // M54.3 — operator-action pull: at startup, fetch any configured
         // model that has an HF-style id and isn't in the store, in the

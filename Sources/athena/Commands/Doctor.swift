@@ -469,20 +469,18 @@ struct Doctor: AsyncParsableCommand {
                         + "— ensure FileVault is on, or set encrypt_store.")
             }
         }
-        // Retention bounds (advisory): unbounded queue/vector growth keeps
+        // Retention bounds (advisory): unbounded queue growth keeps
         // inference content on disk indefinitely.
         let qTtl = parsed?.queueResultTtlSecs ?? 0
         let qMax = parsed?.queueMaxRows ?? 0
-        let vTtl = parsed?.vectorTtlSecs ?? 0
         var ret: [String] = []
         if qTtl > 0 { ret.append("queue TTL \(qTtl)s") }
         if qMax > 0 { ret.append("queue cap \(qMax) rows") }
-        if vTtl > 0 { ret.append("vector TTL \(vTtl)s") }
         if parsed?.dropRequestContent == true { ret.append("drop prompts") }
         if ret.isEmpty {
             say(
                 .ok,
-                "retention: none configured (queue/vector results kept "
+                "retention: none configured (queue results kept "
                     + "until manually removed)")
         } else {
             say(.ok, "retention: " + ret.joined(separator: ", "))

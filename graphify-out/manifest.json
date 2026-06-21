@@ -75,9 +75,9 @@
     "semantic_hash": "4c81e7e8960243538da7c2c22133af98"
   },
   "Sources/AthenaCore/RBAC.swift": {
-    "mtime": 1779127096.4780812,
-    "ast_hash": "97a75eb028f5a8ebd7a004105950983a",
-    "semantic_hash": "97a75eb028f5a8ebd7a004105950983a"
+    "mtime": 1782016059.033476,
+    "ast_hash": "70e3c144e6009fa23866a556272b66c1",
+    "semantic_hash": ""
   },
   "Sources/AthenaCore/SpeculativeStats.swift": {
     "mtime": 1779939768.1565266,
@@ -85,14 +85,14 @@
     "semantic_hash": "c8bec6880dd5c91f0d4a3963c9c8c04c"
   },
   "Sources/AthenaDeploy/AthenaConfig.swift": {
-    "mtime": 1782014255.3589983,
-    "ast_hash": "19b6b73234a97f175f7543eb61564feb",
+    "mtime": 1782015832.6399772,
+    "ast_hash": "fbf7cffd2cf1b56803f13f49c9f62ecc",
     "semantic_hash": ""
   },
   "Sources/AthenaDeploy/DefaultConfig.swift": {
-    "mtime": 1780315945.7683072,
-    "ast_hash": "bdcd1bd433032e67ce51f9a6c848f8ad",
-    "semantic_hash": "bdcd1bd433032e67ce51f9a6c848f8ad"
+    "mtime": 1782016468.03429,
+    "ast_hash": "526ee66e00ca323a6c5ec5f337758811",
+    "semantic_hash": ""
   },
   "Sources/AthenaDeploy/InstallPlan.swift": {
     "mtime": 1780787968.1672688,
@@ -100,8 +100,8 @@
     "semantic_hash": "2aaf2a90a1a70a05798c9ee570ea99d4"
   },
   "Sources/AthenaDeploy/LaunchdPlist.swift": {
-    "mtime": 1781911366.0261674,
-    "ast_hash": "a4264751b2455d2ce065f882b531ecc9",
+    "mtime": 1782016361.739198,
+    "ast_hash": "15c5439cdd2f33e505c11bda7549ddeb",
     "semantic_hash": ""
   },
   "Sources/AthenaDeploy/VersionGuard.swift": {
@@ -110,8 +110,8 @@
     "semantic_hash": "97e4cee0c0bc7ddbdfda276be4126d4e"
   },
   "Sources/AthenaEmbedding/MLXEmbeddingModule.swift": {
-    "mtime": 1781361634.7813492,
-    "ast_hash": "9776a929a853cf34bd5a2edf6c59013f",
+    "mtime": 1782016984.6874304,
+    "ast_hash": "4625cb0d91bb0e6acdb939ff73a3642a",
     "semantic_hash": ""
   },
   "Sources/AthenaEmbedding/StubEmbeddingModule.swift": {
@@ -265,13 +265,8 @@
     "semantic_hash": "634c250bdf5c6a23ea48b174ad4181ec"
   },
   "Sources/AthenaStore/AthenaStore.swift": {
-    "mtime": 1781320222.278759,
-    "ast_hash": "83ea8759af64da09ca6f9fc930cec2d7",
-    "semantic_hash": ""
-  },
-  "Sources/AthenaStore/VectorStore.swift": {
-    "mtime": 1781360238.8614783,
-    "ast_hash": "da592ff5d2edeaa74342c41b49efa3b3",
+    "mtime": 1782016477.5604138,
+    "ast_hash": "9ea304ef466201998993f0ac3bfa6ab8",
     "semantic_hash": ""
   },
   "Sources/AthenaStructured/StructuredGuide.swift": {
@@ -420,8 +415,8 @@
     "semantic_hash": "d16404614855c59c2001089f41c5bd78"
   },
   "Sources/athena/Athena.swift": {
-    "mtime": 1782014456.5264502,
-    "ast_hash": "e612601af5feb27ab718ced4fcb2248e",
+    "mtime": 1782016521.4952264,
+    "ast_hash": "67169617c07e560a0668c9572d4550af",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Audit.swift": {
@@ -440,8 +435,8 @@
     "semantic_hash": ""
   },
   "Sources/athena/Commands/ConfigEditor.swift": {
-    "mtime": 1781911345.3481333,
-    "ast_hash": "72150db810c5598ddefca8b731310207",
+    "mtime": 1782015888.986924,
+    "ast_hash": "f4b7beb8576eaa923df1428c3456095e",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Convert.swift": {
@@ -465,8 +460,8 @@
     "semantic_hash": "b6f7441bff95e5bcfe4786066a68b0af"
   },
   "Sources/athena/Commands/Doctor.swift": {
-    "mtime": 1781325739.9159162,
-    "ast_hash": "8112f2a9c531f0ddd0c5c3a6d53b1f97",
+    "mtime": 1782016378.2306206,
+    "ast_hash": "d6582e8c34c9e9db70d943b224d22be4",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/HfCmd.swift": {
@@ -490,8 +485,8 @@
     "semantic_hash": "5f5b49d75a33c5f490e2fa462f22c6ea"
   },
   "Sources/athena/Commands/Load.swift": {
-    "mtime": 1782014620.8939068,
-    "ast_hash": "efd2833fd1383d9c9d06f7f92eefcd3f",
+    "mtime": 1782016484.6307478,
+    "ast_hash": "9010a09c5e848f96da4b04d8c5217e3b",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Logs.swift": {
@@ -545,8 +540,8 @@
     "semantic_hash": "ba546feb975db11ee6e42e5e147b55e0"
   },
   "Sources/athena/Server/AthenaServer.swift": {
-    "mtime": 1782014420.455595,
-    "ast_hash": "6affe7c96a64194455b68f636fb6b5d8",
+    "mtime": 1782015562.1281202,
+    "ast_hash": "1236a53191bc518f1cb6571ae1c9dacc",
     "semantic_hash": ""
   },
   "Sources/athena/Server/GPUTelemetry.swift": {
@@ -560,13 +555,13 @@
     "semantic_hash": "a48b56ea98e27d1fc6b179d620ddc223"
   },
   "Sources/athena/Server/OpenAIDTO.swift": {
-    "mtime": 1781938299.2783372,
-    "ast_hash": "530f59e4154b7650b68058797e27e5cb",
+    "mtime": 1782015590.0815365,
+    "ast_hash": "1ca8852e58b8e6b18eb3f20868d839de",
     "semantic_hash": ""
   },
   "Sources/athena/Server/OpenAPISpec.swift": {
-    "mtime": 1781909184.1005633,
-    "ast_hash": "8d1c9284a41f55d6a1426df09dc6473a",
+    "mtime": 1782015718.0642562,
+    "ast_hash": "0ea9f8f30d32c0856573690649d17b62",
     "semantic_hash": ""
   },
   "Sources/athena/Server/QueueWorkerService.swift": {
@@ -580,13 +575,13 @@
     "semantic_hash": ""
   },
   "Sources/athena/Server/WebUI.swift": {
-    "mtime": 1781335186.2979202,
-    "ast_hash": "da9d1f6d6a69a8a8a017c7ed140ea1de",
+    "mtime": 1782015662.9594243,
+    "ast_hash": "e1f9176342b65ffa04b446b86e974a7f",
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/AthenaDeployTests.swift": {
-    "mtime": 1781845868.9586828,
-    "ast_hash": "cd45804e9cf72fa9a9fb2872c33ea227",
+    "mtime": 1782016334.4081388,
+    "ast_hash": "59647aed0f5ca135b86b68fac6b50472",
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/AthenaErrorTests.swift": {
@@ -605,8 +600,8 @@
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/AthenaStoreTests.swift": {
-    "mtime": 1781320414.5114894,
-    "ast_hash": "fb21c8901a52fbedcfa6b002b98ea3a9",
+    "mtime": 1782016216.375621,
+    "ast_hash": "d8d6689a31ea107c032601d06f5e4724",
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/DecodeProgressTests.swift": {
@@ -670,8 +665,8 @@
     "semantic_hash": "e437ef03d79b49e31e1f33443d9ef06c"
   },
   "Tests/AthenaCoreTests/RBACTests.swift": {
-    "mtime": 1781361073.703128,
-    "ast_hash": "1fb95ece458e04d81d2778c80ac2afef",
+    "mtime": 1782016647.5449922,
+    "ast_hash": "96f369e7841c377fa5ba7c62cef0f8e4",
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/RetryPolicyTests.swift": {
@@ -737,11 +732,6 @@
   "Tests/AthenaCoreTests/UsageAccountingTests.swift": {
     "mtime": 1781908926.4199395,
     "ast_hash": "da59759127ee4e813a842ce59c6e50fd",
-    "semantic_hash": ""
-  },
-  "Tests/AthenaCoreTests/VectorStoreTests.swift": {
-    "mtime": 1781360187.8477466,
-    "ast_hash": "5ef1b8edc2f126db3b8d01136bfed25c",
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/VersionGuardTests.swift": {
@@ -854,25 +844,15 @@
     "ast_hash": "b11ce55654432418cee6fa71bdf566eb",
     "semantic_hash": ""
   },
-  "clients/Sources/AthenaClient/StoreCmd.swift": {
-    "mtime": 1781298244.6785846,
-    "ast_hash": "626dccf2d6fa935046e92f633d08987d",
-    "semantic_hash": ""
-  },
   "clients/Sources/AthenaClient/Unload.swift": {
     "mtime": 1779892089.4193304,
     "ast_hash": "d236c2df237a3534d55f1e7179652b2f",
     "semantic_hash": "d236c2df237a3534d55f1e7179652b2f"
   },
-  "clients/Sources/AthenaClient/VectorsCmd.swift": {
-    "mtime": 1779122627.2961226,
-    "ast_hash": "ba00ad388b4a07688e23997db89e8b22",
-    "semantic_hash": "ba00ad388b4a07688e23997db89e8b22"
-  },
   "clients/Sources/athena/Athena.swift": {
-    "mtime": 1780316700.3760633,
-    "ast_hash": "d7393cb472e399368e50c94b371f94ba",
-    "semantic_hash": "d7393cb472e399368e50c94b371f94ba"
+    "mtime": 1782016036.3000767,
+    "ast_hash": "a4da232d5620cb79e55f4bd4be9bcd0b",
+    "semantic_hash": ""
   },
   "deploy/build.sh": {
     "mtime": 1782012779.48585,
@@ -880,8 +860,8 @@
     "semantic_hash": ""
   },
   "deploy/e2e-rbac.sh": {
-    "mtime": 1781938621.0894792,
-    "ast_hash": "bbe38280e7cb124b9b5bc249c55f8263",
+    "mtime": 1782016781.5976236,
+    "ast_hash": "c0f6aab9da8d60835e769713d32a5ae3",
     "semantic_hash": ""
   },
   "deploy/integration/e2e-embedding-select.sh": {
@@ -965,8 +945,8 @@
     "semantic_hash": ""
   },
   "docs/at-rest.md": {
-    "mtime": 1782013903.8565388,
-    "ast_hash": "01e5658816fffdac4018cbc1c6c63060",
+    "mtime": 1782016819.7965238,
+    "ast_hash": "ac52a87a87aba379062eacddecb42086",
     "semantic_hash": ""
   },
   "docs/the consuming application-integration.md": {
@@ -1085,13 +1065,13 @@
     "semantic_hash": "371237f6ed34877c859b071318d9b529"
   },
   "CLAUDE.md": {
-    "mtime": 1782014526.1684532,
-    "ast_hash": "b3c63fc1f41feaba842fa4e4f2f996f0",
+    "mtime": 1782016860.9099467,
+    "ast_hash": "19972199f7ee4c1f922658750855a39b",
     "semantic_hash": ""
   },
   "docs/cli-reference.md": {
-    "mtime": 1781824903.2046049,
-    "ast_hash": "0b4d90665ff676bfa2187814ed857c60",
+    "mtime": 1782016958.0504544,
+    "ast_hash": "a17fb7c577c7acd909e47fedc2b76d91",
     "semantic_hash": ""
   },
   "docs/decisions/README.md": {
@@ -1225,13 +1205,13 @@
     "semantic_hash": ""
   },
   "Sources/AthenaServerKit/Auth.swift": {
-    "mtime": 1781845758.8463602,
-    "ast_hash": "e17cb9b97759b9f037f1ef1697761561",
+    "mtime": 1782016069.5523655,
+    "ast_hash": "04d29d381d02b9a53b3e41df24593813",
     "semantic_hash": ""
   },
   "Sources/AthenaServerKit/Metrics.swift": {
-    "mtime": 1781334982.940459,
-    "ast_hash": "2e632aa96272552077f40f98c4c9229a",
+    "mtime": 1782016076.229219,
+    "ast_hash": "54d70a5451279b5aadd9c0c610fa10e6",
     "semantic_hash": ""
   },
   "Sources/AthenaServerKit/MultipartForm.swift": {
@@ -1250,8 +1230,8 @@
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/AthenaServerKitTests.swift": {
-    "mtime": 1781845778.7885587,
-    "ast_hash": "c9832e3af65df3964cbbbd00ee1ec24e",
+    "mtime": 1782016233.6220264,
+    "ast_hash": "e8e6b1ae92323fe95b7cc9ba25d15ccf",
     "semantic_hash": ""
   },
   "docs/decisions/008-testable-server-seam.md": {
@@ -1345,8 +1325,8 @@
     "semantic_hash": ""
   },
   "Sources/AthenaDeploy/ConfigEditor.swift": {
-    "mtime": 1781911330.9637897,
-    "ast_hash": "4271a4e54b251f63e1c5aa451df2d3ce",
+    "mtime": 1782015868.50823,
+    "ast_hash": "50bc63bb9fd547134a9f99e53474a079",
     "semantic_hash": ""
   },
   "Tests/AthenaCoreTests/CLIParseTests.swift": {
@@ -1795,8 +1775,8 @@
     "semantic_hash": ""
   },
   "docs/collapse-persistence-plan.md": {
-    "mtime": 1782013813.5549948,
-    "ast_hash": "80cc38937b8489cca271ea8c167ec15d",
+    "mtime": 1782016879.1870768,
+    "ast_hash": "ea4fd160a76dd702cf8e847c78e0afd4",
     "semantic_hash": ""
   },
   "docs/decisions/024-in-memory-data-protection-coresident-threat.md": {
