@@ -5,8 +5,15 @@ tier-scope decision resolved with the operator at Phase 0). **T3 (encrypt idle
 prompt-cache KV at-rest-in-RAM) deferred** as a stretch, gated on whether the
 target deployment runs the prompt cache with sensitive idle entries. **T1
 shipped v0.10.198** (process lockdown: Hardened Runtime + no `get-task-allow`,
-notarization hook); T2 (side-channel hygiene) follows in the same program. This
-ADR captures the threat model, the hardware ceiling, and the defense ladder
+notarization hook); **T2 shipped v0.10.200** (`ProcessHardening.swift`: core
+dumps off unconditionally via `setrlimit(RLIMIT_CORE,0)`; opt-in
+`ptrace(PT_DENY_ATTACH)` behind `deny_debugger_attach` / `ATHENA_DENY_DEBUGGER`;
+best-effort `secureZero`/`memset_s` of the decoded request PCM on every
+audio/video path. **`mlock` deferred, honestly** — the sensitive data is the
+GB-scale weights/KV pool itself, and pinning it fights the unified-memory
+governor budget (ADR 011/023); a broad `mlockall` is rejected for that reason,
+and there is no clean *small* region to pin today, so the seam exists unused).
+This ADR captures the threat model, the hardware ceiling, and the defense ladder
 *before* a consumer request ("confidential KV cache" / "Private Cloud
 Compute-style protection") lands, so we do not get pushed into re-litigating an
 unbuildable NVIDIA-Confidential-Computing port. Motivated by a consumer floating

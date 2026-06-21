@@ -140,8 +140,9 @@ public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule,
         }
 
         // Option D (ADR 025 S5): decode from the in-memory upload bytes.
-        let pcm = try await AudioDecode.pcm16kMono(
+        var pcm = try await AudioDecode.pcm16kMono(
             from: audio, filename: filename, module: .speakerEmbedding)
+        defer { ProcessHardening.secureZero(&pcm) }  // ADR 024 T2
         let sr = Double(AudioDecode.sampleRate)
         let totalSeconds = Double(pcm.count) / sr
 
@@ -203,8 +204,9 @@ public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule,
                 .speakerEmbedding, reason: "embed called before load")
         }
         // Option D (ADR 025 S5): decode from the in-memory upload bytes.
-        let pcm = try await AudioDecode.pcm16kMono(
+        var pcm = try await AudioDecode.pcm16kMono(
             from: audio, filename: filename, module: .speakerEmbedding)
+        defer { ProcessHardening.secureZero(&pcm) }  // ADR 024 T2
         let sr = Double(AudioDecode.sampleRate)
         let win = max(1, Int(windowSeconds * sr))
         let hop = max(1, Int(hopSeconds * sr))

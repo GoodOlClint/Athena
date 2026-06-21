@@ -228,8 +228,10 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
     ) async throws -> TranscriptionResult {
         // Option D (ADR 025 S5): decode from the in-memory upload bytes — no
         // temp file. `filename` carries the container hint for the decoder.
-        let pcm = try await AudioDecode.pcm16kMono(
+        var pcm = try await AudioDecode.pcm16kMono(
             from: audio, filename: filename, module: .transcription)
+        // ADR 024 T2: best-effort zeroize the decoded speech PCM on the way out.
+        defer { ProcessHardening.secureZero(&pcm) }
         return try transcribePCM(
             pcm, language: language, wordTimestamps: wordTimestamps)
     }

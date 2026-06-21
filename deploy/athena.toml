@@ -154,6 +154,19 @@ engine = "mlx"
 
 # ── Security ─────────────────────────────────────────────────────────
 
+# Process lockdown (ADR 024). Core dumps are disabled unconditionally at
+# startup (RLIMIT_CORE=0) so a crash can never dump the resident weights /
+# KV cache / decrypted secrets to a core file. The release build is also
+# signed with the Hardened Runtime and WITHOUT get-task-allow (see
+# deploy/build.sh + deploy/athena.entitlements), which denies a co-resident
+# process the task port. The key below is the opt-in extra layer:
+#
+# deny_debugger_attach — call ptrace(PT_DENY_ATTACH) at startup so a debugger
+# cannot attach (and a forced attach SIGKILLs the daemon). Redundant with the
+# Hardened-Runtime lockdown and kernel-bypassable, so OFF by default. Override
+# at startup with ATHENA_DENY_DEBUGGER=1/true/0/false.
+# deny_debugger_attach = true
+
 # Bearer-token auth keys file. Each line: `admin <key>` or
 # `inference <key>` (# comments ok). Keep it chmod 600. Keys may
 # also come from ATHENA_ADMIN_KEYS / ATHENA_INFERENCE_KEYS env

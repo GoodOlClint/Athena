@@ -365,6 +365,18 @@ struct Load: AsyncParsableCommand {
             background: background,
             terminalLevel: AthenaLog.level(logLevel) ?? .info)
 
+        // ADR 024 Tier 2 — disable core dumps before any secret (HF token,
+        // store key) or model weight touches memory, so a later crash can never
+        // dump the address space to a core file. Always on; the opt-in debugger
+        // denial is applied below once config is parsed.
+        if ProcessHardening.disableCoreDumps() {
+            Logger(label: AthenaLogLabel.daemon).notice(
+                "hardening: core dumps disabled (RLIMIT_CORE=0)")
+        } else {
+            Logger(label: AthenaLogLabel.daemon).warning(
+                "hardening: could not disable core dumps")
+        }
+
         // HF download cache: if an `hf-cache` sits beside the model
         // store (the configured root, or the default), use it;
         // otherwise leave HF_HOME unset so the Hub client falls back
@@ -420,6 +432,21 @@ struct Load: AsyncParsableCommand {
             .map { $0 == "1" || $0.lowercased() == "true" }
         let dflashEnabled =
             dflashEnvEnabled ?? tomlCfg?.dflashEnabled ?? false
+
+        // ADR 024 Tier 2 (opt-in) — deny debugger attach. Precedence mirrors
+        // the other startup toggles: env ATHENA_DENY_DEBUGGER (1/true/0/false)
+        // > TOML deny_debugger_attach > built-in false. Redundant with the
+        // Tier-1 lockdown (which already denies the task port) and
+        // kernel-bypassable, so off by default.
+        let denyDbgEnv = ProcessInfo.processInfo
+            .environment["ATHENA_DENY_DEBUGGER"]
+            .map { $0 == "1" || $0.lowercased() == "true" }
+        let denyDebugger = denyDbgEnv ?? tomlCfg?.denyDebuggerAttach ?? false
+        if denyDebugger {
+            let ok = ProcessHardening.denyDebuggerAttachNow()
+            Logger(label: AthenaLogLabel.daemon).notice(
+                "hardening: debugger attach denied (PT_DENY_ATTACH\(ok ? "" : " — call failed"))")
+        }
 
         let config = GovernorConfig(
             totalBudgetBytes: budgetBytes,

@@ -213,8 +213,9 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
                 .diarization, reason: "diarize called before load")
         }
         // Option D (ADR 025 S5): decode from the in-memory upload bytes.
-        let pcm = try await AudioDecode.pcm16kMono(
+        var pcm = try await AudioDecode.pcm16kMono(
             from: audio, filename: filename, module: .diarization)
+        defer { ProcessHardening.secureZero(&pcm) }  // ADR 024 T2
         let audio = MLXArray(pcm).asType(.float32)
 
         // M24.4b: the offline single-pass path is capped by the
@@ -268,8 +269,9 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
                     + "which has no segmentation backend; use method=sortformer")
         }
         // Option D (ADR 025 S5): decode from the in-memory upload bytes.
-        let pcm = try await AudioDecode.pcm16kMono(
+        var pcm = try await AudioDecode.pcm16kMono(
             from: audio, filename: filename, module: .diarization)
+        defer { ProcessHardening.secureZero(&pcm) }  // ADR 024 T2
         // PyanNet is length-agnostic and stream-windowed (no positional cap),
         // so the whole file is segmented in one pass; box the non-Sendable
         // model+pcm so the detached run can capture it (the actor serialises).

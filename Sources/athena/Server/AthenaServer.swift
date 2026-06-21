@@ -2096,8 +2096,9 @@ struct AthenaServer {
         // floor/ceiling — a degenerate video is a 4xx here.
         let result: TranscriptionResult
         do {
-            let pcm = try await VideoAudioTrack.extractPCM(
+            var pcm = try await VideoAudioTrack.extractPCM(
                 from: file.data, filename: file.filename, module: .transcription)
+            defer { ProcessHardening.secureZero(&pcm) }  // ADR 024 T2
             result = try await transcription.transcribePCM(
                 pcm, language: form.text("language"),
                 wordTimestamps: wantWords)

@@ -56,6 +56,14 @@ public struct AthenaConfig: Sendable, Equatable {
     /// drafter is operator-pulled from Hugging Face on first use. The
     /// `ATHENA_DFLASH` env var (1/true/0/false) overrides this at startup.
     public var dflashEnabled: Bool?
+    /// ADR 024 Tier 2 (defense-in-depth, opt-in): call `ptrace(PT_DENY_ATTACH)`
+    /// at startup so a debugger cannot attach to the daemon. Redundant with the
+    /// Tier-1 Hardened Runtime / no-`get-task-allow` lockdown (which already
+    /// denies the task port) and kernel-bypassable, so it is OFF by default; on
+    /// a dev/adhoc binary it adds a cheap extra layer. The `ATHENA_DENY_DEBUGGER`
+    /// env var (1/true/0/false) overrides this at startup. Core dumps are
+    /// disabled unconditionally regardless of this flag.
+    public var denyDebuggerAttach: Bool?
     /// Bearer-auth keys file. Optional — no keys + loopback = open;
     /// no keys + non-loopback = the daemon refuses to start.
     public var authKeysFile: String?
@@ -174,6 +182,7 @@ public struct AthenaConfig: Sendable, Equatable {
         promptCacheIdleTtlSecs: Int? = nil,
         promptCacheScope: String? = nil,
         dflashEnabled: Bool? = nil,
+        denyDebuggerAttach: Bool? = nil,
         authKeysFile: String? = nil,
         tlsCert: String? = nil, tlsKey: String? = nil,
         rateLimit: String? = nil, rateBurst: Int? = nil,
@@ -216,6 +225,7 @@ public struct AthenaConfig: Sendable, Equatable {
         self.promptCacheIdleTtlSecs = promptCacheIdleTtlSecs
         self.promptCacheScope = promptCacheScope
         self.dflashEnabled = dflashEnabled
+        self.denyDebuggerAttach = denyDebuggerAttach
         self.authKeysFile = authKeysFile
         self.tlsCert = tlsCert
         self.tlsKey = tlsKey
@@ -428,6 +438,7 @@ public struct AthenaConfig: Sendable, Equatable {
             pcIdleTtl = try int("prompt_cache_idle_ttl_secs", pt)
         }
         let dflashEnabled = try bool("dflash_enabled")
+        let denyDebuggerAttach = try bool("deny_debugger_attach")
         let preload = try bool("preload")
         let dropReq = try bool("drop_request_content")
         let encStore = try bool("encrypt_store")
@@ -452,6 +463,7 @@ public struct AthenaConfig: Sendable, Equatable {
             promptCacheIdleTtlSecs: pcIdleTtl,
             promptCacheScope: scalar("prompt_cache_scope", in: toml),
             dflashEnabled: dflashEnabled,
+            denyDebuggerAttach: denyDebuggerAttach,
             authKeysFile: scalar("auth_keys_file", in: toml),
             tlsCert: scalar("tls_cert", in: toml),
             tlsKey: scalar("tls_key", in: toml),
