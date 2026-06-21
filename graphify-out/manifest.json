@@ -420,8 +420,8 @@
     "semantic_hash": "d16404614855c59c2001089f41c5bd78"
   },
   "Sources/athena/Athena.swift": {
-    "mtime": 1781938361.8875558,
-    "ast_hash": "80a2554102b9fff444c2f2e65fc0c74c",
+    "mtime": 1782012822.0809565,
+    "ast_hash": "251bf7b02c7b6621a9555ff955274ab9",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Audit.swift": {
@@ -800,9 +800,9 @@
     "semantic_hash": ""
   },
   "clients/Sources/AthenaClient/QueueCmd.swift": {
-    "mtime": 1779123971.1728725,
-    "ast_hash": "25e08b42c813b1add9b9c3a0a83f0d74",
-    "semantic_hash": "25e08b42c813b1add9b9c3a0a83f0d74"
+    "mtime": 1781938548.0783992,
+    "ast_hash": "60a4011555c8bcfae374bf9e6109af41",
+    "semantic_hash": ""
   },
   "clients/Sources/AthenaClient/RemoteAdmin.swift": {
     "mtime": 1779136006.990692,
@@ -835,9 +835,9 @@
     "semantic_hash": "31527ccf9b40d7d6f730638973126cf5"
   },
   "clients/Sources/AthenaClient/RemoteModels.swift": {
-    "mtime": 1779892087.3669772,
-    "ast_hash": "10b31ccf74a8756892934ad31ce6d2eb",
-    "semantic_hash": "10b31ccf74a8756892934ad31ce6d2eb"
+    "mtime": 1781938555.714337,
+    "ast_hash": "e4ca5bf1aee5d29b6745167ae2dc775e",
+    "semantic_hash": ""
   },
   "clients/Sources/AthenaClient/RemoteUsage.swift": {
     "mtime": 1779475812.278745,
@@ -875,13 +875,13 @@
     "semantic_hash": "d7393cb472e399368e50c94b371f94ba"
   },
   "deploy/build.sh": {
-    "mtime": 1779892485.1778665,
-    "ast_hash": "e29565ca41e2bea1b26a9e5469e5349c",
-    "semantic_hash": "e29565ca41e2bea1b26a9e5469e5349c"
+    "mtime": 1782012779.48585,
+    "ast_hash": "0110b62692b44090482fa796b88b6457",
+    "semantic_hash": ""
   },
   "deploy/e2e-rbac.sh": {
-    "mtime": 1781938357.358472,
-    "ast_hash": "ef425d1db35f3f4cc7a856f1fea5f420",
+    "mtime": 1781938621.0894792,
+    "ast_hash": "bbe38280e7cb124b9b5bc249c55f8263",
     "semantic_hash": ""
   },
   "deploy/integration/e2e-embedding-select.sh": {
@@ -1085,8 +1085,8 @@
     "semantic_hash": "371237f6ed34877c859b071318d9b529"
   },
   "CLAUDE.md": {
-    "mtime": 1781895068.278997,
-    "ast_hash": "2b9ae8b9a4f3fee905ba62da45aaab25",
+    "mtime": 1782012911.3738992,
+    "ast_hash": "98e2c38ecaa7efac085909100e02ae4b",
     "semantic_hash": ""
   },
   "docs/cli-reference.md": {
@@ -1175,8 +1175,8 @@
     "semantic_hash": ""
   },
   "docs/audit-remediation-plan.md": {
-    "mtime": 1781937356.4394612,
-    "ast_hash": "3c2a548d21de87081723b83a88322a51",
+    "mtime": 1781938755.614939,
+    "ast_hash": "4a384207f4829f9b9cbc55e45d4bdb73",
     "semantic_hash": ""
   },
   "docs/decisions/003-rust-shim-panic-strategy.md": {
@@ -1740,8 +1740,8 @@
     "semantic_hash": ""
   },
   "docs/backlog-hitlist.md": {
-    "mtime": 1781938480.7742016,
-    "ast_hash": "d5b778f21d3edb6a9812f7d4d7997241",
+    "mtime": 1781938788.5935633,
+    "ast_hash": "17d3bc3a9bf24d67476fe61c50188772",
     "semantic_hash": ""
   },
   "docs/logprobs-plan.md": {
@@ -1787,6 +1787,36 @@
   "Sources/athena/Commands/AllowlistOffline.swift": {
     "mtime": 1781937911.444783,
     "ast_hash": "f92414bce7583a5281ff23f5ddcd0503",
+    "semantic_hash": ""
+  },
+  "deploy/verify-hardening.sh": {
+    "mtime": 1782012750.8107786,
+    "ast_hash": "cd46cf5edb97a2508fc6ae3a6d411b59",
+    "semantic_hash": ""
+  },
+  "docs/collapse-persistence-plan.md": {
+    "mtime": 1781987237.148478,
+    "ast_hash": "a58dae742aec086ac0c0b1951aa6178b",
+    "semantic_hash": ""
+  },
+  "docs/decisions/024-in-memory-data-protection-coresident-threat.md": {
+    "mtime": 1782012864.8814492,
+    "ast_hash": "d531f74d2b5ff8b7105e52260cdd68f5",
+    "semantic_hash": ""
+  },
+  "docs/decisions/025-collapse-persistent-data-tenants.md": {
+    "mtime": 1781987189.7837913,
+    "ast_hash": "af6e027f2e07c9bb606ef213473e8486",
+    "semantic_hash": ""
+  },
+  "docs/decisions/026-retire-allowlist-store-is-registry.md": {
+    "mtime": 1781987173.822621,
+    "ast_hash": "ca6eaf121999bde7457c60f0cf539843",
+    "semantic_hash": ""
+  },
+  "docs/hardening-program-plan.md": {
+    "mtime": 1782012929.5084393,
+    "ast_hash": "5969ae18d998f4f2afa415fae408c90f",
     "semantic_hash": ""
   }
 }

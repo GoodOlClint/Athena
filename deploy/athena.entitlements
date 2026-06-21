@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  athena.entitlements — Hardened Runtime entitlements for the Athena daemon
+  (ADR 024 Tier 1 / process lockdown).
+
+  Threat model: a co-resident malicious process that scrapes the daemon's
+  address space (task_for_pid() → mach_vm_read()) to read the resident model
+  weights, KV cache, or decrypted secrets. The single biggest defense is to
+  ship WITHOUT `get-task-allow`, under the Hardened Runtime, so AMFI denies the
+  task port to any caller that is not Apple-entitled against a target that
+  permits attach. See docs/decisions/024-*.md.
+
+  Notes on what is deliberately ABSENT:
+    * com.apple.security.get-task-allow = false (below) — the lever. A dev/adhoc
+      build effectively carries get-task-allow=true; this overrides that.
+    * NO com.apple.security.cs.disable-library-validation — the binary is
+      statically linked (only weak platform dylibs from /usr/lib/swift), so
+      library validation is a non-issue. Granting it would needlessly widen the
+      attack surface.
+    * NO com.apple.security.cs.allow-jit / allow-unsigned-executable-memory —
+      MLX's Metal kernels load from a precompiled `default.metallib` resource;
+      no CPU-side JIT is performed. Spike B (Phase 0) confirmed metallib loads
+      under the Hardened Runtime with none of these granted.
+
+  This file is consumed by deploy/build.sh's signing step and asserted by
+  deploy/verify-hardening.sh.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.get-task-allow</key>
+  <false/>
+</dict>
+</plist>

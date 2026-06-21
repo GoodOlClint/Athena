@@ -67,7 +67,63 @@ xcodebuild -scheme athena-Package -configuration "$CONFIG" \
   CLANG_ENABLE_CODE_COVERAGE=NO ONLY_ACTIVE_ARCH=YES \
   -skipMacroValidation -skipPackagePluginValidation build
 
+BIN=".build/xcode/Build/Products/${CONFIG}/athena"
+
+# ── ADR 024 Tier 1 — process lockdown (Hardened Runtime, no get-task-allow) ──
+#
+# A dev/adhoc binary effectively carries `get-task-allow`, so any process that
+# can call task_for_pid (root trivially) can attach and scrape the address
+# space — KV cache, resident weights, decrypted secrets. We re-sign WITH the
+# Hardened Runtime and WITHOUT get-task-allow (deploy/athena.entitlements) so
+# AMFI denies the task port to a co-resident scraper. Phase-0 Spike B confirmed
+# MLX's metallib still loads under the Hardened Runtime (the M43.3 risk), and
+# that this signature flips a debugger attach from "reaches the task" to "Not
+# allowed to attach."
+#
+# Signing identity:
+#   * CODESIGN_IDENTITY set        → use it (a "Developer ID Application: …"
+#                                     identity enables notarization below).
+#   * unset                        → adhoc ("-"). Adhoc + Hardened Runtime is
+#                                     a fully valid local-dev posture: it still
+#                                     drops get-task-allow and locks the task
+#                                     port. It is NOT notarizable / Gatekeeper-
+#                                     distributable — that needs Developer ID.
+IDENTITY="${CODESIGN_IDENTITY:--}"
 echo
-echo "built: .build/xcode/Build/Products/${CONFIG}/athena"
-echo "install: sudo .build/xcode/Build/Products/${CONFIG}/athena install \\"
+echo "build.sh: applying Hardened Runtime signature (identity: ${IDENTITY})"
+codesign --force --timestamp --options runtime \
+  --entitlements deploy/athena.entitlements \
+  --sign "$IDENTITY" "$BIN"
+
+# Fail-closed regression gate: the binary must be hardened + no get-task-allow.
+./deploy/verify-hardening.sh "$BIN"
+
+# ── Notarization (release only; gated on a Developer ID identity) ────────────
+# Notarization is a Gatekeeper/distribution concern, orthogonal to the task-port
+# lockdown above. It requires a Developer ID identity AND notarytool credentials
+# (a stored keychain profile or Apple-ID app-specific password). Run it only
+# when explicitly requested AND credentialed; otherwise skip with a note.
+#   NOTARIZE=1  CODESIGN_IDENTITY="Developer ID Application: …"  \
+#   NOTARYTOOL_PROFILE="athena-notary"  ./deploy/build.sh Release
+if [ "${NOTARIZE:-0}" = "1" ]; then
+  if [ "$IDENTITY" = "-" ]; then
+    echo "build.sh: NOTARIZE=1 but no CODESIGN_IDENTITY (adhoc) — cannot notarize." >&2
+    exit 1
+  fi
+  prof="${NOTARYTOOL_PROFILE:-}"
+  [ -n "$prof" ] || { echo "build.sh: NOTARIZE=1 needs NOTARYTOOL_PROFILE (xcrun notarytool store-credentials)." >&2; exit 1; }
+  zip=".build/xcode/athena-notarize.zip"
+  /usr/bin/ditto -c -k --keepParent "$BIN" "$zip"
+  echo "build.sh: submitting $zip to notarytool (profile: $prof)…"
+  xcrun notarytool submit "$zip" --keychain-profile "$prof" --wait
+  # CLI tools cannot be `stapler staple`d (no bundle); the notarization ticket
+  # is published to Apple and validated online by Gatekeeper on first run.
+  echo "build.sh: notarization complete (CLI binary — ticket is served online, no stapling)."
+else
+  echo "build.sh: notarization skipped (set NOTARIZE=1 + CODESIGN_IDENTITY + NOTARYTOOL_PROFILE for a release build)."
+fi
+
+echo
+echo "built: ${BIN}"
+echo "install: sudo ${BIN} install \\"
 echo "           --config deploy/athena.toml"
