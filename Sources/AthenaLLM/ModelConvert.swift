@@ -73,10 +73,10 @@ public enum ModelConvert {
                 model: id, detected: label,
                 guidance:
                     "\(label.capitalized) models load in source precision via "
-                    + "their audio module paths — run `athena pull \(id)`, then "
-                    + "select it for that module (config / `athena allowlist "
-                    + "add`). `convert` quantizes only generative and vision "
-                    + "models.")
+                    + "their audio module paths — run `athena pull \(id)` (it "
+                    + "becomes selectable for that module automatically; set it "
+                    + "as the default with `athena default --module <m> \(id)`). "
+                    + "`convert` quantizes only generative and vision models.")
         }
     }
 

@@ -17,7 +17,7 @@ struct Athena: AsyncParsableCommand {
         version: "0.10.48",
         subcommands: [
             Run.self, Ps.self, CStatus.self, Unload.self,
-            LoadCmd.self, ResidentCmd.self, AllowlistCmd.self,
+            LoadCmd.self, ResidentCmd.self,
             ListCmd.self, ShowCmd.self, RmCmd.self, CpCmd.self,
             DefaultCmd.self, PullCmd.self, ConvertCmd.self,
             PruneCmd.self,

@@ -58,6 +58,12 @@ public enum AthenaError: Error, Sendable, Equatable {
     /// for embeddings would return wrong-dimension vectors, and never an
     /// arbitrary on-request download.
     case modelNotAvailable(requested: String, available: [String])
+    /// A request omitted `model` for a module whose store holds MORE THAN ONE
+    /// model of the class and no per-module default is configured (ADR 026).
+    /// A client error (400) — there is no safe auto-pick, so name a `model=`
+    /// (or set a default via `athena default --module <m> <id>`). NEVER a
+    /// silent pick that would change as the store changes.
+    case ambiguousModel(module: ModuleID, available: [String])
     /// A single embedding input exceeds the per-input token ceiling. A
     /// client error (400, OpenAI-style "maximum context length") — never
     /// a silently-truncated vector or an unbounded O(L²) forward pass
@@ -130,6 +136,7 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .audioFormatUnsupported: return 400
         case .requestTimedOut: return 504
         case .modelNotAvailable: return 400
+        case .ambiguousModel: return 400
         case .inputTooLong: return 400
         case .structuredOutputUnavailable: return 400
         case .noChatTemplate: return 400
@@ -164,6 +171,7 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .audioFormatUnsupported: return "audio_format_unsupported"
         case .requestTimedOut: return "inference_timeout"
         case .modelNotAvailable: return "model_not_available"
+        case .ambiguousModel: return "ambiguous_model"
         case .inputTooLong: return "input_too_long"
         case .structuredOutputUnavailable: return "structured_output_unavailable"
         case .noChatTemplate: return "no_chat_template"
@@ -224,24 +232,28 @@ public enum AthenaError: Error, Sendable, Equatable {
                 + "and was cancelled."
         case let .modelNotAvailable(requested, available):
             if available.isEmpty {
-                // M43.4 #2 — the most common cause is a fresh install
-                // with no LLM in the store. Point the operator at the
-                // remediation directly instead of the empty list.
+                // ADR 026 — availability IS the model store. The most common
+                // cause is a fresh install with no model of this class pulled.
+                // Point the operator at `pull` directly instead of an empty
+                // list (the retired allowlist no longer needs an `add`).
                 return "Model '\(requested)' is not available — the "
-                    + "model store has no entries for this module. "
-                    + "Run `athena pull <id>` to fetch one, then "
-                    + "`athena allowlist add --module <m> --id <id>` "
-                    + "(or set `athena default <id>` for the LLM)."
+                    + "model store has no models for this module. "
+                    + "Run `athena pull <id>` to fetch one (then optionally "
+                    + "`athena default --module <m> <id>` to make it the "
+                    + "default)."
             }
-            // M46.4 — dedupe case-divergent rows at display time so a
-            // 400 doesn't list `foo-4b` AND `foo-4B` as two separate
-            // "Configured models" when the new case-insensitive lookup
-            // treats them as the same model anyway. Historical
-            // duplicate ROWS in the SQLite table aren't removed here;
-            // both casings still match the lookup either way.
-            return "Model '\(requested)' is not available. Configured "
+            // M46.4 — dedupe case-divergent names at display time so a 400
+            // doesn't list `foo-4b` AND `foo-4B` as two separate "Available
+            // models" when the case-insensitive store-identity lookup treats
+            // them as the same model anyway.
+            return "Model '\(requested)' is not available. Available "
                 + "models: "
                 + "\(available.dedupedCaseInsensitive().joined(separator: ", "))."
+        case let .ambiguousModel(module, available):
+            return "No model specified for \(module.rawValue) and the store "
+                + "holds more than one (\(available.dedupedCaseInsensitive().joined(separator: ", "))). "
+                + "Name a `model` in the request, or set a default with "
+                + "`athena default --module \(module.rawValue) <id>`."
         case let .inputTooLong(module, tokens, maxTokens):
             return "Input for \(module.rawValue) is \(tokens) tokens, "
                 + "above the \(maxTokens)-token per-input maximum. "

@@ -163,7 +163,7 @@ enum OpenAPISpec {
                     "required": ["file"],
                     "properties": {
                       "file": { "type": "string", "format": "binary", "description": "Audio file." },
-                      "model": { "type": "string", "description": "Selects among the --whisper-model allowlist (M41.3) — a Whisper or Parakeet-TDT id (ADR 020); the resident model's class picks the engine. Omit ⇒ default (Whisper); unknown id ⇒ 400 model_not_available; an unsupported ASR arch ⇒ 400 unsupported_transcription_arch." },
+                      "model": { "type": "string", "description": "Selects among the store's transcription models (ADR 026) — a Whisper or Parakeet-TDT id (ADR 020); the resident model's class picks the engine. Omit ⇒ default (Whisper); unknown id ⇒ 400 model_not_available; an unsupported ASR arch ⇒ 400 unsupported_transcription_arch." },
                       "language": { "type": "string" },
                       "response_format": { "type": "string", "enum": ["json", "text", "srt", "vtt", "verbose_json", "diarized_json"] },
                       "diarize": { "type": "boolean" }
@@ -195,7 +195,7 @@ enum OpenAPISpec {
                     "required": ["file"],
                     "properties": {
                       "file": { "type": "string", "format": "binary", "description": "Video file (any container AVFoundation reads)." },
-                      "model": { "type": "string", "description": "Selects among the transcription allowlist — a Whisper or Parakeet-TDT id (ADR 020). Omit ⇒ default." },
+                      "model": { "type": "string", "description": "Selects among the store's transcription models — a Whisper or Parakeet-TDT id (ADR 020). Omit ⇒ default." },
                       "language": { "type": "string" },
                       "response_format": { "type": "string", "enum": ["json", "text", "srt", "vtt", "verbose_json"] }
                     }
@@ -227,7 +227,7 @@ enum OpenAPISpec {
                     "properties": {
                       "file": { "type": "string", "format": "binary" },
                       "method": { "type": "string", "enum": ["sortformer", "cluster", "pyannote"], "description": "Diarization engine. Omit ⇒ sortformer. A method that mismatches the resident model's backend ⇒ 400 invalid_method." },
-                      "model": { "type": "string", "description": "Selects among --diarization-model allowlist (M41.3). For method=pyannote this must be a pyannote-segmentation model. Omit ⇒ default; unknown id ⇒ 400 model_not_available." },
+                      "model": { "type": "string", "description": "Selects among the store's diarization models (ADR 026). For method=pyannote this must be a pyannote-segmentation model. Omit ⇒ default; unknown id ⇒ 400 model_not_available." },
                       "num_speakers": { "type": "integer", "description": "Exact speaker count (cluster/pyannote)." },
                       "min_speakers": { "type": "integer", "description": "Floor on auto speaker count (cluster/pyannote)." },
                       "max_speakers": { "type": "integer", "description": "Cap on auto speaker count (cluster/pyannote)." },
@@ -258,7 +258,7 @@ enum OpenAPISpec {
                     "required": ["file"],
                     "properties": {
                       "file": { "type": "string", "format": "binary" },
-                      "model": { "type": "string", "description": "Selects among --speaker-embedding-model allowlist (M41.3). Omit ⇒ default; unknown id ⇒ 400 model_not_available. The response `model` is the model actually served." },
+                      "model": { "type": "string", "description": "Selects among the store's speaker-embedding models (ADR 026). Omit ⇒ default; unknown id ⇒ 400 model_not_available. The response `model` is the model actually served." },
                       "segments": { "type": "string", "description": "JSON array of {start,end} segment specs (seconds)." }
                     }
                   } } }
@@ -578,7 +578,7 @@ enum OpenAPISpec {
               "get": {
                 "tags": ["Model store"],
                 "summary": "Every module's resident model slot.",
-                "description": "Reports, for each module class (llm, textEmbedding, transcription, diarization, speakerEmbedding), the operator-declared allowlist, the default (first declared), and the id currently resident in the slot (nil ⇒ unloaded). M41.1. Requires `model.read`.",
+                "description": "Reports, for each module class (llm, textEmbedding, transcription, diarization, speakerEmbedding), the store-derived selectable set, the configured default, and the id currently resident in the slot (nil ⇒ unloaded). M41.1. Requires `model.read`.",
                 "responses": {
                   "200": { "description": "Resident slots.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ModelResidentResponse" } } } },
                   "401": { "$ref": "#/components/responses/Unauthorized" },
@@ -590,7 +590,7 @@ enum OpenAPISpec {
               "post": {
                 "tags": ["Model store"],
                 "summary": "Rebind a module's slot to a model id (M41.1).",
-                "description": "Loads `body.module`'s slot (under the governor) and rebinds it to `body.id` (omit ⇒ the module's default). An id outside the module's allowlist is a 400 (`model_not_available`) — never a silent fallback or on-request download. Requires `model.write`.",
+                "description": "Loads `body.module`'s slot (under the governor) and rebinds it to `body.id` (omit ⇒ the module's default). An id outside the module's store models is a 400 (`model_not_available`) — never a silent fallback or on-request download. Requires `model.write`.",
                 "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ModelLoadRequest" } } } },
                 "responses": {
                   "200": { "description": "Loaded.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ModelLoadResponse" } } } },
@@ -609,64 +609,6 @@ enum OpenAPISpec {
                 "requestBody": { "required": false, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ModelUnloadRequest" } } } },
                 "responses": {
                   "200": { "description": "Unloaded.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ModelUnloadResponse" } } } },
-                  "400": { "$ref": "#/components/responses/BadRequest" },
-                  "401": { "$ref": "#/components/responses/Unauthorized" },
-                  "403": { "$ref": "#/components/responses/Forbidden" }
-                }
-              }
-            },
-            "/api/models/allow": {
-              "get": {
-                "tags": ["Model store"],
-                "summary": "List the persistent per-module allowlist (M42.2).",
-                "description": "Backs every module's selectable set; persisted in SQLite and survives daemon restarts. CLI flags at `athena load` are first-boot seeds only; mutations to this endpoint are the source of truth thereafter. `?module=M` narrows to one module class. Requires `model.read`.",
-                "parameters": [
-                  { "name": "module", "in": "query", "required": false, "schema": { "type": "string", "enum": ["llm", "textEmbedding", "transcription", "diarization", "speakerEmbedding"] } }
-                ],
-                "responses": {
-                  "200": { "description": "Allowlist.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AllowlistResponse" } } } },
-                  "400": { "$ref": "#/components/responses/BadRequest" },
-                  "401": { "$ref": "#/components/responses/Unauthorized" },
-                  "403": { "$ref": "#/components/responses/Forbidden" }
-                }
-              },
-              "post": {
-                "tags": ["Model store"],
-                "summary": "Add a model id to a module's allowlist (M42.2).",
-                "description": "Idempotent on (module, id). `default:true` marks this row as the module's default (clearing the prior one). The running module's allowlist is refreshed in place; the next request validates against the new set without a restart. Requires `model.write`.",
-                "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AddAllowlistRequest" } } } },
-                "responses": {
-                  "200": { "description": "Added.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AllowlistMutationResponse" } } } },
-                  "400": { "$ref": "#/components/responses/BadRequest" },
-                  "401": { "$ref": "#/components/responses/Unauthorized" },
-                  "403": { "$ref": "#/components/responses/Forbidden" }
-                }
-              },
-              "delete": {
-                "tags": ["Model store"],
-                "summary": "Remove a model id from a module's allowlist (M42.2).",
-                "description": "Removes (module, id). The next inference targeting the removed id is a classified 400 `model_not_available`. Removing the current default rotates to the next row by declaration order. Requires `model.write`.",
-                "parameters": [
-                  { "name": "module", "in": "query", "required": true, "schema": { "type": "string", "enum": ["llm", "textEmbedding", "transcription", "diarization", "speakerEmbedding"] } },
-                  { "name": "id", "in": "query", "required": true, "schema": { "type": "string" } }
-                ],
-                "responses": {
-                  "200": { "description": "Removed.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AllowlistMutationResponse" } } } },
-                  "400": { "$ref": "#/components/responses/BadRequest" },
-                  "401": { "$ref": "#/components/responses/Unauthorized" },
-                  "403": { "$ref": "#/components/responses/Forbidden" },
-                  "404": { "$ref": "#/components/responses/NotFound" }
-                }
-              }
-            },
-            "/api/models/allow/default": {
-              "put": {
-                "tags": ["Model store"],
-                "summary": "Mark an allowlist row as the module default (M42.2).",
-                "description": "Flips the `default` flag on (module, id) and clears the prior default in the same module. The id MUST already be in the allowlist; this never adds. Requires `model.write`.",
-                "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SetAllowlistDefaultRequest" } } } },
-                "responses": {
-                  "200": { "description": "Default set.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AllowlistMutationResponse" } } } },
                   "400": { "$ref": "#/components/responses/BadRequest" },
                   "401": { "$ref": "#/components/responses/Unauthorized" },
                   "403": { "$ref": "#/components/responses/Forbidden" }
@@ -1009,7 +951,7 @@ enum OpenAPISpec {
                 "type": "object",
                 "required": ["messages"],
                 "properties": {
-                  "model": { "type": "string", "description": "Same semantics as ChatCompletionRequest.model — selects among the operator-declared LLM allowlist (M41.2)." },
+                  "model": { "type": "string", "description": "Same semantics as ChatCompletionRequest.model — selects among the store's LLM models (ADR 026)." },
                   "messages": { "type": "array", "items": { "type": "object", "properties": { "role": { "type": "string" }, "content": { "type": "string" } } } },
                   "stream": { "type": "boolean" },
                   "max_tokens": { "type": "integer", "description": "Output-token cap (deprecated alias of max_completion_tokens; max_completion_tokens wins if both are sent)." },
@@ -1059,15 +1001,10 @@ enum OpenAPISpec {
               "ModelJobResponse": { "type": "object", "properties": { "job_id": { "type": "string" }, "status": { "type": "string" } } },
               "ModelSlot": { "type": "object", "properties": { "module": { "type": "string", "enum": ["llm", "textEmbedding", "transcription", "diarization", "speakerEmbedding"] }, "allowed": { "type": "array", "items": { "type": "string" } }, "default": { "type": "string" }, "resident": { "type": "string", "nullable": true } } },
               "ModelResidentResponse": { "type": "object", "properties": { "slots": { "type": "array", "items": { "$ref": "#/components/schemas/ModelSlot" } } } },
-              "ModelLoadRequest": { "type": "object", "required": ["module"], "properties": { "module": { "type": "string", "enum": ["llm", "textEmbedding", "transcription", "diarization", "speakerEmbedding"] }, "id": { "type": "string", "description": "Model id within the module's allowlist. Omit ⇒ the module's default (first declared at `athena load`)." } } },
+              "ModelLoadRequest": { "type": "object", "required": ["module"], "properties": { "module": { "type": "string", "enum": ["llm", "textEmbedding", "transcription", "diarization", "speakerEmbedding"] }, "id": { "type": "string", "description": "Model id within the module's store models. Omit ⇒ the module's configured default." } } },
               "ModelLoadResponse": { "type": "object", "properties": { "module": { "type": "string" }, "id": { "type": "string", "description": "Id actually loaded into the slot." }, "status": { "type": "string", "enum": ["loaded"] } } },
               "ModelUnloadRequest": { "type": "object", "properties": { "module": { "type": "string", "description": "Module class to unload, or absent / `\"all\"` for every module." } } },
               "ModelUnloadResponse": { "type": "object", "properties": { "modules": { "type": "array", "items": { "type": "string" } }, "status": { "type": "string", "enum": ["unloaded"] } } },
-              "AllowlistEntry": { "type": "object", "properties": { "module": { "type": "string" }, "id": { "type": "string" }, "default": { "type": "boolean" }, "declared": { "type": "number", "description": "Epoch seconds the row was declared." } } },
-              "AllowlistResponse": { "type": "object", "properties": { "allowlist": { "type": "array", "items": { "$ref": "#/components/schemas/AllowlistEntry" } } } },
-              "AddAllowlistRequest": { "type": "object", "required": ["module", "id"], "properties": { "module": { "type": "string", "enum": ["llm", "textEmbedding", "transcription", "diarization", "speakerEmbedding"] }, "id": { "type": "string" }, "default": { "type": "boolean", "description": "Mark this row as the module's default (clears the prior default in the same module)." } } },
-              "AllowlistMutationResponse": { "type": "object", "properties": { "module": { "type": "string" }, "id": { "type": "string" }, "status": { "type": "string", "enum": ["added", "removed", "default_set"] } } },
-              "SetAllowlistDefaultRequest": { "type": "object", "required": ["module", "id"], "properties": { "module": { "type": "string" }, "id": { "type": "string" } } },
               "UserSummary": { "type": "object", "properties": { "username": { "type": "string" }, "roles": { "type": "array", "items": { "type": "string" } } } },
               "UserListResponse": { "type": "object", "properties": { "users": { "type": "array", "items": { "$ref": "#/components/schemas/UserSummary" } } } },
               "CreateUserRequest": { "type": "object", "required": ["username", "password"], "properties": { "username": { "type": "string" }, "password": { "type": "string" }, "role": { "type": "string" } } },

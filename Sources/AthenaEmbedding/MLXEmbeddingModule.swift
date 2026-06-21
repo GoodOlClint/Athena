@@ -23,13 +23,13 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
     public nonisolated let id: ModuleID = .textEmbedding
     public nonisolated var moduleID: ModuleID { .textEmbedding }
 
-    /// The selectable set (M39). The single resident slot is rebound to
-    /// whichever member a request asks for; an id outside this set is a
-    /// `modelNotAvailable` 400 — a request can never trigger an arbitrary
-    /// HF download. (Future governor evolution: a multi-resident pool so
-    /// hot models stay loaded; today it is one-at-a-time.)
-    private var allowedIds: [String]
-    private var defaultId: String
+    /// ADR 026 — the selectable set is the store's embedding models, scanned
+    /// live via `ModelSupport`; `configuredDefault` is the per-module TOML
+    /// default used when a request omits `model` (nil ⇒ ambiguity rule). The
+    /// single resident slot is rebound to whichever model a request asks for;
+    /// a model absent from the store is a `modelNotAvailable` 400 — a request
+    /// can never trigger an arbitrary HF download.
+    private let configuredDefault: String?
     private let estimatedBytes: Int
     /// Model-store root, so a configured id resolves to its local store
     /// directory and loads from there (like the LLM loader) — which lets
@@ -43,8 +43,8 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
     /// NI3 — the operator's last selection (rebind/embed), staged so a
     /// governor evict→reload restores it instead of silently reverting the
     /// slot to the default. Survives `unload()`; `load(reservation:)`
-    /// honors `desiredName ?? residentId ?? defaultId`, mirroring the LLM
-    /// module's M62 cold-load-binds-requested-model seam.
+    /// honors `desiredName ?? residentId ?? <resolved default>`, mirroring the
+    /// LLM module's M62 cold-load-binds-requested-model seam.
     private var desiredName: String?
     /// Real weight footprint, summed at load by walking
     /// `model.parameters().flattened()`. Surfaced via `residentBytes` so
@@ -76,24 +76,21 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
     private static let clearCacheWorkThreshold = 16_384
 
     /// - Parameters:
-    ///   - modelIds: the selectable set of embedding model HF ids; the
-    ///     first is the default (used when a request omits `model`).
-    ///     Default `[BAAI/bge-small-en-v1.5]` — 384-dim, ~130 MB.
+    ///   - configuredDefault: the per-module TOML default embedding id (ADR
+    ///     026), used when a request omits `model` (nil ⇒ ambiguity rule).
+    ///   - modelStoreRoot: the store root scanned for embedding models.
     ///   - estimatedBytes: governor admission estimate. Default 512 MiB:
     ///     safe headroom over bge-small's weights + tokenizer + the
     ///     transient activation working set. One model is resident at a
     ///     time, so the fixed estimate still bounds the slot even though
     ///     a larger member (e.g. bge-large) exceeds bge-small's weights.
     public init(
-        modelIds: [String] = ["BAAI/bge-small-en-v1.5"],
+        configuredDefault: String? = nil,
         modelStoreRoot: URL? = nil,
         estimatedBytes: Int = 512 * 1024 * 1024
     ) {
-        precondition(
-            !modelIds.isEmpty,
-            "MLXEmbeddingModule needs at least one model id")
-        self.allowedIds = modelIds
-        self.defaultId = modelIds[0]
+        self.configuredDefault =
+            (configuredDefault?.isEmpty == true) ? nil : configuredDefault
         self.modelStoreRoot = modelStoreRoot
         self.estimatedBytes = estimatedBytes
     }
@@ -105,6 +102,30 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
         ModelStoreLayout.localDirectory(for: id, storeRoot: modelStoreRoot)
     }
 
+    /// The store's embedding models (ADR 026 live scan).
+    private func storeModelIds() -> [String] {
+        StoreModelClass.ids(
+            storeRoot: modelStoreRoot, accept: { $0.isEmbeddingSlot })
+    }
+
+    /// ADR 026 resolution against the live store scan (used by rebind/embed).
+    private func resolve(_ id: String?) throws -> String {
+        let available = storeModelIds()
+        switch ModelSelection.resolve(
+            available: available, configuredDefault: configuredDefault,
+            requested: id)
+        {
+        case .resolved(let t): return t
+        case .notAvailable:
+            throw AthenaError.modelNotAvailable(
+                requested: id ?? (configuredDefault ?? ""),
+                available: available)
+        case .ambiguous:
+            throw AthenaError.ambiguousModel(
+                module: .textEmbedding, available: available)
+        }
+    }
+
     public var residentBytes: Int {
         container == nil ? 0 : (weightBytes ?? estimatedBytes)
     }
@@ -113,8 +134,10 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
 
     public func load(reservation: MemoryReservation) async throws {
         if container != nil { return }
-        // NI3: honor the staged selection on a cold/reload, not the default.
-        try await loadContainer(desiredName ?? residentId ?? defaultId)
+        // NI3: honor the staged selection on a cold/reload, else the resolved
+        // configured default (ADR 026 — throws if store empty/ambiguous).
+        let name = try desiredName ?? residentId ?? resolve(nil)
+        try await loadContainer(name)
     }
 
     public func unload() async {
@@ -123,25 +146,17 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
         weightBytes = nil
     }
 
-    public func allowedModelIds() -> [String] { allowedIds }
-    public func defaultModelId() -> String { defaultId }
+    public func allowedModelIds() -> [String] { storeModelIds() }
+    public func defaultModelId() -> String {
+        ModelSelection.displayDefault(
+            available: storeModelIds(), configuredDefault: configuredDefault)
+    }
     public func residentModelId() -> String? { residentId }
-    /// M41 explicit rebind: validate id ∈ allowlist and (when the slot
-    /// is currently loaded) unload+reload to switch the resident model
-    /// in place. If the slot is unloaded the call only stages the target
-    /// id by triggering a fresh load — same fixed governor reservation.
+    /// M41 / ADR 026 explicit rebind: resolve `id` against the store (when the
+    /// slot is loaded, unload+reload to switch in place; when unloaded, stage
+    /// the target by triggering a fresh load — same fixed governor reservation).
     public func rebind(to id: String?) async throws {
-        let requested = id ?? defaultId
-        // M54 — match by store-dir identity so a request naming the model
-        // by either its full HF id or its bare store-dir name resolves the
-        // same allowlist row (like the LLM loader). Canonical id from
-        // storage drives the load.
-        guard let target =
-            allowedIds.canonicalByStoreIdentity(requested)
-        else {
-            throw AthenaError.modelNotAvailable(
-                requested: requested, available: allowedIds)
-        }
+        let target = try resolve(id)
         // NI3: remember the selection so a later evict→reload restores it.
         desiredName = target
         if residentId == target, container != nil { return }
@@ -149,17 +164,6 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
         residentId = nil
         weightBytes = nil
         try await loadContainer(target)
-    }
-
-    public func setAllowedModelIds(_ ids: [String]) {
-        allowedIds = ids
-        defaultId = ids.first ?? defaultId
-        if let d = desiredName, !ids.contains(d) { desiredName = nil }
-        if let r = residentId, !ids.contains(r) {
-            container = nil
-            residentId = nil
-            weightBytes = nil
-        }
     }
 
     /// Load `id` into the single resident slot, replacing whatever was
@@ -228,14 +232,9 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
     public func embed(_ texts: [String], model: String? = nil) async throws
         -> EmbeddingBatch
     {
-        let requested = model ?? defaultId
-        // M54 — match by store-dir identity (bare name or full HF id).
-        guard let target =
-            allowedIds.canonicalByStoreIdentity(requested)
-        else {
-            throw AthenaError.modelNotAvailable(
-                requested: requested, available: allowedIds)
-        }
+        // ADR 026 — resolve `model` against the store (bare name or full HF
+        // id; omit ⇒ configured default / sole model / ambiguity 400).
+        let target = try resolve(model)
         // I2 — serialize: chain after any in-flight embed so the rebind +
         // forward for THIS request run atomically. Without it a concurrent
         // embed for a different model swaps the single slot mid-request and

@@ -51,6 +51,22 @@ public enum LaunchdPlist {
         if let model = config.model {
             args += ["--model", model]
         }
+        // ADR 026 — per-module default model ids become the per-module
+        // first-boot seed flags so the installed daemon's configured default
+        // reaches `athena load` (which uses each flag's first entry as the
+        // module's default).
+        if let m = config.embeddingModel {
+            args += ["--embedding-model", m]
+        }
+        if let m = config.transcriptionModel {
+            args += ["--whisper-model", m]
+        }
+        if let m = config.diarizationModel {
+            args += ["--diarization-model", m]
+        }
+        if let m = config.speakerEmbeddingModel {
+            args += ["--speaker-embedding-model", m]
+        }
         if let modelStore = config.modelStore {
             args += ["--model-store", modelStore]
         }

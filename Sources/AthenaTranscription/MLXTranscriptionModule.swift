@@ -27,12 +27,11 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
         case parakeet(ParakeetTDTModel)
     }
 
-    /// M41.3 operator-declared allowlist (HF ids; the substrate's HF
-    /// cache is the load source). First-declared = the default.
-    /// M42.2: mutable so the persistent DB allowlist can be pushed in
-    /// at runtime without a daemon restart.
-    private var allowedIds: [String]
-    private var defaultId: String
+    /// ADR 026 — the selectable set is the store's transcription models
+    /// (Whisper/Parakeet), scanned live via `ModelSupport`; `configuredDefault`
+    /// is the per-module TOML default (nil ⇒ ambiguity rule). The substrate's
+    /// HF cache is the load source via the store dir.
+    private let configuredDefault: String?
     private let estimatedBytes: Int
     private var engine: Engine?
     /// nil ⇒ unloaded; otherwise the id resident in `engine`.
@@ -43,54 +42,61 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
     private let modelStoreRoot: URL?
 
     /// - Parameters:
-    ///   - modelIds: HF id allowlist (first = default). Default
-    ///     `[mlx-community/whisper-large-v3-turbo]`. M41.3.
+    ///   - configuredDefault: the per-module TOML default transcription id
+    ///     (ADR 026), used when a request omits `model` (nil ⇒ ambiguity rule).
+    ///   - modelStoreRoot: the store root scanned for transcription models.
     ///   - estimatedBytes: governor admission estimate. Default 3 GiB:
     ///     headroom over the larger engine's weights + tokenizer + the
     ///     encoder/decoder activation working set. One model is
     ///     resident at a time, so the fixed estimate bounds the slot.
     public init(
-        modelIds: [String] = ["mlx-community/whisper-large-v3-turbo"],
+        configuredDefault: String? = nil,
         modelStoreRoot: URL? = nil,
         estimatedBytes: Int = 3 * 1024 * 1024 * 1024
     ) {
-        precondition(
-            !modelIds.isEmpty,
-            "MLXTranscriptionModule needs at least one model id")
-        self.allowedIds = modelIds
-        self.defaultId = modelIds[0]
+        self.configuredDefault =
+            (configuredDefault?.isEmpty == true) ? nil : configuredDefault
         self.modelStoreRoot = modelStoreRoot
         self.estimatedBytes = estimatedBytes
-    }
-
-    /// Source-compat init for callers that still pass a single id.
-    public init(
-        modelId: String,
-        estimatedBytes: Int = 3 * 1024 * 1024 * 1024
-    ) {
-        self.init(modelIds: [modelId], estimatedBytes: estimatedBytes)
     }
 
     public var residentBytes: Int { engine == nil ? 0 : estimatedBytes }
 
     public func memoryEstimate() -> Int { estimatedBytes }
 
-    public func load(reservation: MemoryReservation) async throws {
-        if engine != nil { return }
-        try await loadModel(id: residentId ?? defaultId)
+    /// The store's transcription models (ADR 026 live scan).
+    private func storeModelIds() -> [String] {
+        StoreModelClass.ids(
+            storeRoot: modelStoreRoot, accept: { $0.isTranscriptionSlot })
     }
 
-    private func loadModel(id: String) async throws {
-        // M54 — match by store-dir identity (bare name or full HF id).
-        guard let canonical =
-            allowedIds.canonicalByStoreIdentity(id)
-        else {
+    /// ADR 026 resolution against the live store scan (rebind/load).
+    private func resolve(_ id: String?) throws -> String {
+        let available = storeModelIds()
+        switch ModelSelection.resolve(
+            available: available, configuredDefault: configuredDefault,
+            requested: id)
+        {
+        case .resolved(let t): return t
+        case .notAvailable:
             throw AthenaError.modelNotAvailable(
-                requested: id, available: allowedIds)
+                requested: id ?? (configuredDefault ?? ""),
+                available: available)
+        case .ambiguous:
+            throw AthenaError.ambiguousModel(
+                module: .transcription, available: available)
         }
+    }
+
+    public func load(reservation: MemoryReservation) async throws {
+        if engine != nil { return }
+        try await loadModel(id: residentId ?? resolve(nil))
+    }
+
+    private func loadModel(id canonical: String) async throws {
         // M54.3 — load from the local store dir; inference never
-        // auto-downloads (operator pulls a missing model at startup /
-        // allowlist-add). WhisperLoader also seeds the alignment_heads
+        // auto-downloads (operator pulls a missing model at startup).
+        // WhisperLoader also seeds the alignment_heads
         // for M26 word timestamps; an unload+load on rebind picks up the
         // new model's heads.
         guard let dir = ModelStoreLayout.localDirectory(
@@ -186,40 +192,20 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
         residentId = nil
     }
 
-    // M41 — ModelSelectable. M41.3 generalizes to a repeatable
-    // `--whisper-model` allowlist; rebind unloads + reloads in place
-    // under the same governor reservation.
-    public func allowedModelIds() -> [String] { allowedIds }
-    public func defaultModelId() -> String { defaultId }
+    // M41 / ADR 026 — ModelSelectable over the store-classified set; rebind
+    // unloads + reloads in place under the same governor reservation.
+    public func allowedModelIds() -> [String] { storeModelIds() }
+    public func defaultModelId() -> String {
+        ModelSelection.displayDefault(
+            available: storeModelIds(), configuredDefault: configuredDefault)
+    }
     public func residentModelId() -> String? { residentId }
     public func rebind(to id: String?) async throws {
-        let requested = id ?? defaultId
-        // M54 — match by store-dir identity (bare name or full HF id).
-        guard let target =
-            allowedIds.canonicalByStoreIdentity(requested)
-        else {
-            throw AthenaError.modelNotAvailable(
-                requested: requested, available: allowedIds)
-        }
+        let target = try resolve(id)
         if residentId == target, engine != nil { return }
         engine = nil
         residentId = nil
         try await loadModel(id: target)
-    }
-
-    public func setAllowedModelIds(_ ids: [String]) {
-        allowedIds = ids
-        defaultId = ids.first ?? defaultId
-        // ND5: evict only when the resident id is no longer allowed under
-        // the SAME store-identity resolver that load/rebind use. A plain
-        // `!ids.contains(r)` is a stricter case-sensitive full-string match,
-        // so an M42 live refresh re-supplying the resident model under an
-        // equivalent spelling (bare vs full HF id, case diff) would needlessly
-        // drop the loaded model+tokenizer and force a multi-GB reload.
-        if let r = residentId, ids.canonicalByStoreIdentity(r) == nil {
-            engine = nil
-            residentId = nil
-        }
     }
 
     public func transcribe(

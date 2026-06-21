@@ -208,10 +208,10 @@ final class EffectiveMaxTokensTests: XCTestCase {
 /// CI-safe (no MLX / model).
 final class StubLLMModuleSelectionTests: XCTestCase {
 
-    /// NE5: a full HF org/name id resolves to the bare store-dir allowlist
-    /// row (uniform with the embedding/audio modules) instead of 400ing —
+    /// NE5: a full HF org/name id resolves to the bare store-dir name
+    /// (uniform with the embedding/audio modules) instead of 400ing —
     /// pre-fix the LLM path used a full-string case-insensitive match.
-    func testFullHFIdResolvesToBareAllowlistRow() async throws {
+    func testFullHFIdResolvesToBareStoreName() async throws {
         let m = StubLLMModule(
             modelIds: ["Qwen3.5-2B-4bit", "Phi-3.5-mini-instruct-4bit"])
         try await m.rebind(to: "mlx-community/Qwen3.5-2B-4bit")
@@ -219,18 +219,34 @@ final class StubLLMModuleSelectionTests: XCTestCase {
         XCTAssertEqual(r, "Qwen3.5-2B-4bit")
     }
 
-    /// NC13: load() against an emptied allowlist must NOT bind a stale
-    /// default — residentBytes stays 0 so refreshAllowlist releases the
-    /// governor slot rather than holding a reservation for no models.
-    func testEmptyAllowlistLoadReservesNothing() async throws {
-        let m = StubLLMModule(modelIds: ["a", "b"])
-        await m.setAllowedModelIds([])
-        try await m.load(
-            reservation: MemoryReservation(module: .llm, bytes: 0))
+    /// ADR 026: load() with >1 selectable model and NO configured default is
+    /// ambiguous — it must throw `ambiguous_model` and bind nothing, so the
+    /// governor never reserves a slot for an un-decidable default (the NC13
+    /// "don't bind a stale default" intent, restated for store-backed
+    /// selection).
+    func testAmbiguousLoadReservesNothing() async throws {
+        let m = StubLLMModule(modelIds: ["a", "b"])  // no configuredDefault
+        do {
+            try await m.load(
+                reservation: MemoryReservation(module: .llm, bytes: 0))
+            XCTFail("ambiguous omit-model load should throw")
+        } catch let e as AthenaError {
+            XCTAssertEqual(e.code, "ambiguous_model")
+        }
         let bytes = await m.residentBytes
-        XCTAssertEqual(bytes, 0, "no reservation for an empty allowlist")
+        XCTAssertEqual(bytes, 0, "no reservation for an ambiguous default")
         let resident = await m.residentModelId()
         XCTAssertNil(resident)
+    }
+
+    /// ADR 026: a configured default resolves the omit-model case even with
+    /// several selectable models — exactly one is bound.
+    func testConfiguredDefaultResolvesOmitModel() async throws {
+        let m = StubLLMModule(modelIds: ["a", "b"], configuredDefault: "b")
+        try await m.load(
+            reservation: MemoryReservation(module: .llm, bytes: 0))
+        let resident = await m.residentModelId()
+        XCTAssertEqual(resident, "b")
     }
 }
 

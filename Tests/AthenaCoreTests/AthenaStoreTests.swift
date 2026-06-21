@@ -651,39 +651,9 @@ final class AthenaStoreTests: XCTestCase {
         }
     }
 
-    /// H2 (M66.1) — the allowlist default swap is transactional and keeps
-    /// EXACTLY one default per module across repeated re-points, and a
-    /// rejected (unknown-id) re-point leaves the existing default intact.
-    func testAllowlistDefaultSingleSwapH2() async throws {
-        let url = tmpURL()
-        defer { try? FileManager.default.removeItem(at: url) }
-        let s = try AthenaStore(path: url)
-        try await s.addModelAllowlist(
-            module: "llm", id: "a", isDefault: true)
-        try await s.addModelAllowlist(module: "llm", id: "b")
-        try await s.addModelAllowlist(module: "llm", id: "c")
-        func defaults() async -> [String] {
-            await s.listModelAllowlist(module: "llm")
-                .filter(\.isDefault).map(\.id)
-        }
-        let d0 = await defaults()
-        XCTAssertEqual(d0, ["a"])
-        try await s.setModelAllowlistDefault(module: "llm", id: "b")
-        let d1 = await defaults()
-        XCTAssertEqual(d1, ["b"], "exactly one default, swapped")
-        try await s.setModelAllowlistDefault(module: "llm", id: "c")
-        let d2 = await defaults()
-        XCTAssertEqual(d2, ["c"])
-        // A re-point to an unknown id is rejected and changes nothing.
-        do {
-            try await s.setModelAllowlistDefault(module: "llm", id: "zzz")
-            XCTFail("expected a throw for an unknown default id")
-        } catch {
-            // expected
-        }
-        let d3 = await defaults()
-        XCTAssertEqual(d3, ["c"], "rejected swap left default intact")
-    }
+    // ADR 026 — the `model_allowlist` table is retired; its
+    // `testAllowlistDefaultSingleSwapH2` coverage is gone with it. Selection
+    // resolution + the ambiguity rule are unit-pinned in ModelSelectionTests.
 
     func testClearJobRequestEmptiesPrompt() async throws {
         let url = tmpURL()

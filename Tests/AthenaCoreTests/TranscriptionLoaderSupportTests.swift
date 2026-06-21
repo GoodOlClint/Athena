@@ -27,8 +27,9 @@ final class TranscriptionLoaderSupportTests: XCTestCase {
         do {
             let root = try store(name: name, config: config)
             defer { try? FileManager.default.removeItem(at: root) }
-            let mod = MLXTranscriptionModule(
-                modelIds: [name], modelStoreRoot: root)
+            // ADR 026 — selection is the store scan; rebind resolves `name`
+            // against the store dir created above.
+            let mod = MLXTranscriptionModule(modelStoreRoot: root)
             try await mod.rebind(to: name)
             return nil
         } catch {
@@ -79,15 +80,19 @@ final class TranscriptionLoaderSupportTests: XCTestCase {
         XCTAssertTrue(e.message.contains("51866"), e.message)
     }
 
-    /// A non-ASR checkpoint in the transcription slot → cause-naming 400
-    /// ("neither Whisper nor Parakeet"), not a deep loader 500.
-    func testNonAsrModelIs400() async throws {
+    /// ADR 026 — a non-ASR checkpoint is not a transcription model, so it is
+    /// not in the transcription slot's store-class scan: a request for it is a
+    /// clean 400 `model_not_available` (never a deep loader 500). The
+    /// `unsupported_transcription_arch` cause-naming 400 is reserved for a
+    /// model that IS a transcription FAMILY but whose packaging is unloadable
+    /// (the whisper-bad-vocab / parakeet-no-joint cases above).
+    func testNonAsrModelIsModelNotAvailable() async throws {
         let err = await loadError(
             name: "an-llm", config: #"{"model_type":"qwen3_5"}"#)
         guard let e = err as? AthenaError else {
             return XCTFail("expected AthenaError, got \(String(describing: err))")
         }
-        XCTAssertEqual(e.code, "unsupported_transcription_arch")
+        XCTAssertEqual(e.code, "model_not_available")
         XCTAssertEqual(e.httpStatus, 400)
     }
 }

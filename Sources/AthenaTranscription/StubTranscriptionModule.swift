@@ -30,48 +30,56 @@ public actor StubTranscriptionModule: TranscriptionModule, ModelSelectable {
     public nonisolated var moduleID: ModuleID { .transcription }
 
     private let reserveBytes: Int
-    private var modelIds: [String]
-    private var defaultId: String
+    private let modelIds: [String]
+    private let configuredDefault: String?
     private var residentId: String?
 
     public init(
         reserveBytes: Int = 2 * 1024 * 1024 * 1024,
-        modelIds: [String] = ["athena-stub-whisper"]
+        modelIds: [String] = ["athena-stub-whisper"],
+        configuredDefault: String? = nil
     ) {
         precondition(
             !modelIds.isEmpty,
             "StubTranscriptionModule needs at least one model id")
         self.reserveBytes = reserveBytes
         self.modelIds = modelIds
-        self.defaultId = modelIds[0]
+        self.configuredDefault =
+            (configuredDefault?.isEmpty == true) ? nil : configuredDefault
     }
 
     public var residentBytes: Int { residentId == nil ? 0 : reserveBytes }
     public func memoryEstimate() -> Int { reserveBytes }
     public func load(reservation: MemoryReservation) async throws {
-        if residentId == nil { residentId = defaultId }
+        if residentId == nil { residentId = try resolve(nil) }
     }
     public func unload() async { residentId = nil }
 
     public func allowedModelIds() -> [String] { modelIds }
-    public func defaultModelId() -> String { defaultId }
+    public func defaultModelId() -> String {
+        ModelSelection.displayDefault(
+            available: modelIds, configuredDefault: configuredDefault)
+    }
     public func residentModelId() -> String? { residentId }
     public func rebind(to id: String?) async throws {
-        let requested = id ?? defaultId
-        // M46.4 — case-insensitive lookup; canonical id from storage.
-        guard let target =
-            modelIds.canonicalCaseInsensitive(requested)
-        else {
-            throw AthenaError.modelNotAvailable(
-                requested: requested, available: modelIds)
-        }
-        residentId = target
+        residentId = try resolve(id)
     }
 
-    public func setAllowedModelIds(_ ids: [String]) {
-        modelIds = ids
-        defaultId = ids.first ?? defaultId
-        if let r = residentId, !ids.contains(r) { residentId = nil }
+    /// ADR 026 resolution against the injected stub set.
+    private func resolve(_ id: String?) throws -> String {
+        switch ModelSelection.resolve(
+            available: modelIds, configuredDefault: configuredDefault,
+            requested: id)
+        {
+        case .resolved(let t): return t
+        case .notAvailable:
+            throw AthenaError.modelNotAvailable(
+                requested: id ?? (configuredDefault ?? ""),
+                available: modelIds)
+        case .ambiguous:
+            throw AthenaError.ambiguousModel(
+                module: .transcription, available: modelIds)
+        }
     }
 
     public func transcribe(

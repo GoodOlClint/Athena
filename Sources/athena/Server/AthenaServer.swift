@@ -360,28 +360,10 @@ struct AthenaServer {
             await uiAdminStop(request)
         }
 
-        // Allowlist console (M44.1). Cookie + per-action model.read
-        // (list) / model.write (mutations) + CSRF, then REUSE the
-        // M42.2 `/api/models/allow` handlers (handleAllowlist*) so the
-        // server-side refresh-on-mutate path is unchanged. All static
-        // literals (module/id ride the JSON body) ⇒ no trie hazard.
-        router.get("/ui/allowlist") { request, _ -> Response in
-            await handleUIAllowlistPage(request)
-        }
-        router.get("/ui/api/allowlist") { request, _ -> Response in
-            await uiAllowlistList(request)
-        }
-        router.post("/ui/api/allowlist") { request, _ -> Response in
-            await uiAllowlistAdd(request)
-        }
-        router.post("/ui/api/allowlist/rm") { request, _
-            -> Response in
-            await uiAllowlistRm(request)
-        }
-        router.post("/ui/api/allowlist/default") { request, _
-            -> Response in
-            await uiAllowlistDefault(request)
-        }
+        // ADR 026 — the allowlist is retired; availability IS the model store
+        // (classified by ModelSupport), so the `/ui/allowlist` console and its
+        // `/ui/api/allowlist*` mutators are gone. The read-only resident/store
+        // projection stays via `/ui` + `/api/models/resident`.
 
         // RBAC admin console (M18.4). Cookie + per-action
         // users.admin/tokens.admin re-check + CSRF, then REUSE the
@@ -624,24 +606,11 @@ struct AthenaServer {
         router.post("/api/models/unload") { request, _ -> Response in
             await handleModelsUnload(request)
         }
-        // Persistent operator-declared allowlist (M42.2). Backs every
-        // module's selectable set; survives daemon restarts. GET =
-        // model.read, mutations = model.write (per AuthPolicy mapping
-        // of /api/models/*). Default sub-path PUT clears the prior
-        // default + marks the named row.
-        router.get("/api/models/allow") { request, _ -> Response in
-            await handleAllowlistList(request)
-        }
-        router.post("/api/models/allow") { request, _ -> Response in
-            await handleAllowlistAdd(request)
-        }
-        router.delete("/api/models/allow") { request, _ -> Response in
-            await handleAllowlistRemove(request)
-        }
-        router.put("/api/models/allow/default") {
-            request, _ -> Response in
-            await handleAllowlistSetDefault(request)
-        }
+        // ADR 026 — `/api/models/allow*` retired. Availability = the model
+        // store classified by ModelSupport; the per-module default is a TOML
+        // config key (`athena default --module M <id>`). The read-only
+        // `/api/models/resident` projection + the M41 load/unload endpoints
+        // remain, re-pointed at the store.
         router.get("/api/models/:name") { _, context -> Response in
             handleModelShow(context.parameters.get("name"))
         }
@@ -722,10 +691,12 @@ struct AthenaServer {
         // module class (textEmbedding, transcription, diarization,
         // speakerEmbedding) lazy — each consumer ate a 503
         // `module_loading` retry dance on its first call. M46.2 widens
-        // the warmup to ANY module with an `is_default=1` row in the
-        // persisted allowlist (M42). Modules without a configured
-        // default stay lazy: they have no model to load, so issuing a
-        // warm would just spam a `moduleLoadFailed` warning.
+        // the warmup to ANY module that resolves a default model. ADR 026
+        // re-points "has a default" from an `is_default=1` allowlist row to
+        // the module's `defaultModelId()` (configured TOML default, or the
+        // store's sole model of the class). A module with no resolvable
+        // default (empty / ambiguous store) stays lazy: warming it would just
+        // spam a `moduleLoadFailed`/`ambiguousModel` warning.
         //
         // Best-effort and concurrent — the HTTP surface (below) still
         // comes up immediately; each module's warm runs in its own
@@ -734,22 +705,17 @@ struct AthenaServer {
         // request racing a warm is safe.
         if preload {
             let governor = self.governor
-            let store = self.store
             Task {
                 let log = Logger(label: AthenaLogLabel.daemon)
-                let allowlist = await store.listModelAllowlist(
-                    module: nil)
-                // Each module has at most one `is_default=1` row;
-                // dedupe to a sorted ModuleID list for deterministic
+                // ADR 026 — warm any module with a resolvable default
+                // (`defaultModelId()` non-empty), sorted for deterministic
                 // log ordering.
-                let configured: [ModuleID] =
-                    Set(
-                        allowlist.filter { $0.isDefault }
-                            .compactMap {
-                                ModuleID(rawValue: $0.module)
-                            }
-                    )
-                    .sorted { $0.rawValue < $1.rawValue }
+                var configured: [ModuleID] = []
+                for id in ModuleID.allCases
+                where await !selectable(id).defaultModelId().isEmpty {
+                    configured.append(id)
+                }
+                configured.sort { $0.rawValue < $1.rawValue }
                 guard !configured.isEmpty else {
                     log.notice(
                         """
@@ -4123,277 +4089,6 @@ struct AthenaServer {
                 modules: unloaded, status: "unloaded"))
     }
 
-    // MARK: - Persistent model allowlist (M42.2)
-
-    /// `GET /api/models/allow` (M42.2) — all rows, or just `?module=M`.
-    /// Backs `athena allowlist list`; the on-disk allowlist is what
-    /// every daemon-start now resolves from (M42.1 boot-seed +
-    /// `/api/models/allow` mutations from this surface).
-    private func handleAllowlistList(_ request: Request) async
-        -> Response
-    {
-        var moduleFilter: String?
-        if let q = request.uri.query {
-            for kv in q.split(separator: "&")
-            where kv.hasPrefix("module=") {
-                let v = String(kv.dropFirst(7))
-                moduleFilter = v.isEmpty ? nil : v
-            }
-        }
-        if let m = moduleFilter, ModuleID(rawValue: m) == nil {
-            return Self.error(
-                status: .badRequest,
-                message: "unknown module '\(m)'",
-                type: "invalid_request_error", code: "invalid_module")
-        }
-        let rows = await store.listModelAllowlist(module: moduleFilter)
-        return Self.json(
-            AllowlistResponse(
-                allowlist: rows.map {
-                    AllowlistEntryDTO(
-                        module: $0.module, id: $0.id,
-                        default: $0.isDefault,
-                        declared: $0.declared)
-                }))
-    }
-
-    /// `POST /api/models/allow` (M42.2) — add `id` to a module's
-    /// allowlist (idempotent on duplicate). `default: true` marks the
-    /// new row as the module's default. Audited (M30). M42.3 also
-    /// pushes the updated set into the running module so the next
-    /// inference request sees it without a restart.
-    private func handleAllowlistAdd(_ request: Request) async
-        -> Response
-    {
-        let decoded = await decodeJSON(request, AddAllowlistRequest.self)
-        guard case .ok(let body) = decoded else {
-            if case .fail(let r) = decoded { return r }
-            fatalError()
-        }
-        guard
-            let moduleId = ModuleID(rawValue: body.module),
-            !body.id.isEmpty
-        else {
-            await audit(
-                request, action: "model.allow.add",
-                target: body.module + ":" + body.id,
-                result: "denied",
-                detail: "invalid module or empty id")
-            return Self.error(
-                status: .badRequest,
-                message:
-                    "module must be a ModuleID and id must be non-empty",
-                type: "invalid_request_error", code: "invalid_body")
-        }
-        do {
-            try await store.addModelAllowlist(
-                module: moduleId.rawValue, id: body.id,
-                isDefault: body.default ?? false)
-        } catch {
-            await audit(
-                request, action: "model.allow.add",
-                target: moduleId.rawValue + ":" + body.id,
-                result: "denied", detail: "\(error)")
-            return Self.error(
-                status: .internalServerError, message: "\(error)",
-                type: "server_error", code: "store_error")
-        }
-        await refreshAllowlist(module: moduleId)
-        await audit(
-            request, action: "model.allow.add",
-            target: moduleId.rawValue + ":" + body.id,
-            result: "ok",
-            detail: (body.default ?? false) ? "default=true" : nil)
-        // M54.3 — operator added a model: pull it in the BACKGROUND if it
-        // has an HF-style id and isn't materialized yet (responds 'added'
-        // immediately; inference 503s via the governor `pulling` flag
-        // until the fetch lands — never an inference-time download).
-        if body.id.contains("/"),
-            ModelStoreLayout.localDirectory(
-                for: body.id, storeRoot: modelStoreRoot) == nil
-        {
-            let root = modelStoreRoot
-            let gov = governor
-            let mod = moduleId
-            let mid = body.id
-            Task.detached {
-                let log = Logger(label: AthenaLogLabel.daemon)
-                await gov.setPulling(mod, true)
-                log.notice(
-                    """
-                    operator-pull: fetching \(mid) for \(mod.rawValue) \
-                    (allowlist add)
-                    """)
-                do {
-                    _ = try await ModelPull.pull(id: mid, into: root)
-                    log.notice("operator-pull: \(mid) ready")
-                } catch {
-                    log.warning(
-                        """
-                        operator-pull: \(mid) failed: \
-                        \(ModelPull.friendlyError(error))
-                        """)
-                }
-                await gov.setPulling(mod, false)
-            }
-        }
-        return Self.json(
-            AllowlistMutationResponse(
-                module: moduleId.rawValue, id: body.id,
-                status: "added"))
-    }
-
-    /// `DELETE /api/models/allow?module=M&id=X` (M42.2). Removing the
-    /// current default rotates the default to whichever row remains
-    /// first by declaration time (the module's `resolveAllowlist`
-    /// ordering at next refresh). Removing the only remaining row in a
-    /// module leaves that slot un-servable until another `add` (the
-    /// next inference returns 400 model_not_available — explicit
-    /// failure, the safe direction).
-    private func handleAllowlistRemove(_ request: Request) async
-        -> Response
-    {
-        var moduleS: String?
-        var idS: String?
-        if let q = request.uri.query {
-            for kv in q.split(separator: "&") {
-                let p = kv.split(separator: "=", maxSplits: 1)
-                guard p.count == 2 else { continue }
-                let raw = String(p[1])
-                let v = raw.removingPercentEncoding ?? raw
-                switch String(p[0]) {
-                case "module": moduleS = v
-                case "id": idS = v
-                default: break
-                }
-            }
-        }
-        guard
-            let m = moduleS, let id = idS,
-            !m.isEmpty, !id.isEmpty,
-            let moduleId = ModuleID(rawValue: m)
-        else {
-            return Self.error(
-                status: .badRequest,
-                message: "expected ?module=M&id=X with a known module",
-                type: "invalid_request_error", code: "invalid_query")
-        }
-        return await removeAllowlistRow(
-            request, moduleId: moduleId, id: id)
-    }
-
-    /// Shared store-write + refresh + audit path used by the bearer
-    /// `DELETE /api/models/allow` (query-string) and the cookie
-    /// `POST /ui/api/allowlist/rm` (JSON body). One implementation so
-    /// the audit + live-refresh contract can't drift between the two.
-    private func removeAllowlistRow(
-        _ request: Request, moduleId: ModuleID, id: String
-    ) async -> Response {
-        let removed = await store.removeModelAllowlist(
-            module: moduleId.rawValue, id: id)
-        if !removed {
-            return Self.error(
-                status: .notFound,
-                message: "no \(moduleId.rawValue):\(id) in allowlist",
-                type: "invalid_request_error", code: "not_found")
-        }
-        await refreshAllowlist(module: moduleId)
-        await audit(
-            request, action: "model.allow.rm",
-            target: moduleId.rawValue + ":" + id, result: "ok")
-        return Self.json(
-            AllowlistMutationResponse(
-                module: moduleId.rawValue, id: id, status: "removed"))
-    }
-
-    /// `PUT /api/models/allow/default` (M42.2) — mark `id` as `module`'s
-    /// default (clearing the prior default). The id must already be in
-    /// the allowlist; this only flips the flag, never adds.
-    private func handleAllowlistSetDefault(_ request: Request) async
-        -> Response
-    {
-        let decoded = await decodeJSON(
-            request, SetAllowlistDefaultRequest.self)
-        guard case .ok(let body) = decoded else {
-            if case .fail(let r) = decoded { return r }
-            fatalError()
-        }
-        guard
-            let moduleId = ModuleID(rawValue: body.module),
-            !body.id.isEmpty
-        else {
-            return Self.error(
-                status: .badRequest,
-                message:
-                    "module must be a ModuleID and id must be non-empty",
-                type: "invalid_request_error", code: "invalid_body")
-        }
-        do {
-            try await store.setModelAllowlistDefault(
-                module: moduleId.rawValue, id: body.id)
-        } catch {
-            await audit(
-                request, action: "model.allow.default",
-                target: moduleId.rawValue + ":" + body.id,
-                result: "denied", detail: "\(error)")
-            return Self.error(
-                status: .badRequest, message: "\(error)",
-                type: "invalid_request_error",
-                code: "model_not_available")
-        }
-        await refreshAllowlist(module: moduleId)
-        await audit(
-            request, action: "model.allow.default",
-            target: moduleId.rawValue + ":" + body.id, result: "ok")
-        return Self.json(
-            AllowlistMutationResponse(
-                module: moduleId.rawValue, id: body.id,
-                status: "default_set"))
-    }
-
-    /// M42.3 — push the just-mutated DB allowlist into the running
-    /// module so its next request validates against the new set
-    /// without a daemon restart. Default-first ordering matches what
-    /// `resolveAllowlist` does at boot.
-    ///
-    /// M43.1 — every module's `setAllowedModelIds` nils its container
-    /// directly when the resident id drops out of the new list. That
-    /// bypasses the governor's bookkeeping, so the slot's reservation +
-    /// state would otherwise stay stale (the lying-`/healthz` symptom).
-    /// After the live push, ask the module for `residentBytes` — 0 means
-    /// the container was just dropped — and reconcile the governor.
-    private func refreshAllowlist(module: ModuleID) async {
-        let rows = await store.listModelAllowlist(
-            module: module.rawValue)
-        let ordered: [String]
-        if rows.isEmpty {
-            ordered = []
-        } else {
-            let def = rows.first { $0.isDefault } ?? rows[0]
-            var arr = [def.id]
-            for r in rows where r.id != def.id { arr.append(r.id) }
-            ordered = arr
-        }
-        await selectable(module).setAllowedModelIds(ordered)
-        let bytes = await inferenceModule(module).residentBytes
-        if bytes == 0 {
-            await governor.releaseSlot(module)
-        }
-    }
-
-    /// `any InferenceModule` corresponding to `id`. Parallel to
-    /// `selectable(_:)` — used where the governor-side residentBytes
-    /// probe is needed (M43.1 allowlist-drop reconcile).
-    private func inferenceModule(_ id: ModuleID) -> any InferenceModule {
-        switch id {
-        case .llm: return llm
-        case .textEmbedding: return embedding
-        case .transcription: return transcription
-        case .diarization: return diarization
-        case .speakerEmbedding: return speakerEmbedding
-        }
-    }
-
     /// Enqueue a long-running model op (M16.3). The route is already
     /// `.modelWrite`-gated; the job is owner-scoped to the caller so
     /// `GET /v1/queue/:id` only reveals it to the submitter (or an
@@ -4611,73 +4306,6 @@ struct AthenaServer {
             return Self.uiDeny("need daemon.admin")
         }
         return await adminLoadLLM(r)
-    }
-
-    // MARK: - WebUI allowlist reuse (M44.1)
-
-    /// `/ui/api/allowlist` (cookie). Mirrors `handleAllowlistList` —
-    /// `.modelRead` re-check on the logged-in user, then the same
-    /// list+JSON path.
-    private func uiAllowlistList(_ r: Request) async -> Response {
-        guard await uiCaller(r).perms.contains(.modelRead) else {
-            return Self.uiDeny("need model.read")
-        }
-        return await handleAllowlistList(r)
-    }
-
-    /// `/ui/api/allowlist` POST (cookie). CSRF + `.modelWrite`, then
-    /// delegates to `handleAllowlistAdd` — same JSON body shape, same
-    /// audit + refreshAllowlist tail.
-    private func uiAllowlistAdd(_ r: Request) async -> Response {
-        guard csrfOK(r) else {
-            return Self.uiDeny("csrf token missing or invalid")
-        }
-        guard await uiCaller(r).perms.contains(.modelWrite) else {
-            return Self.uiDeny("need model.write")
-        }
-        return await handleAllowlistAdd(r)
-    }
-
-    /// `/ui/api/allowlist/rm` POST (cookie). The bearer endpoint reads
-    /// `?module=&id=` from the query string; the cookie one reads them
-    /// from the JSON body so the WebUI can POST them like every other
-    /// /ui mutation. Both end at `removeAllowlistRow`.
-    private func uiAllowlistRm(_ r: Request) async -> Response {
-        guard csrfOK(r) else {
-            return Self.uiDeny("csrf token missing or invalid")
-        }
-        guard await uiCaller(r).perms.contains(.modelWrite) else {
-            return Self.uiDeny("need model.write")
-        }
-        let decoded = await decodeJSON(r, SetAllowlistDefaultRequest.self)
-        guard case .ok(let body) = decoded else {
-            if case .fail(let f) = decoded { return f }
-            fatalError()
-        }
-        guard
-            let moduleId = ModuleID(rawValue: body.module),
-            !body.id.isEmpty
-        else {
-            return Self.error(
-                status: .badRequest,
-                message:
-                    "module must be a ModuleID and id must be non-empty",
-                type: "invalid_request_error", code: "invalid_body")
-        }
-        return await removeAllowlistRow(
-            r, moduleId: moduleId, id: body.id)
-    }
-
-    /// `/ui/api/allowlist/default` POST (cookie). CSRF + `.modelWrite`,
-    /// then `handleAllowlistSetDefault` (already JSON-body-shaped).
-    private func uiAllowlistDefault(_ r: Request) async -> Response {
-        guard csrfOK(r) else {
-            return Self.uiDeny("csrf token missing or invalid")
-        }
-        guard await uiCaller(r).perms.contains(.modelWrite) else {
-            return Self.uiDeny("need model.write")
-        }
-        return await handleAllowlistSetDefault(r)
     }
 
     // MARK: - RBAC admin (M16.4)

@@ -282,33 +282,21 @@ echo "$SHOW_TXT" | grep -Eq '^vision: +no' \
   && ok "M71.3: show prints vision: no for a text model" \
   || bad "M71.3: show missing/wrong vision line for text model ($SHOW_TXT)"
 rm -rf "$MSTORE/vlm-model"
-# #11 / M43.5 — `athena allowlist` edits the on-disk store directly with
-# `--data-dir` while NO daemon is running (operability for a wedged box).
-ALLOWDD="$(mktemp -d)"
-"$ATHENA" allowlist add --module llm --id m-foo --default \
-  --data-dir "$ALLOWDD" >/dev/null 2>&1 \
-  && ok "#11: offline allowlist add (daemon down)" \
-  || bad "#11: offline allowlist add failed"
-"$ATHENA" allowlist add --module llm --id m-bar --data-dir "$ALLOWDD" \
-  >/dev/null 2>&1
-ALOUT="$("$ATHENA" allowlist list --data-dir "$ALLOWDD" 2>&1)"
-echo "$ALOUT" | grep -q 'm-foo' && echo "$ALOUT" | grep -q 'm-bar' \
-  && ok "#11: offline allowlist list renders rows" \
-  || bad "#11: offline allowlist list missing rows ($ALOUT)"
-"$ATHENA" allowlist default --module llm --id m-bar --data-dir "$ALLOWDD" \
-  >/dev/null 2>&1
-"$ATHENA" allowlist list --module llm --data-dir "$ALLOWDD" 2>&1 \
-  | grep -Eq '\*\s+m-bar' \
-  && ok "#11: offline allowlist default re-points" \
-  || bad "#11: offline allowlist default did not re-point"
-"$ATHENA" allowlist rm --module llm --id m-foo --data-dir "$ALLOWDD" \
+# ADR 026 — the `athena allowlist` CLI (incl. the offline `--data-dir` editor,
+# #11/M43.5) is retired; availability IS the model store and the per-module
+# default is a TOML key. `athena default --module M <id>` is exercised below.
+DEFDD="$(mktemp -d)"
+DEFCFG="$DEFDD/athena.toml"
+: > "$DEFCFG"
+"$ATHENA" default --module transcription whisper-x --config "$DEFCFG" \
   >/dev/null 2>&1 \
-  && ok "#11: offline allowlist rm" || bad "#11: offline allowlist rm failed"
-"$ATHENA" allowlist add --module bogus --id x --data-dir "$ALLOWDD" \
-  >/dev/null 2>&1 \
-  && bad "#11: offline allowlist accepted bad module" \
-  || ok "#11: offline allowlist rejects unknown module"
-rm -rf "$ALLOWDD"
+  && grep -q '^transcription_model = "whisper-x"' "$DEFCFG" \
+  && ok "ADR026: athena default --module writes the per-module TOML key" \
+  || bad "ADR026: athena default --module did not write transcription_model"
+"$ATHENA" default --module bogus x --config "$DEFCFG" >/dev/null 2>&1 \
+  && bad "ADR026: athena default accepted a bad module" \
+  || ok "ADR026: athena default rejects an unknown module"
+rm -rf "$DEFDD"
 
 echo
 echo "== phase 2: permission gating (auth enforced) =="
@@ -719,70 +707,8 @@ UC="$(curl -s -o /dev/null -w '%{http_code}' -b "$UIJAR_A" -X POST \
   || bad "member user-create → $UC (want 303)"
 
 echo
-echo "== phase 2.85: WebUI allowlist console (M44.1) =="
-# /ui/allowlist + /ui/api/allowlist* re-check the cookie user's
-# model.read (list) / model.write (mutations) + CSRF, then DELEGATE to
-# the SAME M42.2 handlers the bearer /api/models/allow routes use — so
-# the live-refresh + audit tail can't drift between the two surfaces.
-APAGE="$(curl -s -b "$UIJAR" "$B/ui/allowlist")"
-echo "$APAGE" | grep -q 'href="/ui/allowlist"' \
-  && ok "allowlist nav link present (model.read)" \
-  || bad "allowlist nav link missing ($APAGE)"
-echo "$APAGE" | grep -q 'name="write" content="1"' \
-  && ok "allowlist page exposes WRITE=1 for admin (model.write)" \
-  || bad "allowlist page missing WRITE=1 ($APAGE)"
-ACSRF="$(printf '%s' "$APAGE" \
-  | sed -n 's/.*name="csrf" content="\([^"]*\)".*/\1/p' | head -1)"
-[ -n "$ACSRF" ] && ok "allowlist page mints CSRF token" \
-  || bad "allowlist page missing CSRF ($APAGE)"
-# list reuses handleAllowlistList — must include the stub's seeded
-# entries (set by `athena load --llm-model fake-model` at boot).
-AL="$(curl -s -b "$UIJAR" "$B/ui/api/allowlist")"
-echo "$AL" | grep -q '"allowlist"' \
-  && ok "/ui/api/allowlist returns allowlist[] (reuse)" \
-  || bad "/ui/api/allowlist missing allowlist[] ($AL)"
-# add + default + rm via the cookie path. The bearer /api side covers
-# the audit + live-refresh tail (asserted elsewhere); this confirms the
-# JSON-body wrappers reach the SAME handlers.
-uic 403 POST "/ui/api/allowlist" "" \
-  '{"module":"textEmbedding","id":"ui-test-emb"}'  # no CSRF
-uic 403 POST "/ui/api/allowlist" "bad" \
-  '{"module":"textEmbedding","id":"ui-test-emb"}'  # bad CSRF
-uic 400 POST "/ui/api/allowlist" "$ACSRF" \
-  '{"module":"NOPE","id":"x"}'                      # invalid_module
-uic 400 POST "/ui/api/allowlist" "$ACSRF" \
-  '{"module":"textEmbedding","id":""}'              # empty id
-uic 200 POST "/ui/api/allowlist" "$ACSRF" \
-  '{"module":"textEmbedding","id":"ui-test-emb"}'   # added
-# the addition must be visible to the same /ui list reader
-curl -s -b "$UIJAR" "$B/ui/api/allowlist" \
-  | grep -q '"id":"ui-test-emb"' \
-  && ok "added row visible in /ui/api/allowlist (live refresh)" \
-  || bad "added row missing after /ui POST"
-uic 200 POST "/ui/api/allowlist/default" "$ACSRF" \
-  '{"module":"textEmbedding","id":"ui-test-emb"}'
-uic 400 POST "/ui/api/allowlist/rm" "$ACSRF" \
-  '{"module":"NOPE","id":"x"}'                      # invalid body
-uic 404 POST "/ui/api/allowlist/rm" "$ACSRF" \
-  '{"module":"textEmbedding","id":"never-was"}'     # not present
-# rotate the default OFF this row first (current row IS default; rm of
-# a default leaves the slot in the documented "next add wins" state,
-# but here we just want a clean rm — restore the boot-seeded sibling
-# as default before removing the test row).
-uic 200 POST "/ui/api/allowlist/default" "$ACSRF" \
-  '{"module":"textEmbedding","id":"athena-embedding-default"}'
-uic 200 POST "/ui/api/allowlist/rm" "$ACSRF" \
-  '{"module":"textEmbedding","id":"ui-test-emb"}'
-# member: nav/page/mutation all gated pre-handler (∌ daemonAdmin)
-AMC="$(curl -s -o /dev/null -w '%{http_code}' -b "$UIJAR_A" \
-  "$B/ui/allowlist")"
-[ "$AMC" = 303 ] && ok "member /ui/allowlist → 303 (∌ daemonAdmin)" \
-  || bad "member /ui/allowlist → $AMC (want 303)"
-AMM="$(curl -s -o /dev/null -w '%{http_code}' -b "$UIJAR_A" -X POST \
-  -H 'X-CSRF-Token: x' -H 'Content-Type: application/json' \
-  -d '{"module":"llm","id":"x"}' "$B/ui/api/allowlist")"
-[ "$AMM" = 303 ] && ok "member allowlist add → 303 (gated pre-handler)" \
-  || bad "member allowlist add → $AMM (want 303)"
+# ADR 026 — the WebUI allowlist console (M44.1: /ui/allowlist +
+# /ui/api/allowlist*) is retired with the allowlist; nothing to exercise here.
 
 echo
 echo "== phase 2.9: usage accounting — non-zero token counts (M27.1) =="
@@ -1291,83 +1217,18 @@ S_BAD=$(curl -s -o /tmp/sbad.json -w '%{http_code}' \
   || bad "speaker-embedding unknown model not refused ($S_BAD: $(cat /tmp/sbad.json))"
 
 echo
-echo "== phase 3.685: persistent allowlist via /api/models/allow (M42) =="
-# Read = model.read; mutations = model.write. RBAC mirrors the rest
-# of /api/models/*. Add/remove/default round-trip + the running
-# module's allowlist refreshes in place (so the next inference
-# validates against the new set without a restart).
-code 401 GET    /api/models/allow ""
-code 200 GET    /api/models/allow "$ADMIN_TOK"
-code 200 GET    /api/models/allow "$RO_TOK"        # readonly ∋ read
-code 403 POST   /api/models/allow "$ALICE_TOK" '{"module":"textEmbedding","id":"athena-embedding-third"}'
-code 403 POST   /api/models/allow "$RO_TOK"    '{"module":"textEmbedding","id":"athena-embedding-third"}'
-# Add a third id to the textEmbedding allowlist.
-code 200 POST   /api/models/allow "$ADMIN_TOK" '{"module":"textEmbedding","id":"athena-embedding-third"}'
-ALL="$(curl -s -H "Authorization: Bearer $ADMIN_TOK" \
-  "http://127.0.0.1:$PORT/api/models/allow?module=textEmbedding")"
-echo "$ALL" | grep -q '"id":"athena-embedding-third"' \
-  && ok "allow add: row visible in /api/models/allow" \
-  || bad "allow add: row missing ($ALL)"
-# Live refresh: the next /v1/embeddings request with the new id rebinds
-# successfully (would have been 400 model_not_available pre-mutation).
-EOK="$(curl -s -X POST -H "Authorization: Bearer $ALICE_TOK" \
-  -H 'Content-Type: application/json' \
-  -d '{"model":"athena-embedding-third","input":"hi"}' \
-  "http://127.0.0.1:$PORT/v1/embeddings")"
-echo "$EOK" | grep -q '"model":"athena-embedding-third"' \
-  && ok "live refresh: new id served without daemon restart" \
-  || bad "live refresh: new id not served ($EOK)"
-# Mark the new id as default; subsequent default-request must serve it.
-code 200 PUT    /api/models/allow/default "$ADMIN_TOK" '{"module":"textEmbedding","id":"athena-embedding-third"}'
-EDEF="$(curl -s -X POST -H "Authorization: Bearer $ALICE_TOK" \
-  -H 'Content-Type: application/json' \
-  -d '{"input":"hi"}' \
-  "http://127.0.0.1:$PORT/v1/embeddings")"
-echo "$EDEF" | grep -q '"model":"athena-embedding-third"' \
-  && ok "allow default: nil-model request serves the new default" \
-  || bad "allow default: default did not change ($EDEF)"
-# Remove the new default; the resident slot is invalidated and the
-# next nil-model request serves whichever row now sits at position 0.
-code 200 DELETE "/api/models/allow?module=textEmbedding&id=athena-embedding-third" "$ADMIN_TOK"
-EREM="$(curl -s -X POST -H "Authorization: Bearer $ALICE_TOK" \
-  -H 'Content-Type: application/json' \
-  -d '{"input":"hi"}' \
-  "http://127.0.0.1:$PORT/v1/embeddings")"
-echo "$EREM" | grep -q '"model":"athena-embedding-third"' \
-  && bad "allow rm: removed id still resident ($EREM)" \
-  || ok "allow rm: resident slot rotated to a remaining row"
-# A subsequent inference with the removed id is now a 400.
-code 400 POST /v1/embeddings "$ALICE_TOK" \
-  '{"model":"athena-embedding-third","input":"hi"}'
-# Audit captures the three mutations.
-AUDA="$(curl -s -H "Authorization: Bearer $ADMIN_TOK" \
-  "http://127.0.0.1:$PORT/api/audit?action=model.allow.add&limit=20")"
-echo "$AUDA" | grep -q 'model.allow.add' \
-  && ok "audit recorded model.allow.add" \
-  || bad "audit missing model.allow.add ($AUDA)"
-AUDD="$(curl -s -H "Authorization: Bearer $ADMIN_TOK" \
-  "http://127.0.0.1:$PORT/api/audit?action=model.allow.default&limit=20")"
-echo "$AUDD" | grep -q 'model.allow.default' \
-  && ok "audit recorded model.allow.default" \
-  || bad "audit missing model.allow.default ($AUDD)"
-AUDR="$(curl -s -H "Authorization: Bearer $ADMIN_TOK" \
-  "http://127.0.0.1:$PORT/api/audit?action=model.allow.rm&limit=20")"
-echo "$AUDR" | grep -q 'model.allow.rm' \
-  && ok "audit recorded model.allow.rm" \
-  || bad "audit missing model.allow.rm ($AUDR)"
+# ADR 026 — phase 3.685 (persistent allowlist via /api/models/allow, M42) is
+# retired: the `/api/models/allow*` surface and its audit actions are gone.
+# Per-request model selection + the store-presence gate are still exercised by
+# the per-module unknown-model 400 checks above and the ambiguity/default unit
+# tests (ModelSelectionTests).
 
 echo
 echo "== phase 3.686: governor truth + /healthz signals (M43.1) =="
-# Three things in one phase:
-#   1. /healthz carries inflight, queueDepth, lastRequestAt (new fields).
-#   2. After serving a request, lastRequestAt > 0.
-#   3. Removing the resident id from the allowlist used to leave the
-#      governor at state=loaded with stale residentBytes (the lying-
-#      /healthz symptom). Post-M43.1 refreshAllowlist reconciles the
-#      governor when the module drops its container, so state goes to
-#      unloaded and residentBytes goes to 0.
-# Force the textEmbedding slot loaded so the post-drop assertion is
-# meaningful.
+# /healthz carries inflight, queueDepth, lastRequestAt; after serving a
+# request lastRequestAt > 0 and the served module is loaded. (The M43.1
+# allowlist-drop→reconcile sub-test is retired with the allowlist; the
+# governor-reconcile-on-unload path is exercised by /api/models/unload.)
 curl -s -X POST -H "Authorization: Bearer $ALICE_TOK" \
   -H 'Content-Type: application/json' \
   -d '{"input":"hi"}' \
@@ -1400,45 +1261,6 @@ if "mlxCacheLimitBytes" not in h:
 ' >/dev/null \
   && ok "/healthz exposes mlxCacheLimitBytes (ADR 023 G1 cache bound)" \
   || bad "/healthz missing mlxCacheLimitBytes ($HZ1)"
-# Add a second id and make it default so the next nil-model rebinds the
-# resident slot onto it.
-code 200 POST /api/models/allow "$ADMIN_TOK" \
-  '{"module":"textEmbedding","id":"athena-embedding-m43"}'
-code 200 PUT  /api/models/allow/default "$ADMIN_TOK" \
-  '{"module":"textEmbedding","id":"athena-embedding-m43"}'
-curl -s -X POST -H "Authorization: Bearer $ALICE_TOK" \
-  -H 'Content-Type: application/json' \
-  -d '{"input":"hi"}' \
-  "http://127.0.0.1:$PORT/v1/embeddings" >/dev/null
-# Remove the now-resident id. Pre-M43.1 the module nils its container
-# directly and the governor never sees it; /healthz then lies. Post-fix
-# refreshAllowlist calls governor.releaseSlot when residentBytes==0.
-code 200 DELETE \
-  "/api/models/allow?module=textEmbedding&id=athena-embedding-m43" \
-  "$ADMIN_TOK"
-HZ2="$(curl -s "http://127.0.0.1:$PORT/healthz")"
-echo "$HZ2" | python3 -c '
-import json, sys
-h = json.loads(sys.stdin.read())
-te = [m for m in h["modules"] if m["id"] == "textEmbedding"][0]
-if te["state"] != "unloaded" or te["residentBytes"] != 0:
-    sys.exit("textEmbedding lies post-drop:" + json.dumps(te))
-' >/dev/null \
-  && ok "governor reconciled on allowlist drop (state=unloaded, residentBytes=0)" \
-  || bad "governor lies after allowlist drop ($HZ2)"
-# M46.5 — the unload path that fired here was an allowlist drop,
-# classified as `operator_unload`; the post-drop snapshot must
-# expose that reason on the textEmbedding slot.
-echo "$HZ2" | python3 -c '
-import json, sys
-h = json.loads(sys.stdin.read())
-te = [m for m in h["modules"] if m["id"] == "textEmbedding"][0]
-r = te.get("unloadedReason")
-if r != "operator_unload":
-    sys.exit("expected operator_unload, got " + repr(r))
-' >/dev/null \
-  && ok "unloadedReason=operator_unload exposed for allowlist drop" \
-  || bad "unloadedReason missing/wrong after allowlist drop ($HZ2)"
 
 echo
 echo "== phase 3.687: cold-load blocks-until-ready → 200 (ADR 015) + allowlist warn + init =="
@@ -1478,27 +1300,16 @@ done
   && ok "cold-load completes detached and serves on retry" \
   || bad "cold-load never finished (last code $RC)"
 
-# `athena allowlist add` warns on stderr when the LLM id isn't in the
-# local model store. The store on D has no entries, so any add should
-# trigger the warning. Best-effort: a 401/network error is silent (the
-# add itself already succeeded).
-WARN_OUT="$("$ATHENA" allowlist add --module llm --id ghost/not-in-store \
-  --host 127.0.0.1 --port $PORT --key "$ADMIN_TOK" 2>&1 >/dev/null || true)"
-echo "$WARN_OUT" | grep -q "not in the local model store" \
-  && ok "allowlist add warns when llm id absent from /api/models" \
-  || bad "allowlist add did not warn ($WARN_OUT)"
-# Clean up the test row so subsequent phases see a stable LLM allowlist.
-"$ATHENA" allowlist rm --module llm --id ghost/not-in-store \
-  --host 127.0.0.1 --port $PORT --key "$ADMIN_TOK" >/dev/null 2>&1 || true
-
-# `athena init --from-allowlist` against an EMPTY data-dir reports the
-# no-rows message instead of pulling the compiled-in defaults. Validates
-# the flag is wired + the DB-read path opens cleanly.
+# ADR 026 — `athena allowlist add` (and its store-warn) is retired; the store
+# IS availability. `athena init --from-config` against a config with no
+# per-module default keys reports the no-keys message (the flag is wired + the
+# config-read path opens cleanly).
 EMPTY2="$(mktemp -d)"
-INIT_OUT="$("$ATHENA" init --from-allowlist --data-dir "$EMPTY2" 2>&1 || true)"
-echo "$INIT_OUT" | grep -q "no allowlist rows" \
-  && ok "init --from-allowlist reports no-rows on empty data-dir" \
-  || bad "init --from-allowlist behavior unexpected ($INIT_OUT)"
+: > "$EMPTY2/athena.toml"
+INIT_OUT="$("$ATHENA" init --from-config --config "$EMPTY2/athena.toml" 2>&1 || true)"
+echo "$INIT_OUT" | grep -q "no per-module default model keys" \
+  && ok "init --from-config reports no-keys on a bare config" \
+  || bad "init --from-config behavior unexpected ($INIT_OUT)"
 rm -rf "$EMPTY2"
 
 echo
@@ -1508,7 +1319,7 @@ echo "== phase 3.688: operator-legibility hints (M43.4) =="
 # `athena config set --no-apply` / `athena doctor`/CLI-only-flags
 # survey, and the model_not_available remediation when the store is
 # empty. None of these need the daemon mutated — we just probe.
-ALLOW_FAIL="$("$ATHENA" allowlist list \
+ALLOW_FAIL="$("$ATHENA" resident \
   --host 127.0.0.1 --port $PORT --key sk-athena-bogus 2>&1 || true)"
 echo "$ALLOW_FAIL" | grep -q "^hint:" \
   && ok "client fail() renders hint: line on stderr from 401" \
@@ -1816,85 +1627,6 @@ echo "== phase 5: last-admin protection =="
   && ok "delete admin allowed once a 2nd admin exists" \
   || bad "delete admin still refused with 2 admins"
 
-stop_daemon
-
-echo
-echo "== phase 5.5: CLI seeds merge on every boot (M44.2) =="
-# Pre-M44.2 the seed was first-boot-only: editing --*-model on the
-# launchd plist and restarting did nothing because the table already
-# had rows. Post-M44.2 each boot idempotently INSERTs the seeded ids,
-# so the CLI flag means what it says; but it never removes or flips
-# the default, so an operator's `allowlist rm` / `allowlist default`
-# choices are preserved (modulo the documented trade — a seed flag
-# the operator removed comes BACK if the flag is still set).
-D5="$(mktemp -d)"
-ATHENA_PASSWORD=adminpass1 "$ATHENA" auth user add admin --role admin \
-  --data-dir "$D5" >/dev/null && ok "seed D5 admin" || bad "seed admin"
-A5="$("$ATHENA" auth token add --user admin --data-dir "$D5" \
-  2>/dev/null | grep -o 'sk-athena-[A-Za-z0-9_-]*' | head -1)"
-# First boot: seed two LLM models from CLI. The DB table for the llm
-# module is empty ⇒ the first seed becomes the default.
-start_daemon "$D5" 127.0.0.1 \
-  --llm-model fake-model --llm-model alt-llm-id \
-  || { echo "d5 failed"; cat "$D/daemon.log"; exit 1; }
-# Row-extraction helper: print the {…} object for a given id (order-
-# agnostic so this doesn't hinge on JSON key emission order).
-row_for() { # JSON ID  → prints the matching {…} object, or empty
-  printf '%s' "$1" | tr '{}' '\n\n' | grep "\"id\":\"$2\"" | head -1
-}
-AL5="$(curl -s -H "Authorization: Bearer $A5" \
-  "http://127.0.0.1:$PORT/api/models/allow?module=llm")"
-R="$(row_for "$AL5" fake-model)"
-[ -n "$R" ] && echo "$R" | grep -q '"default":true' \
-  && ok "first boot: fake-model becomes the seeded default" \
-  || bad "first boot default missing ($AL5)"
-[ -n "$(row_for "$AL5" alt-llm-id)" ] \
-  && ok "first boot: alt-llm-id seeded too" \
-  || bad "first boot alt-llm-id missing ($AL5)"
-# Operator-only edits via /api: add a custom id (operator-x) and
-# rotate the default to it; then REMOVE alt-llm-id. Neither write
-# touches the boot-seed flags.
-curl -s -X POST -H "Authorization: Bearer $A5" \
-  -H 'Content-Type: application/json' \
-  -d '{"module":"llm","id":"operator-x"}' \
-  "http://127.0.0.1:$PORT/api/models/allow" >/dev/null
-curl -s -X PUT -H "Authorization: Bearer $A5" \
-  -H 'Content-Type: application/json' \
-  -d '{"module":"llm","id":"operator-x"}' \
-  "http://127.0.0.1:$PORT/api/models/allow/default" >/dev/null
-curl -s -o /dev/null -X DELETE -H "Authorization: Bearer $A5" \
-  "http://127.0.0.1:$PORT/api/models/allow?module=llm&id=alt-llm-id"
-stop_daemon
-# Second boot: SAME CLI flags. Behavior contract:
-#   - alt-llm-id was rm'd by operator → COMES BACK (CLI flag still set
-#     — the M44.2 trade the brief flagged).
-#   - operator-x was added by operator → still there (CLI never removes).
-#   - default is operator-x (CLI never re-flips the default once the
-#     table has rows).
-start_daemon "$D5" 127.0.0.1 \
-  --llm-model fake-model --llm-model alt-llm-id \
-  || { echo "d5 restart failed"; cat "$D/daemon.log"; exit 1; }
-AL5b="$(curl -s -H "Authorization: Bearer $A5" \
-  "http://127.0.0.1:$PORT/api/models/allow?module=llm")"
-[ -n "$(row_for "$AL5b" alt-llm-id)" ] \
-  && ok "merge: CLI re-adds operator-removed seed on restart" \
-  || bad "alt-llm-id not re-added ($AL5b)"
-[ -n "$(row_for "$AL5b" operator-x)" ] \
-  && ok "preserve: operator-added id survives restart" \
-  || bad "operator-x lost on restart ($AL5b)"
-R="$(row_for "$AL5b" operator-x)"
-echo "$R" | grep -q '"default":true' \
-  && ok "preserve: operator-chosen default survives restart" \
-  || bad "default reverted on restart ($AL5b)"
-R="$(row_for "$AL5b" fake-model)"
-echo "$R" | grep -q '"default":true' \
-  && bad "default leaked back to the first seed (regression)" \
-  || ok "first seed is NOT re-flipped to default on restart"
-# The M43.4 divergence notice must NOT fire — there's no divergence
-# anymore (the DB is a superset of the seed by construction).
-grep -q "model_allowlist DB differs" "$D/daemon.log" \
-  && bad "stale divergence-notice log line emitted" \
-  || ok "divergence notice dropped (no longer applicable)"
 stop_daemon
 
 echo

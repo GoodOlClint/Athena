@@ -275,28 +275,31 @@ public actor StubLLMModule: LLMModule, ModelSelectable {
     public nonisolated var moduleID: ModuleID { .llm }
 
     private let reserveBytes: Int
-    private var modelIds: [String]
-    private var defaultId: String
+    private let modelIds: [String]
+    private let configuredDefault: String?
     private var residentId: String?
     /// M62 — the model the next cold `load` will bind (nil ⇒ the default).
     private var desiredId: String?
 
     /// `reserveBytes` defaults to a representative multi-GB LLM footprint so
     /// budget pressure behaves realistically; tests inject small values.
-    /// `modelIds` is the M41 selectable set; first = default. The stub
-    /// "serves" any of them truthfully so explicit `/api/models/load` and
-    /// the inference-time `model` field exercise rebind under the stub
-    /// engine without a model on disk.
+    /// `modelIds` stands in for the store's LLM models (the stub has no disk);
+    /// `configuredDefault` is the per-module TOML default (ADR 026 — nil ⇒
+    /// resolve by the ambiguity rule). The stub "serves" any of `modelIds`
+    /// truthfully so `/api/models/load` and the inference-time `model` field
+    /// exercise rebind under the stub engine without a model on disk.
     public init(
         reserveBytes: Int = 8 * 1024 * 1024 * 1024,
-        modelIds: [String] = ["athena-stub"]
+        modelIds: [String] = ["athena-stub"],
+        configuredDefault: String? = nil
     ) {
         precondition(
             !modelIds.isEmpty,
             "StubLLMModule needs at least one model id")
         self.reserveBytes = reserveBytes
         self.modelIds = modelIds
-        self.defaultId = modelIds[0]
+        self.configuredDefault =
+            (configuredDefault?.isEmpty == true) ? nil : configuredDefault
     }
 
     public var residentBytes: Int { residentId == nil ? 0 : reserveBytes }
@@ -305,13 +308,11 @@ public actor StubLLMModule: LLMModule, ModelSelectable {
 
     public func load(reservation: MemoryReservation) async throws {
         // M62 — bind the requested cold-load target (set via
-        // selectColdLoadModel), else the default.
-        // NC13: but never bind against an EMPTY allowlist — a stale
-        // defaultId would make residentBytes report non-zero, so
-        // refreshAllowlist never releases the governor slot (a stuck
-        // reservation for an allowlist with no models). Leave residentId nil.
+        // selectColdLoadModel), else the resolved default (ADR 026).
         guard !modelIds.isEmpty else { return }
-        if residentId == nil { residentId = desiredId ?? defaultId }
+        if residentId == nil {
+            residentId = try desiredId ?? resolvedDefaultId()
+        }
     }
 
     public func unload() async {
@@ -319,39 +320,35 @@ public actor StubLLMModule: LLMModule, ModelSelectable {
     }
 
     public func allowedModelIds() -> [String] { modelIds }
-    public func defaultModelId() -> String { defaultId }
+    public func defaultModelId() -> String {
+        ModelSelection.displayDefault(
+            available: modelIds, configuredDefault: configuredDefault)
+    }
     public func residentModelId() -> String? { residentId }
     public func rebind(to id: String?) async throws {
-        let requested = id ?? defaultId
-        // NE5 — resolve by store-dir identity (bare name OR full HF id),
-        // matching the real LLM module + the embedding/audio modules so id
-        // acceptance is uniform across engines and endpoints.
-        guard let target =
-            modelIds.canonicalByStoreIdentity(requested)
-        else {
-            throw AthenaError.modelNotAvailable(
-                requested: requested, available: modelIds)
-        }
-        residentId = target
+        residentId = try resolve(id)
     }
 
     public func selectColdLoadModel(_ id: String?) async throws {
-        guard let id, !id.isEmpty else { desiredId = nil; return }
-        guard let target = modelIds.canonicalByStoreIdentity(id) else {
-            throw AthenaError.modelNotAvailable(
-                requested: id, available: modelIds)
-        }
-        desiredId = target
+        desiredId = try resolve(id)
     }
 
-    public func setAllowedModelIds(_ ids: [String]) {
-        modelIds = ids
-        defaultId = ids.first ?? defaultId
-        if let r = residentId, !ids.contains(r) {
-            residentId = nil
+    /// ADR 026 resolution against the injected stub model set.
+    private func resolve(_ id: String?) throws -> String {
+        switch ModelSelection.resolve(
+            available: modelIds, configuredDefault: configuredDefault,
+            requested: id)
+        {
+        case .resolved(let t): return t
+        case .notAvailable:
+            throw AthenaError.modelNotAvailable(
+                requested: id ?? (configuredDefault ?? ""),
+                available: modelIds)
+        case .ambiguous:
+            throw AthenaError.ambiguousModel(module: .llm, available: modelIds)
         }
-        if let d = desiredId, !ids.contains(d) { desiredId = nil }
     }
+    private func resolvedDefaultId() throws -> String { try resolve(nil) }
 
     public nonisolated func generate(prompt: String) -> AsyncStream<String> {
         AsyncStream { continuation in

@@ -14,8 +14,10 @@ public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule,
     public nonisolated let id: ModuleID = .speakerEmbedding
     public nonisolated var moduleID: ModuleID { .speakerEmbedding }
 
-    private var allowedIds: [String]
-    private var defaultId: String
+    /// ADR 026 — the selectable set is the store's speaker-embedding models
+    /// (WeSpeaker), scanned live via `ModelSupport`; `configuredDefault` is the
+    /// per-module TOML default (nil ⇒ ambiguity rule).
+    private let configuredDefault: String?
     private let estimatedBytes: Int
     private var model: WeSpeakerModel?
     private var residentId: String?
@@ -24,54 +26,60 @@ public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule,
     private let modelStoreRoot: URL?
 
     /// - Parameters:
-    ///   - modelIds: HF id allowlist (first = default). Default
-    ///     `[aufklarer/WeSpeaker-ResNet34-LM-MLX]` — the ungated
-    ///     safetensors mirror (substrate cannot read the mlx-community
-    ///     `.npz`).
+    ///   - configuredDefault: the per-module TOML default speaker-embedding id
+    ///     (ADR 026), used when a request omits `model` (nil ⇒ ambiguity rule).
+    ///   - modelStoreRoot: the store root scanned for speaker-embedding models.
     ///   - estimatedBytes: governor admission estimate. 512 MiB: the
     ///     weights are tiny (~25 MB) but ResNet activations over a
     ///     long segment's mel grid dominate; conservative headroom that
     ///     M5 reconciles to the real footprint post-load.
     public init(
-        modelIds: [String] = ["aufklarer/WeSpeaker-ResNet34-LM-MLX"],
+        configuredDefault: String? = nil,
         modelStoreRoot: URL? = nil,
         estimatedBytes: Int = 512 * 1024 * 1024
     ) {
-        precondition(
-            !modelIds.isEmpty,
-            "MLXSpeakerEmbeddingModule needs at least one model id")
-        self.allowedIds = modelIds
-        self.defaultId = modelIds[0]
+        self.configuredDefault =
+            (configuredDefault?.isEmpty == true) ? nil : configuredDefault
         self.modelStoreRoot = modelStoreRoot
         self.estimatedBytes = estimatedBytes
-    }
-
-    public init(
-        modelId: String,
-        estimatedBytes: Int = 512 * 1024 * 1024
-    ) {
-        self.init(modelIds: [modelId], estimatedBytes: estimatedBytes)
     }
 
     public var residentBytes: Int { model == nil ? 0 : estimatedBytes }
 
     public func memoryEstimate() -> Int { estimatedBytes }
 
-    public func load(reservation: MemoryReservation) async throws {
-        if model != nil { return }
-        try await loadModel(id: residentId ?? defaultId)
+    /// The store's speaker-embedding models (ADR 026 live scan).
+    private func storeModelIds() -> [String] {
+        StoreModelClass.ids(
+            storeRoot: modelStoreRoot, accept: { $0.isSpeakerEmbeddingSlot })
     }
 
-    private func loadModel(id: String) async throws {
-        // M54 — match by store-dir identity (bare name or full HF id).
-        guard let canonical =
-            allowedIds.canonicalByStoreIdentity(id)
-        else {
+    /// ADR 026 resolution against the live store scan (rebind/load).
+    private func resolve(_ id: String?) throws -> String {
+        let available = storeModelIds()
+        switch ModelSelection.resolve(
+            available: available, configuredDefault: configuredDefault,
+            requested: id)
+        {
+        case .resolved(let t): return t
+        case .notAvailable:
             throw AthenaError.modelNotAvailable(
-                requested: id, available: allowedIds)
+                requested: id ?? (configuredDefault ?? ""),
+                available: available)
+        case .ambiguous:
+            throw AthenaError.ambiguousModel(
+                module: .speakerEmbedding, available: available)
         }
+    }
+
+    public func load(reservation: MemoryReservation) async throws {
+        if model != nil { return }
+        try await loadModel(id: residentId ?? resolve(nil))
+    }
+
+    private func loadModel(id canonical: String) async throws {
         // M54.3 — local-store-dir load only; inference never auto-downloads
-        // (operator pulls a missing model at startup / allowlist-add).
+        // (operator pulls a missing model at startup).
         guard let dir = ModelStoreLayout.localDirectory(
             for: canonical, storeRoot: modelStoreRoot)
         else {
@@ -99,36 +107,20 @@ public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule,
         residentId = nil
     }
 
-    // M41 — ModelSelectable. M41.3 repeatable
-    // `--speaker-embedding-model` allowlist with in-place rebind.
-    public func allowedModelIds() -> [String] { allowedIds }
-    public func defaultModelId() -> String { defaultId }
+    // M41 / ADR 026 — ModelSelectable over the store-classified set with
+    // in-place rebind.
+    public func allowedModelIds() -> [String] { storeModelIds() }
+    public func defaultModelId() -> String {
+        ModelSelection.displayDefault(
+            available: storeModelIds(), configuredDefault: configuredDefault)
+    }
     public func residentModelId() -> String? { residentId }
     public func rebind(to id: String?) async throws {
-        let requested = id ?? defaultId
-        // M54 — match by store-dir identity (bare name or full HF id).
-        guard let target =
-            allowedIds.canonicalByStoreIdentity(requested)
-        else {
-            throw AthenaError.modelNotAvailable(
-                requested: requested, available: allowedIds)
-        }
+        let target = try resolve(id)
         if residentId == target, model != nil { return }
         model = nil
         residentId = nil
         try await loadModel(id: target)
-    }
-
-    public func setAllowedModelIds(_ ids: [String]) {
-        allowedIds = ids
-        defaultId = ids.first ?? defaultId
-        // ND5: evict only when the resident id is no longer allowed under the
-        // SAME store-identity resolver as load/rebind (an equivalent spelling
-        // must NOT force a needless reload).
-        if let r = residentId, ids.canonicalByStoreIdentity(r) == nil {
-            model = nil
-            residentId = nil
-        }
     }
 
     public func embed(

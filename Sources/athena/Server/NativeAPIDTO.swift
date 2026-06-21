@@ -114,9 +114,11 @@ struct AthenaStopResponse: Codable {
 // model lifecycle, generalizing the M39 embedding pattern to every
 // module class)
 
-/// One module's selectable-set snapshot: the allowlist (operator-
-/// declared at `load` time), the default (first declared), and the id
-/// currently resident in the slot (nil ⇒ unloaded).
+/// One module's selectable-set snapshot (ADR 026): `allowed` is the store's
+/// models of the module's modality (classified by ModelSupport), `default` is
+/// the configured/best-effort default, and `resident` is the id currently in
+/// the slot (nil ⇒ unloaded). The `allowed`/`default` field names are retained
+/// for wire compatibility.
 struct ModelSlotDTO: Codable {
     let module: String  // ModuleID.rawValue
     let allowed: [String]
@@ -131,7 +133,7 @@ struct ModelResidentResponse: Codable {
 
 /// `POST /api/models/load` — rebind a module's slot to `id` (omit ⇒
 /// the default), loading the module first if it is unloaded. An id
-/// outside the module's allowlist is a 400 (`model_not_available`).
+/// not in the module's store models is a 400 (`model_not_available`).
 struct ModelLoadRequest: Codable {
     let module: String  // ModuleID.rawValue
     let id: String?
@@ -155,37 +157,9 @@ struct ModelUnloadResponse: Codable {
     let status: String  // "unloaded"
 }
 
-// MARK: - /api/models/allow (M42 — persistent operator-declared
-// allowlist; survives daemon restarts. CLI flags are first-boot seeds
-// only; mutations here are the source of truth from M42 onward).
-
-struct AllowlistEntryDTO: Codable {
-    let module: String  // ModuleID.rawValue
-    let id: String
-    let `default`: Bool
-    let declared: Double  // epoch seconds
-}
-
-struct AllowlistResponse: Codable {
-    let allowlist: [AllowlistEntryDTO]
-}
-
-struct AddAllowlistRequest: Codable {
-    let module: String
-    let id: String
-    let `default`: Bool?
-}
-
-struct AllowlistMutationResponse: Codable {
-    let module: String
-    let id: String
-    let status: String  // "added" | "removed" | "default_set"
-}
-
-struct SetAllowlistDefaultRequest: Codable {
-    let module: String
-    let id: String
-}
+// ADR 026 — the `/api/models/allow*` surface (and its DTOs) are retired.
+// Availability is the model store classified by ModelSupport; the per-module
+// default is a TOML config key set via `athena default --module M <id>`.
 
 /// `/api/admin/status` — native daemon + RBAC posture for a remote
 /// admin (distinct from open `/healthz` governor state and

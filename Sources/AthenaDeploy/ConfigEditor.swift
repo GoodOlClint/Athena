@@ -30,11 +30,14 @@ public enum ConfigEditor {
     public static let rawKeys: Set<String> = [
         "temperature", "speculative", "rate_limit", "preload",
         "drop_request_content", "encrypt_store", "prompt_cache_enabled",
-        "dflash_enabled",
+        "dflash_enabled", "deny_debugger_attach",
     ]
     public static let knownKeys: Set<String> = [
         "listen_host", "listen_port", "budget_bytes", "engine",
         "model", "model_store", "data_dir", "log_level",
+        // ADR 026 — per-module default model keys (the LLM default is `model`).
+        "embedding_model", "transcription_model", "diarization_model",
+        "speaker_embedding_model",
         "log_dir", "max_tokens", "temperature",
         "speculative", "auth_keys_file",
         "tls_cert", "tls_key", "rate_limit", "rate_burst",
@@ -45,6 +48,8 @@ public enum ConfigEditor {
         "mlx_cache_limit_bytes",
         "queue_result_ttl_secs", "queue_max_rows",
         "drop_request_content", "encrypt_store",
+        // ADR 024 T2 — opt-in debugger-attach denial (bool; see rawKeys).
+        "deny_debugger_attach",
         "https_proxy", "http_proxy", "all_proxy", "no_proxy",
         "kv_compression",
         "prompt_cache_enabled", "prompt_cache_max_entries",

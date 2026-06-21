@@ -26,10 +26,32 @@ final class StubEmbeddingModuleTests: XCTestCase {
 
     // M39: per-request model selection over the configured set.
 
-    func testAbsentModelServesDefaultTruthfully() async throws {
-        let m = StubEmbeddingModule(modelIds: ["m-small", "m-large"])
+    func testAbsentModelServesConfiguredDefault() async throws {
+        let m = StubEmbeddingModule(
+            modelIds: ["m-small", "m-large"], configuredDefault: "m-small")
         let batch = try await m.embed(["hi"], model: nil)
-        XCTAssertEqual(batch.model, "m-small", "nil ⇒ first declared")
+        XCTAssertEqual(batch.model, "m-small", "nil ⇒ configured default")
+    }
+
+    /// ADR 026: omit `model` with >1 selectable and NO configured default is
+    /// ambiguous — a 400 `ambiguous_model`, never a silent pick.
+    func testAbsentModelAmbiguousWithoutDefault() async throws {
+        let m = StubEmbeddingModule(modelIds: ["m-small", "m-large"])
+        do {
+            _ = try await m.embed(["hi"], model: nil)
+            XCTFail("expected ambiguous_model")
+        } catch let e as AthenaError {
+            XCTAssertEqual(e.code, "ambiguous_model")
+            XCTAssertEqual(e.httpStatus, 400)
+        }
+    }
+
+    /// ADR 026: omit `model` with exactly ONE selectable model uses it (no
+    /// configured default needed).
+    func testAbsentModelSoleModelUsed() async throws {
+        let m = StubEmbeddingModule(modelIds: ["only-one"])
+        let batch = try await m.embed(["hi"], model: nil)
+        XCTAssertEqual(batch.model, "only-one")
     }
 
     func testSelectsAllowedModelAndEchoesTruthfully() async throws {

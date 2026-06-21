@@ -42,8 +42,8 @@ public actor StubEmbeddingModule: EmbeddingModule, ModelSelectable {
     public nonisolated let id: ModuleID = .textEmbedding
     public nonisolated var moduleID: ModuleID { .textEmbedding }
 
-    private var allowedIds: [String]
-    private var defaultId: String
+    private let modelIds: [String]
+    private let configuredDefault: String?
     private let reserveBytes: Int
     /// nil ⇒ unloaded. The stub has no real container; the value tracks
     /// which id is "resident" for M39/M41 selection + rebind semantics.
@@ -53,51 +53,58 @@ public actor StubEmbeddingModule: EmbeddingModule, ModelSelectable {
     private var desiredName: String?
 
     /// - Parameters:
-    ///   - modelIds: the selectable set (first = default). The stub
-    ///     "serves" any of these truthfully (M39 parity with the real
-    ///     module); an id outside the set is a `modelNotAvailable` 400.
+    ///   - modelIds: the stand-in store set (the stub has no disk). The stub
+    ///     "serves" any of these truthfully (M39 parity); an id outside the set
+    ///     is a `modelNotAvailable` 400.
+    ///   - configuredDefault: per-module TOML default (ADR 026; nil ⇒ ambiguity).
     public init(
         modelIds: [String] = ["athena-embedding"],
+        configuredDefault: String? = nil,
         reserveBytes: Int = 1 * 1024 * 1024 * 1024
     ) {
         precondition(
             !modelIds.isEmpty,
             "StubEmbeddingModule needs at least one model id")
-        self.allowedIds = modelIds
-        self.defaultId = modelIds[0]
+        self.modelIds = modelIds
+        self.configuredDefault =
+            (configuredDefault?.isEmpty == true) ? nil : configuredDefault
         self.reserveBytes = reserveBytes
     }
 
     public var residentBytes: Int { residentId == nil ? 0 : reserveBytes }
     public func memoryEstimate() -> Int { reserveBytes }
     public func load(reservation: MemoryReservation) async throws {
-        if residentId == nil { residentId = desiredName ?? defaultId }
+        if residentId == nil { residentId = try desiredName ?? resolve(nil) }
     }
     public func unload() async { residentId = nil }
 
-    public func allowedModelIds() -> [String] { allowedIds }
-    public func defaultModelId() -> String { defaultId }
+    public func allowedModelIds() -> [String] { modelIds }
+    public func defaultModelId() -> String {
+        ModelSelection.displayDefault(
+            available: modelIds, configuredDefault: configuredDefault)
+    }
     public func residentModelId() -> String? { residentId }
     public func rebind(to id: String?) async throws {
-        let requested = id ?? defaultId
-        // NI2 — resolve by store-dir identity (bare name OR full HF id),
-        // identical to MLXEmbeddingModule, so id acceptance matches across
-        // --engine stub and --engine mlx (the stub is the CI/e2e surface).
-        guard let target =
-            allowedIds.canonicalByStoreIdentity(requested)
-        else {
-            throw AthenaError.modelNotAvailable(
-                requested: requested, available: allowedIds)
-        }
+        let target = try resolve(id)
         desiredName = target
         residentId = target
     }
 
-    public func setAllowedModelIds(_ ids: [String]) {
-        allowedIds = ids
-        defaultId = ids.first ?? defaultId
-        if let d = desiredName, !ids.contains(d) { desiredName = nil }
-        if let r = residentId, !ids.contains(r) { residentId = nil }
+    /// ADR 026 resolution against the injected stub set.
+    private func resolve(_ id: String?) throws -> String {
+        switch ModelSelection.resolve(
+            available: modelIds, configuredDefault: configuredDefault,
+            requested: id)
+        {
+        case .resolved(let t): return t
+        case .notAvailable:
+            throw AthenaError.modelNotAvailable(
+                requested: id ?? (configuredDefault ?? ""),
+                available: modelIds)
+        case .ambiguous:
+            throw AthenaError.ambiguousModel(
+                module: .textEmbedding, available: modelIds)
+        }
     }
 
     /// Deterministic 8-dim pseudo-embedding (FNV-1a byte folds), MLX-free.
@@ -134,15 +141,9 @@ public actor StubEmbeddingModule: EmbeddingModule, ModelSelectable {
     public func embed(_ texts: [String], model: String? = nil) async throws
         -> EmbeddingBatch
     {
-        let requested = model ?? defaultId
-        // NI2 — resolve by store-dir identity, identical to the MLX module
-        // (bare name OR full HF id), so stub and mlx accept the same ids.
-        guard let served =
-            allowedIds.canonicalByStoreIdentity(requested)
-        else {
-            throw AthenaError.modelNotAvailable(
-                requested: requested, available: allowedIds)
-        }
+        // ADR 026 — resolve `model` against the injected stub set (bare name
+        // OR full HF id; omit ⇒ configured default / sole model / ambiguity).
+        let served = try resolve(model)
         // M41: per-request selection rebinds the slot's "resident" id in the
         // stub too, so /api/models/resident reflects what an embed call
         // would actually serve. NI3 parity: also stage it for reload.

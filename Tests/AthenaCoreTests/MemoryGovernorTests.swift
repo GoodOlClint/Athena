@@ -370,12 +370,15 @@ final class MemoryGovernorTests: XCTestCase {
 
     func testColdLoadUsesDefaultWhenSelectionCleared() async throws {
         let gov = MemoryGovernor(totalBudgetBytes: 1_000)
+        // ADR 026 — "clearing" the selection resolves the per-module default;
+        // with >1 model that requires a configured default (else ambiguous).
         let stub = StubLLMModule(
-            reserveBytes: 100, modelIds: ["model-A", "model-B"])
+            reserveBytes: 100, modelIds: ["model-A", "model-B"],
+            configuredDefault: "model-A")
         await gov.register(stub, evictable: false)
 
         try await stub.selectColdLoadModel("model-B")
-        try await stub.selectColdLoadModel(nil)  // clear ⇒ default
+        try await stub.selectColdLoadModel(nil)  // clear ⇒ configured default
         try await gov.ensureLoaded(.llm)
 
         let resident = await stub.residentModelId()

@@ -552,37 +552,25 @@ struct Load: AsyncParsableCommand {
         }
         let athenaStore = try AthenaStore(path: dbPath, key: storeKey)
 
-        // M41.2: --llm-model is the new repeatable allowlist. If unset,
-        // desugar from the single --model so existing scripts keep
-        // working unchanged. Either way the FIRST entry is the default
-        // (used when a request omits `model`).
-        let llmRefs: [String?] =
-            llmModels.isEmpty ? [model] : llmModels.map { Optional($0) }
-        let llmURLsFromFlags = llmRefs.map { store.resolve($0) }
-        let llmIdsFromFlags = llmURLsFromFlags.map { $0.lastPathComponent }
-        // M42.1: resolve each module's effective allowlist from the
-        // persisted table (seeding on empty). The default sits at
-        // position 0 — modules keep treating `[0]` as default and need
-        // no awareness of the DB layer.
-        let llmIds = await Self.resolveAllowlist(
-            store: athenaStore, module: .llm, seed: llmIdsFromFlags)
-        let llmURLs = llmIds.map { name in
-            llmURLsFromFlags.first { $0.lastPathComponent == name }
-                ?? store.resolve(name)
-        }
-        let modelURL = llmURLs[0]
-        let embeddingIds = await Self.resolveAllowlist(
-            store: athenaStore, module: .textEmbedding,
-            seed: embeddingModels)
-        let transcriptionIds = await Self.resolveAllowlist(
-            store: athenaStore, module: .transcription,
-            seed: transcriptionModels)
-        let diarizationIds = await Self.resolveAllowlist(
-            store: athenaStore, module: .diarization,
-            seed: diarizationModels)
-        let speakerEmbeddingIds = await Self.resolveAllowlist(
-            store: athenaStore, module: .speakerEmbedding,
-            seed: speakerEmbeddingModels)
+        // ADR 026 — selection is store-backed; there is no allowlist. Each
+        // module's per-request selectable set is the store classified by
+        // ModelSupport; the per-module DEFAULT comes from config (the `--model`
+        // / `--*-model` flags, themselves seeded from the TOML keys via the
+        // launchd plist). The FIRST configured id is the default (used when a
+        // request omits `model`); `athena init` / startup still pulls every
+        // configured id so both engine families (whisper+parakeet,
+        // sortformer+pyannote) land in the store and become selectable.
+        let llmDefaultName =
+            llmModels.first ?? model ?? ModelStore.defaultModelName
+        let modelURL = store.resolve(llmDefaultName)
+        // Stub seed sets (the stub has no disk; these stand in for the store).
+        let llmStubIds =
+            llmModels.isEmpty
+            ? [model ?? ModelStore.defaultModelName] : llmModels
+        let embeddingDefault = embeddingModels.first
+        let transcriptionDefault = transcriptionModels.first
+        let diarizationDefault = diarizationModels.first
+        let speakerEmbeddingDefault = speakerEmbeddingModels.first
 
         // M23 fork B: a VALID kv_compression codec that can't serve the
         // loaded architecture (TriAttention eviction is Qwen3.5-only)
@@ -604,24 +592,25 @@ struct Load: AsyncParsableCommand {
         }
 
         // The LLM is non-evictable (the primary workload); transcription and
-        // embedding remain governed stubs (real impls land in M4) and are
-        // evictable so the governor can reclaim their budget under pressure.
-        // M42.1: each module's allowlist resolves from the persisted
-        // `model_allowlist` table (seeded above from CLI flags on first
-        // boot). The default is `llmIds[0]` / etc. — already
-        // DB-default-first.
-        // M53: the structured-output engine (llguidance) parses
-        // incrementally, so a `maxItems`-bounded schema can no longer blow
-        // up memory — the M49.5 pre-compile complexity gate and its
+        // embedding are evictable so the governor can reclaim their budget
+        // under pressure.
+        // ADR 026: each module's selectable set is the model store classified
+        // by ModelSupport; the per-module default is `configuredDefault` (the
+        // flag's first id). The stub engine has no disk, so it gets the
+        // configured ids as a stand-in selectable set + the same default.
+        // M53: the structured-output engine (llguidance) parses incrementally,
+        // so a `maxItems`-bounded schema can no longer blow up memory — the
+        // M49.5 pre-compile complexity gate and its
         // `structured_max_unbounded_subarrays` TOML key are gone.
         let llm: any LLMModule
         switch engine {
         case .stub:
-            llm = StubLLMModule(modelIds: llmIds)
+            llm = StubLLMModule(
+                modelIds: llmStubIds, configuredDefault: llmDefaultName)
         case .mlx:
             llm = MLXLLMModule(
-                modelDirectories: llmURLs,
                 modelStoreRoot: store.rootDirectory,
+                configuredDefault: llmDefaultName,
                 parameters: .init(
                     maxTokens: maxTokens,
                     temperature: Float(temperature ?? 0.7),
@@ -634,39 +623,45 @@ struct Load: AsyncParsableCommand {
         let embedding: any EmbeddingModule
         switch engine {
         case .stub:
-            embedding = StubEmbeddingModule(modelIds: embeddingIds)
+            embedding = StubEmbeddingModule(
+                modelIds: embeddingModels,
+                configuredDefault: embeddingDefault)
         case .mlx:
             embedding = MLXEmbeddingModule(
-                modelIds: embeddingIds,
+                configuredDefault: embeddingDefault,
                 modelStoreRoot: store.rootDirectory)
         }
         let transcription: any TranscriptionModule
         switch engine {
         case .stub:
             transcription = StubTranscriptionModule(
-                modelIds: transcriptionIds)
+                modelIds: transcriptionModels,
+                configuredDefault: transcriptionDefault)
         case .mlx:
             transcription = MLXTranscriptionModule(
-                modelIds: transcriptionIds,
+                configuredDefault: transcriptionDefault,
                 modelStoreRoot: store.rootDirectory)
         }
         let diarization: any DiarizationModule
         switch engine {
         case .stub:
-            diarization = StubDiarizationModule(modelIds: diarizationIds)
+            diarization = StubDiarizationModule(
+                modelIds: diarizationModels,
+                configuredDefault: diarizationDefault)
         case .mlx:
             diarization = MLXDiarizationModule(
-                modelIds: diarizationIds,
+                configuredDefault: diarizationDefault,
                 modelStoreRoot: store.rootDirectory)
         }
         let speakerEmbedding: any SpeakerEmbeddingModule
         switch engine {
         case .stub:
             speakerEmbedding = StubSpeakerEmbeddingModule(
-                modelIds: speakerEmbeddingIds)
+                modelIds: speakerEmbeddingModels,
+                configuredDefault: speakerEmbeddingDefault)
         case .mlx:
             speakerEmbedding = MLXSpeakerEmbeddingModule(
-                modelIds: speakerEmbeddingIds,
+                configuredDefault: speakerEmbeddingDefault,
                 modelStoreRoot: store.rootDirectory)
         }
         await governor.register(llm, evictable: false)
@@ -766,11 +761,15 @@ struct Load: AsyncParsableCommand {
         // 503 via the governor's `pulling` flag until the pull lands.
         // Bare store-dir ids (the LLM convention) aren't Hub-pullable and
         // are skipped — they're provisioned via `athena pull`/`convert`.
+        // ADR 026 — pull every CONFIGURED id (the flag seed lists), so both
+        // engine families land in the store and become selectable; selection
+        // itself then reads the store, not this list.
         let configuredForPull: [(ModuleID, [String])] = [
-            (.llm, llmIds), (.textEmbedding, embeddingIds),
-            (.transcription, transcriptionIds),
-            (.diarization, diarizationIds),
-            (.speakerEmbedding, speakerEmbeddingIds),
+            (.llm, llmModels.isEmpty ? [model].compactMap { $0 } : llmModels),
+            (.textEmbedding, embeddingModels),
+            (.transcription, transcriptionModels),
+            (.diarization, diarizationModels),
+            (.speakerEmbedding, speakerEmbeddingModels),
         ]
         let pullStoreRoot = store.rootDirectory
         Task.detached {
@@ -843,71 +842,6 @@ struct Load: AsyncParsableCommand {
                 await governor.setPulling(module, false)
             }
         }
-    }
-
-    /// Resolve a module's effective allowlist from the persisted
-    /// `model_allowlist` table. On every boot any id in the CLI seed
-    /// that isn't already in the DB is idempotently added; the CLI
-    /// never REMOVES rows (operator `athena allowlist rm` is preserved)
-    /// and never re-flips the default once the table has any rows
-    /// (operator `athena allowlist default` is preserved). On a TRULY
-    /// fresh table the first seed entry becomes the default, so a new
-    /// install still gets a sensible default from the CLI/TOML alone.
-    ///
-    /// Behaviour history. M42.1 originally seeded the table on first
-    /// boot and treated later CLI edits as no-ops (DB wins); M43.4
-    /// added a divergence notice. M44.2 turned the CLI into a merge
-    /// writer on every boot so the operator's `--*-model` intent
-    /// actually takes effect on restart — at the cost that a flag
-    /// they removed via `athena allowlist rm` will come back unless
-    /// they also strike it from the CLI/TOML.
-    static func resolveAllowlist(
-        store: AthenaStore, module: ModuleID, seed: [String]
-    ) async -> [String] {
-        let seedClean = seed.filter { !$0.isEmpty }
-        let emptyAtStart =
-            await store.modelAllowlistCount(
-                module: module.rawValue) == 0
-        for (idx, id) in seedClean.enumerated() {
-            // Only the FIRST seed on a fresh table becomes default;
-            // every subsequent boot (or later seed in this list) adds
-            // with isDefault=false so an operator's `allowlist default`
-            // choice is never silently overwritten.
-            let asDefault = emptyAtStart && idx == 0
-            try? await store.addModelAllowlist(
-                module: module.rawValue, id: id,
-                isDefault: asDefault)
-        }
-        let rows = await store.listModelAllowlist(
-            module: module.rawValue)
-        guard !rows.isEmpty else { return seedClean }
-        // Default first, then declaration order.
-        let def = rows.first { $0.isDefault } ?? rows[0]
-        var ordered = [def.id]
-        for row in rows where row.id != def.id {
-            ordered.append(row.id)
-        }
-        // M54 — store-identity collision guard. Two configured ids that
-        // share a store-dir basename (e.g. `a/m` and `b/m`) both resolve
-        // to the same store directory, so a request for either silently
-        // loads whichever is first. The store keys by basename, so it
-        // can't even hold both — warn loudly rather than alias quietly.
-        let identities = ordered.map { $0.modelStoreIdentity }
-        let collided = Set(
-            identities.filter { id in
-                identities.filter { $0.caseInsensitiveCompare(id)
-                    == .orderedSame }.count > 1
-            })
-        if !collided.isEmpty {
-            Logger(label: AthenaLogLabel.daemon).warning(
-                """
-                \(module.rawValue) allowlist has ids sharing a store-dir \
-                name \(collided.sorted()) — they resolve to the same local \
-                directory; requests will load whichever is declared first. \
-                Use distinct model names or remove the duplicate.
-                """)
-        }
-        return ordered
     }
 
     /// Process resident-set bytes (RSS) for the governor's M5 reconcile.

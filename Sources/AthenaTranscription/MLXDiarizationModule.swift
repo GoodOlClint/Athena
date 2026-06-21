@@ -20,8 +20,10 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
     public nonisolated let id: ModuleID = .diarization
     public nonisolated var moduleID: ModuleID { .diarization }
 
-    private var allowedIds: [String]
-    private var defaultId: String
+    /// ADR 026 — the selectable set is the store's diarization models
+    /// (Sortformer/pyannote), scanned live via `ModelSupport`;
+    /// `configuredDefault` is the per-module TOML default (nil ⇒ ambiguity).
+    private let configuredDefault: String?
     private let estimatedBytes: Int
     private var model: SortformerModel?
     /// The pyannote PyanNet segmentation engine, resident iff
@@ -49,33 +51,22 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
     private let modelStoreRoot: URL?
 
     /// - Parameters:
-    ///   - modelIds: HF id allowlist (first = default). Default
-    ///     `[mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16]`.
+    ///   - configuredDefault: the per-module TOML default diarization id
+    ///     (ADR 026), used when a request omits `model` (nil ⇒ ambiguity rule).
+    ///   - modelStoreRoot: the store root scanned for diarization models.
     ///   - estimatedBytes: governor admission estimate. 1 GiB:
     ///     conservative headroom over the small fp16 weights + the
     ///     FastConformer/transformer activation working set on long
     ///     audio (M5 reconciles to the real footprint post-load).
     public init(
-        modelIds: [String] = [
-            "mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16"
-        ],
+        configuredDefault: String? = nil,
         modelStoreRoot: URL? = nil,
         estimatedBytes: Int = 1 * 1024 * 1024 * 1024
     ) {
-        precondition(
-            !modelIds.isEmpty,
-            "MLXDiarizationModule needs at least one model id")
-        self.allowedIds = modelIds
-        self.defaultId = modelIds[0]
+        self.configuredDefault =
+            (configuredDefault?.isEmpty == true) ? nil : configuredDefault
         self.modelStoreRoot = modelStoreRoot
         self.estimatedBytes = estimatedBytes
-    }
-
-    public init(
-        modelId: String,
-        estimatedBytes: Int = 1 * 1024 * 1024 * 1024
-    ) {
-        self.init(modelIds: [modelId], estimatedBytes: estimatedBytes)
     }
 
     public var residentBytes: Int {
@@ -84,21 +75,38 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
 
     public func memoryEstimate() -> Int { estimatedBytes }
 
-    public func load(reservation: MemoryReservation) async throws {
-        if model != nil || segmentationModel != nil { return }
-        try await loadModel(id: residentId ?? defaultId)
+    /// The store's diarization models (ADR 026 live scan).
+    private func storeModelIds() -> [String] {
+        StoreModelClass.ids(
+            storeRoot: modelStoreRoot, accept: { $0.isDiarizationSlot })
     }
 
-    private func loadModel(id: String) async throws {
-        // M54 — match by store-dir identity (bare name or full HF id).
-        guard let canonical =
-            allowedIds.canonicalByStoreIdentity(id)
-        else {
+    /// ADR 026 resolution against the live store scan (rebind/load).
+    private func resolve(_ id: String?) throws -> String {
+        let available = storeModelIds()
+        switch ModelSelection.resolve(
+            available: available, configuredDefault: configuredDefault,
+            requested: id)
+        {
+        case .resolved(let t): return t
+        case .notAvailable:
             throw AthenaError.modelNotAvailable(
-                requested: id, available: allowedIds)
+                requested: id ?? (configuredDefault ?? ""),
+                available: available)
+        case .ambiguous:
+            throw AthenaError.ambiguousModel(
+                module: .diarization, available: available)
         }
+    }
+
+    public func load(reservation: MemoryReservation) async throws {
+        if model != nil || segmentationModel != nil { return }
+        try await loadModel(id: residentId ?? resolve(nil))
+    }
+
+    private func loadModel(id canonical: String) async throws {
         // M54.3 — local-store-dir load only; inference never auto-downloads
-        // (operator pulls a missing model at startup / allowlist-add).
+        // (operator pulls a missing model at startup).
         guard let dir = ModelStoreLayout.localDirectory(
             for: canonical, storeRoot: modelStoreRoot)
         else {
@@ -154,20 +162,16 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
         backend = .sortformer
     }
 
-    // M41 — ModelSelectable. M41.3 repeatable `--diarization-model`
-    // allowlist with in-place rebind.
-    public func allowedModelIds() -> [String] { allowedIds }
-    public func defaultModelId() -> String { defaultId }
+    // M41 / ADR 026 — ModelSelectable over the store-classified set with
+    // in-place rebind.
+    public func allowedModelIds() -> [String] { storeModelIds() }
+    public func defaultModelId() -> String {
+        ModelSelection.displayDefault(
+            available: storeModelIds(), configuredDefault: configuredDefault)
+    }
     public func residentModelId() -> String? { residentId }
     public func rebind(to id: String?) async throws {
-        let requested = id ?? defaultId
-        // M54 — match by store-dir identity (bare name or full HF id).
-        guard let target =
-            allowedIds.canonicalByStoreIdentity(requested)
-        else {
-            throw AthenaError.modelNotAvailable(
-                requested: requested, available: allowedIds)
-        }
+        let target = try resolve(id)
         if residentId == target, model != nil || segmentationModel != nil {
             return
         }
@@ -177,20 +181,6 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
         segmentationModel = nil
         residentId = nil
         try await loadModel(id: target)
-    }
-
-    public func setAllowedModelIds(_ ids: [String]) {
-        allowedIds = ids
-        defaultId = ids.first ?? defaultId
-        // ND5: evict only when the resident id is no longer allowed under the
-        // SAME store-identity resolver as load/rebind (an equivalent spelling
-        // must NOT force a needless reload).
-        if let r = residentId, ids.canonicalByStoreIdentity(r) == nil {
-            model = nil
-            segmentationModel = nil
-            residentId = nil
-            backend = .sortformer
-        }
     }
 
     /// Backend of the resident model (ADR 018) — the route uses this to match

@@ -84,16 +84,14 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     /// diagnosing a specific request shape.
     nonisolated static let log = Logger(label: "athena.llm")
 
-    /// M41.2: operator-declared allowlist as store-name → directory URL.
-    /// First-declared = the default (loaded when the slot first comes up
-    /// or when a request omits `model`). A request whose `model` is
-    /// outside this map is `modelNotAvailable` (400) — never a silent
-    /// fallback, never an on-request download.
-    /// M42.2: mutable so the persistent allowlist can be pushed in at
-    /// runtime; `modelStoreRoot` lets us resolve a newly-allowed name
-    /// to its directory without operator restart.
-    private var modelDirectories: [(name: String, url: URL)]
-    private var defaultName: String
+    /// ADR 026 — the selectable set is the model store classified by
+    /// `ModelSupport` (an LLM slot accepts `.llm` and `.vision`), scanned live
+    /// from `modelStoreRoot`; there is no pushed-in allowlist. `configuredDefault`
+    /// is the per-module TOML default used when a request omits `model` (nil ⇒
+    /// resolve by the ambiguity rule). A request naming a model absent from the
+    /// store is `modelNotAvailable` (400) — never a silent fallback or an
+    /// on-request download.
+    private let configuredDefault: String?
     private let modelStoreRoot: URL
     private let params: LLMGenerationParameters
     /// Governor admission estimate. M41.2 sizes this as the MAX across
@@ -191,10 +189,9 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     private var dflashDraftBytes: Int = 0
 
     /// Single-model convenience init kept for source-compat with M27/M40
-    /// call sites; forwards to the M41.2 list form with a 1-entry
-    /// allowlist. The store root is inferred from the directory's
-    /// parent (so new ids added via /api/models/allow at runtime
-    /// resolve to siblings of the seed model).
+    /// call sites (and tests): the directory IS a store entry, so the store
+    /// root is its parent and the directory's basename is the configured
+    /// default (ADR 026).
     public init(
         modelDirectory: URL,
         parameters: LLMGenerationParameters = .init(),
@@ -203,49 +200,57 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         dflashEnabled: Bool = false
     ) {
         self.init(
-            modelDirectories: [modelDirectory],
             modelStoreRoot: modelDirectory.deletingLastPathComponent(),
+            configuredDefault: modelDirectory.lastPathComponent,
             parameters: parameters,
             promptCacheCapBytes: promptCacheCapBytes,
             prefixCache: prefixCache,
             dflashEnabled: dflashEnabled)
     }
 
-    /// M41.2: operator-declared list (first = default). Empty ⇒
-    /// precondition trap — every daemon must declare at least one LLM.
-    /// `modelStoreRoot` (M42.2) is the directory that hosts every
-    /// declared model and any later additions via /api/models/allow;
-    /// defaults to the parent of `urls[0]` for source-compat.
+    /// ADR 026 — the LLM slot serves whatever LLM/vision models are in the
+    /// store under `modelStoreRoot`; `configuredDefault` (the TOML `model` key)
+    /// is loaded when a request omits `model` (nil ⇒ ambiguity rule).
     public init(
-        modelDirectories urls: [URL],
-        modelStoreRoot: URL? = nil,
+        modelStoreRoot: URL,
+        configuredDefault: String? = nil,
         parameters: LLMGenerationParameters = .init(),
         promptCacheCapBytes: Int = 0,
         prefixCache: PrefixKVCache? = nil,
         dflashEnabled: Bool = false
     ) {
-        precondition(
-            !urls.isEmpty,
-            "MLXLLMModule needs at least one model directory")
         self.prefixCache = prefixCache
         self.dflashEnabled = dflashEnabled
-        self.modelDirectories = urls.map {
-            (name: $0.lastPathComponent, url: $0)
-        }
-        self.defaultName = self.modelDirectories[0].name
-        self.modelStoreRoot =
-            modelStoreRoot ?? urls[0].deletingLastPathComponent()
+        self.modelStoreRoot = modelStoreRoot
+        let cleanDefault = (configuredDefault?.isEmpty == true)
+            ? nil : configuredDefault
+        self.configuredDefault = cleanDefault
         self.params = parameters
-        // MAX across the allowlist so the slot still bounds the largest
-        // declared member after a rebind.
-        self.estimatedBytes = urls.lazy
+        // Governor admission estimate: MAX across the store's LLM/vision
+        // models so the fixed slot still bounds the largest member after a
+        // rebind. Errs high (the safe direction for an OOM gate); 0 when the
+        // store has no model of the class yet (e.g. pulled post-boot).
+        let classIds = StoreModelClass.ids(
+            storeRoot: modelStoreRoot, accept: { $0.isLLMSlot })
+        self.estimatedBytes =
+            classIds
+            .compactMap {
+                ModelStoreLayout.localDirectory(
+                    for: $0, storeRoot: modelStoreRoot)
+            }
             .map { Self.estimateBytes(forModelAt: $0) }
             .max() ?? 0
         self.promptCacheCapBytes = promptCacheCapBytes
 
-        // Initial cap geometry seeded from the DEFAULT model; rebind
-        // recomputes from the new model's config.
-        let info = ModelConfigInfo.read(modelDirectory: urls[0])
+        // Initial cap geometry seeded from the configured default (or the
+        // first store model of the class); rebind recomputes from the loaded
+        // model's config.
+        let seedName = cleanDefault ?? classIds.first
+        let seedDir = seedName.flatMap {
+            ModelStoreLayout.localDirectory(
+                for: $0, storeRoot: modelStoreRoot)
+        }
+        let info = seedDir.flatMap { ModelConfigInfo.read(modelDirectory: $0) }
         self.configVocabSize = info?.vocabSize
         let fp16PerToken =
             info?.perTokenKVBytes(bytesPerElement: 2) ?? (256 * 1024)
@@ -255,18 +260,35 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         }
     }
 
+    /// The store directory for `name` (ADR 026): resolve via the shared
+    /// store-layout helper so a bare name or full HF id both land, and the
+    /// `pull` symlink is followed.
     private func directoryURL(for name: String) -> URL? {
-        modelDirectories.first { $0.name == name }?.url
+        ModelStoreLayout.localDirectory(for: name, storeRoot: modelStoreRoot)
     }
 
-    /// NC11: returns `URL?` and falls back via `.first?.url`, never a
-    /// literal `[0]` subscript — `setAllowedModelIds([])` (empty DB
-    /// allowlist) leaves `modelDirectories` empty while `defaultName` is
-    /// stale, so a `[0]` access would trap. (Currently uncalled; this keeps
-    /// it from becoming an allowlist-API-reachable crash if it is wired up.)
-    private var residentDirectory: URL? {
-        directoryURL(for: residentName ?? defaultName)
-            ?? modelDirectories.first?.url
+    /// The store dirs of this slot's modality (ADR 026 live scan).
+    private func storeModelIds() -> [String] {
+        StoreModelClass.ids(
+            storeRoot: modelStoreRoot, accept: { $0.isLLMSlot })
+    }
+
+    /// Resolve the default-or-throw name when a request omits `model`
+    /// (cold-load / preload warm). ADR 026 ambiguity rule.
+    private func resolvedDefaultName() throws -> String {
+        let available = storeModelIds()
+        switch ModelSelection.resolve(
+            available: available, configuredDefault: configuredDefault,
+            requested: nil)
+        {
+        case .resolved(let t): return t
+        case .notAvailable:
+            throw AthenaError.modelNotAvailable(
+                requested: configuredDefault ?? "", available: available)
+        case .ambiguous:
+            throw AthenaError.ambiguousModel(
+                module: .llm, available: available)
+        }
     }
 
     /// Brief 4b: refuse a prompt whose KV/prompt-cache would exceed the
@@ -421,8 +443,10 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         // M62 — bind the requested cold-load target (set via
         // selectColdLoadModel) so a cold slot serves the requested model,
         // not the default. residentName is normally nil here (slot empty);
-        // defaultName is the final fallback.
-        try await loadModel(name: desiredName ?? residentName ?? defaultName)
+        // the resolved configured default is the final fallback (ADR 026 —
+        // throws if the store is empty/ambiguous with no configured default).
+        let name = try desiredName ?? residentName ?? resolvedDefaultName()
+        try await loadModel(name: name)
     }
 
     public func unload() async {
@@ -437,8 +461,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     private func loadModel(name: String) async throws {
         guard let url = directoryURL(for: name) else {
             throw AthenaError.modelNotAvailable(
-                requested: name,
-                available: modelDirectories.map { $0.name })
+                requested: name, available: storeModelIds())
         }
         // Route Qwen3.5 directories to Athena's vendored model so the
         // substrate stays pristine. Idempotent; must precede the load.
@@ -565,30 +588,17 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             }
     }
 
-    // M41 — ModelSelectable. M41.2 generalizes to a repeatable
-    // `--llm-model` allowlist (M41.1 shipped the protocol shape with a
-    // single-id allowlist).
-    public func allowedModelIds() -> [String] {
-        modelDirectories.map { $0.name }
+    // M41 / ADR 026 — ModelSelectable over the store-classified selectable set.
+    public func allowedModelIds() -> [String] { storeModelIds() }
+    public func defaultModelId() -> String {
+        ModelSelection.displayDefault(
+            available: storeModelIds(), configuredDefault: configuredDefault)
     }
-    public func defaultModelId() -> String { defaultName }
     public func residentModelId() -> String? {
         container == nil ? nil : residentName
     }
     public func rebind(to id: String?) async throws {
-        let requested = id ?? defaultName
-        let allowed = modelDirectories.map { $0.name }
-        // NE5 — resolve by store-dir identity so a request naming the model
-        // by either its bare store-dir name OR its full HF org/name id
-        // resolves uniformly, matching the embedding/transcription modules
-        // (and case-insensitive, so `foo-4b` still finds `foo-4B`). The
-        // CANONICAL stored id drives every downstream step.
-        guard let target =
-            allowed.canonicalByStoreIdentity(requested)
-        else {
-            throw AthenaError.modelNotAvailable(
-                requested: requested, available: allowed)
-        }
+        let target = try resolve(id)
         if residentName == target, container != nil { return }
         // Drop the current container (and its caches) before swapping
         // so the substrate's working set is released before the new
@@ -598,38 +608,27 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     }
 
     public func selectColdLoadModel(_ id: String?) async throws {
-        guard let id, !id.isEmpty else { desiredName = nil; return }
-        let allowed = modelDirectories.map { $0.name }
-        // Same store-identity discipline as rebind (NE5).
-        guard let target = allowed.canonicalByStoreIdentity(id) else {
-            throw AthenaError.modelNotAvailable(
-                requested: id, available: allowed)
-        }
-        desiredName = target
+        desiredName = try resolve(id)
     }
 
-    public func setAllowedModelIds(_ ids: [String]) {
-        // Resolve every name to a URL under the model store root. An
-        // absolute path (rare; an operator who pre-knows the directory)
-        // is honored as-is. New names get a fresh URL; existing names
-        // keep their URL.
-        let existing = Dictionary(
-            uniqueKeysWithValues: modelDirectories.map { ($0.name, $0.url) })
-        modelDirectories = ids.map { name in
-            let url =
-                existing[name]
-                ?? (name.hasPrefix("/")
-                    ? URL(fileURLWithPath: name, isDirectory: true)
-                    : modelStoreRoot.appendingPathComponent(
-                        name, isDirectory: true))
-            return (name: name, url: url)
+    /// ADR 026 resolution against the live store scan: a named id matches by
+    /// store-dir identity (bare name OR full HF id, case-insensitive); an
+    /// omitted id resolves the configured default / sole model / ambiguity.
+    private func resolve(_ id: String?) throws -> String {
+        let available = storeModelIds()
+        switch ModelSelection.resolve(
+            available: available, configuredDefault: configuredDefault,
+            requested: id)
+        {
+        case .resolved(let t): return t
+        case .notAvailable:
+            throw AthenaError.modelNotAvailable(
+                requested: id ?? (configuredDefault ?? ""),
+                available: available)
+        case .ambiguous:
+            throw AthenaError.ambiguousModel(
+                module: .llm, available: available)
         }
-        defaultName = modelDirectories.first?.name ?? defaultName
-        if let r = residentName, !ids.contains(r) {
-            dropResidentModel()  // C10
-        }
-        // M62 — drop a stale cold-load target no longer in the allowlist.
-        if let d = desiredName, !ids.contains(d) { desiredName = nil }
     }
 
     public nonisolated func generate(prompt: String) -> AsyncStream<String> {
@@ -946,7 +945,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         let prefixCache = self.prefixCache
         let cacheScope: String? = prefixCache.map {
             $0.scopeKey(
-                model: residentName ?? defaultName,
+                model: residentName ?? (configuredDefault ?? ""),
                 principal: principal, cacheKey: promptCacheKey)
         }
         // M63.3b — for an unguided greedy request, load the DFlash drafter

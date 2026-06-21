@@ -10,6 +10,15 @@ public struct AthenaConfig: Sendable, Equatable {
     public var budgetBytes: Int?
     public var engine: String?
     public var model: String?
+    /// ADR 026 — per-module default model ids (the LLM default stays `model`).
+    /// Each names the model loaded when a request to that module omits `model`;
+    /// absent ⇒ resolve by the store ambiguity rule (sole model, else 400
+    /// `ambiguous_model`). Set via `athena default --module M <id>`. Defaulted
+    /// to `nil` so the memberwise init stays source-compatible.
+    public var embeddingModel: String? = nil
+    public var transcriptionModel: String? = nil
+    public var diarizationModel: String? = nil
+    public var speakerEmbeddingModel: String? = nil
     /// Model-store root directory. Optional — falls back to the
     /// built-in default (`~/.athena/models`) when absent. Set this to
     /// relocate the store (e.g. onto an external SSD).
@@ -164,7 +173,12 @@ public struct AthenaConfig: Sendable, Equatable {
 
     public init(
         listenHost: String, listenPort: Int, budgetBytes: Int?,
-        engine: String?, model: String?, modelStore: String? = nil,
+        engine: String?, model: String?,
+        embeddingModel: String? = nil,
+        transcriptionModel: String? = nil,
+        diarizationModel: String? = nil,
+        speakerEmbeddingModel: String? = nil,
+        modelStore: String? = nil,
         dataDir: String? = nil,
         logLevel: String? = nil,
         maxTokens: Int? = nil, temperature: String? = nil,
@@ -204,6 +218,10 @@ public struct AthenaConfig: Sendable, Equatable {
         self.budgetBytes = budgetBytes
         self.engine = engine
         self.model = model
+        self.embeddingModel = embeddingModel
+        self.transcriptionModel = transcriptionModel
+        self.diarizationModel = diarizationModel
+        self.speakerEmbeddingModel = speakerEmbeddingModel
         self.modelStore = modelStore
         self.dataDir = dataDir
         self.logLevel = logLevel
@@ -432,6 +450,11 @@ public struct AthenaConfig: Sendable, Equatable {
             budgetBytes: budget,
             engine: scalar("engine", in: toml),
             model: scalar("model", in: toml),
+            embeddingModel: scalar("embedding_model", in: toml),
+            transcriptionModel: scalar("transcription_model", in: toml),
+            diarizationModel: scalar("diarization_model", in: toml),
+            speakerEmbeddingModel: scalar(
+                "speaker_embedding_model", in: toml),
             modelStore: scalar("model_store", in: toml),
             dataDir: scalar("data_dir", in: toml),
             logLevel: scalar("log_level", in: toml),

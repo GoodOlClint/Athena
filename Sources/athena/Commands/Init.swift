@@ -1,8 +1,8 @@
 import ArgumentParser
 import AthenaClient
 import AthenaCore
+import AthenaDeploy
 import AthenaLLM
-import AthenaStore
 import Foundation
 
 /// `athena init` — pull the default auxiliary modules (embeddings,
@@ -38,19 +38,20 @@ struct Init: AsyncParsableCommand {
     var embeddingModels: [String] = [Load.defaultEmbeddingModel]
 
     @Flag(
-        name: .customLong("from-allowlist"),
+        name: .customLong("from-config"),
         help: """
-            Read the persistent allowlist and pull every allowed id \
-            instead of the compiled-in defaults. After an operator adds \
-            a new model via `athena allowlist add`, this re-runs init to \
-            prefetch it. The data-dir hosts the SQLite store; default \
-            ~/.athena. LLM ids are included.
+            Read the per-module default model ids from the daemon's TOML \
+            config (`model`, `embedding_model`, `transcription_model`, \
+            `diarization_model`, `speaker_embedding_model`) and pull those \
+            instead of the compiled-in defaults (ADR 026). After setting a \
+            default with `athena default --module M <id>`, this re-runs init \
+            to prefetch it.
             """
     )
-    var fromAllowlist: Bool = false
+    var fromConfig: Bool = false
 
-    @Option(help: "Runtime/data dir (default ~/.athena). Used with --from-allowlist.")
-    var dataDir: String?
+    @Option(help: "Config file (overrides auto-resolution). Used with --from-config.")
+    var config: String?
 
     func run() async throws {
         let root =
@@ -59,14 +60,13 @@ struct Init: AsyncParsableCommand {
             } ?? ModelStore.defaultRoot
 
         let aux: [(role: String, id: String)]
-        if fromAllowlist {
-            aux = try await readAllowlistAsAux()
+        if fromConfig {
+            aux = readConfigAsAux()
             guard !aux.isEmpty else {
                 print(
-                    "athena init --from-allowlist: no allowlist rows in "
-                        + "\(dataDir ?? "~/.athena")/athena.sqlite. Run "
-                        + "`athena load` once (seeds CLI flags) or "
-                        + "`athena allowlist add` first.")
+                    "athena init --from-config: no per-module default model "
+                        + "keys set in the config. Set one with "
+                        + "`athena default --module <m> <id>` first.")
                 return
             }
         } else {
@@ -91,9 +91,9 @@ struct Init: AsyncParsableCommand {
 
         print(
             "athena init — pulling \(aux.count) "
-                + (fromAllowlist ? "allowlist " : "default auxiliary ")
+                + (fromConfig ? "configured " : "default auxiliary ")
                 + "models into \(root.path)")
-        if !fromAllowlist {
+        if !fromConfig {
             print(
                 "note: these are multi-GB downloads. The LLM is NOT included "
                     + "— choose one with `athena pull` / `athena default`.")
@@ -149,35 +149,26 @@ struct Init: AsyncParsableCommand {
         if failed > 0 { throw ExitCode.failure }
     }
 
-    /// M43.2 — load every (module, id) row from the SQLite allowlist and
-    /// map it into the `(role, id)` shape the existing pull loop expects.
-    /// Mirrors the module→role labels init has always used; `llm` rows
-    /// are included so an operator who added an LLM via `athena allowlist
-    /// add` can prefetch the weights with one command.
-    private func readAllowlistAsAux() async throws
-        -> [(role: String, id: String)]
-    {
-        let dir = dataDir.map {
-            URL(
-                fileURLWithPath: ($0 as NSString).expandingTildeInPath,
-                isDirectory: true)
-        } ?? AthenaEnv.userHome()
-            .appendingPathComponent(".athena", isDirectory: true)
-        let dbURL = dir.appendingPathComponent("athena.sqlite")
-        let store = try AthenaStore(
-            path: dbURL, key: StoreKey.resolve())
-        let rows = await store.listModelAllowlist()
-        return rows.map { row -> (role: String, id: String) in
-            let role: String
-            switch row.module {
-            case "llm": role = "llm"
-            case "textEmbedding": role = "embeddings"
-            case "transcription": role = "transcription"
-            case "diarization": role = "diarization"
-            case "speakerEmbedding": role = "speaker-embeddings"
-            default: role = row.module
-            }
-            return (role: role, id: row.id)
+    /// ADR 026 — read the per-module default model ids from the TOML config
+    /// and map them into the `(role, id)` shape the pull loop expects, so an
+    /// operator who set `athena default --module M <id>` can prefetch every
+    /// configured default with one command. Modules with no configured default
+    /// are skipped (nothing to pull).
+    private func readConfigAsAux() -> [(role: String, id: String)] {
+        guard
+            let cfg = try? AthenaConfig.parse(
+                file: ConfigEditor.resolvePath(config))
+        else { return [] }
+        var out: [(role: String, id: String)] = []
+        if let id = cfg.model { out.append(("llm", id)) }
+        if let id = cfg.embeddingModel { out.append(("embeddings", id)) }
+        if let id = cfg.transcriptionModel {
+            out.append(("transcription", id))
         }
+        if let id = cfg.diarizationModel { out.append(("diarization", id)) }
+        if let id = cfg.speakerEmbeddingModel {
+            out.append(("speaker-embeddings", id))
+        }
+        return out
     }
 }

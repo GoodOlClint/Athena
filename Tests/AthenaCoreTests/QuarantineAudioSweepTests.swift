@@ -70,9 +70,7 @@ final class QuarantineAudioSweepTests: XCTestCase {
         func bytes(_ u: URL) -> Data { (try? Data(contentsOf: u)) ?? Data() }
 
         // --- Transcription: Whisper, then Parakeet (shared slot, rebind). ---
-        let t = MLXTranscriptionModule(
-            modelIds: ["whisper-large-v3-turbo", "parakeet-tdt-0.6b-v3"],
-            modelStoreRoot: Self.storeRoot)
+        let t = MLXTranscriptionModule(modelStoreRoot: Self.storeRoot)
         for model in ["whisper-large-v3-turbo", "parakeet-tdt-0.6b-v3"] {
             do { try await t.rebind(to: model) } catch {
                 mark("SKIP transcription/\(model): load failed — \(error)")
@@ -89,12 +87,7 @@ final class QuarantineAudioSweepTests: XCTestCase {
         }
 
         // --- Diarization: Sortformer (diarize), then pyannote (segment). ---
-        let d = MLXDiarizationModule(
-            modelIds: [
-                "diar_streaming_sortformer_4spk-v2.1-fp16",
-                "Pyannote-Segmentation-MLX",
-            ],
-            modelStoreRoot: Self.storeRoot)
+        let d = MLXDiarizationModule(modelStoreRoot: Self.storeRoot)
         if (try? await d.rebind(to: "diar_streaming_sortformer_4spk-v2.1-fp16"))
             != nil
         {
@@ -118,9 +111,7 @@ final class QuarantineAudioSweepTests: XCTestCase {
         } else { mark("SKIP segment/pyannote: load failed") }
 
         // --- Speaker embedding: WeSpeaker (whole-clip + sliding window). ---
-        let s = MLXSpeakerEmbeddingModule(
-            modelIds: ["WeSpeaker-ResNet34-LM-MLX"],
-            modelStoreRoot: Self.storeRoot)
+        let s = MLXSpeakerEmbeddingModule(modelStoreRoot: Self.storeRoot)
         if (try? await s.rebind(to: "WeSpeaker-ResNet34-LM-MLX")) != nil {
             for f in files {
                 await probe("spk.embed | \(f.lastPathComponent)") {
