@@ -200,7 +200,7 @@
       "source_location": "",
       "_origin": "ast",
       "id": "sendable",
-      "community": 69,
+      "community": 342,
       "norm_label": "sendable"
     },
     {
@@ -210,7 +210,7 @@
       "source_location": "",
       "_origin": "ast",
       "id": "equatable",
-      "community": 286,
+      "community": 129,
       "norm_label": "equatable"
     },
     {
@@ -840,7 +840,7 @@
       "source_location": "",
       "_origin": "ast",
       "id": "string",
-      "community": 280,
+      "community": 7,
       "norm_label": "string"
     },
     {
@@ -950,7 +950,7 @@
       "source_location": "",
       "_origin": "ast",
       "id": "caseiterable",
-      "community": 343,
+      "community": 203,
       "norm_label": "caseiterable"
     },
     {
@@ -1470,7 +1470,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "athenacore_inferencemodule",
-      "community": 241,
+      "community": 11,
       "norm_label": "inferencemodule.swift"
     },
     {
@@ -1480,7 +1480,7 @@
       "source_location": "L17",
       "_origin": "ast",
       "id": "athenacore_inferencemodule_inferencemodule",
-      "community": 241,
+      "community": 11,
       "norm_label": "inferencemodule"
     },
     {
@@ -1490,7 +1490,7 @@
       "source_location": "",
       "_origin": "ast",
       "id": "actor",
-      "community": 241,
+      "community": 11,
       "norm_label": "actor"
     },
     {
@@ -1560,7 +1560,7 @@
       "source_location": "",
       "_origin": "ast",
       "id": "customstringconvertible",
-      "community": 107,
+      "community": 119,
       "norm_label": "customstringconvertible"
     },
     {
@@ -2040,7 +2040,7 @@
       "source_location": "L22",
       "_origin": "ast",
       "id": "sources_athenacore_memorygovernor_swift_moduleid",
-      "community": 120,
+      "community": 122,
       "norm_label": "moduleid"
     },
     {
@@ -2060,7 +2060,7 @@
       "source_location": "L24",
       "_origin": "ast",
       "id": "sources_athenacore_memorygovernor_swift_int",
-      "community": 120,
+      "community": 122,
       "norm_label": "int"
     },
     {
@@ -2104,10 +2104,20 @@
       "norm_label": "governorsnapshot"
     },
     {
+      "label": "String",
+      "file_type": "code",
+      "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
+      "source_location": "L71",
+      "_origin": "ast",
+      "id": "sources_athenacore_memorygovernor_swift_string",
+      "community": 120,
+      "norm_label": "string"
+    },
+    {
       "label": ".init()",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L67",
+      "source_location": "L73",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_governorsnapshot_init",
       "community": 120,
@@ -2117,7 +2127,7 @@
       "label": "UnloadedReason",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L86",
+      "source_location": "L94",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_unloadedreason",
       "community": 120,
@@ -2127,7 +2137,7 @@
       "label": "memoryPressure",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L90",
+      "source_location": "L98",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_unloadedreason_memorypressure",
       "community": 120,
@@ -2137,7 +2147,7 @@
       "label": "operatorUnload",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L93",
+      "source_location": "L101",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_unloadedreason_operatorunload",
       "community": 120,
@@ -2147,7 +2157,7 @@
       "label": "loadFailed",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L97",
+      "source_location": "L105",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_unloadedreason_loadfailed",
       "community": 120,
@@ -2157,17 +2167,17 @@
       "label": "MemoryGovernor",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L108",
+      "source_location": "L116",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_memorygovernor",
-      "community": 120,
+      "community": 122,
       "norm_label": "memorygovernor"
     },
     {
       "label": "Entry",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L109",
+      "source_location": "L117",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_entry",
       "community": 120,
@@ -2177,7 +2187,7 @@
       "label": "InferenceModule",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L110",
+      "source_location": "L118",
       "_origin": "ast",
       "id": "sources_athenacore_memorygovernor_swift_inferencemodule",
       "community": 120,
@@ -2187,17 +2197,17 @@
       "label": "MemoryReservation",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L112",
+      "source_location": "L120",
       "_origin": "ast",
       "id": "sources_athenacore_memorygovernor_swift_memoryreservation",
-      "community": 120,
+      "community": 122,
       "norm_label": "memoryreservation"
     },
     {
       "label": "Date",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L114",
+      "source_location": "L122",
       "_origin": "ast",
       "id": "sources_athenacore_memorygovernor_swift_date",
       "community": 120,
@@ -2207,177 +2217,177 @@
       "label": "Task",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L172",
+      "source_location": "L180",
       "_origin": "ast",
       "id": "sources_athenacore_memorygovernor_swift_task",
-      "community": 120,
+      "community": 122,
       "norm_label": "task"
     },
     {
       "label": "Void",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L172",
+      "source_location": "L180",
       "_origin": "ast",
       "id": "sources_athenacore_memorygovernor_swift_void",
-      "community": 120,
+      "community": 122,
       "norm_label": "void"
     },
     {
       "label": "Error",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L172",
+      "source_location": "L180",
       "_origin": "ast",
       "id": "sources_athenacore_memorygovernor_swift_error",
-      "community": 120,
+      "community": 92,
       "norm_label": "error"
     },
     {
       "label": "UInt64",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L179",
+      "source_location": "L187",
       "_origin": "ast",
       "id": "sources_athenacore_memorygovernor_swift_uint64",
-      "community": 120,
+      "community": 122,
       "norm_label": "uint64"
     },
     {
       "label": "Never",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L192",
+      "source_location": "L200",
       "_origin": "ast",
       "id": "sources_athenacore_memorygovernor_swift_never",
-      "community": 120,
+      "community": 122,
       "norm_label": "never"
     },
     {
       "label": "Set",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L206",
+      "source_location": "L214",
       "_origin": "ast",
       "id": "sources_athenacore_memorygovernor_swift_set",
-      "community": 120,
+      "community": 122,
       "norm_label": "set"
     },
     {
       "label": "MemoryProbe",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L207",
+      "source_location": "L215",
       "_origin": "ast",
       "id": "memoryprobe",
-      "community": 120,
+      "community": 122,
       "norm_label": "memoryprobe"
     },
     {
       "label": "UnloadHook",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L208",
+      "source_location": "L216",
       "_origin": "ast",
       "id": "unloadhook",
-      "community": 120,
+      "community": 122,
       "norm_label": "unloadhook"
     },
     {
       "label": "EventHook",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L209",
+      "source_location": "L217",
       "_origin": "ast",
       "id": "eventhook",
-      "community": 120,
+      "community": 122,
       "norm_label": "eventhook"
     },
     {
       "label": "PromptCachePoolProbe",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L210",
+      "source_location": "L218",
       "_origin": "ast",
       "id": "promptcachepoolprobe",
-      "community": 120,
+      "community": 122,
       "norm_label": "promptcachepoolprobe"
     },
     {
       "label": "PromptCacheReliefHook",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L211",
+      "source_location": "L219",
       "_origin": "ast",
       "id": "promptcachereliefhook",
-      "community": 120,
+      "community": 122,
       "norm_label": "promptcachereliefhook"
     },
     {
       "label": "FootprintProbe",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L216",
+      "source_location": "L224",
       "_origin": "ast",
       "id": "footprintprobe",
-      "community": 120,
+      "community": 122,
       "norm_label": "footprintprobe"
     },
     {
       "label": "ReclaimCacheHook",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L217",
+      "source_location": "L225",
       "_origin": "ast",
       "id": "reclaimcachehook",
-      "community": 120,
+      "community": 122,
       "norm_label": "reclaimcachehook"
     },
     {
       "label": "GovernorMemory",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L218",
+      "source_location": "L226",
       "_origin": "ast",
       "id": "governormemory",
-      "community": 120,
+      "community": 122,
       "norm_label": "governormemory"
     },
     {
       "label": ".init()",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L224",
+      "source_location": "L232",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_memorygovernor_init",
-      "community": 120,
+      "community": 122,
       "norm_label": ".init()"
     },
     {
       "label": "GovernorConfig",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L249",
+      "source_location": "L257",
       "_origin": "ast",
       "id": "governorconfig",
-      "community": 120,
+      "community": 122,
       "norm_label": "governorconfig"
     },
     {
       "label": ".safeBudget()",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L282",
+      "source_location": "L290",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_memorygovernor_safebudget",
-      "community": 120,
+      "community": 122,
       "norm_label": ".safebudget()"
     },
     {
       "label": ".register()",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L291",
+      "source_location": "L299",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_memorygovernor_register",
       "community": 120,
@@ -2387,7 +2397,7 @@
       "label": "LoadStatus",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L307",
+      "source_location": "L315",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_loadstatus",
       "community": 120,
@@ -2397,7 +2407,7 @@
       "label": "loaded",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L308",
+      "source_location": "L316",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_loadstatus_loaded",
       "community": 120,
@@ -2407,7 +2417,7 @@
       "label": "loading",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L309",
+      "source_location": "L317",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_loadstatus_loading",
       "community": 120,
@@ -2417,27 +2427,27 @@
       "label": ".beginLoadIfNeeded()",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L319",
+      "source_location": "L327",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_memorygovernor_beginloadifneeded",
-      "community": 120,
+      "community": 122,
       "norm_label": ".beginloadifneeded()"
     },
     {
       "label": ".clearInFlight()",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L361",
+      "source_location": "L369",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_memorygovernor_clearinflight",
-      "community": 120,
+      "community": 122,
       "norm_label": ".clearinflight()"
     },
     {
       "label": ".setPulling()",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L370",
+      "source_location": "L378",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_memorygovernor_setpulling",
       "community": 120,
@@ -2447,37 +2457,37 @@
       "label": ".ensureLoaded()",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L377",
+      "source_location": "L385",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_memorygovernor_ensureloaded",
-      "community": 120,
+      "community": 122,
       "norm_label": ".ensureloaded()"
     },
     {
       "label": ".awaitLoad()",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L425",
+      "source_location": "L433",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_memorygovernor_awaitload",
-      "community": 120,
+      "community": 122,
       "norm_label": ".awaitload()"
     },
     {
       "label": "Double",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L425",
+      "source_location": "L433",
       "_origin": "ast",
       "id": "sources_athenacore_memorygovernor_swift_double",
-      "community": 120,
+      "community": 122,
       "norm_label": "double"
     },
     {
       "label": "LoadPeek",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L493",
+      "source_location": "L501",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_loadpeek",
       "community": 120,
@@ -2487,7 +2497,7 @@
       "label": "loaded",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L494",
+      "source_location": "L502",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_loadpeek_loaded",
       "community": 120,
@@ -2497,7 +2507,7 @@
       "label": "pulling",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L495",
+      "source_location": "L503",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_loadpeek_pulling",
       "community": 120,
@@ -2507,7 +2517,7 @@
       "label": "needsLoad",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L496",
+      "source_location": "L504",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_loadpeek_needsload",
       "community": 120,
@@ -2517,7 +2527,7 @@
       "label": ".peekLoad()",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L498",
+      "source_location": "L506",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_memorygovernor_peekload",
       "community": 120,
@@ -2527,47 +2537,47 @@
       "label": ".relievePressure()",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L516",
+      "source_location": "L524",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_memorygovernor_relievepressure",
-      "community": 120,
+      "community": 122,
       "norm_label": ".relievepressure()"
     },
     {
       "label": ".relievePromptCachePressureIfNeeded()",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L548",
+      "source_location": "L556",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_memorygovernor_relievepromptcachepressureifneeded",
-      "community": 120,
+      "community": 122,
       "norm_label": ".relievepromptcachepressureifneeded()"
     },
     {
       "label": ".performLoad()",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L555",
+      "source_location": "L563",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_memorygovernor_performload",
-      "community": 120,
+      "community": 122,
       "norm_label": ".performload()"
     },
     {
       "label": ".fmtBytes()",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L680",
+      "source_location": "L688",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_memorygovernor_fmtbytes",
-      "community": 120,
+      "community": 122,
       "norm_label": ".fmtbytes()"
     },
     {
       "label": ".ms()",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L686",
+      "source_location": "L694",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_memorygovernor_ms",
       "community": 120,
@@ -2577,80 +2587,80 @@
       "label": ".reconcile()",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L696",
+      "source_location": "L704",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_memorygovernor_reconcile",
-      "community": 120,
+      "community": 122,
       "norm_label": ".reconcile()"
     },
     {
       "label": ".admissionDenominator()",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L727",
+      "source_location": "L735",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_memorygovernor_admissiondenominator",
-      "community": 120,
+      "community": 122,
       "norm_label": ".admissiondenominator()"
     },
     {
       "label": ".makeRoom()",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L741",
+      "source_location": "L749",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_memorygovernor_makeroom",
-      "community": 120,
+      "community": 122,
       "norm_label": ".makeroom()"
     },
     {
       "label": ".evictSync()",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L808",
+      "source_location": "L816",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_memorygovernor_evictsync",
-      "community": 120,
+      "community": 122,
       "norm_label": ".evictsync()"
     },
     {
       "label": ".markUnloaded()",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L833",
+      "source_location": "L841",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_memorygovernor_markunloaded",
-      "community": 120,
+      "community": 122,
       "norm_label": ".markunloaded()"
     },
     {
       "label": ".releaseSlot()",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L850",
+      "source_location": "L858",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_memorygovernor_releaseslot",
-      "community": 120,
+      "community": 122,
       "norm_label": ".releaseslot()"
     },
     {
       "label": ".unload()",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L865",
+      "source_location": "L873",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_memorygovernor_unload",
-      "community": 120,
+      "community": 122,
       "norm_label": ".unload()"
     },
     {
       "label": ".snapshot()",
       "file_type": "code",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L897",
+      "source_location": "L905",
       "_origin": "ast",
       "id": "athenacore_memorygovernor_memorygovernor_snapshot",
-      "community": 120,
+      "community": 122,
       "norm_label": ".snapshot()"
     },
     {
@@ -2960,7 +2970,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "athenacore_modelselectable",
-      "community": 241,
+      "community": 11,
       "norm_label": "modelselectable.swift"
     },
     {
@@ -2970,7 +2980,7 @@
       "source_location": "L19",
       "_origin": "ast",
       "id": "athenacore_modelselectable_modelselectable",
-      "community": 241,
+      "community": 11,
       "norm_label": "modelselectable"
     },
     {
@@ -3230,7 +3240,7 @@
       "source_location": "L43",
       "_origin": "ast",
       "id": "athenacore_modelsupport_modelmodality",
-      "community": 128,
+      "community": 53,
       "norm_label": "modelmodality"
     },
     {
@@ -3240,7 +3250,7 @@
       "source_location": "L45",
       "_origin": "ast",
       "id": "athenacore_modelsupport_modelmodality_llm",
-      "community": 128,
+      "community": 53,
       "norm_label": "llm"
     },
     {
@@ -3250,7 +3260,7 @@
       "source_location": "L47",
       "_origin": "ast",
       "id": "athenacore_modelsupport_modelmodality_vision",
-      "community": 128,
+      "community": 53,
       "norm_label": "vision"
     },
     {
@@ -3260,7 +3270,7 @@
       "source_location": "L49",
       "_origin": "ast",
       "id": "athenacore_modelsupport_modelmodality_embedding",
-      "community": 128,
+      "community": 53,
       "norm_label": "embedding"
     },
     {
@@ -3270,7 +3280,7 @@
       "source_location": "L52",
       "_origin": "ast",
       "id": "athenacore_modelsupport_modelmodality_transcription",
-      "community": 128,
+      "community": 53,
       "norm_label": "transcription"
     },
     {
@@ -3280,7 +3290,7 @@
       "source_location": "L54",
       "_origin": "ast",
       "id": "athenacore_modelsupport_modelmodality_diarization",
-      "community": 128,
+      "community": 53,
       "norm_label": "diarization"
     },
     {
@@ -3290,7 +3300,7 @@
       "source_location": "L56",
       "_origin": "ast",
       "id": "athenacore_modelsupport_modelmodality_speakerembedding",
-      "community": 128,
+      "community": 53,
       "norm_label": "speakerembedding"
     },
     {
@@ -3300,7 +3310,7 @@
       "source_location": "L58",
       "_origin": "ast",
       "id": "athenacore_modelsupport_modelmodality_unsupported",
-      "community": 128,
+      "community": 53,
       "norm_label": "unsupported"
     },
     {
@@ -3310,7 +3320,7 @@
       "source_location": "L62",
       "_origin": "ast",
       "id": "sources_athenacore_modelsupport_swift_string",
-      "community": 128,
+      "community": 53,
       "norm_label": "string"
     },
     {
@@ -3620,7 +3630,7 @@
       "source_location": "L52",
       "_origin": "ast",
       "id": "uuid",
-      "community": 246,
+      "community": 257,
       "norm_label": "uuid"
     },
     {
@@ -4100,7 +4110,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "athenacore_speculativestats",
-      "community": 122,
+      "community": 342,
       "norm_label": "speculativestats.swift"
     },
     {
@@ -4110,7 +4120,7 @@
       "source_location": "L17",
       "_origin": "ast",
       "id": "athenacore_speculativestats_speculativeacceptanceobserver",
-      "community": 122,
+      "community": 342,
       "norm_label": "speculativeacceptanceobserver"
     },
     {
@@ -4120,7 +4130,7 @@
       "source_location": "L24",
       "_origin": "ast",
       "id": "athenacore_speculativestats_speculativestats",
-      "community": 122,
+      "community": 342,
       "norm_label": "speculativestats"
     },
     {
@@ -4130,7 +4140,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "athenacore_storemode",
-      "community": 280,
+      "community": 327,
       "norm_label": "storemode.swift"
     },
     {
@@ -4140,7 +4150,7 @@
       "source_location": "L4",
       "_origin": "ast",
       "id": "athenacore_storemode_storepersistence",
-      "community": 280,
+      "community": 327,
       "norm_label": "storepersistence"
     },
     {
@@ -4150,7 +4160,7 @@
       "source_location": "L6",
       "_origin": "ast",
       "id": "athenacore_storemode_storepersistence_persistent",
-      "community": 280,
+      "community": 327,
       "norm_label": "persistent"
     },
     {
@@ -4160,7 +4170,7 @@
       "source_location": "L9",
       "_origin": "ast",
       "id": "athenacore_storemode_storepersistence_ephemeral",
-      "community": 280,
+      "community": 327,
       "norm_label": "ephemeral"
     },
     {
@@ -4170,7 +4180,7 @@
       "source_location": "L21",
       "_origin": "ast",
       "id": "athenacore_storemode_storemode",
-      "community": 280,
+      "community": 327,
       "norm_label": "storemode"
     },
     {
@@ -4180,7 +4190,7 @@
       "source_location": "L22",
       "_origin": "ast",
       "id": "sources_athenacore_storemode_swift_set",
-      "community": 280,
+      "community": 327,
       "norm_label": "set"
     },
     {
@@ -4190,7 +4200,7 @@
       "source_location": "L26",
       "_origin": "ast",
       "id": "athenacore_storemode_storemode_isloopback",
-      "community": 280,
+      "community": 327,
       "norm_label": ".isloopback()"
     },
     {
@@ -4200,7 +4210,7 @@
       "source_location": "L26",
       "_origin": "ast",
       "id": "sources_athenacore_storemode_swift_bool",
-      "community": 280,
+      "community": 327,
       "norm_label": "bool"
     },
     {
@@ -4210,7 +4220,7 @@
       "source_location": "L43",
       "_origin": "ast",
       "id": "athenacore_storemode_storemode_resolve",
-      "community": 280,
+      "community": 327,
       "norm_label": ".resolve()"
     },
     {
@@ -4470,7 +4480,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "athenadeploy_cliparse",
-      "community": 19,
+      "community": 139,
       "norm_label": "cliparse.swift"
     },
     {
@@ -4480,7 +4490,7 @@
       "source_location": "L13",
       "_origin": "ast",
       "id": "athenadeploy_cliparse_parsettlseconds",
-      "community": 19,
+      "community": 139,
       "norm_label": "parsettlseconds()"
     },
     {
@@ -4490,7 +4500,7 @@
       "source_location": "L13",
       "_origin": "ast",
       "id": "sources_athenadeploy_cliparse_swift_string",
-      "community": 19,
+      "community": 139,
       "norm_label": "string"
     },
     {
@@ -4500,7 +4510,7 @@
       "source_location": "L13",
       "_origin": "ast",
       "id": "sources_athenadeploy_cliparse_swift_int",
-      "community": 19,
+      "community": 139,
       "norm_label": "int"
     },
     {
@@ -4510,7 +4520,7 @@
       "source_location": "L35",
       "_origin": "ast",
       "id": "athenadeploy_cliparse_isvalidlabel",
-      "community": 19,
+      "community": 139,
       "norm_label": "isvalidlabel()"
     },
     {
@@ -4520,7 +4530,7 @@
       "source_location": "L35",
       "_origin": "ast",
       "id": "sources_athenadeploy_cliparse_swift_bool",
-      "community": 19,
+      "community": 139,
       "norm_label": "bool"
     },
     {
@@ -4830,7 +4840,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "athenadeploy_launchdplist",
-      "community": 139,
+      "community": 179,
       "norm_label": "launchdplist.swift"
     },
     {
@@ -4840,7 +4850,7 @@
       "source_location": "L7",
       "_origin": "ast",
       "id": "athenadeploy_launchdplist_launchdplist",
-      "community": 139,
+      "community": 179,
       "norm_label": "launchdplist"
     },
     {
@@ -4850,7 +4860,7 @@
       "source_location": "L9",
       "_origin": "ast",
       "id": "athenadeploy_launchdplist_launchdplist_dictionary",
-      "community": 139,
+      "community": 179,
       "norm_label": ".dictionary()"
     },
     {
@@ -4860,7 +4870,7 @@
       "source_location": "L9",
       "_origin": "ast",
       "id": "sources_athenadeploy_launchdplist_swift_string",
-      "community": 139,
+      "community": 179,
       "norm_label": "string"
     },
     {
@@ -4870,7 +4880,7 @@
       "source_location": "L9",
       "_origin": "ast",
       "id": "sources_athenadeploy_launchdplist_swift_athenaconfig",
-      "community": 139,
+      "community": 179,
       "norm_label": "athenaconfig"
     },
     {
@@ -4880,7 +4890,7 @@
       "source_location": "L9",
       "_origin": "ast",
       "id": "sources_athenadeploy_launchdplist_swift_any",
-      "community": 139,
+      "community": 179,
       "norm_label": "any"
     },
     {
@@ -4890,7 +4900,7 @@
       "source_location": "L179",
       "_origin": "ast",
       "id": "athenadeploy_launchdplist_launchdplist_xmldata",
-      "community": 139,
+      "community": 179,
       "norm_label": ".xmldata()"
     },
     {
@@ -4900,7 +4910,7 @@
       "source_location": "L179",
       "_origin": "ast",
       "id": "sources_athenadeploy_launchdplist_swift_data",
-      "community": 139,
+      "community": 179,
       "norm_label": "data"
     },
     {
@@ -4910,7 +4920,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "athenadeploy_versionguard",
-      "community": 280,
+      "community": 7,
       "norm_label": "versionguard.swift"
     },
     {
@@ -4920,7 +4930,7 @@
       "source_location": "L7",
       "_origin": "ast",
       "id": "athenadeploy_versionguard_versionguard",
-      "community": 280,
+      "community": 7,
       "norm_label": "versionguard"
     },
     {
@@ -4930,7 +4940,7 @@
       "source_location": "L8",
       "_origin": "ast",
       "id": "athenadeploy_versionguard_transition",
-      "community": 280,
+      "community": 7,
       "norm_label": "transition"
     },
     {
@@ -4940,7 +4950,7 @@
       "source_location": "L9",
       "_origin": "ast",
       "id": "athenadeploy_versionguard_transition_fresh",
-      "community": 280,
+      "community": 7,
       "norm_label": "fresh"
     },
     {
@@ -4950,7 +4960,7 @@
       "source_location": "L10",
       "_origin": "ast",
       "id": "athenadeploy_versionguard_transition_reinstall",
-      "community": 280,
+      "community": 7,
       "norm_label": "reinstall"
     },
     {
@@ -4960,7 +4970,7 @@
       "source_location": "L11",
       "_origin": "ast",
       "id": "athenadeploy_versionguard_transition_upgrade",
-      "community": 280,
+      "community": 7,
       "norm_label": "upgrade"
     },
     {
@@ -4970,7 +4980,7 @@
       "source_location": "L12",
       "_origin": "ast",
       "id": "athenadeploy_versionguard_transition_downgrade",
-      "community": 280,
+      "community": 7,
       "norm_label": "downgrade"
     },
     {
@@ -4980,7 +4990,7 @@
       "source_location": "L17",
       "_origin": "ast",
       "id": "athenadeploy_versionguard_versionguard_compare",
-      "community": 280,
+      "community": 7,
       "norm_label": ".compare()"
     },
     {
@@ -4990,7 +5000,7 @@
       "source_location": "L17",
       "_origin": "ast",
       "id": "sources_athenadeploy_versionguard_swift_int",
-      "community": 280,
+      "community": 7,
       "norm_label": "int"
     },
     {
@@ -5000,7 +5010,7 @@
       "source_location": "L28",
       "_origin": "ast",
       "id": "athenadeploy_versionguard_versionguard_classify",
-      "community": 280,
+      "community": 7,
       "norm_label": ".classify()"
     },
     {
@@ -5010,7 +5020,7 @@
       "source_location": "L43",
       "_origin": "ast",
       "id": "athenadeploy_versionguard_versionguard_summary",
-      "community": 280,
+      "community": 7,
       "norm_label": ".summary()"
     },
     {
@@ -5360,7 +5370,7 @@
       "source_location": "",
       "_origin": "ast",
       "id": "inferencemodule",
-      "community": 54,
+      "community": 40,
       "norm_label": "inferencemodule"
     },
     {
@@ -5510,7 +5520,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "athenallm_athenamodelregistration",
-      "community": 41,
+      "community": 316,
       "norm_label": "athenamodelregistration.swift"
     },
     {
@@ -5520,7 +5530,7 @@
       "source_location": "L19",
       "_origin": "ast",
       "id": "athenallm_athenamodelregistration_athenamodelregistration",
-      "community": 41,
+      "community": 316,
       "norm_label": "athenamodelregistration"
     },
     {
@@ -5530,7 +5540,7 @@
       "source_location": "L36",
       "_origin": "ast",
       "id": "sources_athenallm_athenamodelregistration_swift_url",
-      "community": 41,
+      "community": 316,
       "norm_label": "url"
     },
     {
@@ -5540,7 +5550,7 @@
       "source_location": "L40",
       "_origin": "ast",
       "id": "athenallm_athenamodelregistration_athenamodelregistration_checkpointhasmtp",
-      "community": 41,
+      "community": 316,
       "norm_label": ".checkpointhasmtp()"
     },
     {
@@ -5550,7 +5560,7 @@
       "source_location": "L40",
       "_origin": "ast",
       "id": "sources_athenallm_athenamodelregistration_swift_bool",
-      "community": 41,
+      "community": 316,
       "norm_label": "bool"
     },
     {
@@ -5560,7 +5570,7 @@
       "source_location": "L61",
       "_origin": "ast",
       "id": "athenallm_athenamodelregistration_athenamodelregistration_safetensorsheaderhasmtp",
-      "community": 41,
+      "community": 316,
       "norm_label": ".safetensorsheaderhasmtp()"
     },
     {
@@ -5570,7 +5580,7 @@
       "source_location": "L78",
       "_origin": "ast",
       "id": "athenallm_athenamodelregistration_athenamodelregistration_decode",
-      "community": 41,
+      "community": 316,
       "norm_label": ".decode()"
     },
     {
@@ -5580,7 +5590,7 @@
       "source_location": "L78",
       "_origin": "ast",
       "id": "c",
-      "community": 41,
+      "community": 316,
       "norm_label": "c"
     },
     {
@@ -5590,7 +5600,7 @@
       "source_location": "L78",
       "_origin": "ast",
       "id": "sources_athenallm_athenamodelregistration_swift_data",
-      "community": 41,
+      "community": 316,
       "norm_label": "data"
     },
     {
@@ -5600,7 +5610,7 @@
       "source_location": "L88",
       "_origin": "ast",
       "id": "athenallm_athenamodelregistration_athenamodelregistration_install",
-      "community": 41,
+      "community": 316,
       "norm_label": ".install()"
     },
     {
@@ -6390,7 +6400,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "athenallm_guidedsubstrate",
-      "community": 19,
+      "community": 8,
       "norm_label": "guidedsubstrate.swift"
     },
     {
@@ -6400,7 +6410,7 @@
       "source_location": "L20",
       "_origin": "ast",
       "id": "athenallm_guidedsubstrate_guidedsubstrate",
-      "community": 19,
+      "community": 8,
       "norm_label": "guidedsubstrate"
     },
     {
@@ -6410,7 +6420,7 @@
       "source_location": "L27",
       "_origin": "ast",
       "id": "athenallm_guidedsubstrate_guidedlogitprocessor",
-      "community": 19,
+      "community": 8,
       "norm_label": "guidedlogitprocessor"
     },
     {
@@ -6420,7 +6430,7 @@
       "source_location": "",
       "_origin": "ast",
       "id": "logitprocessor",
-      "community": 19,
+      "community": 8,
       "norm_label": "logitprocessor"
     },
     {
@@ -6430,7 +6440,7 @@
       "source_location": "L28",
       "_origin": "ast",
       "id": "sources_athenallm_guidedsubstrate_swift_structuredguide",
-      "community": 19,
+      "community": 8,
       "norm_label": "structuredguide"
     },
     {
@@ -6440,7 +6450,7 @@
       "source_location": "L29",
       "_origin": "ast",
       "id": "sources_athenallm_guidedsubstrate_swift_int",
-      "community": 19,
+      "community": 8,
       "norm_label": "int"
     },
     {
@@ -6450,7 +6460,7 @@
       "source_location": "L33",
       "_origin": "ast",
       "id": "sources_athenallm_guidedsubstrate_swift_logprobsink",
-      "community": 19,
+      "community": 8,
       "norm_label": "logprobsink"
     },
     {
@@ -6460,7 +6470,7 @@
       "source_location": "L35",
       "_origin": "ast",
       "id": "athenallm_guidedsubstrate_guidedlogitprocessor_prompt",
-      "community": 19,
+      "community": 8,
       "norm_label": ".prompt()"
     },
     {
@@ -6470,7 +6480,7 @@
       "source_location": "L35",
       "_origin": "ast",
       "id": "sources_athenallm_guidedsubstrate_swift_mlxarray",
-      "community": 19,
+      "community": 8,
       "norm_label": "mlxarray"
     },
     {
@@ -6480,7 +6490,7 @@
       "source_location": "L37",
       "_origin": "ast",
       "id": "athenallm_guidedsubstrate_guidedlogitprocessor_process",
-      "community": 19,
+      "community": 8,
       "norm_label": ".process()"
     },
     {
@@ -6490,7 +6500,7 @@
       "source_location": "L53",
       "_origin": "ast",
       "id": "athenallm_guidedsubstrate_guidedlogitprocessor_didsample",
-      "community": 19,
+      "community": 8,
       "norm_label": ".didsample()"
     },
     {
@@ -6500,7 +6510,7 @@
       "source_location": "L69",
       "_origin": "ast",
       "id": "athenallm_guidedsubstrate_guidedsubstrate_generate",
-      "community": 19,
+      "community": 8,
       "norm_label": ".generate()"
     },
     {
@@ -6510,7 +6520,7 @@
       "source_location": "L69",
       "_origin": "ast",
       "id": "sources_athenallm_guidedsubstrate_swift_languagemodel",
-      "community": 19,
+      "community": 8,
       "norm_label": "languagemodel"
     },
     {
@@ -6860,7 +6870,7 @@
       "source_location": "L17",
       "_origin": "ast",
       "id": "athenallm_mlxllmmodule_llmgenerationparameters",
-      "community": 1,
+      "community": 42,
       "norm_label": "llmgenerationparameters"
     },
     {
@@ -6870,7 +6880,7 @@
       "source_location": "L18",
       "_origin": "ast",
       "id": "sources_athenallm_mlxllmmodule_swift_int",
-      "community": 1,
+      "community": 42,
       "norm_label": "int"
     },
     {
@@ -6880,7 +6890,7 @@
       "source_location": "L19",
       "_origin": "ast",
       "id": "sources_athenallm_mlxllmmodule_swift_float",
-      "community": 1,
+      "community": 42,
       "norm_label": "float"
     },
     {
@@ -6890,7 +6900,7 @@
       "source_location": "L26",
       "_origin": "ast",
       "id": "sources_athenallm_mlxllmmodule_swift_bool",
-      "community": 1,
+      "community": 42,
       "norm_label": "bool"
     },
     {
@@ -6900,7 +6910,7 @@
       "source_location": "L28",
       "_origin": "ast",
       "id": "sources_athenallm_mlxllmmodule_swift_kvcompression",
-      "community": 1,
+      "community": 42,
       "norm_label": "kvcompression"
     },
     {
@@ -6910,7 +6920,7 @@
       "source_location": "L30",
       "_origin": "ast",
       "id": "athenallm_mlxllmmodule_llmgenerationparameters_init",
-      "community": 1,
+      "community": 42,
       "norm_label": ".init()"
     },
     {
@@ -7010,7 +7020,7 @@
       "source_location": "L138",
       "_origin": "ast",
       "id": "sources_athenallm_mlxllmmodule_swift_task",
-      "community": 1,
+      "community": 42,
       "norm_label": "task"
     },
     {
@@ -7040,7 +7050,7 @@
       "source_location": "L152",
       "_origin": "ast",
       "id": "sources_athenallm_mlxllmmodule_swift_structuredvocabulary",
-      "community": 1,
+      "community": 42,
       "norm_label": "structuredvocabulary"
     },
     {
@@ -7100,7 +7110,7 @@
       "source_location": "L296",
       "_origin": "ast",
       "id": "athenallm_mlxllmmodule_mlxllmmodule_preflightpromptcache",
-      "community": 1,
+      "community": 42,
       "norm_label": ".preflightpromptcache()"
     },
     {
@@ -7110,7 +7120,7 @@
       "source_location": "L301",
       "_origin": "ast",
       "id": "sources_athenallm_mlxllmmodule_swift_chatturn",
-      "community": 1,
+      "community": 42,
       "norm_label": "chatturn"
     },
     {
@@ -7120,7 +7130,7 @@
       "source_location": "L328",
       "_origin": "ast",
       "id": "athenallm_mlxllmmodule_mlxllmmodule_chatmessages",
-      "community": 1,
+      "community": 42,
       "norm_label": ".chatmessages()"
     },
     {
@@ -7130,7 +7140,7 @@
       "source_location": "L328",
       "_origin": "ast",
       "id": "chat",
-      "community": 1,
+      "community": 42,
       "norm_label": "chat"
     },
     {
@@ -7140,7 +7150,7 @@
       "source_location": "L355",
       "_origin": "ast",
       "id": "athenallm_mlxllmmodule_mlxllmmodule_memoryestimate",
-      "community": 1,
+      "community": 42,
       "norm_label": ".memoryestimate()"
     },
     {
@@ -7300,7 +7310,7 @@
       "source_location": "L634",
       "_origin": "ast",
       "id": "athenallm_mlxllmmodule_mlxllmmodule_generate",
-      "community": 1,
+      "community": 42,
       "norm_label": ".generate()"
     },
     {
@@ -7310,7 +7320,7 @@
       "source_location": "L634",
       "_origin": "ast",
       "id": "sources_athenallm_mlxllmmodule_swift_asyncstream",
-      "community": 1,
+      "community": 42,
       "norm_label": "asyncstream"
     },
     {
@@ -7320,7 +7330,7 @@
       "source_location": "L648",
       "_origin": "ast",
       "id": "athenallm_mlxllmmodule_mlxllmmodule_generatemetered",
-      "community": 1,
+      "community": 42,
       "norm_label": ".generatemetered()"
     },
     {
@@ -7330,7 +7340,7 @@
       "source_location": "L648",
       "_origin": "ast",
       "id": "sources_athenallm_mlxllmmodule_swift_double",
-      "community": 1,
+      "community": 42,
       "norm_label": "double"
     },
     {
@@ -7340,7 +7350,7 @@
       "source_location": "L648",
       "_origin": "ast",
       "id": "sources_athenallm_mlxllmmodule_swift_logprobsrequest",
-      "community": 1,
+      "community": 42,
       "norm_label": "logprobsrequest"
     },
     {
@@ -7350,7 +7360,7 @@
       "source_location": "L648",
       "_origin": "ast",
       "id": "sources_athenallm_mlxllmmodule_swift_genchunk",
-      "community": 1,
+      "community": 42,
       "norm_label": "genchunk"
     },
     {
@@ -7360,7 +7370,7 @@
       "source_location": "L757",
       "_origin": "ast",
       "id": "athenallm_mlxllmmodule_mlxllmmodule_runspeculative",
-      "community": 1,
+      "community": 42,
       "norm_label": ".runspeculative()"
     },
     {
@@ -7370,7 +7380,7 @@
       "source_location": "L757",
       "_origin": "ast",
       "id": "sources_athenallm_mlxllmmodule_swift_tokenusage",
-      "community": 1,
+      "community": 42,
       "norm_label": "tokenusage"
     },
     {
@@ -7380,7 +7390,7 @@
       "source_location": "L757",
       "_origin": "ast",
       "id": "sources_athenallm_mlxllmmodule_swift_tokenlogprob",
-      "community": 1,
+      "community": 42,
       "norm_label": "tokenlogprob"
     },
     {
@@ -7390,7 +7400,7 @@
       "source_location": "L1112",
       "_origin": "ast",
       "id": "athenallm_mlxllmmodule_mlxllmmodule_buildlogprobs",
-      "community": 1,
+      "community": 42,
       "norm_label": ".buildlogprobs()"
     },
     {
@@ -7400,7 +7410,7 @@
       "source_location": "L1112",
       "_origin": "ast",
       "id": "sources_athenallm_mlxllmmodule_swift_logprobsink",
-      "community": 1,
+      "community": 42,
       "norm_label": "logprobsink"
     },
     {
@@ -7410,7 +7420,7 @@
       "source_location": "L1129",
       "_origin": "ast",
       "id": "athenallm_mlxllmmodule_mlxllmmodule_begingeneration",
-      "community": 1,
+      "community": 42,
       "norm_label": ".begingeneration()"
     },
     {
@@ -7420,7 +7430,7 @@
       "source_location": "L1129",
       "_origin": "ast",
       "id": "generation",
-      "community": 1,
+      "community": 42,
       "norm_label": "generation"
     },
     {
@@ -7430,7 +7440,7 @@
       "source_location": "L1198",
       "_origin": "ast",
       "id": "athenallm_mlxllmmodule_mlxllmmodule_effectivemaxtokens",
-      "community": 1,
+      "community": 42,
       "norm_label": ".effectivemaxtokens()"
     },
     {
@@ -8360,7 +8370,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "athenallm_prefixkvcache",
-      "community": 65,
+      "community": 61,
       "norm_label": "prefixkvcache.swift"
     },
     {
@@ -8370,7 +8380,7 @@
       "source_location": "L55",
       "_origin": "ast",
       "id": "athenallm_prefixkvcache_prefixkvcache",
-      "community": 30,
+      "community": 61,
       "norm_label": "prefixkvcache"
     },
     {
@@ -8380,7 +8390,7 @@
       "source_location": "L73",
       "_origin": "ast",
       "id": "athenallm_prefixkvcache_scopemode",
-      "community": 65,
+      "community": 61,
       "norm_label": "scopemode"
     },
     {
@@ -8390,7 +8400,7 @@
       "source_location": "L74",
       "_origin": "ast",
       "id": "athenallm_prefixkvcache_scopemode_principal",
-      "community": 65,
+      "community": 61,
       "norm_label": "principal"
     },
     {
@@ -8400,7 +8410,7 @@
       "source_location": "L75",
       "_origin": "ast",
       "id": "athenallm_prefixkvcache_scopemode_cachekey",
-      "community": 65,
+      "community": 61,
       "norm_label": "cachekey"
     },
     {
@@ -8410,7 +8420,7 @@
       "source_location": "L76",
       "_origin": "ast",
       "id": "athenallm_prefixkvcache_scopemode_both",
-      "community": 65,
+      "community": 61,
       "norm_label": "both"
     },
     {
@@ -8420,7 +8430,7 @@
       "source_location": "L82",
       "_origin": "ast",
       "id": "athenallm_prefixkvcache_prefixkvcache_scopekey",
-      "community": 280,
+      "community": 7,
       "norm_label": ".scopekey()"
     },
     {
@@ -8430,7 +8440,7 @@
       "source_location": "L104",
       "_origin": "ast",
       "id": "athenallm_prefixkvcache_payload",
-      "community": 65,
+      "community": 61,
       "norm_label": "payload"
     },
     {
@@ -8440,7 +8450,7 @@
       "source_location": "L107",
       "_origin": "ast",
       "id": "athenallm_prefixkvcache_payload_plain",
-      "community": 65,
+      "community": 61,
       "norm_label": "plain"
     },
     {
@@ -8450,7 +8460,7 @@
       "source_location": "L111",
       "_origin": "ast",
       "id": "athenallm_prefixkvcache_payload_sealed",
-      "community": 65,
+      "community": 50,
       "norm_label": "sealed"
     },
     {
@@ -8460,7 +8470,7 @@
       "source_location": "L114",
       "_origin": "ast",
       "id": "athenallm_prefixkvcache_entry",
-      "community": 65,
+      "community": 61,
       "norm_label": "entry"
     },
     {
@@ -8480,7 +8490,7 @@
       "source_location": "L122",
       "_origin": "ast",
       "id": "sources_athenallm_prefixkvcache_swift_date",
-      "community": 65,
+      "community": 61,
       "norm_label": "date"
     },
     {
@@ -8490,7 +8500,7 @@
       "source_location": "L135",
       "_origin": "ast",
       "id": "athenallm_prefixkvcache_entry_init",
-      "community": 65,
+      "community": 61,
       "norm_label": ".init()"
     },
     {
@@ -8530,7 +8540,7 @@
       "source_location": "L163",
       "_origin": "ast",
       "id": "sources_athenallm_prefixkvcache_swift_mlxarray",
-      "community": 30,
+      "community": 61,
       "norm_label": "mlxarray"
     },
     {
@@ -8560,7 +8570,7 @@
       "source_location": "L196",
       "_origin": "ast",
       "id": "sources_athenallm_prefixkvcache_swift_timeinterval",
-      "community": 30,
+      "community": 61,
       "norm_label": "timeinterval"
     },
     {
@@ -8570,7 +8580,7 @@
       "source_location": "L202",
       "_origin": "ast",
       "id": "idlekvcipher",
-      "community": 30,
+      "community": 61,
       "norm_label": "idlekvcipher"
     },
     {
@@ -8580,7 +8590,7 @@
       "source_location": "L211",
       "_origin": "ast",
       "id": "athenallm_prefixkvcache_prefixkvcache_init",
-      "community": 30,
+      "community": 61,
       "norm_label": ".init()"
     },
     {
@@ -8590,7 +8600,7 @@
       "source_location": "L211",
       "_origin": "ast",
       "id": "sources_athenallm_prefixkvcache_swift_bool",
-      "community": 30,
+      "community": 61,
       "norm_label": "bool"
     },
     {
@@ -8630,7 +8640,7 @@
       "source_location": "L331",
       "_origin": "ast",
       "id": "athenallm_prefixkvcache_prefixkvcache_release",
-      "community": 30,
+      "community": 61,
       "norm_label": ".release()"
     },
     {
@@ -8640,7 +8650,7 @@
       "source_location": "L339",
       "_origin": "ast",
       "id": "athenallm_prefixkvcache_prefixkvcache_makerecorder",
-      "community": 30,
+      "community": 61,
       "norm_label": ".makerecorder()"
     },
     {
@@ -8680,7 +8690,7 @@
       "source_location": "L405",
       "_origin": "ast",
       "id": "athenallm_prefixkvcache_prefixkvcache_sealarrays",
-      "community": 30,
+      "community": 61,
       "norm_label": ".sealarrays()"
     },
     {
@@ -8690,7 +8700,7 @@
       "source_location": "L405",
       "_origin": "ast",
       "id": "sources_athenallm_prefixkvcache_swift_data",
-      "community": 30,
+      "community": 61,
       "norm_label": "data"
     },
     {
@@ -8700,7 +8710,7 @@
       "source_location": "L416",
       "_origin": "ast",
       "id": "athenallm_prefixkvcache_prefixkvcache_openarrays",
-      "community": 30,
+      "community": 61,
       "norm_label": ".openarrays()"
     },
     {
@@ -8720,7 +8730,7 @@
       "source_location": "L463",
       "_origin": "ast",
       "id": "athenallm_prefixkvcache_prefixkvcache_rotatekeyifpoolemptylocked",
-      "community": 30,
+      "community": 61,
       "norm_label": ".rotatekeyifpoolemptylocked()"
     },
     {
@@ -8730,7 +8740,7 @@
       "source_location": "L471",
       "_origin": "ast",
       "id": "athenallm_prefixkvcache_prefixkvcache_entrymetas",
-      "community": 30,
+      "community": 61,
       "norm_label": ".entrymetas()"
     },
     {
@@ -8740,7 +8750,7 @@
       "source_location": "L471",
       "_origin": "ast",
       "id": "sources_athenallm_prefixkvcache_swift_prefixcachepolicy",
-      "community": 30,
+      "community": 61,
       "norm_label": "prefixcachepolicy"
     },
     {
@@ -8750,7 +8760,7 @@
       "source_location": "L483",
       "_origin": "ast",
       "id": "athenallm_prefixkvcache_prefixkvcache_sweepidle",
-      "community": 30,
+      "community": 61,
       "norm_label": ".sweepidle()"
     },
     {
@@ -8760,7 +8770,7 @@
       "source_location": "L501",
       "_origin": "ast",
       "id": "athenallm_prefixkvcache_prefixkvcache_evictifneeded",
-      "community": 30,
+      "community": 61,
       "norm_label": ".evictifneeded()"
     },
     {
@@ -8770,7 +8780,7 @@
       "source_location": "L515",
       "_origin": "ast",
       "id": "athenallm_prefixkvcache_prefixkvcache_flushidle",
-      "community": 30,
+      "community": 61,
       "norm_label": ".flushidle()"
     },
     {
@@ -8780,7 +8790,7 @@
       "source_location": "L531",
       "_origin": "ast",
       "id": "athenallm_prefixkvcache_stats",
-      "community": 65,
+      "community": 61,
       "norm_label": "stats"
     },
     {
@@ -8790,7 +8800,7 @@
       "source_location": "L541",
       "_origin": "ast",
       "id": "athenallm_prefixkvcache_prefixkvcache_stats",
-      "community": 65,
+      "community": 61,
       "norm_label": ".stats()"
     },
     {
@@ -8800,7 +8810,7 @@
       "source_location": "L556",
       "_origin": "ast",
       "id": "athenallm_prefixkvcache_prefixkvcache_poolbytesandentries",
-      "community": 30,
+      "community": 61,
       "norm_label": ".poolbytesandentries()"
     },
     {
@@ -9050,7 +9060,7 @@
       "source_location": "L44",
       "_origin": "ast",
       "id": "systemrandomnumbergenerator",
-      "community": 8,
+      "community": 10,
       "norm_label": "systemrandomnumbergenerator"
     },
     {
@@ -9530,7 +9540,7 @@
       "source_location": "L120",
       "_origin": "ast",
       "id": "sources_athenallm_stubllmmodule_swift_sendable",
-      "community": 26,
+      "community": 42,
       "norm_label": "sendable"
     },
     {
@@ -9950,7 +9960,7 @@
       "source_location": "L41",
       "_origin": "ast",
       "id": "athenamodels_athenaqwen35_forwardprofile_clk",
-      "community": 345,
+      "community": 91,
       "norm_label": ".clk()"
     },
     {
@@ -9960,7 +9970,7 @@
       "source_location": "L41",
       "_origin": "ast",
       "id": "sources_athenamodels_athenaqwen35_swift_uint64",
-      "community": 345,
+      "community": 91,
       "norm_label": "uint64"
     },
     {
@@ -10390,7 +10400,7 @@
       "source_location": "L216",
       "_origin": "ast",
       "id": "sources_athenamodels_athenaqwen35_swift_mlxarray",
-      "community": 345,
+      "community": 206,
       "norm_label": "mlxarray"
     },
     {
@@ -10470,7 +10480,7 @@
       "source_location": "L285",
       "_origin": "ast",
       "id": "mambacache",
-      "community": 206,
+      "community": 345,
       "norm_label": "mambacache"
     },
     {
@@ -10520,7 +10530,7 @@
       "source_location": "L427",
       "_origin": "ast",
       "id": "athenamodels_athenaqwen35_athenaqwen35attention_callasfunction",
-      "community": 345,
+      "community": 91,
       "norm_label": ".callasfunction()"
     },
     {
@@ -10530,7 +10540,7 @@
       "source_location": "L427",
       "_origin": "ast",
       "id": "sources_athenamodels_athenaqwen35_swift_mlxfast",
-      "community": 345,
+      "community": 91,
       "norm_label": "mlxfast"
     },
     {
@@ -10540,7 +10550,7 @@
       "source_location": "L427",
       "_origin": "ast",
       "id": "sources_athenamodels_athenaqwen35_swift_kvcache",
-      "community": 345,
+      "community": 206,
       "norm_label": "kvcache"
     },
     {
@@ -10630,7 +10640,7 @@
       "source_location": "L561",
       "_origin": "ast",
       "id": "athenamodels_athenaqwen35_athenaqwen35decoderlayer_callasfunction",
-      "community": 345,
+      "community": 91,
       "norm_label": ".callasfunction()"
     },
     {
@@ -10670,7 +10680,7 @@
       "source_location": "L631",
       "_origin": "ast",
       "id": "athenamodels_athenaqwen35_athenaqwen35textmodelinner_backbone",
-      "community": 345,
+      "community": 206,
       "norm_label": ".backbone()"
     },
     {
@@ -10680,7 +10690,7 @@
       "source_location": "L659",
       "_origin": "ast",
       "id": "athenamodels_athenaqwen35_athenaqwen35textmodelinner_normalize",
-      "community": 345,
+      "community": 206,
       "norm_label": ".normalize()"
     },
     {
@@ -10690,7 +10700,7 @@
       "source_location": "L661",
       "_origin": "ast",
       "id": "athenamodels_athenaqwen35_athenaqwen35textmodelinner_callasfunction",
-      "community": 345,
+      "community": 206,
       "norm_label": ".callasfunction()"
     },
     {
@@ -10700,7 +10710,7 @@
       "source_location": "L684",
       "_origin": "ast",
       "id": "athenamodels_athenaqwen35_triattentionrequestpolicy",
-      "community": 206,
+      "community": 220,
       "norm_label": "triattentionrequestpolicy"
     },
     {
@@ -10710,7 +10720,7 @@
       "source_location": "L685",
       "_origin": "ast",
       "id": "sources_athenamodels_athenaqwen35_swift_triattentionconfig",
-      "community": 206,
+      "community": 220,
       "norm_label": "triattentionconfig"
     },
     {
@@ -10770,7 +10780,7 @@
       "source_location": "L716",
       "_origin": "ast",
       "id": "athenamodels_athenaqwen35_athenaqwen35textmodel_callasfunction",
-      "community": 345,
+      "community": 206,
       "norm_label": ".callasfunction()"
     },
     {
@@ -10780,7 +10790,7 @@
       "source_location": "L732",
       "_origin": "ast",
       "id": "athenamodels_athenaqwen35_athenaqwen35textmodel_project",
-      "community": 345,
+      "community": 206,
       "norm_label": ".project()"
     },
     {
@@ -10790,7 +10800,7 @@
       "source_location": "L738",
       "_origin": "ast",
       "id": "athenamodels_athenaqwen35_athenaqwen35textmodel_logitsandhidden",
-      "community": 345,
+      "community": 206,
       "norm_label": ".logitsandhidden()"
     },
     {
@@ -10800,7 +10810,7 @@
       "source_location": "L750",
       "_origin": "ast",
       "id": "athenamodels_athenaqwen35_athenaqwen35textmodel_mtpforward",
-      "community": 345,
+      "community": 206,
       "norm_label": ".mtpforward()"
     },
     {
@@ -10810,7 +10820,7 @@
       "source_location": "L762",
       "_origin": "ast",
       "id": "athenamodels_athenaqwen35_athenaqwen35textmodel_makemtpcache",
-      "community": 345,
+      "community": 206,
       "norm_label": ".makemtpcache()"
     },
     {
@@ -10820,7 +10830,7 @@
       "source_location": "L766",
       "_origin": "ast",
       "id": "athenamodels_athenaqwen35_athenaqwen35textmodel_newcache",
-      "community": 206,
+      "community": 345,
       "norm_label": ".newcache()"
     },
     {
@@ -10830,7 +10840,7 @@
       "source_location": "L766",
       "_origin": "ast",
       "id": "generateparameters",
-      "community": 206,
+      "community": 345,
       "norm_label": "generateparameters"
     },
     {
@@ -12260,7 +12270,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "triattention_triattentionconfig",
-      "community": 316,
+      "community": 342,
       "norm_label": "triattentionconfig.swift"
     },
     {
@@ -12270,7 +12280,7 @@
       "source_location": "L18",
       "_origin": "ast",
       "id": "triattention_triattentionconfig_triattentionconfig",
-      "community": 316,
+      "community": 342,
       "norm_label": "triattentionconfig"
     },
     {
@@ -12280,7 +12290,7 @@
       "source_location": "L20",
       "_origin": "ast",
       "id": "sources_athenamodels_triattention_triattentionconfig_swift_int",
-      "community": 316,
+      "community": 342,
       "norm_label": "int"
     },
     {
@@ -12290,7 +12300,7 @@
       "source_location": "L24",
       "_origin": "ast",
       "id": "scoreaggregation",
-      "community": 316,
+      "community": 342,
       "norm_label": "scoreaggregation"
     },
     {
@@ -12300,7 +12310,7 @@
       "source_location": "L26",
       "_origin": "ast",
       "id": "sources_athenamodels_triattention_triattentionconfig_swift_bool",
-      "community": 316,
+      "community": 342,
       "norm_label": "bool"
     },
     {
@@ -12310,7 +12320,7 @@
       "source_location": "L28",
       "_origin": "ast",
       "id": "triattention_triattentionconfig_scoreaggregation",
-      "community": 316,
+      "community": 342,
       "norm_label": "scoreaggregation"
     },
     {
@@ -12320,7 +12330,7 @@
       "source_location": "L29",
       "_origin": "ast",
       "id": "triattention_triattentionconfig_scoreaggregation_mean",
-      "community": 316,
+      "community": 342,
       "norm_label": "mean"
     },
     {
@@ -12330,7 +12340,7 @@
       "source_location": "L30",
       "_origin": "ast",
       "id": "triattention_triattentionconfig_scoreaggregation_max",
-      "community": 316,
+      "community": 342,
       "norm_label": "max"
     },
     {
@@ -12340,7 +12350,7 @@
       "source_location": "L33",
       "_origin": "ast",
       "id": "triattention_triattentionconfig_triattentionconfig_init",
-      "community": 316,
+      "community": 342,
       "norm_label": ".init()"
     },
     {
@@ -12880,7 +12890,7 @@
       "source_location": "L148",
       "_origin": "ast",
       "id": "iso8601dateformatter",
-      "community": 311,
+      "community": 203,
       "norm_label": "iso8601dateformatter"
     },
     {
@@ -13170,7 +13180,7 @@
       "source_location": "L127",
       "_origin": "ast",
       "id": "athenaserverkit_auth_authconfig_load",
-      "community": 14,
+      "community": 203,
       "norm_label": ".load()"
     },
     {
@@ -13180,7 +13190,7 @@
       "source_location": "L127",
       "_origin": "ast",
       "id": "logger",
-      "community": 311,
+      "community": 203,
       "norm_label": "logger"
     },
     {
@@ -13270,7 +13280,7 @@
       "source_location": "L364",
       "_origin": "ast",
       "id": "athenaserverkit_auth_authmiddleware",
-      "community": 183,
+      "community": 14,
       "norm_label": "authmiddleware"
     },
     {
@@ -13290,7 +13300,7 @@
       "source_location": "L366",
       "_origin": "ast",
       "id": "session",
-      "community": 183,
+      "community": 82,
       "norm_label": "session"
     },
     {
@@ -13300,7 +13310,7 @@
       "source_location": "L368",
       "_origin": "ast",
       "id": "athenaserverkit_auth_authmiddleware_init",
-      "community": 183,
+      "community": 14,
       "norm_label": ".init()"
     },
     {
@@ -13310,7 +13320,7 @@
       "source_location": "L373",
       "_origin": "ast",
       "id": "athenaserverkit_auth_authmiddleware_handle",
-      "community": 183,
+      "community": 14,
       "norm_label": ".handle()"
     },
     {
@@ -13320,7 +13330,7 @@
       "source_location": "L373",
       "_origin": "ast",
       "id": "sources_athenaserverkit_auth_swift_request",
-      "community": 183,
+      "community": 14,
       "norm_label": "request"
     },
     {
@@ -13330,7 +13340,7 @@
       "source_location": "L373",
       "_origin": "ast",
       "id": "sources_athenaserverkit_auth_swift_context",
-      "community": 183,
+      "community": 14,
       "norm_label": "context"
     },
     {
@@ -13340,7 +13350,7 @@
       "source_location": "L373",
       "_origin": "ast",
       "id": "sources_athenaserverkit_auth_swift_response",
-      "community": 183,
+      "community": 14,
       "norm_label": "response"
     },
     {
@@ -13350,7 +13360,7 @@
       "source_location": "L482",
       "_origin": "ast",
       "id": "athenaserverkit_auth_authmiddleware_redirect",
-      "community": 183,
+      "community": 14,
       "norm_label": ".redirect()"
     },
     {
@@ -13360,7 +13370,7 @@
       "source_location": "L488",
       "_origin": "ast",
       "id": "athenaserverkit_auth_authmiddleware_deny",
-      "community": 183,
+      "community": 14,
       "norm_label": ".deny()"
     },
     {
@@ -13370,7 +13380,7 @@
       "source_location": "L488",
       "_origin": "ast",
       "id": "sources_athenaserverkit_auth_swift_httpresponse",
-      "community": 183,
+      "community": 14,
       "norm_label": "httpresponse"
     },
     {
@@ -15450,7 +15460,7 @@
       "source_location": "L58",
       "_origin": "ast",
       "id": "athenastructured_structuredschema_jsonvalue_foundationvalue",
-      "community": 1,
+      "community": 70,
       "norm_label": ".foundationvalue()"
     },
     {
@@ -15800,7 +15810,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "athenatranscription_diarizationmodule",
-      "community": 26,
+      "community": 11,
       "norm_label": "diarizationmodule.swift"
     },
     {
@@ -15810,7 +15820,7 @@
       "source_location": "L6",
       "_origin": "ast",
       "id": "athenatranscription_diarizationmodule_diarizationturn",
-      "community": 26,
+      "community": 11,
       "norm_label": "diarizationturn"
     },
     {
@@ -15820,7 +15830,7 @@
       "source_location": "L7",
       "_origin": "ast",
       "id": "sources_athenatranscription_diarizationmodule_swift_double",
-      "community": 26,
+      "community": 11,
       "norm_label": "double"
     },
     {
@@ -15830,7 +15840,7 @@
       "source_location": "L9",
       "_origin": "ast",
       "id": "sources_athenatranscription_diarizationmodule_swift_int",
-      "community": 26,
+      "community": 11,
       "norm_label": "int"
     },
     {
@@ -15840,7 +15850,7 @@
       "source_location": "L10",
       "_origin": "ast",
       "id": "athenatranscription_diarizationmodule_diarizationturn_init",
-      "community": 26,
+      "community": 11,
       "norm_label": ".init()"
     },
     {
@@ -15850,7 +15860,7 @@
       "source_location": "L20",
       "_origin": "ast",
       "id": "athenatranscription_diarizationmodule_diarizationresult",
-      "community": 26,
+      "community": 11,
       "norm_label": "diarizationresult"
     },
     {
@@ -15860,7 +15870,7 @@
       "source_location": "L23",
       "_origin": "ast",
       "id": "athenatranscription_diarizationmodule_diarizationresult_init",
-      "community": 26,
+      "community": 11,
       "norm_label": ".init()"
     },
     {
@@ -15870,7 +15880,7 @@
       "source_location": "L40",
       "_origin": "ast",
       "id": "athenatranscription_diarizationmodule_speakeractivityregion",
-      "community": 26,
+      "community": 11,
       "norm_label": "speakeractivityregion"
     },
     {
@@ -15880,7 +15890,7 @@
       "source_location": "L49",
       "_origin": "ast",
       "id": "athenatranscription_diarizationmodule_speakeractivityregion_init",
-      "community": 26,
+      "community": 11,
       "norm_label": ".init()"
     },
     {
@@ -15890,7 +15900,7 @@
       "source_location": "L63",
       "_origin": "ast",
       "id": "athenatranscription_diarizationmodule_diarizationmodule",
-      "community": 26,
+      "community": 11,
       "norm_label": "diarizationmodule"
     },
     {
@@ -15900,7 +15910,7 @@
       "source_location": "L84",
       "_origin": "ast",
       "id": "athenatranscription_diarizationmodule_stubdiarizationmodule",
-      "community": 26,
+      "community": 11,
       "norm_label": "stubdiarizationmodule"
     },
     {
@@ -15910,7 +15920,7 @@
       "source_location": "L85",
       "_origin": "ast",
       "id": "sources_athenatranscription_diarizationmodule_swift_moduleid",
-      "community": 26,
+      "community": 11,
       "norm_label": "moduleid"
     },
     {
@@ -15920,7 +15930,7 @@
       "source_location": "L89",
       "_origin": "ast",
       "id": "sources_athenatranscription_diarizationmodule_swift_string",
-      "community": 26,
+      "community": 11,
       "norm_label": "string"
     },
     {
@@ -15930,7 +15940,7 @@
       "source_location": "L93",
       "_origin": "ast",
       "id": "athenatranscription_diarizationmodule_stubdiarizationmodule_init",
-      "community": 26,
+      "community": 11,
       "norm_label": ".init()"
     },
     {
@@ -15940,7 +15950,7 @@
       "source_location": "L108",
       "_origin": "ast",
       "id": "athenatranscription_diarizationmodule_stubdiarizationmodule_memoryestimate",
-      "community": 26,
+      "community": 11,
       "norm_label": ".memoryestimate()"
     },
     {
@@ -15950,7 +15960,7 @@
       "source_location": "L109",
       "_origin": "ast",
       "id": "athenatranscription_diarizationmodule_stubdiarizationmodule_load",
-      "community": 26,
+      "community": 11,
       "norm_label": ".load()"
     },
     {
@@ -15960,7 +15970,7 @@
       "source_location": "L109",
       "_origin": "ast",
       "id": "sources_athenatranscription_diarizationmodule_swift_memoryreservation",
-      "community": 26,
+      "community": 11,
       "norm_label": "memoryreservation"
     },
     {
@@ -15970,7 +15980,7 @@
       "source_location": "L112",
       "_origin": "ast",
       "id": "athenatranscription_diarizationmodule_stubdiarizationmodule_unload",
-      "community": 26,
+      "community": 11,
       "norm_label": ".unload()"
     },
     {
@@ -15980,7 +15990,7 @@
       "source_location": "L114",
       "_origin": "ast",
       "id": "athenatranscription_diarizationmodule_stubdiarizationmodule_allowedmodelids",
-      "community": 26,
+      "community": 11,
       "norm_label": ".allowedmodelids()"
     },
     {
@@ -15990,7 +16000,7 @@
       "source_location": "L115",
       "_origin": "ast",
       "id": "athenatranscription_diarizationmodule_stubdiarizationmodule_defaultmodelid",
-      "community": 26,
+      "community": 11,
       "norm_label": ".defaultmodelid()"
     },
     {
@@ -16000,7 +16010,7 @@
       "source_location": "L119",
       "_origin": "ast",
       "id": "athenatranscription_diarizationmodule_stubdiarizationmodule_residentmodelid",
-      "community": 26,
+      "community": 11,
       "norm_label": ".residentmodelid()"
     },
     {
@@ -16010,7 +16020,7 @@
       "source_location": "L120",
       "_origin": "ast",
       "id": "athenatranscription_diarizationmodule_stubdiarizationmodule_rebind",
-      "community": 26,
+      "community": 11,
       "norm_label": ".rebind()"
     },
     {
@@ -16020,7 +16030,7 @@
       "source_location": "L125",
       "_origin": "ast",
       "id": "athenatranscription_diarizationmodule_stubdiarizationmodule_resolve",
-      "community": 26,
+      "community": 11,
       "norm_label": ".resolve()"
     },
     {
@@ -16030,7 +16040,7 @@
       "source_location": "L141",
       "_origin": "ast",
       "id": "athenatranscription_diarizationmodule_stubdiarizationmodule_diarize",
-      "community": 26,
+      "community": 11,
       "norm_label": ".diarize()"
     },
     {
@@ -16040,7 +16050,7 @@
       "source_location": "L141",
       "_origin": "ast",
       "id": "sources_athenatranscription_diarizationmodule_swift_data",
-      "community": 26,
+      "community": 11,
       "norm_label": "data"
     },
     {
@@ -16050,7 +16060,7 @@
       "source_location": "L150",
       "_origin": "ast",
       "id": "athenatranscription_diarizationmodule_stubdiarizationmodule_residentbackend",
-      "community": 26,
+      "community": 11,
       "norm_label": ".residentbackend()"
     },
     {
@@ -16060,7 +16070,7 @@
       "source_location": "L150",
       "_origin": "ast",
       "id": "sources_athenatranscription_diarizationmodule_swift_diarizationbackend",
-      "community": 26,
+      "community": 11,
       "norm_label": "diarizationbackend"
     },
     {
@@ -16070,7 +16080,7 @@
       "source_location": "L155",
       "_origin": "ast",
       "id": "athenatranscription_diarizationmodule_stubdiarizationmodule_segment",
-      "community": 26,
+      "community": 11,
       "norm_label": ".segment()"
     },
     {
@@ -16250,7 +16260,7 @@
       "source_location": "L142",
       "_origin": "ast",
       "id": "sources_athenatranscription_inmemoryasset_swift_anyobject",
-      "community": 122,
+      "community": 342,
       "norm_label": "anyobject"
     },
     {
@@ -16980,7 +16990,7 @@
       "source_location": "L126",
       "_origin": "ast",
       "id": "speakersegmentrequest",
-      "community": 8,
+      "community": 102,
       "norm_label": "speakersegmentrequest"
     },
     {
@@ -17020,7 +17030,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "athenatranscription_mlxtranscriptionmodule",
-      "community": 203,
+      "community": 96,
       "norm_label": "mlxtranscriptionmodule.swift"
     },
     {
@@ -17250,7 +17260,7 @@
       "source_location": "L211",
       "_origin": "ast",
       "id": "athenatranscription_mlxtranscriptionmodule_mlxtranscriptionmodule_transcribe",
-      "community": 306,
+      "community": 96,
       "norm_label": ".transcribe()"
     },
     {
@@ -17260,7 +17270,7 @@
       "source_location": "L211",
       "_origin": "ast",
       "id": "sources_athenatranscription_mlxtranscriptionmodule_swift_data",
-      "community": 306,
+      "community": 96,
       "norm_label": "data"
     },
     {
@@ -17270,7 +17280,7 @@
       "source_location": "L211",
       "_origin": "ast",
       "id": "sources_athenatranscription_mlxtranscriptionmodule_swift_bool",
-      "community": 306,
+      "community": 96,
       "norm_label": "bool"
     },
     {
@@ -17280,7 +17290,7 @@
       "source_location": "L211",
       "_origin": "ast",
       "id": "sources_athenatranscription_mlxtranscriptionmodule_swift_transcriptionresult",
-      "community": 306,
+      "community": 96,
       "norm_label": "transcriptionresult"
     },
     {
@@ -17290,7 +17300,7 @@
       "source_location": "L230",
       "_origin": "ast",
       "id": "athenatranscription_mlxtranscriptionmodule_mlxtranscriptionmodule_transcribepcm",
-      "community": 306,
+      "community": 96,
       "norm_label": ".transcribepcm()"
     },
     {
@@ -17300,7 +17310,7 @@
       "source_location": "L230",
       "_origin": "ast",
       "id": "sources_athenatranscription_mlxtranscriptionmodule_swift_float",
-      "community": 306,
+      "community": 96,
       "norm_label": "float"
     },
     {
@@ -17760,7 +17770,7 @@
       "source_location": "",
       "_origin": "ast",
       "id": "decodable",
-      "community": 5,
+      "community": 26,
       "norm_label": "decodable"
     },
     {
@@ -21250,7 +21260,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "athenatranscription_stubtranscriptionmodule",
-      "community": 54,
+      "community": 40,
       "norm_label": "stubtranscriptionmodule.swift"
     },
     {
@@ -21260,7 +21270,7 @@
       "source_location": "L6",
       "_origin": "ast",
       "id": "athenatranscription_stubtranscriptionmodule_transcriptionmodule",
-      "community": 54,
+      "community": 40,
       "norm_label": "transcriptionmodule"
     },
     {
@@ -21700,7 +21710,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "wespeaker_wespeakerfeatures",
-      "community": 298,
+      "community": 6,
       "norm_label": "wespeakerfeatures.swift"
     },
     {
@@ -21710,7 +21720,7 @@
       "source_location": "L14",
       "_origin": "ast",
       "id": "wespeaker_wespeakerfeatures_wespeakerfeatures",
-      "community": 298,
+      "community": 6,
       "norm_label": "wespeakerfeatures"
     },
     {
@@ -21720,7 +21730,7 @@
       "source_location": "L19",
       "_origin": "ast",
       "id": "sources_athenatranscription_wespeaker_wespeakerfeatures_swift_float",
-      "community": 298,
+      "community": 6,
       "norm_label": "float"
     },
     {
@@ -21730,7 +21740,7 @@
       "source_location": "L22",
       "_origin": "ast",
       "id": "vdsp_length",
-      "community": 298,
+      "community": 6,
       "norm_label": "vdsp_length"
     },
     {
@@ -21740,7 +21750,7 @@
       "source_location": "L23",
       "_origin": "ast",
       "id": "fftsetup",
-      "community": 298,
+      "community": 6,
       "norm_label": "fftsetup"
     },
     {
@@ -21750,7 +21760,7 @@
       "source_location": "L27",
       "_origin": "ast",
       "id": "wespeaker_wespeakerfeatures_wespeakerfeatures_init",
-      "community": 298,
+      "community": 6,
       "norm_label": ".init()"
     },
     {
@@ -21760,7 +21770,7 @@
       "source_location": "L44",
       "_origin": "ast",
       "id": "wespeaker_wespeakerfeatures_wespeakerfeatures_deinit",
-      "community": 298,
+      "community": 6,
       "norm_label": ".deinit()"
     },
     {
@@ -21770,7 +21780,7 @@
       "source_location": "L46",
       "_origin": "ast",
       "id": "wespeaker_wespeakerfeatures_wespeakerfeatures_buildmelfilterbank",
-      "community": 298,
+      "community": 6,
       "norm_label": ".buildmelfilterbank()"
     },
     {
@@ -21780,7 +21790,7 @@
       "source_location": "L46",
       "_origin": "ast",
       "id": "sources_athenatranscription_wespeaker_wespeakerfeatures_swift_int",
-      "community": 298,
+      "community": 6,
       "norm_label": "int"
     },
     {
@@ -21790,7 +21800,7 @@
       "source_location": "L93",
       "_origin": "ast",
       "id": "wespeaker_wespeakerfeatures_wespeakerfeatures_extractraw",
-      "community": 298,
+      "community": 6,
       "norm_label": ".extractraw()"
     },
     {
@@ -21800,7 +21810,7 @@
       "source_location": "L209",
       "_origin": "ast",
       "id": "wespeaker_wespeakerfeatures_wespeakerfeatures_extract",
-      "community": 298,
+      "community": 6,
       "norm_label": ".extract()"
     },
     {
@@ -21810,7 +21820,7 @@
       "source_location": "L209",
       "_origin": "ast",
       "id": "sources_athenatranscription_wespeaker_wespeakerfeatures_swift_mlxarray",
-      "community": 298,
+      "community": 6,
       "norm_label": "mlxarray"
     },
     {
@@ -22980,7 +22990,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "commands_audit",
-      "community": 179,
+      "community": 79,
       "norm_label": "audit.swift"
     },
     {
@@ -22990,7 +23000,7 @@
       "source_location": "L14",
       "_origin": "ast",
       "id": "commands_audit_auditcommand",
-      "community": 179,
+      "community": 79,
       "norm_label": "auditcommand"
     },
     {
@@ -23000,7 +23010,7 @@
       "source_location": "L19",
       "_origin": "ast",
       "id": "sources_athena_commands_audit_swift_daemonoptions",
-      "community": 179,
+      "community": 79,
       "norm_label": "daemonoptions"
     },
     {
@@ -23010,7 +23020,7 @@
       "source_location": "L20",
       "_origin": "ast",
       "id": "sources_athena_commands_audit_swift_string",
-      "community": 179,
+      "community": 79,
       "norm_label": "string"
     },
     {
@@ -23020,7 +23030,7 @@
       "source_location": "L24",
       "_origin": "ast",
       "id": "sources_athena_commands_audit_swift_double",
-      "community": 179,
+      "community": 79,
       "norm_label": "double"
     },
     {
@@ -23030,7 +23040,7 @@
       "source_location": "L26",
       "_origin": "ast",
       "id": "sources_athena_commands_audit_swift_int",
-      "community": 179,
+      "community": 79,
       "norm_label": "int"
     },
     {
@@ -23040,7 +23050,7 @@
       "source_location": "L31",
       "_origin": "ast",
       "id": "commands_audit_auditcommand_run",
-      "community": 179,
+      "community": 79,
       "norm_label": ".run()"
     },
     {
@@ -24710,7 +24720,7 @@
       "source_location": "L26",
       "_origin": "ast",
       "id": "commands_load_load",
-      "community": 311,
+      "community": 203,
       "norm_label": "load"
     },
     {
@@ -24720,7 +24730,7 @@
       "source_location": "L56",
       "_origin": "ast",
       "id": "sources_athena_commands_load_swift_string",
-      "community": 311,
+      "community": 203,
       "norm_label": "string"
     },
     {
@@ -24730,7 +24740,7 @@
       "source_location": "L59",
       "_origin": "ast",
       "id": "sources_athena_commands_load_swift_int",
-      "community": 311,
+      "community": 203,
       "norm_label": "int"
     },
     {
@@ -24740,7 +24750,7 @@
       "source_location": "L74",
       "_origin": "ast",
       "id": "sources_athena_commands_load_swift_double",
-      "community": 311,
+      "community": 203,
       "norm_label": "double"
     },
     {
@@ -24750,7 +24760,7 @@
       "source_location": "L312",
       "_origin": "ast",
       "id": "commands_load_load_run",
-      "community": 311,
+      "community": 203,
       "norm_label": ".run()"
     },
     {
@@ -24760,7 +24770,7 @@
       "source_location": "L863",
       "_origin": "ast",
       "id": "commands_load_load_pullmissingconfigured",
-      "community": 311,
+      "community": 203,
       "norm_label": ".pullmissingconfigured()"
     },
     {
@@ -24770,7 +24780,7 @@
       "source_location": "L863",
       "_origin": "ast",
       "id": "sources_athena_commands_load_swift_moduleid",
-      "community": 311,
+      "community": 203,
       "norm_label": "moduleid"
     },
     {
@@ -24780,7 +24790,7 @@
       "source_location": "L863",
       "_origin": "ast",
       "id": "sources_athena_commands_load_swift_url",
-      "community": 311,
+      "community": 203,
       "norm_label": "url"
     },
     {
@@ -24800,7 +24810,7 @@
       "source_location": "L907",
       "_origin": "ast",
       "id": "commands_load_load_processresidentbytes",
-      "community": 311,
+      "community": 203,
       "norm_label": ".processresidentbytes()"
     },
     {
@@ -24810,7 +24820,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "commands_logs",
-      "community": 19,
+      "community": 128,
       "norm_label": "logs.swift"
     },
     {
@@ -24820,7 +24830,7 @@
       "source_location": "L17",
       "_origin": "ast",
       "id": "commands_logs_logs",
-      "community": 19,
+      "community": 128,
       "norm_label": "logs"
     },
     {
@@ -24830,7 +24840,7 @@
       "source_location": "L23",
       "_origin": "ast",
       "id": "sources_athena_commands_logs_swift_daemonoptions",
-      "community": 19,
+      "community": 128,
       "norm_label": "daemonoptions"
     },
     {
@@ -24840,7 +24850,7 @@
       "source_location": "L26",
       "_origin": "ast",
       "id": "sources_athena_commands_logs_swift_string",
-      "community": 19,
+      "community": 128,
       "norm_label": "string"
     },
     {
@@ -24850,7 +24860,7 @@
       "source_location": "L43",
       "_origin": "ast",
       "id": "sources_athena_commands_logs_swift_int",
-      "community": 19,
+      "community": 128,
       "norm_label": "int"
     },
     {
@@ -24860,7 +24870,7 @@
       "source_location": "L54",
       "_origin": "ast",
       "id": "commands_logs_logs_run",
-      "community": 19,
+      "community": 128,
       "norm_label": ".run()"
     },
     {
@@ -24870,7 +24880,7 @@
       "source_location": "L79",
       "_origin": "ast",
       "id": "commands_logs_logs_runoffline",
-      "community": 19,
+      "community": 128,
       "norm_label": ".runoffline()"
     },
     {
@@ -25430,7 +25440,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "commands_uninstall",
-      "community": 19,
+      "community": 331,
       "norm_label": "uninstall.swift"
     },
     {
@@ -25440,7 +25450,7 @@
       "source_location": "L10",
       "_origin": "ast",
       "id": "commands_uninstall_uninstall",
-      "community": 19,
+      "community": 331,
       "norm_label": "uninstall"
     },
     {
@@ -25450,7 +25460,7 @@
       "source_location": "",
       "_origin": "ast",
       "id": "parsablecommand",
-      "community": 19,
+      "community": 331,
       "norm_label": "parsablecommand"
     },
     {
@@ -25460,7 +25470,7 @@
       "source_location": "L15",
       "_origin": "ast",
       "id": "sources_athena_commands_uninstall_swift_string",
-      "community": 19,
+      "community": 331,
       "norm_label": "string"
     },
     {
@@ -25470,7 +25480,7 @@
       "source_location": "L26",
       "_origin": "ast",
       "id": "commands_uninstall_uninstall_run",
-      "community": 19,
+      "community": 331,
       "norm_label": ".run()"
     },
     {
@@ -25480,7 +25490,7 @@
       "source_location": "L99",
       "_origin": "ast",
       "id": "commands_uninstall_uninstall_launchctl",
-      "community": 19,
+      "community": 331,
       "norm_label": ".launchctl()"
     },
     {
@@ -25490,7 +25500,7 @@
       "source_location": "L99",
       "_origin": "ast",
       "id": "sources_athena_commands_uninstall_swift_int32",
-      "community": 19,
+      "community": 331,
       "norm_label": "int32"
     },
     {
@@ -26047,7 +26057,7 @@
       "label": "ModuleHealth",
       "file_type": "code",
       "source_file": "Sources/athena/Server/AthenaServer.swift",
-      "source_location": "L5220",
+      "source_location": "L5224",
       "_origin": "ast",
       "id": "modulehealth",
       "community": 46,
@@ -26057,7 +26067,7 @@
       "label": "ModuleHealth",
       "file_type": "code",
       "source_file": "Sources/athena/Server/AthenaServer.swift",
-      "source_location": "L5229",
+      "source_location": "L5233",
       "_origin": "ast",
       "id": "server_athenaserver_modulehealth",
       "community": 46,
@@ -26067,7 +26077,7 @@
       "label": "ModuleID",
       "file_type": "code",
       "source_file": "Sources/athena/Server/AthenaServer.swift",
-      "source_location": "L5230",
+      "source_location": "L5234",
       "_origin": "ast",
       "id": "sources_athena_server_athenaserver_swift_moduleid",
       "community": 46,
@@ -26077,7 +26087,7 @@
       "label": "ModuleState",
       "file_type": "code",
       "source_file": "Sources/athena/Server/AthenaServer.swift",
-      "source_location": "L5231",
+      "source_location": "L5235",
       "_origin": "ast",
       "id": "sources_athena_server_athenaserver_swift_modulestate",
       "community": 46,
@@ -26087,7 +26097,7 @@
       "label": "UnloadedReason",
       "file_type": "code",
       "source_file": "Sources/athena/Server/AthenaServer.swift",
-      "source_location": "L5234",
+      "source_location": "L5238",
       "_origin": "ast",
       "id": "sources_athena_server_athenaserver_swift_unloadedreason",
       "community": 46,
@@ -26097,7 +26107,7 @@
       "label": ".init()",
       "file_type": "code",
       "source_file": "Sources/athena/Server/AthenaServer.swift",
-      "source_location": "L5241",
+      "source_location": "L5245",
       "_origin": "ast",
       "id": "server_athenaserver_healthresponse_init",
       "community": 46,
@@ -26107,7 +26117,7 @@
       "label": ".thermalLabel()",
       "file_type": "code",
       "source_file": "Sources/athena/Server/AthenaServer.swift",
-      "source_location": "L5276",
+      "source_location": "L5281",
       "_origin": "ast",
       "id": "server_athenaserver_healthresponse_thermallabel",
       "community": 46,
@@ -26117,7 +26127,7 @@
       "label": "ProcessInfo",
       "file_type": "code",
       "source_file": "Sources/athena/Server/AthenaServer.swift",
-      "source_location": "L5276",
+      "source_location": "L5281",
       "_origin": "ast",
       "id": "processinfo",
       "community": 46,
@@ -26127,7 +26137,7 @@
       "label": "TLSConfigError",
       "file_type": "code",
       "source_file": "Sources/athena/Server/AthenaServer.swift",
-      "source_location": "L5287",
+      "source_location": "L5292",
       "_origin": "ast",
       "id": "server_athenaserver_tlsconfigerror",
       "community": 46,
@@ -26137,7 +26147,7 @@
       "label": "incomplete",
       "file_type": "code",
       "source_file": "Sources/athena/Server/AthenaServer.swift",
-      "source_location": "L5288",
+      "source_location": "L5293",
       "_origin": "ast",
       "id": "server_athenaserver_tlsconfigerror_incomplete",
       "community": 46,
@@ -26360,7 +26370,7 @@
       "source_location": "L86",
       "_origin": "ast",
       "id": "server_nativeapidto_codingkeys",
-      "community": 3,
+      "community": 346,
       "norm_label": "codingkeys"
     },
     {
@@ -26370,7 +26380,7 @@
       "source_location": "L86",
       "_origin": "ast",
       "id": "server_nativeapidto_codingkeys_model",
-      "community": 3,
+      "community": 346,
       "norm_label": "model"
     },
     {
@@ -26380,7 +26390,7 @@
       "source_location": "L86",
       "_origin": "ast",
       "id": "server_nativeapidto_codingkeys_input",
-      "community": 3,
+      "community": 346,
       "norm_label": "input"
     },
     {
@@ -26880,7 +26890,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_openaidto",
-      "community": 177,
+      "community": 68,
       "norm_label": "openaidto.swift"
     },
     {
@@ -27130,7 +27140,7 @@
       "source_location": "L143",
       "_origin": "ast",
       "id": "sources_athena_server_openaidto_swift_double",
-      "community": 177,
+      "community": 68,
       "norm_label": "double"
     },
     {
@@ -27150,7 +27160,7 @@
       "source_location": "L204",
       "_origin": "ast",
       "id": "sources_athena_server_openaidto_swift_sendable",
-      "community": 1,
+      "community": 70,
       "norm_label": "sendable"
     },
     {
@@ -27250,7 +27260,7 @@
       "source_location": "L383",
       "_origin": "ast",
       "id": "server_openaidto_chatcompletiontokenlogprob",
-      "community": 177,
+      "community": 68,
       "norm_label": "chatcompletiontokenlogprob"
     },
     {
@@ -27260,7 +27270,7 @@
       "source_location": "L387",
       "_origin": "ast",
       "id": "chattoplogprob",
-      "community": 177,
+      "community": 68,
       "norm_label": "chattoplogprob"
     },
     {
@@ -27270,7 +27280,7 @@
       "source_location": "L390",
       "_origin": "ast",
       "id": "server_openaidto_chattoplogprob",
-      "community": 177,
+      "community": 68,
       "norm_label": "chattoplogprob"
     },
     {
@@ -27360,7 +27370,7 @@
       "source_location": "L462",
       "_origin": "ast",
       "id": "server_openaidto_apierrorbody",
-      "community": 177,
+      "community": 68,
       "norm_label": "apierrorbody"
     },
     {
@@ -27370,7 +27380,7 @@
       "source_location": "L463",
       "_origin": "ast",
       "id": "server_openaidto_errordetail",
-      "community": 177,
+      "community": 68,
       "norm_label": "errordetail"
     },
     {
@@ -27380,7 +27390,7 @@
       "source_location": "L483",
       "_origin": "ast",
       "id": "server_openaidto_openaimodel",
-      "community": 177,
+      "community": 68,
       "norm_label": "openaimodel"
     },
     {
@@ -27390,7 +27400,7 @@
       "source_location": "L490",
       "_origin": "ast",
       "id": "server_openaidto_openaimodellist",
-      "community": 177,
+      "community": 68,
       "norm_label": "openaimodellist"
     },
     {
@@ -27490,7 +27500,7 @@
       "source_location": "L543",
       "_origin": "ast",
       "id": "server_openaidto_wordtimestamp",
-      "community": 177,
+      "community": 68,
       "norm_label": "wordtimestamp"
     },
     {
@@ -27500,7 +27510,7 @@
       "source_location": "L550",
       "_origin": "ast",
       "id": "server_openaidto_verbosesegment",
-      "community": 177,
+      "community": 68,
       "norm_label": "verbosesegment"
     },
     {
@@ -27510,7 +27520,7 @@
       "source_location": "L567",
       "_origin": "ast",
       "id": "server_openaidto_verbosetranscriptionresponse",
-      "community": 177,
+      "community": 68,
       "norm_label": "verbosetranscriptionresponse"
     },
     {
@@ -28860,7 +28870,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "athenacoretests_athenamodelstests",
-      "community": 8,
+      "community": 202,
       "norm_label": "athenamodelstests.swift"
     },
     {
@@ -28870,7 +28880,7 @@
       "source_location": "L16",
       "_origin": "ast",
       "id": "athenacoretests_athenamodelstests_athenamodelsconfigtests",
-      "community": 258,
+      "community": 202,
       "norm_label": "athenamodelsconfigtests"
     },
     {
@@ -28880,7 +28890,7 @@
       "source_location": "L22",
       "_origin": "ast",
       "id": "athenacoretests_athenamodelstests_athenamodelsconfigtests_qwen35configurl",
-      "community": 258,
+      "community": 202,
       "norm_label": ".qwen35configurl()"
     },
     {
@@ -28890,7 +28900,7 @@
       "source_location": "L22",
       "_origin": "ast",
       "id": "tests_athenacoretests_athenamodelstests_swift_url",
-      "community": 258,
+      "community": 202,
       "norm_label": "url"
     },
     {
@@ -28900,7 +28910,7 @@
       "source_location": "L32",
       "_origin": "ast",
       "id": "athenacoretests_athenamodelstests_athenamodelsconfigtests_testvendoredconfigdecodesrealqwen35",
-      "community": 258,
+      "community": 202,
       "norm_label": ".testvendoredconfigdecodesrealqwen35()"
     },
     {
@@ -28910,7 +28920,7 @@
       "source_location": "L48",
       "_origin": "ast",
       "id": "athenacoretests_athenamodelstests_athenamodelsconfigtests_testinlineconfigmtpdefaultstozero",
-      "community": 258,
+      "community": 202,
       "norm_label": ".testinlineconfigmtpdefaultstozero()"
     },
     {
@@ -28920,7 +28930,7 @@
       "source_location": "L55",
       "_origin": "ast",
       "id": "athenacoretests_athenamodelstests_athenamodelsconfigtests_testinlinetextconfigdefaultsapply",
-      "community": 258,
+      "community": 202,
       "norm_label": ".testinlinetextconfigdefaultsapply()"
     },
     {
@@ -28930,7 +28940,7 @@
       "source_location": "L73",
       "_origin": "ast",
       "id": "athenacoretests_athenamodelstests_triattentionscorermemoryregressiontests",
-      "community": 8,
+      "community": 202,
       "norm_label": "triattentionscorermemoryregressiontests"
     },
     {
@@ -28940,7 +28950,7 @@
       "source_location": "L75",
       "_origin": "ast",
       "id": "athenacoretests_athenamodelstests_triattentionscorermemoryregressiontests_testscorekeyspoolstaysboundedacrossmanycalls",
-      "community": 8,
+      "community": 202,
       "norm_label": ".testscorekeyspoolstaysboundedacrossmanycalls()"
     },
     {
@@ -29040,7 +29050,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "athenacoretests_athenaserverkittests",
-      "community": 15,
+      "community": 82,
       "norm_label": "athenaserverkittests.swift"
     },
     {
@@ -29110,7 +29120,7 @@
       "source_location": "L129",
       "_origin": "ast",
       "id": "athenacoretests_athenaserverkittests_athenaserverkittests_testloadfromenv",
-      "community": 311,
+      "community": 203,
       "norm_label": ".testloadfromenv()"
     },
     {
@@ -29160,7 +29170,7 @@
       "source_location": "L236",
       "_origin": "ast",
       "id": "athenacoretests_athenaserverkittests_athenaserverkittests_testsessionmintvalidateexpiry",
-      "community": 183,
+      "community": 82,
       "norm_label": ".testsessionmintvalidateexpiry()"
     },
     {
@@ -29170,7 +29180,7 @@
       "source_location": "L255",
       "_origin": "ast",
       "id": "athenacoretests_athenaserverkittests_athenaserverkittests_testsessioncsrf",
-      "community": 183,
+      "community": 82,
       "norm_label": ".testsessioncsrf()"
     },
     {
@@ -29570,7 +29580,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "athenacoretests_cliparsetests",
-      "community": 19,
+      "community": 139,
       "norm_label": "cliparsetests.swift"
     },
     {
@@ -29580,7 +29590,7 @@
       "source_location": "L9",
       "_origin": "ast",
       "id": "athenacoretests_cliparsetests_cliparsetests",
-      "community": 19,
+      "community": 139,
       "norm_label": "cliparsetests"
     },
     {
@@ -29590,7 +29600,7 @@
       "source_location": "L13",
       "_origin": "ast",
       "id": "athenacoretests_cliparsetests_cliparsetests_testttlunits",
-      "community": 19,
+      "community": 139,
       "norm_label": ".testttlunits()"
     },
     {
@@ -29600,7 +29610,7 @@
       "source_location": "L20",
       "_origin": "ast",
       "id": "athenacoretests_cliparsetests_cliparsetests_testttlbareintegerisseconds",
-      "community": 19,
+      "community": 139,
       "norm_label": ".testttlbareintegerisseconds()"
     },
     {
@@ -29610,7 +29620,7 @@
       "source_location": "L24",
       "_origin": "ast",
       "id": "athenacoretests_cliparsetests_cliparsetests_testttltrimswhitespace",
-      "community": 19,
+      "community": 139,
       "norm_label": ".testttltrimswhitespace()"
     },
     {
@@ -29620,7 +29630,7 @@
       "source_location": "L28",
       "_origin": "ast",
       "id": "athenacoretests_cliparsetests_cliparsetests_testttlrejectsmalformedandnonpositive",
-      "community": 19,
+      "community": 139,
       "norm_label": ".testttlrejectsmalformedandnonpositive()"
     },
     {
@@ -29630,7 +29640,7 @@
       "source_location": "L38",
       "_origin": "ast",
       "id": "athenacoretests_cliparsetests_cliparsetests_testttlrejectsoverflow",
-      "community": 19,
+      "community": 139,
       "norm_label": ".testttlrejectsoverflow()"
     },
     {
@@ -29640,7 +29650,7 @@
       "source_location": "L45",
       "_origin": "ast",
       "id": "athenacoretests_cliparsetests_cliparsetests_testvalidlabels",
-      "community": 19,
+      "community": 139,
       "norm_label": ".testvalidlabels()"
     },
     {
@@ -29650,7 +29660,7 @@
       "source_location": "L51",
       "_origin": "ast",
       "id": "athenacoretests_cliparsetests_cliparsetests_testinvalidlabels",
-      "community": 19,
+      "community": 139,
       "norm_label": ".testinvalidlabels()"
     },
     {
@@ -31730,7 +31740,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "athenacoretests_gemma4moeparitytests",
-      "community": 112,
+      "community": 330,
       "norm_label": "gemma4moeparitytests.swift"
     },
     {
@@ -31740,7 +31750,7 @@
       "source_location": "L23",
       "_origin": "ast",
       "id": "athenacoretests_gemma4moeparitytests_gemma4moeparitytests",
-      "community": 112,
+      "community": 330,
       "norm_label": "gemma4moeparitytests"
     },
     {
@@ -31750,7 +31760,7 @@
       "source_location": "L25",
       "_origin": "ast",
       "id": "athenacoretests_gemma4moeparitytests_gemma4moeparitytests_requiremodeltests",
-      "community": 112,
+      "community": 330,
       "norm_label": ".requiremodeltests()"
     },
     {
@@ -31760,7 +31770,7 @@
       "source_location": "L30",
       "_origin": "ast",
       "id": "athenacoretests_gemma4moeparitytests_gemma4moeparitytests_modeldir",
-      "community": 112,
+      "community": 330,
       "norm_label": ".modeldir()"
     },
     {
@@ -31770,7 +31780,7 @@
       "source_location": "L30",
       "_origin": "ast",
       "id": "tests_athenacoretests_gemma4moeparitytests_swift_url",
-      "community": 112,
+      "community": 330,
       "norm_label": "url"
     },
     {
@@ -31780,7 +31790,7 @@
       "source_location": "L53",
       "_origin": "ast",
       "id": "athenacoretests_gemma4moeparitytests_gemma4moeparitytests_fixtureurl",
-      "community": 112,
+      "community": 330,
       "norm_label": ".fixtureurl()"
     },
     {
@@ -31790,7 +31800,7 @@
       "source_location": "L64",
       "_origin": "ast",
       "id": "athenacoretests_gemma4moeparitytests_gemma4moeparitytests_testforwardmatchespythonreference",
-      "community": 112,
+      "community": 330,
       "norm_label": ".testforwardmatchespythonreference()"
     },
     {
@@ -33270,7 +33280,7 @@
       "source_location": "L11",
       "_origin": "ast",
       "id": "athenacoretests_mlxllmmoduletests_speculativegatetests",
-      "community": 1,
+      "community": 42,
       "norm_label": "speculativegatetests"
     },
     {
@@ -33280,7 +33290,7 @@
       "source_location": "L12",
       "_origin": "ast",
       "id": "athenacoretests_mlxllmmoduletests_speculativegatetests_testeligibleattempzero",
-      "community": 1,
+      "community": 42,
       "norm_label": ".testeligibleattempzero()"
     },
     {
@@ -33290,7 +33300,7 @@
       "source_location": "L17",
       "_origin": "ast",
       "id": "athenacoretests_mlxllmmoduletests_speculativegatetests_testeligibleatnonzerotemp",
-      "community": 1,
+      "community": 42,
       "norm_label": ".testeligibleatnonzerotemp()"
     },
     {
@@ -33300,7 +33310,7 @@
       "source_location": "L22",
       "_origin": "ast",
       "id": "athenacoretests_mlxllmmoduletests_speculativegatetests_testspeculativeoffneverengages",
-      "community": 1,
+      "community": 42,
       "norm_label": ".testspeculativeoffneverengages()"
     },
     {
@@ -33360,7 +33370,7 @@
       "source_location": "L64",
       "_origin": "ast",
       "id": "athenacoretests_mlxllmmoduletests_mlxllmmoduleestimatetests",
-      "community": 246,
+      "community": 257,
       "norm_label": "mlxllmmoduleestimatetests"
     },
     {
@@ -33370,7 +33380,7 @@
       "source_location": "L66",
       "_origin": "ast",
       "id": "athenacoretests_mlxllmmoduletests_mlxllmmoduleestimatetests_testestimatesumsonlysafetensors",
-      "community": 246,
+      "community": 257,
       "norm_label": ".testestimatesumsonlysafetensors()"
     },
     {
@@ -33380,7 +33390,7 @@
       "source_location": "L84",
       "_origin": "ast",
       "id": "athenacoretests_mlxllmmoduletests_mlxllmmoduleestimatetests_testestimatemissingdiriszero",
-      "community": 246,
+      "community": 257,
       "norm_label": ".testestimatemissingdiriszero()"
     },
     {
@@ -33390,7 +33400,7 @@
       "source_location": "L94",
       "_origin": "ast",
       "id": "athenacoretests_mlxllmmoduletests_mlxllmmoduleestimatetests_testestimatefollowsblobsymlinks",
-      "community": 246,
+      "community": 257,
       "norm_label": ".testestimatefollowsblobsymlinks()"
     },
     {
@@ -33400,7 +33410,7 @@
       "source_location": "L125",
       "_origin": "ast",
       "id": "athenacoretests_mlxllmmoduletests_mlxllmmoduleestimatetests_testestimatefollowsrootsymlink",
-      "community": 246,
+      "community": 257,
       "norm_label": ".testestimatefollowsrootsymlink()"
     },
     {
@@ -33540,7 +33550,7 @@
       "source_location": "L256",
       "_origin": "ast",
       "id": "athenacoretests_mlxllmmoduletests_mlxllmgenerationintegrationtests",
-      "community": 148,
+      "community": 299,
       "norm_label": "mlxllmgenerationintegrationtests"
     },
     {
@@ -33550,7 +33560,7 @@
       "source_location": "L258",
       "_origin": "ast",
       "id": "athenacoretests_mlxllmmoduletests_mlxllmgenerationintegrationtests_testgovernedgenerationproducestext",
-      "community": 148,
+      "community": 299,
       "norm_label": ".testgovernedgenerationproducestext()"
     },
     {
@@ -33560,7 +33570,7 @@
       "source_location": "L294",
       "_origin": "ast",
       "id": "athenacoretests_mlxllmmoduletests_mlxllmgenerationintegrationtests_testloadsviastoresymlink",
-      "community": 148,
+      "community": 299,
       "norm_label": ".testloadsviastoresymlink()"
     },
     {
@@ -33700,7 +33710,7 @@
       "source_location": "L583",
       "_origin": "ast",
       "id": "athenacoretests_mlxllmmoduletests_acceptcounter",
-      "community": 122,
+      "community": 342,
       "norm_label": "acceptcounter"
     },
     {
@@ -33720,7 +33730,7 @@
       "source_location": "L594",
       "_origin": "ast",
       "id": "tests_athenacoretests_mlxllmmoduletests_swift_int",
-      "community": 148,
+      "community": 299,
       "norm_label": "int"
     },
     {
@@ -34720,7 +34730,7 @@
       "source_location": "L73",
       "_origin": "ast",
       "id": "athenacoretests_modelclasstests_modelclasstests_testdetectfromdirectorywithstmarker",
-      "community": 217,
+      "community": 257,
       "norm_label": ".testdetectfromdirectorywithstmarker()"
     },
     {
@@ -35100,7 +35110,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "athenacoretests_modelselectiontests",
-      "community": 84,
+      "community": 21,
       "norm_label": "modelselectiontests.swift"
     },
     {
@@ -35220,7 +35230,7 @@
       "source_location": "L127",
       "_origin": "ast",
       "id": "athenacoretests_modelselectiontests_modelmodalityacceptortests",
-      "community": 84,
+      "community": 21,
       "norm_label": "modelmodalityacceptortests"
     },
     {
@@ -35230,7 +35240,7 @@
       "source_location": "L128",
       "_origin": "ast",
       "id": "athenacoretests_modelselectiontests_modelmodalityacceptortests_testslotacceptors",
-      "community": 84,
+      "community": 21,
       "norm_label": ".testslotacceptors()"
     },
     {
@@ -35240,7 +35250,7 @@
       "source_location": "L147",
       "_origin": "ast",
       "id": "athenacoretests_modelselectiontests_storemodelclasstests",
-      "community": 84,
+      "community": 21,
       "norm_label": "storemodelclasstests"
     },
     {
@@ -35250,7 +35260,7 @@
       "source_location": "L151",
       "_origin": "ast",
       "id": "athenacoretests_modelselectiontests_storemodelclasstests_testenumeratebymodality",
-      "community": 84,
+      "community": 21,
       "norm_label": ".testenumeratebymodality()"
     },
     {
@@ -35610,7 +35620,7 @@
       "source_location": "L253",
       "_origin": "ast",
       "id": "athenacoretests_modelsupporttests_modelsupporttests_testdetectmissingconfigisunsupported",
-      "community": 246,
+      "community": 39,
       "norm_label": ".testdetectmissingconfigisunsupported()"
     },
     {
@@ -35950,7 +35960,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "athenacoretests_parakeetdecodesteptests",
-      "community": 84,
+      "community": 333,
       "norm_label": "parakeetdecodesteptests.swift"
     },
     {
@@ -35960,7 +35970,7 @@
       "source_location": "L8",
       "_origin": "ast",
       "id": "athenacoretests_parakeetdecodesteptests_parakeetdecodesteptests",
-      "community": 84,
+      "community": 333,
       "norm_label": "parakeetdecodesteptests"
     },
     {
@@ -35970,7 +35980,7 @@
       "source_location": "L10",
       "_origin": "ast",
       "id": "athenacoretests_parakeetdecodesteptests_parakeetdecodesteptests_testnonzerodurationadvancesandresets",
-      "community": 84,
+      "community": 333,
       "norm_label": ".testnonzerodurationadvancesandresets()"
     },
     {
@@ -35980,7 +35990,7 @@
       "source_location": "L19",
       "_origin": "ast",
       "id": "athenacoretests_parakeetdecodesteptests_parakeetdecodesteptests_testzerodurationholdspointerandcounts",
-      "community": 84,
+      "community": 333,
       "norm_label": ".testzerodurationholdspointerandcounts()"
     },
     {
@@ -35990,7 +36000,7 @@
       "source_location": "L32",
       "_origin": "ast",
       "id": "athenacoretests_parakeetdecodesteptests_parakeetdecodesteptests_testantistallforcesadvanceatcap",
-      "community": 84,
+      "community": 333,
       "norm_label": ".testantistallforcesadvanceatcap()"
     },
     {
@@ -36000,7 +36010,7 @@
       "source_location": "L41",
       "_origin": "ast",
       "id": "athenacoretests_parakeetdecodesteptests_parakeetdecodesteptests_testantistallboundeddecodeterminates",
-      "community": 84,
+      "community": 333,
       "norm_label": ".testantistallboundeddecodeterminates()"
     },
     {
@@ -36170,7 +36180,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "athenacoretests_passiveoraclecontracttests",
-      "community": 262,
+      "community": 183,
       "norm_label": "passiveoraclecontracttests.swift"
     },
     {
@@ -36180,7 +36190,7 @@
       "source_location": "L11",
       "_origin": "ast",
       "id": "athenacoretests_passiveoraclecontracttests_passiveoraclecontracttests",
-      "community": 262,
+      "community": 183,
       "norm_label": "passiveoraclecontracttests"
     },
     {
@@ -36190,7 +36200,7 @@
       "source_location": "L13",
       "_origin": "ast",
       "id": "athenacoretests_passiveoraclecontracttests_passiveoraclecontracttests_testownportnotollama",
-      "community": 262,
+      "community": 183,
       "norm_label": ".testownportnotollama()"
     },
     {
@@ -36200,7 +36210,7 @@
       "source_location": "L19",
       "_origin": "ast",
       "id": "athenacoretests_passiveoraclecontracttests_passiveoraclecontracttests_testloopbackbydefault",
-      "community": 262,
+      "community": 183,
       "norm_label": ".testloopbackbydefault()"
     },
     {
@@ -36210,7 +36220,7 @@
       "source_location": "L23",
       "_origin": "ast",
       "id": "athenacoretests_passiveoraclecontracttests_passiveoraclecontracttests_testsingleboundedbudget",
-      "community": 262,
+      "community": 183,
       "norm_label": ".testsingleboundedbudget()"
     },
     {
@@ -36220,7 +36230,7 @@
       "source_location": "L30",
       "_origin": "ast",
       "id": "athenacoretests_passiveoraclecontracttests_passiveoraclecontracttests_testexplicitbudgethonored",
-      "community": 262,
+      "community": 183,
       "norm_label": ".testexplicitbudgethonored()"
     },
     {
@@ -36250,7 +36260,7 @@
       "source_location": "L20",
       "_origin": "ast",
       "id": "athenacoretests_prefixkvcachetests_prefixkvcachetests_testscopekeyprincipalmodeisolates",
-      "community": 30,
+      "community": 233,
       "norm_label": ".testscopekeyprincipalmodeisolates()"
     },
     {
@@ -37190,7 +37200,7 @@
       "source_location": "L48",
       "_origin": "ast",
       "id": "tests_athenacoretests_sortformertests_swift_float",
-      "community": 64,
+      "community": 10,
       "norm_label": "float"
     },
     {
@@ -37230,7 +37240,7 @@
       "source_location": "L159",
       "_origin": "ast",
       "id": "athenacoretests_sortformertests_sortformermemoryregressiontests_testgeneratepoolstaysboundedacrossmanycalls",
-      "community": 64,
+      "community": 10,
       "norm_label": ".testgeneratepoolstaysboundedacrossmanycalls()"
     },
     {
@@ -37710,7 +37720,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "athenacoretests_speculativestatstests",
-      "community": 122,
+      "community": 30,
       "norm_label": "speculativestatstests.swift"
     },
     {
@@ -37720,7 +37730,7 @@
       "source_location": "L16",
       "_origin": "ast",
       "id": "athenacoretests_speculativestatstests_speculativestatstests",
-      "community": 122,
+      "community": 30,
       "norm_label": "speculativestatstests"
     },
     {
@@ -37730,7 +37740,7 @@
       "source_location": "L19",
       "_origin": "ast",
       "id": "athenacoretests_speculativestatstests_countingobserver",
-      "community": 122,
+      "community": 30,
       "norm_label": "countingobserver"
     },
     {
@@ -37740,7 +37750,7 @@
       "source_location": "L25",
       "_origin": "ast",
       "id": "athenacoretests_speculativestatstests_countingobserver_recorditeration",
-      "community": 122,
+      "community": 30,
       "norm_label": ".recorditeration()"
     },
     {
@@ -37750,7 +37760,7 @@
       "source_location": "L25",
       "_origin": "ast",
       "id": "tests_athenacoretests_speculativestatstests_swift_bool",
-      "community": 122,
+      "community": 30,
       "norm_label": "bool"
     },
     {
@@ -37760,7 +37770,7 @@
       "source_location": "L32",
       "_origin": "ast",
       "id": "tests_athenacoretests_speculativestatstests_swift_int",
-      "community": 122,
+      "community": 30,
       "norm_label": "int"
     },
     {
@@ -37770,7 +37780,7 @@
       "source_location": "L36",
       "_origin": "ast",
       "id": "tests_athenacoretests_speculativestatstests_swift_double",
-      "community": 122,
+      "community": 30,
       "norm_label": "double"
     },
     {
@@ -37780,7 +37790,7 @@
       "source_location": "L45",
       "_origin": "ast",
       "id": "athenacoretests_speculativestatstests_speculativestatstests_testobservertasklocalreachespublisher",
-      "community": 122,
+      "community": 30,
       "norm_label": ".testobservertasklocalreachespublisher()"
     },
     {
@@ -37790,7 +37800,7 @@
       "source_location": "L63",
       "_origin": "ast",
       "id": "athenacoretests_speculativestatstests_speculativestatstests_testacceptancerateclearsfloor",
-      "community": 122,
+      "community": 30,
       "norm_label": ".testacceptancerateclearsfloor()"
     },
     {
@@ -37800,7 +37810,7 @@
       "source_location": "L78",
       "_origin": "ast",
       "id": "athenacoretests_speculativestatstests_speculativestatstests_testnoobserverisnoop",
-      "community": 122,
+      "community": 30,
       "norm_label": ".testnoobserverisnoop()"
     },
     {
@@ -37810,7 +37820,7 @@
       "source_location": "L88",
       "_origin": "ast",
       "id": "athenacoretests_speculativestatstests_speculativestatstests_simulatespeculativeiterations",
-      "community": 122,
+      "community": 30,
       "norm_label": ".simulatespeculativeiterations()"
     },
     {
@@ -38560,7 +38570,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "athenacoretests_supportedmodelstests",
-      "community": 332,
+      "community": 84,
       "norm_label": "supportedmodelstests.swift"
     },
     {
@@ -38570,7 +38580,7 @@
       "source_location": "L8",
       "_origin": "ast",
       "id": "athenacoretests_supportedmodelstests_supportedmodelstests",
-      "community": 332,
+      "community": 84,
       "norm_label": "supportedmodelstests"
     },
     {
@@ -38580,7 +38590,7 @@
       "source_location": "L10",
       "_origin": "ast",
       "id": "athenacoretests_supportedmodelstests_supportedmodelstests_testqwen35familydetected",
-      "community": 332,
+      "community": 84,
       "norm_label": ".testqwen35familydetected()"
     },
     {
@@ -38590,7 +38600,7 @@
       "source_location": "L18",
       "_origin": "ast",
       "id": "athenacoretests_supportedmodelstests_supportedmodelstests_testsupporttiers",
-      "community": 332,
+      "community": 84,
       "norm_label": ".testsupporttiers()"
     },
     {
@@ -38600,7 +38610,7 @@
       "source_location": "L30",
       "_origin": "ast",
       "id": "athenacoretests_supportedmodelstests_supportedmodelstests_testdescribementionstypeandtier",
-      "community": 332,
+      "community": 84,
       "norm_label": ".testdescribementionstypeandtier()"
     },
     {
@@ -38610,7 +38620,7 @@
       "source_location": "L45",
       "_origin": "ast",
       "id": "athenacoretests_supportedmodelstests_supportedmodelstests_testnoneandturboquantserveeveryarch",
-      "community": 332,
+      "community": 84,
       "norm_label": ".testnoneandturboquantserveeveryarch()"
     },
     {
@@ -38620,7 +38630,7 @@
       "source_location": "L53",
       "_origin": "ast",
       "id": "athenacoretests_supportedmodelstests_supportedmodelstests_testtriattentionservesonlyqwen35",
-      "community": 332,
+      "community": 84,
       "norm_label": ".testtriattentionservesonlyqwen35()"
     },
     {
@@ -38800,7 +38810,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "athenacoretests_transcriptionformattests",
-      "community": 274,
+      "community": 84,
       "norm_label": "transcriptionformattests.swift"
     },
     {
@@ -38810,7 +38820,7 @@
       "source_location": "L8",
       "_origin": "ast",
       "id": "athenacoretests_transcriptionformattests_transcriptionformattests",
-      "community": 274,
+      "community": 84,
       "norm_label": "transcriptionformattests"
     },
     {
@@ -38820,7 +38830,7 @@
       "source_location": "L16",
       "_origin": "ast",
       "id": "athenacoretests_transcriptionformattests_transcriptionformattests_testsrt",
-      "community": 274,
+      "community": 84,
       "norm_label": ".testsrt()"
     },
     {
@@ -38830,7 +38840,7 @@
       "source_location": "L24",
       "_origin": "ast",
       "id": "athenacoretests_transcriptionformattests_transcriptionformattests_testvtt",
-      "community": 274,
+      "community": 84,
       "norm_label": ".testvtt()"
     },
     {
@@ -38840,7 +38850,7 @@
       "source_location": "L33",
       "_origin": "ast",
       "id": "athenacoretests_transcriptionformattests_transcriptionformattests_testemptysegments",
-      "community": 274,
+      "community": 84,
       "norm_label": ".testemptysegments()"
     },
     {
@@ -38850,7 +38860,7 @@
       "source_location": "L40",
       "_origin": "ast",
       "id": "athenacoretests_transcriptionformattests_transcriptionformattests_testinvertedsegmentclampsend",
-      "community": 274,
+      "community": 84,
       "norm_label": ".testinvertedsegmentclampsend()"
     },
     {
@@ -38860,7 +38870,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "athenacoretests_transcriptionloadersupporttests",
-      "community": 326,
+      "community": 96,
       "norm_label": "transcriptionloadersupporttests.swift"
     },
     {
@@ -38870,7 +38880,7 @@
       "source_location": "L12",
       "_origin": "ast",
       "id": "athenacoretests_transcriptionloadersupporttests_transcriptionloadersupporttests",
-      "community": 326,
+      "community": 96,
       "norm_label": "transcriptionloadersupporttests"
     },
     {
@@ -38880,7 +38890,7 @@
       "source_location": "L15",
       "_origin": "ast",
       "id": "athenacoretests_transcriptionloadersupporttests_transcriptionloadersupporttests_store",
-      "community": 326,
+      "community": 96,
       "norm_label": ".store()"
     },
     {
@@ -38890,7 +38900,7 @@
       "source_location": "L15",
       "_origin": "ast",
       "id": "tests_athenacoretests_transcriptionloadersupporttests_swift_string",
-      "community": 326,
+      "community": 96,
       "norm_label": "string"
     },
     {
@@ -38900,7 +38910,7 @@
       "source_location": "L15",
       "_origin": "ast",
       "id": "tests_athenacoretests_transcriptionloadersupporttests_swift_url",
-      "community": 326,
+      "community": 96,
       "norm_label": "url"
     },
     {
@@ -38910,7 +38920,7 @@
       "source_location": "L26",
       "_origin": "ast",
       "id": "athenacoretests_transcriptionloadersupporttests_transcriptionloadersupporttests_loaderror",
-      "community": 326,
+      "community": 96,
       "norm_label": ".loaderror()"
     },
     {
@@ -38930,7 +38940,7 @@
       "source_location": "L43",
       "_origin": "ast",
       "id": "athenacoretests_transcriptionloadersupporttests_transcriptionloadersupporttests_testtransformersparakeetwithoutjointis400notdeep500",
-      "community": 326,
+      "community": 96,
       "norm_label": ".testtransformersparakeetwithoutjointis400notdeep500()"
     },
     {
@@ -38940,7 +38950,7 @@
       "source_location": "L71",
       "_origin": "ast",
       "id": "athenacoretests_transcriptionloadersupporttests_transcriptionloadersupporttests_testwhisperwrongvocabis400",
-      "community": 326,
+      "community": 96,
       "norm_label": ".testwhisperwrongvocabis400()"
     },
     {
@@ -38950,7 +38960,7 @@
       "source_location": "L89",
       "_origin": "ast",
       "id": "athenacoretests_transcriptionloadersupporttests_transcriptionloadersupporttests_testnonasrmodelismodelnotavailable",
-      "community": 326,
+      "community": 96,
       "norm_label": ".testnonasrmodelismodelnotavailable()"
     },
     {
@@ -39090,7 +39100,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "athenacoretests_triattentione2etests",
-      "community": 220,
+      "community": 1,
       "norm_label": "triattentione2etests.swift"
     },
     {
@@ -39100,7 +39110,7 @@
       "source_location": "L15",
       "_origin": "ast",
       "id": "athenacoretests_triattentione2etests_triattentione2etests",
-      "community": 220,
+      "community": 1,
       "norm_label": "triattentione2etests"
     },
     {
@@ -39110,7 +39120,7 @@
       "source_location": "L18",
       "_origin": "ast",
       "id": "athenacoretests_triattentione2etests_triattentione2etests_skipunlessmlx",
-      "community": 220,
+      "community": 1,
       "norm_label": ".skipunlessmlx()"
     },
     {
@@ -39120,7 +39130,7 @@
       "source_location": "L27",
       "_origin": "ast",
       "id": "athenacoretests_triattentione2etests_triattentione2etests_skipunlessmodel",
-      "community": 220,
+      "community": 1,
       "norm_label": ".skipunlessmodel()"
     },
     {
@@ -39130,7 +39140,7 @@
       "source_location": "L27",
       "_origin": "ast",
       "id": "tests_athenacoretests_triattentione2etests_swift_url",
-      "community": 220,
+      "community": 1,
       "norm_label": "url"
     },
     {
@@ -39140,7 +39150,7 @@
       "source_location": "L40",
       "_origin": "ast",
       "id": "athenacoretests_triattentione2etests_triattentione2etests_generate",
-      "community": 220,
+      "community": 1,
       "norm_label": ".generate()"
     },
     {
@@ -39150,7 +39160,7 @@
       "source_location": "L40",
       "_origin": "ast",
       "id": "tests_athenacoretests_triattentione2etests_swift_kvcompression",
-      "community": 220,
+      "community": 1,
       "norm_label": "kvcompression"
     },
     {
@@ -39160,7 +39170,7 @@
       "source_location": "L40",
       "_origin": "ast",
       "id": "tests_athenacoretests_triattentione2etests_swift_string",
-      "community": 220,
+      "community": 1,
       "norm_label": "string"
     },
     {
@@ -39170,7 +39180,7 @@
       "source_location": "L59",
       "_origin": "ast",
       "id": "athenacoretests_triattentione2etests_triattentione2etests_assertcoherent",
-      "community": 220,
+      "community": 1,
       "norm_label": ".assertcoherent()"
     },
     {
@@ -39180,7 +39190,7 @@
       "source_location": "L70",
       "_origin": "ast",
       "id": "athenacoretests_triattentione2etests_triattentione2etests_testtriattentionproducescoherentoutput",
-      "community": 220,
+      "community": 1,
       "norm_label": ".testtriattentionproducescoherentoutput()"
     },
     {
@@ -39190,7 +39200,7 @@
       "source_location": "L81",
       "_origin": "ast",
       "id": "athenacoretests_triattentione2etests_triattentione2etests_testuncompressedvstriattentionbothcoherent",
-      "community": 220,
+      "community": 1,
       "norm_label": ".testuncompressedvstriattentionbothcoherent()"
     },
     {
@@ -39200,7 +39210,7 @@
       "source_location": "L93",
       "_origin": "ast",
       "id": "athenacoretests_triattentione2etests_triattentione2etests_testevictionboundscacheandpopulatedroundtrip",
-      "community": 220,
+      "community": 1,
       "norm_label": ".testevictionboundscacheandpopulatedroundtrip()"
     },
     {
@@ -39390,7 +39400,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "athenacoretests_versionguardtests",
-      "community": 21,
+      "community": 84,
       "norm_label": "versionguardtests.swift"
     },
     {
@@ -39400,7 +39410,7 @@
       "source_location": "L5",
       "_origin": "ast",
       "id": "athenacoretests_versionguardtests_versionguardtests",
-      "community": 21,
+      "community": 84,
       "norm_label": "versionguardtests"
     },
     {
@@ -39410,7 +39420,7 @@
       "source_location": "L6",
       "_origin": "ast",
       "id": "athenacoretests_versionguardtests_versionguardtests_testcompareisnumericnotlexical",
-      "community": 21,
+      "community": 84,
       "norm_label": ".testcompareisnumericnotlexical()"
     },
     {
@@ -39420,7 +39430,7 @@
       "source_location": "L17",
       "_origin": "ast",
       "id": "athenacoretests_versionguardtests_versionguardtests_testclassifytransitions",
-      "community": 21,
+      "community": 84,
       "norm_label": ".testclassifytransitions()"
     },
     {
@@ -39430,7 +39440,7 @@
       "source_location": "L37",
       "_origin": "ast",
       "id": "athenacoretests_versionguardtests_versionguardtests_testsummarystrings",
-      "community": 21,
+      "community": 84,
       "norm_label": ".testsummarystrings()"
     },
     {
@@ -39670,7 +39680,7 @@
       "source_location": "L176",
       "_origin": "ast",
       "id": "athenacoretests_wespeakertests_wespeakerintegrationtests_testgovernedmoduleandinvalidsegment",
-      "community": 8,
+      "community": 102,
       "norm_label": ".testgovernedmoduleandinvalidsegment()"
     },
     {
@@ -39830,7 +39840,7 @@
       "source_location": "L12",
       "_origin": "ast",
       "id": "athenacoretests_whispertests_whispersinusoidstests_testsinusoidshape",
-      "community": 84,
+      "community": 112,
       "norm_label": ".testsinusoidshape()"
     },
     {
@@ -41060,7 +41070,7 @@
       "source_location": "L317",
       "_origin": "ast",
       "id": "athenaclient_remoteauth_cauthuser",
-      "community": 79,
+      "community": 5,
       "norm_label": "cauthuser"
     },
     {
@@ -41070,7 +41080,7 @@
       "source_location": "L325",
       "_origin": "ast",
       "id": "athenaclient_remoteauth_cauthuser_init",
-      "community": 79,
+      "community": 5,
       "norm_label": ".init()"
     },
     {
@@ -41170,7 +41180,7 @@
       "source_location": "L370",
       "_origin": "ast",
       "id": "athenaclient_remoteauth_cauthrole",
-      "community": 79,
+      "community": 5,
       "norm_label": "cauthrole"
     },
     {
@@ -41180,7 +41190,7 @@
       "source_location": "L378",
       "_origin": "ast",
       "id": "athenaclient_remoteauth_cauthrole_init",
-      "community": 79,
+      "community": 5,
       "norm_label": ".init()"
     },
     {
@@ -41280,7 +41290,7 @@
       "source_location": "L418",
       "_origin": "ast",
       "id": "athenaclient_remoteauth_cauthtoken",
-      "community": 79,
+      "community": 5,
       "norm_label": "cauthtoken"
     },
     {
@@ -41290,7 +41300,7 @@
       "source_location": "L423",
       "_origin": "ast",
       "id": "athenaclient_remoteauth_cauthtoken_init",
-      "community": 79,
+      "community": 5,
       "norm_label": ".init()"
     },
     {
@@ -41750,7 +41760,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "athenaclient_remotemodels",
-      "community": 13,
+      "community": 26,
       "norm_label": "remotemodels.swift"
     },
     {
@@ -41770,7 +41780,7 @@
       "source_location": "L26",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_entry",
-      "community": 13,
+      "community": 26,
       "norm_label": "entry"
     },
     {
@@ -41780,7 +41790,7 @@
       "source_location": "L27",
       "_origin": "ast",
       "id": "clients_sources_athenaclient_remotemodels_swift_string",
-      "community": 13,
+      "community": 26,
       "norm_label": "string"
     },
     {
@@ -41790,7 +41800,7 @@
       "source_location": "L28",
       "_origin": "ast",
       "id": "clients_sources_athenaclient_remotemodels_swift_int",
-      "community": 13,
+      "community": 65,
       "norm_label": "int"
     },
     {
@@ -41800,7 +41810,7 @@
       "source_location": "L31",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_listresp",
-      "community": 13,
+      "community": 26,
       "norm_label": "listresp"
     },
     {
@@ -41810,7 +41820,7 @@
       "source_location": "L32",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_detailresp",
-      "community": 13,
+      "community": 26,
       "norm_label": "detailresp"
     },
     {
@@ -41820,7 +41830,7 @@
       "source_location": "L37",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_defaultresp",
-      "community": 13,
+      "community": 26,
       "norm_label": "defaultresp"
     },
     {
@@ -41840,7 +41850,7 @@
       "source_location": "L41",
       "_origin": "ast",
       "id": "clients_sources_athenaclient_remotemodels_swift_data",
-      "community": 13,
+      "community": 337,
       "norm_label": "data"
     },
     {
@@ -41900,7 +41910,7 @@
       "source_location": "L101",
       "_origin": "ast",
       "id": "clients_sources_athenaclient_remotemodels_swift_bool",
-      "community": 13,
+      "community": 337,
       "norm_label": "bool"
     },
     {
@@ -41930,7 +41940,7 @@
       "source_location": "L150",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_loadreq",
-      "community": 13,
+      "community": 26,
       "norm_label": "loadreq"
     },
     {
@@ -41940,7 +41950,7 @@
       "source_location": "L154",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_loadresp",
-      "community": 13,
+      "community": 26,
       "norm_label": "loadresp"
     },
     {
@@ -41950,7 +41960,7 @@
       "source_location": "L159",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_unloadreq",
-      "community": 13,
+      "community": 26,
       "norm_label": "unloadreq"
     },
     {
@@ -41960,7 +41970,7 @@
       "source_location": "L160",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_unloadresp",
-      "community": 13,
+      "community": 26,
       "norm_label": "unloadresp"
     },
     {
@@ -41970,7 +41980,7 @@
       "source_location": "L164",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_slotresp",
-      "community": 13,
+      "community": 26,
       "norm_label": "slotresp"
     },
     {
@@ -41980,7 +41990,7 @@
       "source_location": "L170",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_residentresp",
-      "community": 13,
+      "community": 26,
       "norm_label": "residentresp"
     },
     {
@@ -42050,7 +42060,7 @@
       "source_location": "L279",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_modelopstream",
-      "community": 13,
+      "community": 337,
       "norm_label": "modelopstream"
     },
     {
@@ -42060,7 +42070,7 @@
       "source_location": "L280",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_modelopstream_run",
-      "community": 13,
+      "community": 337,
       "norm_label": ".run()"
     },
     {
@@ -42070,7 +42080,7 @@
       "source_location": "L342",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_modelopstream_handleframe",
-      "community": 13,
+      "community": 337,
       "norm_label": ".handleframe()"
     },
     {
@@ -42080,7 +42090,7 @@
       "source_location": "L394",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_pullcmd",
-      "community": 13,
+      "community": 65,
       "norm_label": "pullcmd"
     },
     {
@@ -42090,7 +42100,7 @@
       "source_location": "L404",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_pullcmd_init",
-      "community": 13,
+      "community": 65,
       "norm_label": ".init()"
     },
     {
@@ -42100,7 +42110,7 @@
       "source_location": "L405",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_pullcmd_run",
-      "community": 13,
+      "community": 65,
       "norm_label": ".run()"
     },
     {
@@ -42110,7 +42120,7 @@
       "source_location": "L413",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_convertcmd",
-      "community": 13,
+      "community": 65,
       "norm_label": "convertcmd"
     },
     {
@@ -42120,7 +42130,7 @@
       "source_location": "L428",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_convertcmd_init",
-      "community": 13,
+      "community": 65,
       "norm_label": ".init()"
     },
     {
@@ -42130,7 +42140,7 @@
       "source_location": "L429",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_convertcmd_run",
-      "community": 13,
+      "community": 65,
       "norm_label": ".run()"
     },
     {
@@ -42140,7 +42150,7 @@
       "source_location": "L440",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_prunecmd",
-      "community": 13,
+      "community": 65,
       "norm_label": "prunecmd"
     },
     {
@@ -42150,7 +42160,7 @@
       "source_location": "L449",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_prunecmd_init",
-      "community": 13,
+      "community": 65,
       "norm_label": ".init()"
     },
     {
@@ -42160,7 +42170,7 @@
       "source_location": "L450",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_prunecmd_run",
-      "community": 13,
+      "community": 65,
       "norm_label": ".run()"
     },
     {
@@ -42170,7 +42180,7 @@
       "source_location": "L457",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_cpcmd",
-      "community": 13,
+      "community": 26,
       "norm_label": "cpcmd"
     },
     {
@@ -42180,7 +42190,7 @@
       "source_location": "L468",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_cpcmd_init",
-      "community": 13,
+      "community": 26,
       "norm_label": ".init()"
     },
     {
@@ -42190,7 +42200,7 @@
       "source_location": "L469",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_cpcmd_run",
-      "community": 13,
+      "community": 26,
       "norm_label": ".run()"
     },
     {
@@ -42200,7 +42210,7 @@
       "source_location": "L476",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_defaultcmd",
-      "community": 13,
+      "community": 26,
       "norm_label": "defaultcmd"
     },
     {
@@ -42210,7 +42220,7 @@
       "source_location": "L483",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_defaultcmd_init",
-      "community": 13,
+      "community": 26,
       "norm_label": ".init()"
     },
     {
@@ -42230,7 +42240,7 @@
       "source_location": "L493",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_rmcmd",
-      "community": 13,
+      "community": 26,
       "norm_label": "rmcmd"
     },
     {
@@ -42240,7 +42250,7 @@
       "source_location": "L499",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_rmcmd_init",
-      "community": 13,
+      "community": 26,
       "norm_label": ".init()"
     },
     {
@@ -42250,7 +42260,7 @@
       "source_location": "L500",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_rmcmd_run",
-      "community": 13,
+      "community": 26,
       "norm_label": ".run()"
     },
     {
@@ -42290,7 +42300,7 @@
       "source_location": "L521",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_loadcmd",
-      "community": 13,
+      "community": 26,
       "norm_label": "loadcmd"
     },
     {
@@ -42300,7 +42310,7 @@
       "source_location": "L534",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_loadcmd_init",
-      "community": 13,
+      "community": 26,
       "norm_label": ".init()"
     },
     {
@@ -42310,7 +42320,7 @@
       "source_location": "L535",
       "_origin": "ast",
       "id": "athenaclient_remotemodels_loadcmd_run",
-      "community": 13,
+      "community": 26,
       "norm_label": ".run()"
     },
     {
@@ -48915,7 +48925,7 @@
       "label": "Context",
       "file_type": "document",
       "source_file": "docs/decisions/023-governor-memory-accounting-truthfulness.md",
-      "source_location": "L13",
+      "source_location": "L19",
       "_origin": "ast",
       "id": "decisions_023_governor_memory_accounting_truthfulness_context",
       "community": 319,
@@ -48925,7 +48935,7 @@
       "label": "Decision",
       "file_type": "document",
       "source_file": "docs/decisions/023-governor-memory-accounting-truthfulness.md",
-      "source_location": "L49",
+      "source_location": "L55",
       "_origin": "ast",
       "id": "decisions_023_governor_memory_accounting_truthfulness_decision",
       "community": 319,
@@ -48935,7 +48945,7 @@
       "label": "Honesty boundary (binding)",
       "file_type": "document",
       "source_file": "docs/decisions/023-governor-memory-accounting-truthfulness.md",
-      "source_location": "L82",
+      "source_location": "L88",
       "_origin": "ast",
       "id": "decisions_023_governor_memory_accounting_truthfulness_honesty_boundary_binding",
       "community": 319,
@@ -48945,7 +48955,7 @@
       "label": "Rejected / deferred",
       "file_type": "document",
       "source_file": "docs/decisions/023-governor-memory-accounting-truthfulness.md",
-      "source_location": "L92",
+      "source_location": "L98",
       "_origin": "ast",
       "id": "decisions_023_governor_memory_accounting_truthfulness_rejected_deferred",
       "community": 319,
@@ -48955,7 +48965,7 @@
       "label": "Consequences",
       "file_type": "document",
       "source_file": "docs/decisions/023-governor-memory-accounting-truthfulness.md",
-      "source_location": "L104",
+      "source_location": "L110",
       "_origin": "ast",
       "id": "decisions_023_governor_memory_accounting_truthfulness_consequences",
       "community": 319,
@@ -48965,7 +48975,7 @@
       "label": "Validation",
       "file_type": "document",
       "source_file": "docs/decisions/023-governor-memory-accounting-truthfulness.md",
-      "source_location": "L116",
+      "source_location": "L122",
       "_origin": "ast",
       "id": "decisions_023_governor_memory_accounting_truthfulness_validation",
       "community": 319,
@@ -48975,7 +48985,7 @@
       "label": "Amendment (2026-06-19) \u2014 the probe is `phys_footprint`, NOT `activeMemory`",
       "file_type": "document",
       "source_file": "docs/decisions/023-governor-memory-accounting-truthfulness.md",
-      "source_location": "L127",
+      "source_location": "L133",
       "_origin": "ast",
       "id": "decisions_023_governor_memory_accounting_truthfulness_amendment_2026_06_19_the_probe_is_phys_footprint_not_activememory",
       "community": 319,
@@ -49685,7 +49695,7 @@
       "label": "Principle",
       "file_type": "document",
       "source_file": "docs/governor-truth-plan.md",
-      "source_location": "L10",
+      "source_location": "L13",
       "_origin": "ast",
       "id": "docs_governor_truth_plan_principle",
       "community": 273,
@@ -49695,7 +49705,7 @@
       "label": "Current state (verified)",
       "file_type": "document",
       "source_file": "docs/governor-truth-plan.md",
-      "source_location": "L18",
+      "source_location": "L21",
       "_origin": "ast",
       "id": "docs_governor_truth_plan_current_state_verified",
       "community": 273,
@@ -49705,7 +49715,7 @@
       "label": "Slices",
       "file_type": "document",
       "source_file": "docs/governor-truth-plan.md",
-      "source_location": "L38",
+      "source_location": "L41",
       "_origin": "ast",
       "id": "docs_governor_truth_plan_slices",
       "community": 273,
@@ -49715,27 +49725,27 @@
       "label": "G1 \u2014 bound the serve-path MLX cache (`mlx_cache_limit_bytes`) \u2014 \u2705 SHIPPED v0.10.191",
       "file_type": "document",
       "source_file": "docs/governor-truth-plan.md",
-      "source_location": "L40",
+      "source_location": "L43",
       "_origin": "ast",
       "id": "docs_governor_truth_plan_g1_bound_the_serve_path_mlx_cache_mlx_cache_limit_bytes_shipped_v0_10_191",
       "community": 273,
       "norm_label": "g1 \u2014 bound the serve-path mlx cache (`mlx_cache_limit_bytes`) \u2014 \u2705 shipped v0.10.191"
     },
     {
-      "label": "G2 \u2014 admission against `committed = phys_footprint \u2212 mlxCacheBytes` (truth) \u2014 **DESIGNED, awaiting approval**",
+      "label": "G2 \u2014 admission against `committed = phys_footprint \u2212 mlxCacheBytes` (truth) \u2014 \u2705 SHIPPED v0.10.209\u2013211",
       "file_type": "document",
       "source_file": "docs/governor-truth-plan.md",
-      "source_location": "L59",
+      "source_location": "L62",
       "_origin": "ast",
-      "id": "docs_governor_truth_plan_g2_admission_against_committed_phys_footprint_mlxcachebytes_truth_designed_awaiting_approval",
+      "id": "docs_governor_truth_plan_g2_admission_against_committed_phys_footprint_mlxcachebytes_truth_shipped_v0_10_209_211",
       "community": 273,
-      "norm_label": "g2 \u2014 admission against `committed = phys_footprint \u2212 mlxcachebytes` (truth) \u2014 **designed, awaiting approval**"
+      "norm_label": "g2 \u2014 admission against `committed = phys_footprint \u2212 mlxcachebytes` (truth) \u2014 \u2705 shipped v0.10.209\u2013211"
     },
     {
       "label": "G3 \u2014 measured per-tenant footprint surfaced (visibility) \u2014 \u2705 SHIPPED v0.10.192",
       "file_type": "document",
       "source_file": "docs/governor-truth-plan.md",
-      "source_location": "L113",
+      "source_location": "L132",
       "_origin": "ast",
       "id": "docs_governor_truth_plan_g3_measured_per_tenant_footprint_surfaced_visibility_shipped_v0_10_192",
       "community": 273,
@@ -49745,7 +49755,7 @@
       "label": "Original G3 sketch (for reference)",
       "file_type": "document",
       "source_file": "docs/governor-truth-plan.md",
-      "source_location": "L128",
+      "source_location": "L147",
       "_origin": "ast",
       "id": "docs_governor_truth_plan_original_g3_sketch_for_reference",
       "community": 273,
@@ -49755,7 +49765,7 @@
       "label": "Sequencing & gates",
       "file_type": "document",
       "source_file": "docs/governor-truth-plan.md",
-      "source_location": "L139",
+      "source_location": "L158",
       "_origin": "ast",
       "id": "docs_governor_truth_plan_sequencing_gates",
       "community": 273,
@@ -49765,7 +49775,7 @@
       "label": "Honesty boundary (from ADR 023, binding)",
       "file_type": "document",
       "source_file": "docs/governor-truth-plan.md",
-      "source_location": "L157",
+      "source_location": "L176",
       "_origin": "ast",
       "id": "docs_governor_truth_plan_honesty_boundary_from_adr_023_binding",
       "community": 273,
@@ -57170,9 +57180,9 @@
       "source_file": "Tests/AthenaCoreTests/MemoryGovernorTests.swift",
       "source_location": "L643",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "athenacoretests_memorygovernortests_fakefootprint",
-      "target": "sendable",
-      "confidence_score": 1.0
+      "target": "sendable"
     },
     {
       "relation": "inherits",
@@ -60420,9 +60430,9 @@
       "source_file": "Sources/AthenaCore/GovernorMemory.swift",
       "source_location": "L37",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "athenacore_governormemory_admissionmode",
-      "target": "caseiterable",
-      "confidence_score": 1.0
+      "target": "caseiterable"
     },
     {
       "relation": "implements",
@@ -60595,9 +60605,9 @@
       "source_location": "L18",
       "weight": 1.0,
       "context": "parameter_type",
+      "confidence_score": 1.0,
       "source": "athenacore_governormemory_governormemory_resolvecachelimit",
-      "target": "sources_athenacore_governormemory_swift_int",
-      "confidence_score": 1.0
+      "target": "sources_athenacore_governormemory_swift_int"
     },
     {
       "relation": "references",
@@ -60606,9 +60616,9 @@
       "source_location": "L76",
       "weight": 1.0,
       "context": "parameter_type",
+      "confidence_score": 1.0,
       "source": "athenacore_governormemory_governormemory_admissiondenominator",
-      "target": "sources_athenacore_governormemory_swift_int",
-      "confidence_score": 1.0
+      "target": "sources_athenacore_governormemory_swift_int"
     },
     {
       "relation": "references",
@@ -60617,9 +60627,9 @@
       "source_location": "L58",
       "weight": 1.0,
       "context": "parameter_type",
+      "confidence_score": 1.0,
       "source": "athenacore_governormemory_governormemory_committedbytes",
-      "target": "sources_athenacore_governormemory_swift_int",
-      "confidence_score": 1.0
+      "target": "sources_athenacore_governormemory_swift_int"
     },
     {
       "relation": "references",
@@ -60628,9 +60638,9 @@
       "source_location": "L94",
       "weight": 1.0,
       "context": "parameter_type",
+      "confidence_score": 1.0,
       "source": "athenacore_governormemory_governormemory_fits",
-      "target": "sources_athenacore_governormemory_swift_int",
-      "confidence_score": 1.0
+      "target": "sources_athenacore_governormemory_swift_int"
     },
     {
       "relation": "references",
@@ -60639,9 +60649,9 @@
       "source_location": "L87",
       "weight": 1.0,
       "context": "parameter_type",
+      "confidence_score": 1.0,
       "source": "athenacore_governormemory_governormemory_freebytes",
-      "target": "sources_athenacore_governormemory_swift_int",
-      "confidence_score": 1.0
+      "target": "sources_athenacore_governormemory_swift_int"
     },
     {
       "relation": "case_of",
@@ -61792,9 +61802,9 @@
       "source_location": "L94",
       "weight": 1.0,
       "context": "return_type",
+      "confidence_score": 1.0,
       "source": "athenacore_governormemory_governormemory_fits",
-      "target": "sources_athenacore_governormemory_swift_bool",
-      "confidence_score": 1.0
+      "target": "sources_athenacore_governormemory_swift_bool"
     },
     {
       "relation": "contains",
@@ -64182,9 +64192,9 @@
       "source_location": "L23",
       "weight": 1.0,
       "context": "field",
-      "confidence_score": 1.0,
       "source": "athenacore_memorygovernor_modulesnapshot",
-      "target": "sources_athenacore_memorygovernor_swift_modulestate"
+      "target": "sources_athenacore_memorygovernor_swift_modulestate",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -64193,9 +64203,9 @@
       "source_location": "L26",
       "weight": 1.0,
       "context": "field",
-      "confidence_score": 1.0,
       "source": "athenacore_memorygovernor_modulesnapshot",
-      "target": "sources_athenacore_memorygovernor_swift_unloadedreason"
+      "target": "sources_athenacore_memorygovernor_swift_unloadedreason",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -64377,12 +64387,12 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L89",
+      "source_location": "L119",
       "weight": 1.0,
       "context": "field",
-      "confidence_score": 1.0,
       "source": "athenacore_memorygovernor_entry",
-      "target": "sources_athenacore_memorygovernor_swift_modulestate"
+      "target": "sources_athenacore_memorygovernor_swift_modulestate",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -64391,9 +64401,9 @@
       "source_location": "L37",
       "weight": 1.0,
       "context": "parameter_type",
-      "confidence_score": 1.0,
       "source": "athenacore_memorygovernor_modulesnapshot_init",
-      "target": "sources_athenacore_memorygovernor_swift_modulestate"
+      "target": "sources_athenacore_memorygovernor_swift_modulestate",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -64435,9 +64445,9 @@
       "source_location": "L727",
       "weight": 1.0,
       "context": "return_type",
+      "confidence_score": 1.0,
       "source": "athenacore_memorygovernor_memorygovernor_admissiondenominator",
-      "target": "sources_athenacore_memorygovernor_swift_int",
-      "confidence_score": 1.0
+      "target": "sources_athenacore_memorygovernor_swift_int"
     },
     {
       "relation": "references",
@@ -64556,9 +64566,9 @@
       "source_location": "L37",
       "weight": 1.0,
       "context": "parameter_type",
-      "confidence_score": 1.0,
       "source": "athenacore_memorygovernor_modulesnapshot_init",
-      "target": "sources_athenacore_memorygovernor_swift_unloadedreason"
+      "target": "sources_athenacore_memorygovernor_swift_unloadedreason",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
@@ -64572,6 +64582,17 @@
     },
     {
       "relation": "references",
+      "confidence": "EXTRACTED",
+      "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
+      "source_location": "L71",
+      "weight": 1.0,
+      "context": "field",
+      "confidence_score": 1.0,
+      "source": "athenacore_memorygovernor_governorsnapshot",
+      "target": "sources_athenacore_memorygovernor_swift_string"
+    },
+    {
+      "relation": "references",
       "context": "return_type",
       "confidence": "EXTRACTED",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
@@ -64580,6 +64601,49 @@
       "confidence_score": 1.0,
       "source": "athenacore_memorygovernor_memorygovernor_snapshot",
       "target": "athenacore_memorygovernor_governorsnapshot"
+    },
+    {
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
+      "source_location": "L73",
+      "weight": 1.0,
+      "context": "parameter_type",
+      "confidence_score": 1.0,
+      "source": "athenacore_memorygovernor_governorsnapshot_init",
+      "target": "sources_athenacore_memorygovernor_swift_string"
+    },
+    {
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
+      "source_location": "L688",
+      "weight": 1.0,
+      "context": "return_type",
+      "confidence_score": 1.0,
+      "source": "athenacore_memorygovernor_memorygovernor_fmtbytes",
+      "target": "sources_athenacore_memorygovernor_swift_string"
+    },
+    {
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
+      "source_location": "L694",
+      "weight": 1.0,
+      "context": "return_type",
+      "confidence_score": 1.0,
+      "source": "athenacore_memorygovernor_memorygovernor_ms",
+      "target": "sources_athenacore_memorygovernor_swift_string"
+    },
+    {
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
+      "source_location": "L94",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "athenacore_memorygovernor_unloadedreason",
+      "target": "sources_athenacore_memorygovernor_swift_string"
     },
     {
       "relation": "references",
@@ -64639,9 +64703,9 @@
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
       "source_location": "L727",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "athenacore_memorygovernor_memorygovernor",
-      "target": "athenacore_memorygovernor_memorygovernor_admissiondenominator",
-      "confidence_score": 1.0
+      "target": "athenacore_memorygovernor_memorygovernor_admissiondenominator"
     },
     {
       "relation": "method",
@@ -64871,9 +64935,9 @@
       "source_location": "L216",
       "weight": 1.0,
       "context": "field",
+      "confidence_score": 1.0,
       "source": "athenacore_memorygovernor_memorygovernor",
-      "target": "footprintprobe",
-      "confidence_score": 1.0
+      "target": "footprintprobe"
     },
     {
       "relation": "references",
@@ -64882,9 +64946,9 @@
       "source_location": "L218",
       "weight": 1.0,
       "context": "field",
+      "confidence_score": 1.0,
       "source": "athenacore_memorygovernor_memorygovernor",
-      "target": "governormemory",
-      "confidence_score": 1.0
+      "target": "governormemory"
     },
     {
       "relation": "references",
@@ -64926,9 +64990,9 @@
       "source_location": "L217",
       "weight": 1.0,
       "context": "field",
+      "confidence_score": 1.0,
       "source": "athenacore_memorygovernor_memorygovernor",
-      "target": "reclaimcachehook",
-      "confidence_score": 1.0
+      "target": "reclaimcachehook"
     },
     {
       "relation": "references",
@@ -64945,12 +65009,12 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L175",
+      "source_location": "L200",
       "weight": 1.0,
       "context": "generic_arg",
-      "confidence_score": 1.0,
       "source": "athenacore_memorygovernor_memorygovernor",
-      "target": "sources_athenacore_memorygovernor_swift_never"
+      "target": "sources_athenacore_memorygovernor_swift_never",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -64967,12 +65031,12 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L175",
+      "source_location": "L200",
       "weight": 1.0,
       "context": "field",
-      "confidence_score": 1.0,
       "source": "athenacore_memorygovernor_memorygovernor",
-      "target": "sources_athenacore_memorygovernor_swift_task"
+      "target": "sources_athenacore_memorygovernor_swift_task",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -64989,12 +65053,12 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L175",
+      "source_location": "L200",
       "weight": 1.0,
       "context": "generic_arg",
-      "confidence_score": 1.0,
       "source": "athenacore_memorygovernor_memorygovernor",
-      "target": "sources_athenacore_memorygovernor_swift_void"
+      "target": "sources_athenacore_memorygovernor_swift_void",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -65374,12 +65438,12 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L92",
+      "source_location": "L122",
       "weight": 1.0,
       "context": "field",
-      "confidence_score": 1.0,
       "source": "athenacore_memorygovernor_entry",
-      "target": "sources_athenacore_memorygovernor_swift_date"
+      "target": "sources_athenacore_memorygovernor_swift_date",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -65501,56 +65565,76 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L528",
+      "source_location": "L694",
       "weight": 1.0,
       "context": "parameter_type",
-      "confidence_score": 1.0,
       "source": "athenacore_memorygovernor_memorygovernor_ms",
-      "target": "sources_athenacore_memorygovernor_swift_date"
+      "target": "sources_athenacore_memorygovernor_swift_date",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L415",
+      "source_location": "L459",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "athenacore_memorygovernor_memorygovernor_awaitload",
-      "target": "sources_athenacore_memorygovernor_swift_task"
+      "target": "sources_athenacore_memorygovernor_swift_task",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L315",
+      "source_location": "L359",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "athenacore_memorygovernor_memorygovernor_beginloadifneeded",
-      "target": "sources_athenacore_memorygovernor_swift_task"
+      "target": "sources_athenacore_memorygovernor_swift_task",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L734",
+      "source_location": "L834",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "athenacore_memorygovernor_memorygovernor_evictsync",
-      "target": "sources_athenacore_memorygovernor_swift_task"
+      "target": "sources_athenacore_memorygovernor_swift_task",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
-      "source_location": "L796",
+      "source_location": "L896",
+      "weight": 1.0,
+      "source": "athenacore_memorygovernor_memorygovernor_unload",
+      "target": "sources_athenacore_memorygovernor_swift_task",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "source_file": "Sources/AthenaDeploy/AthenaConfig.swift",
+      "source_location": "L273",
       "weight": 1.0,
       "confidence_score": 1.0,
-      "source": "athenacore_memorygovernor_memorygovernor_unload",
-      "target": "sources_athenacore_memorygovernor_swift_task"
+      "source": "athenadeploy_athenaconfig_parseerror",
+      "target": "sources_athenacore_memorygovernor_swift_error"
+    },
+    {
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "source_file": "Sources/AthenaDeploy/ConfigEditor.swift",
+      "source_location": "L117",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "athenadeploy_configeditor_failure",
+      "target": "sources_athenacore_memorygovernor_swift_error"
     },
     {
       "relation": "calls",
@@ -65680,9 +65764,9 @@
       "source_location": "L249",
       "weight": 1.0,
       "context": "parameter_type",
+      "confidence_score": 1.0,
       "source": "athenacore_memorygovernor_memorygovernor_init",
-      "target": "footprintprobe",
-      "confidence_score": 1.0
+      "target": "footprintprobe"
     },
     {
       "relation": "references",
@@ -65691,9 +65775,9 @@
       "source_location": "L249",
       "weight": 1.0,
       "context": "parameter_type",
+      "confidence_score": 1.0,
       "source": "athenacore_memorygovernor_memorygovernor_init",
-      "target": "reclaimcachehook",
-      "confidence_score": 1.0
+      "target": "reclaimcachehook"
     },
     {
       "relation": "references",
@@ -65702,9 +65786,9 @@
       "source_location": "L249",
       "weight": 1.0,
       "context": "parameter_type",
+      "confidence_score": 1.0,
       "source": "athenacore_memorygovernor_memorygovernor_init",
-      "target": "governormemory",
-      "confidence_score": 1.0
+      "target": "governormemory"
     },
     {
       "relation": "calls",
@@ -66027,9 +66111,9 @@
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
       "source_location": "L749",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "athenacore_memorygovernor_memorygovernor_makeroom",
-      "target": "athenacore_memorygovernor_memorygovernor_admissiondenominator",
-      "confidence_score": 1.0
+      "target": "athenacore_memorygovernor_memorygovernor_admissiondenominator"
     },
     {
       "relation": "calls",
@@ -66038,9 +66122,9 @@
       "source_file": "Sources/AthenaCore/MemoryGovernor.swift",
       "source_location": "L924",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "athenacore_memorygovernor_memorygovernor_snapshot",
-      "target": "athenacore_memorygovernor_memorygovernor_admissiondenominator",
-      "confidence_score": 1.0
+      "target": "athenacore_memorygovernor_memorygovernor_admissiondenominator"
     },
     {
       "relation": "calls",
@@ -69730,12 +69814,12 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "Sources/AthenaDeploy/ConfigEditor.swift",
-      "source_location": "L92",
+      "source_location": "L94",
       "weight": 1.0,
       "context": "parameter_type",
-      "confidence_score": 1.0,
       "source": "athenadeploy_configeditor_configeditor_isassignment",
-      "target": "sources_athenadeploy_configeditor_swift_substring"
+      "target": "sources_athenadeploy_configeditor_swift_substring",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -69752,23 +69836,23 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "Sources/AthenaDeploy/ConfigEditor.swift",
-      "source_location": "L103",
+      "source_location": "L105",
       "weight": 1.0,
       "context": "parameter_type",
-      "confidence_score": 1.0,
       "source": "athenadeploy_configeditor_configeditor_iscommented",
-      "target": "sources_athenadeploy_configeditor_swift_substring"
+      "target": "sources_athenadeploy_configeditor_swift_substring",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "Sources/AthenaDeploy/ConfigEditor.swift",
-      "source_location": "L242",
+      "source_location": "L257",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "athenadeploy_configeditor_configeditor_setscalarthrowing",
-      "target": "sources_athenadeploy_configeditor_swift_substring"
+      "target": "sources_athenadeploy_configeditor_swift_substring",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -70180,9 +70264,9 @@
       "source_location": "L9",
       "weight": 1.0,
       "context": "return_type",
-      "confidence_score": 1.0,
       "source": "athenadeploy_launchdplist_launchdplist_dictionary",
-      "target": "sources_athenadeploy_launchdplist_swift_any"
+      "target": "sources_athenadeploy_launchdplist_swift_any",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -70254,12 +70338,12 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "Sources/AthenaDeploy/LaunchdPlist.swift",
-      "source_location": "L157",
+      "source_location": "L179",
       "weight": 1.0,
       "context": "return_type",
-      "confidence_score": 1.0,
       "source": "athenadeploy_launchdplist_launchdplist_xmldata",
-      "target": "sources_athenadeploy_launchdplist_swift_data"
+      "target": "sources_athenadeploy_launchdplist_swift_data",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -134312,9 +134396,9 @@
       "source_file": "Tests/AthenaCoreTests/MemoryGovernorTests.swift",
       "source_location": "L643",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "athenacoretests_memorygovernortests",
-      "target": "athenacoretests_memorygovernortests_fakefootprint",
-      "confidence_score": 1.0
+      "target": "athenacoretests_memorygovernortests_fakefootprint"
     },
     {
       "relation": "contains",
@@ -134542,9 +134626,9 @@
       "source_file": "Tests/AthenaCoreTests/MemoryGovernorTests.swift",
       "source_location": "L659",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "athenacoretests_memorygovernortests_memorygovernortests",
-      "target": "athenacoretests_memorygovernortests_memorygovernortests_testfootprintmoderejectsovercommitthatestimateadmits",
-      "confidence_score": 1.0
+      "target": "athenacoretests_memorygovernortests_memorygovernortests_testfootprintmoderejectsovercommitthatestimateadmits"
     },
     {
       "relation": "method",
@@ -134622,9 +134706,9 @@
       "source_file": "Tests/AthenaCoreTests/MemoryGovernorTests.swift",
       "source_location": "L700",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "athenacoretests_memorygovernortests_memorygovernortests",
-      "target": "athenacoretests_memorygovernortests_memorygovernortests_testreclaimrungadmitswithouteviction",
-      "confidence_score": 1.0
+      "target": "athenacoretests_memorygovernortests_memorygovernortests_testreclaimrungadmitswithouteviction"
     },
     {
       "relation": "method",
@@ -134702,9 +134786,9 @@
       "source_file": "Tests/AthenaCoreTests/MemoryGovernorTests.swift",
       "source_location": "L729",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "athenacoretests_memorygovernortests_memorygovernortests",
-      "target": "athenacoretests_memorygovernortests_memorygovernortests_testsnapshotfreebytesreflectslivefootprint",
-      "confidence_score": 1.0
+      "target": "athenacoretests_memorygovernortests_memorygovernortests_testsnapshotfreebytesreflectslivefootprint"
     },
     {
       "relation": "method",
@@ -134972,9 +135056,9 @@
       "source_location": "L645",
       "weight": 1.0,
       "context": "field",
+      "confidence_score": 1.0,
       "source": "athenacoretests_memorygovernortests_fakefootprint",
-      "target": "tests_athenacoretests_memorygovernortests_swift_int",
-      "confidence_score": 1.0
+      "target": "tests_athenacoretests_memorygovernortests_swift_int"
     },
     {
       "relation": "references",
@@ -134983,9 +135067,9 @@
       "source_location": "L646",
       "weight": 1.0,
       "context": "parameter_type",
+      "confidence_score": 1.0,
       "source": "athenacoretests_memorygovernortests_fakefootprint_init",
-      "target": "tests_athenacoretests_memorygovernortests_swift_int",
-      "confidence_score": 1.0
+      "target": "tests_athenacoretests_memorygovernortests_swift_int"
     },
     {
       "relation": "references",
@@ -134994,9 +135078,9 @@
       "source_location": "L650",
       "weight": 1.0,
       "context": "return_type",
+      "confidence_score": 1.0,
       "source": "athenacoretests_memorygovernortests_fakefootprint_sample",
-      "target": "tests_athenacoretests_memorygovernortests_swift_int",
-      "confidence_score": 1.0
+      "target": "tests_athenacoretests_memorygovernortests_swift_int"
     },
     {
       "relation": "references",
@@ -135770,9 +135854,9 @@
       "source_file": "Tests/AthenaCoreTests/MemoryGovernorTests.swift",
       "source_location": "L646",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "athenacoretests_memorygovernortests_fakefootprint",
-      "target": "athenacoretests_memorygovernortests_fakefootprint_init",
-      "confidence_score": 1.0
+      "target": "athenacoretests_memorygovernortests_fakefootprint_init"
     },
     {
       "relation": "method",
@@ -135780,9 +135864,9 @@
       "source_file": "Tests/AthenaCoreTests/MemoryGovernorTests.swift",
       "source_location": "L650",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "athenacoretests_memorygovernortests_fakefootprint",
-      "target": "athenacoretests_memorygovernortests_fakefootprint_sample",
-      "confidence_score": 1.0
+      "target": "athenacoretests_memorygovernortests_fakefootprint_sample"
     },
     {
       "relation": "calls",
@@ -135791,9 +135875,9 @@
       "source_file": "Tests/AthenaCoreTests/MemoryGovernorTests.swift",
       "source_location": "L662",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "athenacoretests_memorygovernortests_memorygovernortests_testfootprintmoderejectsovercommitthatestimateadmits",
-      "target": "athenacoretests_memorygovernortests_fakefootprint",
-      "confidence_score": 1.0
+      "target": "athenacoretests_memorygovernortests_fakefootprint"
     },
     {
       "relation": "calls",
@@ -135802,9 +135886,9 @@
       "source_file": "Tests/AthenaCoreTests/MemoryGovernorTests.swift",
       "source_location": "L704",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "athenacoretests_memorygovernortests_memorygovernortests_testreclaimrungadmitswithouteviction",
-      "target": "athenacoretests_memorygovernortests_fakefootprint",
-      "confidence_score": 1.0
+      "target": "athenacoretests_memorygovernortests_fakefootprint"
     },
     {
       "relation": "calls",
@@ -135813,9 +135897,9 @@
       "source_file": "Tests/AthenaCoreTests/MemoryGovernorTests.swift",
       "source_location": "L732",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "athenacoretests_memorygovernortests_memorygovernortests_testsnapshotfreebytesreflectslivefootprint",
-      "target": "athenacoretests_memorygovernortests_fakefootprint",
-      "confidence_score": 1.0
+      "target": "athenacoretests_memorygovernortests_fakefootprint"
     },
     {
       "relation": "calls",
@@ -135824,9 +135908,9 @@
       "source_file": "Tests/AthenaCoreTests/MemoryGovernorTests.swift",
       "source_location": "L668",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "athenacoretests_memorygovernortests_memorygovernortests_testfootprintmoderejectsovercommitthatestimateadmits",
-      "target": "athenacoretests_memorygovernortests_fakefootprint_sample",
-      "confidence_score": 1.0
+      "target": "athenacoretests_memorygovernortests_fakefootprint_sample"
     },
     {
       "relation": "calls",
@@ -135835,9 +135919,9 @@
       "source_file": "Tests/AthenaCoreTests/MemoryGovernorTests.swift",
       "source_location": "L712",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "athenacoretests_memorygovernortests_memorygovernortests_testreclaimrungadmitswithouteviction",
-      "target": "athenacoretests_memorygovernortests_fakefootprint_sample",
-      "confidence_score": 1.0
+      "target": "athenacoretests_memorygovernortests_fakefootprint_sample"
     },
     {
       "relation": "calls",
@@ -135846,9 +135930,9 @@
       "source_file": "Tests/AthenaCoreTests/MemoryGovernorTests.swift",
       "source_location": "L735",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "athenacoretests_memorygovernortests_memorygovernortests_testsnapshotfreebytesreflectslivefootprint",
-      "target": "athenacoretests_memorygovernortests_fakefootprint_sample",
-      "confidence_score": 1.0
+      "target": "athenacoretests_memorygovernortests_fakefootprint_sample"
     },
     {
       "relation": "method",
@@ -156091,11 +156175,11 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/governor-truth-plan.md",
-      "source_location": "L59",
+      "source_location": "L62",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "docs_governor_truth_plan_slices",
-      "target": "docs_governor_truth_plan_g2_admission_against_committed_phys_footprint_mlxcachebytes_truth_designed_awaiting_approval"
+      "target": "docs_governor_truth_plan_g2_admission_against_committed_phys_footprint_mlxcachebytes_truth_shipped_v0_10_209_211",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -162087,5 +162171,5 @@
       "source_file": "docs/structured-rss-rootcause.md"
     }
   ],
-  "built_at_commit": "1d6ae00f5c5ca35144e7683e6cd103b5afbe5e8c"
+  "built_at_commit": "7e3f06f02e9fbe358cad4c40fede918b974eec62"
 }

@@ -1,9 +1,15 @@
 # ADR 023 — governor memory-accounting truthfulness + serve-path cache bound
 
-**Status:** Accepted (M79) — staged rollout. **G1 (bound the serve cache) SHIPPED
-v0.10.191** (commit `0d2338f`); **G3 (measured per-tenant footprint) SHIPPED
-v0.10.192** (commit `193fca1`); **G2 (reconcile admission against the real
-footprint) IN PROGRESS** (M82, this slice) — see `docs/governor-truth-plan.md`.
+**Status:** Accepted (M79) — **ALL SLICES SHIPPED.** **G1 (bound the serve cache)
+v0.10.191** (commit `0d2338f`); **G3 (measured per-tenant footprint) v0.10.192**
+(commit `193fca1`); **G2 (reconcile admission against the real footprint)
+v0.10.209–211** (M82): the MLX-free admission seam (`committed = phys_footprint −
+reclaimable cache`, denominator `max(committed, reserved)`) is unit-pinned in
+`GovernorMemory`; `MemoryGovernor.makeRoom` gates on it (reclaim-then-evict
+ladder), `snapshot().freeBytes` reports `budget − max(committed, reserved)`, and
+`/healthz` surfaces `admissionMode`. Default-ON behind the
+`governor_admission_mode` (`footprint`|`estimate`) revert knob. See
+`docs/governor-truth-plan.md`.
 Realizes the long-deferred "**next milestone = governor accounting truthfulness**"
 from ADR 011 and the standing *heartbeat-RSS-undercounts-GPU* finding. Motivated
 by a field observation: after heavy overnight use the daemon's

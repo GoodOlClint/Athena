@@ -63,11 +63,18 @@ public struct GovernorSnapshot: Sendable, Codable {
     /// double-count against module admission.
     public let promptCachePoolBytes: Int
     public let promptCachePoolEntries: Int
+    /// ADR 023 G2 — the active admission accounting mode. `"footprint"` ⇒
+    /// `freeBytes` is `budget − max(committed, reserved)` (the live Metal
+    /// footprint governs admission); `"estimate"` ⇒ the pre-G2 reservation-only
+    /// denominator (the revert switch). Surfaced so an operator can confirm from
+    /// `/healthz` whether the truthful-accounting path is active.
+    public let admissionMode: String
 
     public init(
         totalBudgetBytes: Int, residentBytes: Int, freeBytes: Int,
         promptCacheCapBytes: Int, modules: [ModuleSnapshot],
-        promptCachePoolBytes: Int = 0, promptCachePoolEntries: Int = 0
+        promptCachePoolBytes: Int = 0, promptCachePoolEntries: Int = 0,
+        admissionMode: String = GovernorMemory.AdmissionMode.footprint.rawValue
     ) {
         self.totalBudgetBytes = totalBudgetBytes
         self.residentBytes = residentBytes
@@ -76,6 +83,7 @@ public struct GovernorSnapshot: Sendable, Codable {
         self.modules = modules
         self.promptCachePoolBytes = promptCachePoolBytes
         self.promptCachePoolEntries = promptCachePoolEntries
+        self.admissionMode = admissionMode
     }
 }
 
@@ -925,7 +933,8 @@ public actor MemoryGovernor {
             promptCacheCapBytes: promptCacheCapBytes,
             modules: mods,
             promptCachePoolBytes: pool.bytes,
-            promptCachePoolEntries: pool.entries
+            promptCachePoolEntries: pool.entries,
+            admissionMode: admissionMode.rawValue
         )
     }
 }

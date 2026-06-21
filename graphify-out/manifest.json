@@ -40,8 +40,8 @@
     "semantic_hash": "02bb55a620f14e10a33cb53b21e0114a"
   },
   "Sources/AthenaCore/MemoryGovernor.swift": {
-    "mtime": 1782080091.2704506,
-    "ast_hash": "ea8be4d0f1fa55c0c4a7143e64164aed",
+    "mtime": 1782080338.549739,
+    "ast_hash": "2c377f77799004f5a8d05a3973ee1e7f",
     "semantic_hash": ""
   },
   "Sources/AthenaCore/ModelAllowlist.swift": {
@@ -415,8 +415,8 @@
     "semantic_hash": "d16404614855c59c2001089f41c5bd78"
   },
   "Sources/athena/Athena.swift": {
-    "mtime": 1782080254.0825374,
-    "ast_hash": "1c90424d747b05efb0d446f54e15bf5a",
+    "mtime": 1782080443.3510308,
+    "ast_hash": "bf419cd8a481e7e4228029ed36502605",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Audit.swift": {
@@ -540,8 +540,8 @@
     "semantic_hash": "ba546feb975db11ee6e42e5e147b55e0"
   },
   "Sources/athena/Server/AthenaServer.swift": {
-    "mtime": 1782059153.7695498,
-    "ast_hash": "7cdd9f2ec0351e667c404120357e7d2b",
+    "mtime": 1782080352.0739808,
+    "ast_hash": "4002508fd3243e975672c4b311b7781e",
     "semantic_hash": ""
   },
   "Sources/athena/Server/GPUTelemetry.swift": {
@@ -560,8 +560,8 @@
     "semantic_hash": ""
   },
   "Sources/athena/Server/OpenAPISpec.swift": {
-    "mtime": 1782057001.7039104,
-    "ast_hash": "67a1d4a7f6ffc75aa8272927f0059e2d",
+    "mtime": 1782080380.0323763,
+    "ast_hash": "0b07cceba60e915af5e1f9c3cd4034a1",
     "semantic_hash": ""
   },
   "Sources/athena/Server/WebUI.swift": {
@@ -1035,8 +1035,8 @@
     "semantic_hash": "371237f6ed34877c859b071318d9b529"
   },
   "CLAUDE.md": {
-    "mtime": 1782079006.954665,
-    "ast_hash": "b530dadaa416d4737d8cfed2209bd6f5",
+    "mtime": 1782080414.4472108,
+    "ast_hash": "170eecbbbc89380f3f3ed85293ebd91b",
     "semantic_hash": ""
   },
   "docs/cli-reference.md": {
@@ -1670,8 +1670,8 @@
     "semantic_hash": ""
   },
   "docs/decisions/023-governor-memory-accounting-truthfulness.md": {
-    "mtime": 1782078988.0976295,
-    "ast_hash": "0a1e2d87f004cad128206939a897b14e",
+    "mtime": 1782080392.8754485,
+    "ast_hash": "19601412846b0fa7bcee2fae921ca895",
     "semantic_hash": ""
   },
   "Sources/AthenaTranscription/SpeakerWindowGate.swift": {
@@ -1715,8 +1715,8 @@
     "semantic_hash": ""
   },
   "docs/governor-truth-plan.md": {
-    "mtime": 1782079180.408897,
-    "ast_hash": "81e2bd0a12d51f9a64bd13140901b2ee",
+    "mtime": 1782080433.490336,
+    "ast_hash": "f297a3006f32a75f10139de1ad4280db",
     "semantic_hash": ""
   },
   "Sources/AthenaCore/GovernorMemory.swift": {

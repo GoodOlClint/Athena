@@ -5203,6 +5203,10 @@ struct HealthResponse: Encodable {
     /// bound). Lets an operator confirm the cache is bounded vs MLX's default;
     /// `mlxCacheBytes` should plateau at/under this.
     let mlxCacheLimitBytes: Int
+    /// ADR 023 G2 — the active admission accounting mode (`footprint` =
+    /// truthful, meters `budget − max(committed, reserved)`; `estimate` = the
+    /// revert switch). `freeBytes` above is computed under this mode.
+    let admissionMode: String
     /// M60.2 — whether the daemon holds a `PreventUserIdleSystemSleep` power
     /// assertion. `false` ⇒ an unattended Mac can idle-sleep and SUSPEND
     /// inference mid-request (the root cause of the M60 throughput-decay
@@ -5261,6 +5265,7 @@ struct HealthResponse: Encodable {
         self.mlxActiveBytes = MLX.Memory.activeMemory
         self.mlxCacheBytes = MLX.Memory.cacheMemory
         self.mlxCacheLimitBytes = MLX.Memory.cacheLimit
+        self.admissionMode = snapshot.admissionMode
         self.modules = snapshot.modules.map { m in
             ModuleHealth(
                 id: m.id, state: m.state, residentBytes: m.residentBytes,

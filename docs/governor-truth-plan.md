@@ -1,7 +1,10 @@
 # Governor memory-accounting truthfulness — change plan (ADR 023)
 
-**Status:** G1 SHIPPED (v0.10.191) · G3 SHIPPED (v0.10.192) · **G2 DESIGNED — awaiting
-review before build** (this slice, M82, starts at v0.10.209).
+**Status:** G1 SHIPPED (v0.10.191) · G3 SHIPPED (v0.10.192) · **G2 SHIPPED
+(v0.10.209–211, M82)** — admission now meters `max(committed, reserved)` against
+budget; `/healthz` surfaces `admissionMode` + honest `freeBytes`; default-ON
+behind the `governor_admission_mode` revert knob. **ADR 023 fully shipped.**
+RUNBOOK soak (mixed load, peak `phys_footprint` ≤ budget) pending.
 **Decision of record:** `docs/decisions/023-governor-memory-accounting-truthfulness.md`
 (+ its 2026-06-19 amendment: probe is `phys_footprint`, not `activeMemory`).
 **Milestone:** operator-assigned tag (ADR 011's long-deferred "next milestone =
@@ -56,7 +59,23 @@ unit-pinned (`GovernorMemoryTests`, 657/0); `Load.run` sets `MLX.Memory.cacheLim
 - **Risk:** low (one process-wide setting; a too-low limit only costs throughput, which
   the default avoids). Effort S–M.
 
-### G2 — admission against `committed = phys_footprint − mlxCacheBytes` (truth) — **DESIGNED, awaiting approval**
+### G2 — admission against `committed = phys_footprint − mlxCacheBytes` (truth) — ✅ SHIPPED v0.10.209–211
+**As built:** G2.1 (v0.10.209) landed the MLX-free `GovernorMemory` seam
+(`committedBytes`/`admissionDenominator`/`freeBytes`/`fits` + `AdmissionMode`,
+11 unit tests). G2.2 (v0.10.210) wired the injected `footprintProbe`
+(`phys_footprint` + `MLX.Memory.cacheMemory`) + `reclaimCache` hook into
+`MemoryGovernor.makeRoom` (front-door `max(committed, reserved)` gate → rung-1
+prompt-pool/cache reclaim → rung-2 reserved-metered LRU eviction → reject on the
+committed ceiling only when nothing was evictable, avoiding the async-unload lag),
+made `snapshot().freeBytes` honest, and plumbed `governor_admission_mode`
+(CLI > TOML > default `footprint`) through `AthenaConfig`/`ConfigEditor`/
+`LaunchdPlist` with set-time enum validation; 3 actor tests. G2.3 (v0.10.211)
+surfaced `admissionMode` on `GovernorSnapshot` → `/healthz` + the self-describing
+OpenAPI healthz description. Honesty boundary held: `residentBytes` stays the
+per-tenant reservation sum (+ G3 `measured` flag); the reclaimable cache is one
+global number, never attributed.
+
+**Design notes (as decided):**
 
 **Operator decisions (2026-06-21 interview):**
 - **Denominator = `max(committed, reserved)`** (warmup-safe). `committed = physFootprint
