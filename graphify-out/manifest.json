@@ -1,7 +1,7 @@
 {
   "Package.swift": {
-    "mtime": 1781791868.1951787,
-    "ast_hash": "a7a899d1085d861293f504cb5821187a",
+    "mtime": 1782071683.9163823,
+    "ast_hash": "f2157dfa851958afd105596c14ca56ea",
     "semantic_hash": ""
   },
   "Sources/AthenaCore/AthenaEnv.swift": {
@@ -415,8 +415,8 @@
     "semantic_hash": "d16404614855c59c2001089f41c5bd78"
   },
   "Sources/athena/Athena.swift": {
-    "mtime": 1782059350.2659361,
-    "ast_hash": "d2267c51ef6358dd89c375f80d0a43af",
+    "mtime": 1782071844.2434373,
+    "ast_hash": "b1b3188c300a4040b13f5bf09987eafb",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Audit.swift": {
@@ -1035,8 +1035,8 @@
     "semantic_hash": "371237f6ed34877c859b071318d9b529"
   },
   "CLAUDE.md": {
-    "mtime": 1782059021.0395467,
-    "ast_hash": "4694015f73343edf1a375546e68e8aab",
+    "mtime": 1782071133.3810978,
+    "ast_hash": "76a83e9c8b53e281351b40b909b256ff",
     "semantic_hash": ""
   },
   "docs/cli-reference.md": {
@@ -1745,8 +1745,8 @@
     "semantic_hash": ""
   },
   "docs/decisions/024-in-memory-data-protection-coresident-threat.md": {
-    "mtime": 1782014503.736575,
-    "ast_hash": "54de230c1986a9fa5314e6b34db32243",
+    "mtime": 1782071091.6042259,
+    "ast_hash": "7aff90b548e09a1eea576cf4ac68657e",
     "semantic_hash": ""
   },
   "docs/decisions/025-collapse-persistent-data-tenants.md": {
@@ -1802,6 +1802,36 @@
   "Tests/AthenaCoreTests/StoreModeTests.swift": {
     "mtime": 1782058539.2691317,
     "ast_hash": "0bfb04586b88531d44390798953a557f",
+    "semantic_hash": ""
+  },
+  "Sources/AthenaCore/IdleKVCipher.swift": {
+    "mtime": 1782071713.9841313,
+    "ast_hash": "4d5e23d24339f5c7653919ccf73286e1",
+    "semantic_hash": ""
+  },
+  "Sources/AthenaCore/KVFrame.swift": {
+    "mtime": 1782071744.6982524,
+    "ast_hash": "1c37ff34457b93277ec8a4f6a43aeba3",
+    "semantic_hash": ""
+  },
+  "Sources/AthenaLLM/KVByteCodec.swift": {
+    "mtime": 1782071775.4194765,
+    "ast_hash": "1c03b2e4d7f346dc311e8a58963a3d0b",
+    "semantic_hash": ""
+  },
+  "Tests/AthenaCoreTests/IdleKVCipherTests.swift": {
+    "mtime": 1782071813.2067068,
+    "ast_hash": "b2449ddf54117140fa5c44d6b27151a6",
+    "semantic_hash": ""
+  },
+  "Tests/AthenaCoreTests/KVFrameTests.swift": {
+    "mtime": 1782071829.1759074,
+    "ast_hash": "e5f518f38772285323e61f5733e9175c",
+    "semantic_hash": ""
+  },
+  "docs/confidential-kv-cache-plan.md": {
+    "mtime": 1782071041.5444944,
+    "ast_hash": "415a72c3bfa4feae3fc4e11a55feb02d",
     "semantic_hash": ""
   }
 }

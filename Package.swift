@@ -105,6 +105,13 @@ let package = Package(
         // subsystem: every inference module shares one global budget.
         .target(
             name: "AthenaCore",
+            dependencies: [
+                // ADR 024 T3 — AES-256-GCM for the idle prompt-cache KV
+                // cipher (`IdleKVCipher`). swift-crypto (cross-platform, the
+                // same product AthenaServerKit links) over Apple CryptoKit so
+                // AthenaCore stays buildable off Darwin.
+                .product(name: "Crypto", package: "swift-crypto"),
+            ],
             path: "Sources/AthenaCore"),
 
         // C ABI of the Rust outlines-core structured-output staticlib.

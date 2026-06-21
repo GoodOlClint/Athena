@@ -1,11 +1,15 @@
 # ADR 024 — in-memory data protection against a co-resident adversary
 
-**Status:** **Accepted — T1 + T2 committed** (hardening program, M80; ADR 024
-tier-scope decision resolved with the operator at Phase 0). **T3 (encrypt idle
-prompt-cache KV at-rest-in-RAM) deferred** as a stretch, gated on whether the
-target deployment runs the prompt cache with sensitive idle entries. **T1
-shipped v0.10.198** (process lockdown: Hardened Runtime + no `get-task-allow`,
-notarization hook); **T2 shipped v0.10.200** (`ProcessHardening.swift`: core
+**Status:** **Accepted — T1 + T2 + T3** (hardening program, M80–M81; ADR 024
+tier-scope decision resolved with the operator at Phase 0, T3 gate cleared M81).
+**T3 (encrypt idle prompt-cache KV at-rest-in-RAM)** was deferred as a stretch,
+gated on whether the target deployment runs the prompt cache with sensitive idle
+entries; **that gate is now cleared** — the deployment handles HIPAA (PHI) and/or
+PCI (PAN) workloads whose reused prefixes sit in the M59 idle cache, so T3 is
+**accepted** (plan: `docs/confidential-kv-cache-plan.md`; slices M81 from
+v0.10.206). **T1 shipped v0.10.198** (process lockdown: Hardened Runtime + no
+`get-task-allow`, notarization hook); **T2 shipped v0.10.200**
+(`ProcessHardening.swift`: core
 dumps off unconditionally via `setrlimit(RLIMIT_CORE,0)`; opt-in
 `ptrace(PT_DENY_ATTACH)` behind `deny_debugger_attach` / `ATHENA_DENY_DEBUGGER`;
 best-effort `secureZero`/`memset_s` of the decoded request PCM on every
@@ -86,11 +90,16 @@ To read another process's memory a co-resident attacker needs
 
 ## Decision
 
-**T1 + T2 committed; T3 deferred.** The tier-scope decision was resolved with the
-operator at the hardening-program Phase-0 gate: build **T1** (process lockdown)
-and **T2** (side-channel hygiene) now — the high-value, bounded work — and treat
-**T3** (encrypt idle prompt-cache KV at-rest-in-RAM) as a stretch, gated on
-whether the target deployment runs the prompt cache with sensitive idle entries.
+**T1 + T2 committed (M80); T3 accepted (M81, gate cleared).** The tier-scope
+decision was resolved with the operator at the hardening-program Phase-0 gate:
+build **T1** (process lockdown) and **T2** (side-channel hygiene) first — the
+high-value, bounded work — and treat **T3** (encrypt idle prompt-cache KV
+at-rest-in-RAM) as a stretch, gated on whether the target deployment runs the
+prompt cache with sensitive idle entries. **That T3 gate is now cleared** (M81):
+the deployment handles HIPAA/PCI workloads whose reused prefixes sit in the idle
+cache, so T3 is accepted with the refinements recorded under "Tier 3" below
+(swap-led justification, RAM-only key, ciphertext-at-rest-always, independent
+`prompt_cache_encrypt_idle` toggle). Plan: `docs/confidential-kv-cache-plan.md`.
 This ADR records the threat model, the defense ladder, and the binding honesty
 boundary. (The original framing left tier selection open pending the consumer's
 exact adversary — co-resident non-root vs. root-but-SIP-intact vs. "prove I'm
@@ -122,13 +131,62 @@ win and the direct answer to "lock the pool from another process":
   boundary (MLX's pool may hand the page back before we touch it).
 
 **Tier 3 — encrypt the *idle* cache at-rest-in-RAM (most responsive to the
-co-resident threat).** The prompt-prefix cache is mostly **cold entries on
-idle-TTL waiting for reuse** — long dwell, high value, the prime scraping target.
-Keep idle/retained KV entries **encrypted in RAM** (AES-GCM via CryptoKit, key
-wrapped by the Secure Enclave), decrypt only the slice being restored into a live
-decode. Collapses the plaintext window from "the whole pool, indefinitely" to
-"the single entry currently decoding." Cost: per-hit crypto on cache
-restore; complexity.
+co-resident threat). ACCEPTED M81 (gate cleared); plan
+`docs/confidential-kv-cache-plan.md`, slices from v0.10.206.** The prompt-prefix
+cache is mostly **cold entries on idle-TTL waiting for reuse** — long dwell, high
+value, the prime scraping target. Keep idle/retained KV entries **encrypted in
+RAM** (AES-256-GCM via CryptoKit), decrypt only the slice being restored into a
+live decode. Collapses the plaintext window from "the whole pool, indefinitely"
+to "the single entry currently decoding." Cost: per-hit crypto on cache restore;
+a net-new KV serialize/deserialize seam; complexity.
+
+As-accepted refinements (M81):
+
+- **Justification leads with swap, not the in-RAM scraper.** T1 already blocks a
+  non-root `task_for_pid`, so T3's strongest *T1-independent* value is **swap /
+  compressed-memory leakage**: macOS can compress and swap the long-dwell idle
+  pool under pressure, and if host swap-encryption / FileVault is off, plaintext
+  PHI/PAN KV could hit disk — outside any process-memory adversary and outside
+  T1's scope. T3 ensures **only ciphertext is ever swappable**, which is the
+  clean compliance story ("encrypted at rest, including volatile caches and
+  anything that can reach swap"). This is *why T3 and not `mlock`* for the idle
+  pool — encrypted pages stay swappable/reclaimable (the governor keeps its
+  budget) while never exposing plaintext to swap, whereas pinning GB-scale KV
+  fights the unified-memory budget (ADR 011/023). Secondary value:
+  residency-window collapse (a momentary core-dump/debugger/`task_for_pid`-
+  regression read catches only the one decoding entry) and defense-in-depth /
+  attestation (survives a T1 misconfig; an auditor can be told the idle cache is
+  AES-256-GCM).
+- **Key model = RAM-only, NO Secure Enclave (narrows this ADR's original "key
+  wrapped by the Secure Enclave" sketch).** A random per-process
+  `SymmetricKey(.bits256)`, rotated/zeroed on full pool flush. SEP-wrapping is
+  **rejected** for a process-ephemeral key: the key is necessarily in our RAM
+  during every bulk seal/open, so against the co-resident/kernel threat SEP
+  changes nothing (a kernel adversary reads the unwrapped key regardless; a
+  non-root one is already blocked by T1), and its only value would be an auditor
+  "keys in Secure Enclave" checkbox that is partly theater for a RAM-only key.
+  Re-open SEP only if a future M59.5 *persists* the key.
+- **Ciphertext-at-rest-always (a refinement of "encrypt-on-evict").** Because the
+  cache is clone-on-hit (the entry's own tensors are never the working buffer —
+  `acquire` clones them into a fresh working cache under the lock), an `Entry`
+  holds **only ciphertext from `store` to evict**; `acquire` decrypts
+  just-in-time into the working clone (the irreducibly-plaintext active entry)
+  and wipes the transient buffer. This strictly dominates literal refcount-gated
+  encryption (same guarantee, simpler invariant, no wider plaintext window).
+- **Latency posture = "must beat cold."** No fixed SLA; the invariant is
+  restore < cold re-prefill (hardware AES ~GB/s vs ~190 s prefill wins
+  comfortably; measured on a ~760 MB entry, numbers recorded on completion), with
+  a guard that prefers cold if a restore would ever cost more than re-prefilling.
+- **Toggle = independent `prompt_cache_encrypt_idle`** (off by default, mirroring
+  `encrypt_store`), not a broader "confidential mode" umbrella.
+- **Bit-identical gate is sacred:** AES-GCM is lossless, so warm-with-encryption
+  output must stay byte-identical to cold — re-run `e2e-m59-prefix-cache.sh` with
+  encryption on. A decrypt that can't reproduce the exact bytes is a correctness
+  bug, not a degraded mode.
+- **Honesty boundary unchanged** (see below): T3 shrinks the window to the active
+  decoding entry; the key + active working set + weights remain plaintext and a
+  kernel/SIP-off adversary reads them. The transient plaintext wipe is
+  best-effort, but the at-rest/swap guarantee is designed not to depend on it.
 
 ### Honesty boundary (binding)
 
