@@ -3063,6 +3063,11 @@ struct AthenaServer {
         }
         await audit(
             request, action: action, target: target, result: "ok")
+        // Operator legibility: a notice-level line per model op (replacing the
+        // old `queue submit/running` lines). Emitted inside the request's
+        // LogScope so it carries req=/principal=/function= (M45.3).
+        Self.log.notice(
+            "model op \(action) target=\(target ?? "-")")
         return streamModelOp(kind: kind, body: body)
     }
 

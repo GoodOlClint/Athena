@@ -67,18 +67,14 @@ ln -s /nonexistent/gone "$MSTORE/dead"
 
 D2=""                          # phase-8 isolated RBAC-admin data dir
 D3=""                          # phase-8.7 audit-retention data dir
-D4=""                          # phase-25 queue-TTL data dir
-D5=""                          # phase-25.1 queue-max-rows data dir
-D6=""                          # phase-25.2 vector-TTL data dir
-D7=""                          # phase-25.3 content opt-out data dir
-D8=""                          # phase-25.3 content-retained control dir
+# (ADR 025: D4/D5/D7/D8 queue-retention + D6 vector-TTL data dirs removed
+#  with the queue + vector phases.)
 D9=""                          # phase-26 encrypted-store data dir
 D10=""                         # phase-26 plaintext→encrypted migration dir
 cleanup() {
   [ -n "$DPID" ] && kill "$DPID" 2>/dev/null
   wait "$DPID" 2>/dev/null
   rm -rf "$D" "$EMPTY" "$MSTORE" ${D2:+"$D2"} ${D3:+"$D3"} \
-    ${D4:+"$D4"} ${D5:+"$D5"} ${D6:+"$D6"} ${D7:+"$D7"} ${D8:+"$D8"} \
     ${D9:+"$D9"} ${D10:+"$D10"}
   unset ATHENA_STORE_KEY
 }
@@ -597,17 +593,11 @@ uic 404 POST "/ui/api/models/rm" "$CSRF" '{"name":"ghost"}'   # reached
 uic 200 POST "/ui/api/models/copy" "$CSRF" \
   '{"src":"fake-model","dst":"ui-tmp","copy":false}'
 uic 200 POST "/ui/api/models/rm" "$CSRF" '{"name":"ui-tmp"}'
-# pull enqueues via the SAME M16 path → 202 {job_id}; poll the
-# console job endpoint (nil-owner, model.read-gated).
-JR="$(curl -s -b "$UIJAR" -X POST -H "X-CSRF-Token: $CSRF" \
-  -H 'Content-Type: application/json' -d '{"id":"hf/none"}' \
-  "$B/ui/api/models/pull")"
-JID="$(printf '%s' "$JR" | sed -n \
-  's/.*"job_id":"\([^"]*\)".*/\1/p')"
-[ -n "$JID" ] && ok "pull enqueued via reuse (job $JID)" \
-  || bad "pull did not return job_id ($JR)"
-uic 200 GET "/ui/api/job?id=$JID"
-uic 400 POST "/ui/api/models/pull" "$CSRF" '{"id":""}'  # validator
+# ADR 025 S2 — /ui model ops run SYNCHRONOUSLY (no job id, no poll): the
+# POST blocks and returns the terminal result JSON. A dry-run prune is
+# offline + deterministic, so it round-trips to a clean 200.
+uic 200 POST "/ui/api/models/prune" "$CSRF" '{"dry_run":true}'
+uic 400 POST "/ui/api/models/pull" "$CSRF" '{"id":""}'  # validator (no stream)
 # member: model nav/page/mutation all gated pre-handler (∌ daemonAdmin)
 MC="$(curl -s -o /dev/null -w '%{http_code}' -b "$UIJAR_A" \
   "$B/ui/models")"
@@ -1225,10 +1215,11 @@ echo
 
 echo
 echo "== phase 3.686: governor truth + /healthz signals (M43.1) =="
-# /healthz carries inflight, queueDepth, lastRequestAt; after serving a
-# request lastRequestAt > 0 and the served module is loaded. (The M43.1
-# allowlist-drop→reconcile sub-test is retired with the allowlist; the
-# governor-reconcile-on-unload path is exercised by /api/models/unload.)
+# /healthz carries inflight + lastRequestAt; after serving a request
+# lastRequestAt > 0 and the served module is loaded. (ADR 025 S2 removed the
+# `queueDepth` field with the async queue. The M43.1 allowlist-drop→reconcile
+# sub-test is retired with the allowlist; the governor-reconcile-on-unload
+# path is exercised by /api/models/unload.)
 curl -s -X POST -H "Authorization: Bearer $ALICE_TOK" \
   -H 'Content-Type: application/json' \
   -d '{"input":"hi"}' \
@@ -1237,9 +1228,11 @@ HZ1="$(curl -s "http://127.0.0.1:$PORT/healthz")"
 echo "$HZ1" | python3 -c '
 import json, sys
 h = json.loads(sys.stdin.read())
-for k in ("inflight", "queueDepth", "lastRequestAt"):
+for k in ("inflight", "lastRequestAt"):
     if k not in h:
         sys.exit("missing:" + k)
+if "queueDepth" in h:
+    sys.exit("queueDepth should be gone (ADR 025 S2)")
 if h["lastRequestAt"] <= 0:
     sys.exit("lastRequestAt=0")
 te = [m for m in h["modules"] if m["id"] == "textEmbedding"][0]
@@ -1249,7 +1242,7 @@ if te["state"] != "loaded" or te["residentBytes"] <= 0:
 if "measured" not in te:
     sys.exit("missing measured field:" + json.dumps(te))
 ' >/dev/null \
-  && ok "/healthz adds inflight/queueDepth/lastRequestAt + loaded state" \
+  && ok "/healthz adds inflight/lastRequestAt + loaded state (no queueDepth)" \
   || bad "/healthz missing M43.1 fields or textEmbedding not loaded ($HZ1)"
 # ADR 023 G1: /healthz exposes the serve-path MLX cache bound so an operator
 # can confirm the reclaimable buffer pool is bounded (mlxCacheBytes plateaus ≤ it).
@@ -1396,22 +1389,19 @@ echo
 echo "== phase 3.6891: request-scoped log metadata (M45.3) =="
 # M45.3 plumbs req/principal/function through swift-log's
 # MetadataProvider via the LogScope TaskLocal set by AuthMiddleware.
-# Verify by submitting a queue job and checking the daemon.log line
-# carries req=<uuid> + principal=<admin> + function=<swift fn>.
-M45_3_JID="$(curl -s -X POST \
-  "http://127.0.0.1:$PORT/v1/queue/conversation" \
+# Verify via a model op (ADR 025 S2: the old queue `submit/running` lines
+# are replaced by a notice-level `model op <action>` line) emitted inside
+# the request's LogScope, so the daemon.log line carries req=<uuid> +
+# principal=<admin> + function=<swift fn>. A dry-run prune is offline +
+# deterministic and changes nothing.
+curl -s -X POST "http://127.0.0.1:$PORT/api/models/prune" \
   -H "Authorization: Bearer $ADMIN_TOK" \
-  -H 'Content-Type: application/json' \
-  -d '{"messages":[{"role":"user","content":"m45.3"}]}' \
-  | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
-# Give the worker a moment to log `queue job running` / done.
+  -H 'Content-Type: application/json' -d '{"dry_run":true}' >/dev/null
 sleep 0.5
-# The notice-level emission for THIS job id should carry M45.3
-# metadata.
-M45_3_LINE="$(grep -E "queue (submit|job running|job done).*id=$M45_3_JID" \
-  "$D/daemon.log" | head -1)"
+# The notice-level `model op model.prune` line should carry M45.3 metadata.
+M45_3_LINE="$(grep -E "model op model.prune" "$D/daemon.log" | tail -1)"
 echo "$M45_3_LINE" | grep -q "req=" \
-  && ok "M45.3 daemon log carries req= field for $M45_3_JID" \
+  && ok "M45.3 daemon log carries req= field for the model op" \
   || bad "M45.3 daemon log missing req= ($M45_3_LINE)"
 echo "$M45_3_LINE" | grep -q "principal=" \
   && ok "M45.3 daemon log carries principal= field" \
@@ -1560,50 +1550,35 @@ echo "$ORET" | grep -q '"object":"model"' \
   || bad "/v1/models/:id wrong object ($ORET)"
 
 echo
-echo "== phase 3.7: async model ops via queue (M16.3) =="
-# perm: model.write only; AuthMiddleware blocks before any enqueue.
+echo "== phase 3.7: synchronous model ops + SSE (ADR 025 S2) =="
+# perm: model.write only; AuthMiddleware blocks before the op runs. These
+# faults are returned as plain status codes BEFORE the SSE stream opens.
 code 403 POST /api/models/pull   "$ALICE_TOK" '{"id":"x/y"}'
 code 403 POST /api/models/prune  "$RO_TOK"
 code 400 POST /api/models/pull   "$ADMIN_TOK" '{}'   # 'id' required
-# Security: the public /v1/queue/:kind route must NOT accept model_*
-# (a queue.submit-only caller would otherwise bypass model.write).
-code 400 POST /v1/queue/model_pull   "$ALICE_TOK" '{"id":"x/y"}'
-code 400 POST /v1/queue/model_prune  "$ALICE_TOK" '{}'
-# prune round-trip (offline, deterministic): submit → poll → done.
-PJID="$(curl -s -X POST "http://127.0.0.1:$PORT/api/models/prune" \
+# ADR 025 S2 — the async queue (and the `/v1/queue*` surface that could
+# bypass model.write via a model_* kind) is gone; model ops run in-process
+# and stream Server-Sent Events directly on `/api/models/*`. No job id.
+# prune round-trip (offline, deterministic): the SSE stream ends with a
+# terminal `done` event carrying the result.
+PRES="$(curl -s -X POST "http://127.0.0.1:$PORT/api/models/prune" \
   -H "Authorization: Bearer $ADMIN_TOK" \
-  -H "Content-Type: application/json" -d '{}' \
-  | sed -n 's/.*"job_id":"\([^"]*\)".*/\1/p')"
-[ -n "$PJID" ] && ok "prune enqueued ($PJID)" || bad "prune enqueue"
-PRES="$(curl -s -H "Authorization: Bearer $ADMIN_TOK" \
-  "http://127.0.0.1:$PORT/v1/queue/$PJID?wait=15")"
-echo "$PRES" | grep -q '"status":"done"' \
-  && ok "prune job completed" || bad "prune job ($PRES)"
+  -H "Content-Type: application/json" -d '{}')"
+echo "$PRES" | grep -q '"event":"done"' \
+  && ok "prune completed (synchronous SSE)" || bad "prune did not finish ($PRES)"
 echo "$PRES" | grep -q '"dead"' \
   && ok "prune found the dangling symlink" \
   || bad "prune candidates missing 'dead' ($PRES)"
 [ ! -e "$MSTORE/dead" ] \
   && ok "dangling symlink removed" || bad "dead symlink survived"
-# pull dispatch + owner-scoped polling (no completion wait — network).
-DJID="$(curl -s -X POST "http://127.0.0.1:$PORT/api/models/pull" \
+# pull of a nonexistent repo streams a terminal `error` event (no job id).
+DRES="$(curl -s -X POST "http://127.0.0.1:$PORT/api/models/pull" \
   -H "Authorization: Bearer $ADMIN_TOK" \
   -H "Content-Type: application/json" \
-  -d '{"id":"athena-e2e/does-not-exist"}' \
-  | sed -n 's/.*"job_id":"\([^"]*\)".*/\1/p')"
-[ -n "$DJID" ] && ok "pull enqueued ($DJID)" || bad "pull enqueue"
-code 200 GET "/v1/queue/$DJID" "$ADMIN_TOK"   # owner/admin sees it
-code 404 GET "/v1/queue/$DJID" "$BOB_TOK"     # other tenant hidden
-
-echo
-echo "== phase 4: cross-tenant queue isolation =="
-JID="$(curl -s -X POST "http://127.0.0.1:$PORT/v1/queue/conversation" \
-  -H "Authorization: Bearer $ALICE_TOK" \
-  -H "Content-Type: application/json" -d "$CHAT" \
-  | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
-[ -n "$JID" ] && ok "alice submitted job $JID" || bad "alice submit"
-code 200 GET "/v1/queue/$JID" "$ALICE_TOK"              # owner
-code 404 GET "/v1/queue/$JID" "$BOB_TOK"                # other tenant
-code 200 GET "/v1/queue/$JID" "$ADMIN_TOK"              # admin sees all
+  -d '{"id":"athena-e2e/does-not-exist"}')"
+echo "$DRES" | grep -q '"event":"error"' \
+  && ok "pull of a missing repo streams an error event" \
+  || bad "pull error event missing ($DRES)"
 
 echo
 echo "== phase 5: last-admin protection =="
@@ -2378,7 +2353,7 @@ echo "== phase 19: per-principal rate limiting — 429 + Retry-After (M29.1) =="
 # loopback, ephemeral data dir, port 17447.
 stop_daemon
 start_daemon "$D" 127.0.0.1 --rate-limit 1 --rate-burst 1 --preload \
-  --llm-model athena-stub \
+  --llm-model Qwen3.5-27B-4bit-mtp \
   || { echo "rate-limited daemon failed"; cat "$D/daemon.log"; exit 1; }
 grep -q "auth: enabled (RBAC" "$D/daemon.log" \
   && ok "rate-limited daemon still enforces auth" \
@@ -2433,7 +2408,7 @@ hold() { # BEARER  → backgrounds a ~150 ms in-flight chat, sets $HPID
 # while a DIFFERENT principal (bob) is unaffected.
 stop_daemon
 start_daemon "$D" 127.0.0.1 --max-concurrency-per-principal 1 \
-  --preload --llm-model athena-stub \
+  --preload --llm-model Qwen3.5-27B-4bit-mtp \
   || { echo "concurrency daemon failed"; cat "$D/daemon.log"; exit 1; }
 hold "$ALICE_TOK"
 probe 429 "$ALICE_TOK" \
@@ -2458,7 +2433,7 @@ stop_daemon
 # fills the whole daemon, so a DIFFERENT principal is rejected — proving
 # the cap is global, not per-caller.
 start_daemon "$D" 127.0.0.1 --max-concurrency 1 --preload \
-  --llm-model athena-stub \
+  --llm-model Qwen3.5-27B-4bit-mtp \
   || { echo "global-concurrency daemon failed"; cat "$D/daemon.log"; \
        exit 1; }
 hold "$ALICE_TOK"
@@ -2528,7 +2503,7 @@ echo "== phase 22: per-request inference timeout — 504 + truncate (M33.1) =="
 stop_daemon
 export ATHENA_STUB_DELAY_MS=200
 start_daemon "$D" 127.0.0.1 --request-timeout-secs 1 --preload \
-  --llm-model athena-stub \
+  --llm-model Qwen3.5-27B-4bit-mtp \
   || { echo "timeout daemon failed"; cat "$D/daemon.log"; exit 1; }
 # 22a: a sync chat that overruns the 1 s deadline → classified 504.
 TO="$(curl -s -i -H "Authorization: Bearer $ALICE_TOK" \
@@ -2554,7 +2529,7 @@ echo "$SR" | grep -q "data: \[DONE\]" \
 # NOT 504 — the override widens the deadline for THIS call only.
 RELAX="$(curl -s -i -H "Authorization: Bearer $ALICE_TOK" \
   -H "Content-Type: application/json" \
-  -d '{"model":"athena-stub","timeout":30,"messages":[{"role":"user","content":"hi"}]}' \
+  -d '{"model":"Qwen3.5-27B-4bit-mtp","timeout":30,"messages":[{"role":"user","content":"hi"}]}' \
   "http://127.0.0.1:$PORT/v1/chat/completions")"
 echo "$RELAX" | head -1 | grep -q " 200" \
   && ok "per-request timeout=30 widens past daemon's 1 s cap → 200" \
@@ -2564,7 +2539,7 @@ echo "$RELAX" | head -1 | grep -q " 200" \
 # guard so the "0 ⇒ disable" branch stays alive across refactors.
 OFF="$(curl -s -i -H "Authorization: Bearer $ALICE_TOK" \
   -H "Content-Type: application/json" \
-  -d '{"model":"athena-stub","timeout":0,"messages":[{"role":"user","content":"hi"}]}' \
+  -d '{"model":"Qwen3.5-27B-4bit-mtp","timeout":0,"messages":[{"role":"user","content":"hi"}]}' \
   "http://127.0.0.1:$PORT/v1/chat/completions")"
 echo "$OFF" | head -1 | grep -q " 200" \
   && ok "per-request timeout=0 disables deadline → 200" \
@@ -2573,7 +2548,7 @@ stop_daemon
 # 22c: the SAME slow generation under a generous timeout is NOT killed —
 # proves the deadline doesn't false-fire on legitimate work.
 start_daemon "$D" 127.0.0.1 --request-timeout-secs 30 --preload \
-  --llm-model athena-stub \
+  --llm-model Qwen3.5-27B-4bit-mtp \
   || { echo "generous-timeout daemon failed"; cat "$D/daemon.log"; exit 1; }
 code 200 POST /v1/chat/completions "$ALICE_TOK" "$CHAT"
 # 22c2 (M46.3a): per-request `timeout: 1` override TIGHTENS the deadline
@@ -2581,7 +2556,7 @@ code 200 POST /v1/chat/completions "$ALICE_TOK" "$CHAT"
 # at 200 must now 504 with the per-call cap.
 TIGHT="$(curl -s -i -H "Authorization: Bearer $ALICE_TOK" \
   -H "Content-Type: application/json" \
-  -d '{"model":"athena-stub","timeout":1,"messages":[{"role":"user","content":"hi"}]}' \
+  -d '{"model":"Qwen3.5-27B-4bit-mtp","timeout":1,"messages":[{"role":"user","content":"hi"}]}' \
   "http://127.0.0.1:$PORT/v1/chat/completions")"
 echo "$TIGHT" | head -1 | grep -q " 504" \
   && ok "per-request timeout=1 tightens below daemon's 30 s cap → 504" \
@@ -2601,7 +2576,7 @@ echo "== phase 23: graceful shutdown — drain in-flight on SIGTERM (M33.2) =="
 # the request is reliably mid-generation when the signal lands.
 stop_daemon
 export ATHENA_STUB_DELAY_MS=300
-start_daemon "$D" 127.0.0.1 --preload --llm-model athena-stub \
+start_daemon "$D" 127.0.0.1 --preload --llm-model Qwen3.5-27B-4bit-mtp \
   || { echo "graceful-shutdown daemon failed"; cat "$D/daemon.log"; exit 1; }
 GDPID="$DPID"
 INFLIGHT="$(mktemp)"
@@ -2645,7 +2620,7 @@ stop_daemon
 # the warm-line assertions. Daemon log path stays $D/daemon.log per the
 # start_daemon helper, so the existing greps work unchanged.
 D24="$(mktemp -d)"
-start_daemon "$D24" 127.0.0.1 --preload --llm-model athena-stub \
+start_daemon "$D24" 127.0.0.1 --preload --llm-model Qwen3.5-27B-4bit-mtp \
   || { echo "preload daemon failed"; cat "$D/daemon.log"; exit 1; }
 ok "daemon serves immediately (healthz up) with --preload"
 WARM=0
@@ -2692,115 +2667,10 @@ grep -q "preload:" "$D/daemon.log" \
   || ok "default start is lazy (no preload without the flag)"
 stop_daemon
 
-echo
-echo "== phase 25: queue-result retention sweeper (M34.1) =="
-# A submitted job's request+result persist so a client can poll after the
-# fact; left unbounded those inference-output blobs accumulate forever.
-# queue_result_ttl_secs prunes TERMINAL results older than the window,
-# swept on the worker's idle path. Fresh data dir, auth off (loopback,
-# no creds) so submission needs no token. Deterministic via a backdated
-# `updated` (mirrors phase 8.7's audit-retention proof).
-stop_daemon
-D4="$(mktemp -d)"
-qdb4="$D4/athena.sqlite"
-start_daemon "$D4" 127.0.0.1 --queue-result-ttl-secs 1 \
-  || { echo "queue-ttl daemon failed"; cat "$D/daemon.log"; exit 1; }
-J1="$(curl -s -X POST "http://127.0.0.1:$PORT/v1/queue/conversation" \
-  -H "Content-Type: application/json" -d "$CHAT" \
-  | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
-[ -n "$J1" ] && ok "submitted job 1 ($J1)" || bad "submit job 1"
-R1="$(curl -s "http://127.0.0.1:$PORT/v1/queue/$J1?wait=15")"
-echo "$R1" | grep -q '"status":"done"' \
-  && ok "job 1 completed (result persisted)" || bad "job 1 done ($R1)"
-# Backdate its completion ~10 days so the 1 s TTL must reap it.
-OLDQ=$(( $(date +%s) - 864000 ))
-sqlite3 "$qdb4" "UPDATE jobs SET updated=$OLDQ WHERE id='$J1';"
-# A second submit wakes the worker; after it drains, the idle sweep fires.
-J2="$(curl -s -X POST "http://127.0.0.1:$PORT/v1/queue/conversation" \
-  -H "Content-Type: application/json" -d "$CHAT" \
-  | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
-curl -s -o /dev/null "http://127.0.0.1:$PORT/v1/queue/$J2?wait=15"
-GONEQ=0
-for _ in $(seq 1 20); do
-  N="$(sqlite3 "$qdb4" "SELECT COUNT(*) FROM jobs WHERE id='$J1';")"
-  [ "$N" = "0" ] && { GONEQ=1; break; }
-  sleep 0.25
-done
-[ "$GONEQ" = "1" ] \
-  && ok "stale terminal result pruned past the TTL window" \
-  || bad "stale queue result survived TTL"
-KEPTQ="$(sqlite3 "$qdb4" "SELECT COUNT(*) FROM jobs WHERE id='$J2';")"
-[ "$KEPTQ" = "1" ] \
-  && ok "fresh result retained within the window" \
-  || bad "fresh result missing after sweep ($KEPTQ)"
-stop_daemon
-rm -rf "$D4"; D4=""
-
-echo
-echo "== phase 25.1: queue_max_rows caps total rows (M34.1) =="
-# An independent bound: cap total job rows, trimming the oldest terminal
-# results first. Submit three jobs; once they finish and the worker idles,
-# the cap reaps down to 2.
-D5="$(mktemp -d)"
-qdb5="$D5/athena.sqlite"
-start_daemon "$D5" 127.0.0.1 --queue-max-rows 2 \
-  || { echo "queue-max daemon failed"; cat "$D/daemon.log"; exit 1; }
-for _ in 1 2 3; do
-  JX="$(curl -s -X POST "http://127.0.0.1:$PORT/v1/queue/conversation" \
-    -H "Content-Type: application/json" -d "$CHAT" \
-    | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
-  curl -s -o /dev/null "http://127.0.0.1:$PORT/v1/queue/$JX?wait=15"
-done
-CAPQ=0
-for _ in $(seq 1 20); do
-  N="$(sqlite3 "$qdb5" "SELECT COUNT(*) FROM jobs;")"
-  [ "$N" = "2" ] && { CAPQ=1; break; }
-  sleep 0.25
-done
-[ "$CAPQ" = "1" ] \
-  && ok "queue trimmed to the row cap (2)" \
-  || bad "queue not capped (rows=$(sqlite3 "$qdb5" 'SELECT COUNT(*) FROM jobs;'))"
-stop_daemon
-rm -rf "$D5"; D5=""
-
-echo
-echo "== phase 25.3: content opt-out — drop prompt on completion (M34.2) =="
-# With --drop-request-content the queue wipes a job's request (prompt)
-# blob the moment it finishes; the result the client polls for stays.
-# Default (no flag) retains the prompt. Auth off.
-D7="$(mktemp -d)"
-cdb7="$D7/athena.sqlite"
-start_daemon "$D7" 127.0.0.1 --drop-request-content \
-  || { echo "content-optout daemon failed"; cat "$D/daemon.log"; exit 1; }
-JC="$(curl -s -X POST "http://127.0.0.1:$PORT/v1/queue/conversation" \
-  -H "Content-Type: application/json" -d "$CHAT" \
-  | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
-curl -s -o /dev/null "http://127.0.0.1:$PORT/v1/queue/$JC?wait=15"
-REQLEN="$(sqlite3 "$cdb7" "SELECT length(request) FROM jobs WHERE id='$JC';")"
-RESLEN="$(sqlite3 "$cdb7" "SELECT length(result) FROM jobs WHERE id='$JC';")"
-[ "$REQLEN" = "0" ] \
-  && ok "prompt blob wiped on completion (request length 0)" \
-  || bad "prompt blob survived with opt-out (len=$REQLEN)"
-[ "${RESLEN:-0}" -gt 0 ] \
-  && ok "result still retained for the client to poll (len=$RESLEN)" \
-  || bad "result missing after content opt-out (len=$RESLEN)"
-stop_daemon
-rm -rf "$D7"; D7=""
-# Control: default daemon (no flag) keeps the prompt.
-D8="$(mktemp -d)"
-cdb8="$D8/athena.sqlite"
-start_daemon "$D8" 127.0.0.1 \
-  || { echo "content-control daemon failed"; cat "$D/daemon.log"; exit 1; }
-JK="$(curl -s -X POST "http://127.0.0.1:$PORT/v1/queue/conversation" \
-  -H "Content-Type: application/json" -d "$CHAT" \
-  | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')"
-curl -s -o /dev/null "http://127.0.0.1:$PORT/v1/queue/$JK?wait=15"
-KREQ="$(sqlite3 "$cdb8" "SELECT length(request) FROM jobs WHERE id='$JK';")"
-[ "${KREQ:-0}" -gt 0 ] \
-  && ok "default retains the prompt (no opt-out ⇒ request kept)" \
-  || bad "default unexpectedly dropped the prompt (len=$KREQ)"
-stop_daemon
-rm -rf "$D8"; D8=""
+# ADR 025 S2 — phases 25 / 25.1 / 25.3 (queue-result TTL, row cap, and
+# prompt content opt-out) are gone with the async queue and its
+# queue_result_ttl_secs / queue_max_rows / drop_request_content knobs. The
+# daemon now persists no request content at all.
 
 echo
 echo "== phase 26: at-rest encryption + migration (M34.3b) =="
@@ -2899,13 +2769,9 @@ echo "$OP" | grep -qi "at-rest: store is plaintext" \
   && ok "doctor reports a plaintext store (FileVault fallback)" \
   || { bad "doctor missing plaintext at-rest line"; echo "$OP" | grep -i at-rest; }
 rm -rf "$PDD"
-# 27c: retention knobs are surfaced.
-CR="$DOC3/ret.toml"
-dcfg27 "$CR" "$D" "queue_result_ttl_secs = 604800"
-OR="$("$ATHENA" doctor --config "$CR" --model-store "$MSTORE" 2>&1)"
-echo "$OR" | grep -qi "retention:.*queue TTL 604800s" \
-  && ok "doctor reports configured retention bounds" \
-  || { bad "doctor missing retention line"; echo "$OR" | grep -i retention; }
+# ADR 025 S2 — 27c (doctor "retention: queue TTL …") removed: the queue and
+# its retention knobs are gone, so there is no request-content retention for
+# doctor to report.
 rm -rf "$DOC3"
 
 echo

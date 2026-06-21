@@ -4,6 +4,14 @@
 **Date:** 2026-06-17
 **Milestone:** pre-M72 strategy; sets the next-milestone priority (governor accounting truthfulness)
 
+> **Amended (ADR 025, M80):** the **vector store and the async queue were removed**
+> (v0.10.201 / v0.10.203). They are no longer governor tenants — they were always the
+> weakest of the set (CPU bookkeeping, no Metal budget, a client can self-host them),
+> so the multi-tenant story **narrows to audio / embeddings / vision / video**. The
+> Metal-governor thesis is unaffected: those modalities are exactly the ones that
+> contend for the one Metal budget. Read the queue/vectors references below as
+> historical context, not the current tenant set.
+
 ## Context
 
 Triggered by a "build vs. switch" question: with LM Studio installed for vision, the

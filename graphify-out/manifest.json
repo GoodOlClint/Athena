@@ -415,8 +415,8 @@
     "semantic_hash": "d16404614855c59c2001089f41c5bd78"
   },
   "Sources/athena/Athena.swift": {
-    "mtime": 1782058569.52458,
-    "ast_hash": "d1a4f35048b0da2fb401943ba19f95dd",
+    "mtime": 1782059350.2659361,
+    "ast_hash": "d2267c51ef6358dd89c375f80d0a43af",
     "semantic_hash": ""
   },
   "Sources/athena/Commands/Audit.swift": {
@@ -540,8 +540,8 @@
     "semantic_hash": "ba546feb975db11ee6e42e5e147b55e0"
   },
   "Sources/athena/Server/AthenaServer.swift": {
-    "mtime": 1782056379.2250757,
-    "ast_hash": "b0d7120cebd9204878241f6c4ea5cc0b",
+    "mtime": 1782059153.7695498,
+    "ast_hash": "7cdd9f2ec0351e667c404120357e7d2b",
     "semantic_hash": ""
   },
   "Sources/athena/Server/GPUTelemetry.swift": {
@@ -840,8 +840,8 @@
     "semantic_hash": ""
   },
   "deploy/e2e-rbac.sh": {
-    "mtime": 1782025755.7481005,
-    "ast_hash": "c11a1680475763c2601aadd1db96401e",
+    "mtime": 1782059851.3434606,
+    "ast_hash": "9dec82b24ef0da63113d04d7deb0ae68",
     "semantic_hash": ""
   },
   "deploy/integration/e2e-embedding-select.sh": {
@@ -1035,8 +1035,8 @@
     "semantic_hash": "371237f6ed34877c859b071318d9b529"
   },
   "CLAUDE.md": {
-    "mtime": 1782057743.5216122,
-    "ast_hash": "d27a95faa086a44dfe04cd468f8bd608",
+    "mtime": 1782059021.0395467,
+    "ast_hash": "4694015f73343edf1a375546e68e8aab",
     "semantic_hash": ""
   },
   "docs/cli-reference.md": {
@@ -1320,8 +1320,8 @@
     "semantic_hash": ""
   },
   "docs/decisions/011-unified-memory-governor-as-thesis.md": {
-    "mtime": 1781706386.9812067,
-    "ast_hash": "803c326e4e7cd347d81a92ac10517fe8",
+    "mtime": 1782058978.3512156,
+    "ast_hash": "45436b10c9b2e79d825681f2d7a3cb69",
     "semantic_hash": ""
   },
   "docs/m71-vision-input-plan.md": {
@@ -1360,8 +1360,8 @@
     "semantic_hash": ""
   },
   "docs/decisions/013-v1-inference-surface-api-control-only.md": {
-    "mtime": 1781722657.7144165,
-    "ast_hash": "b22f529a4e1bda1fd3d2f382e6981071",
+    "mtime": 1782058992.1802366,
+    "ast_hash": "fea534146f186623b0b111899af3e65a",
     "semantic_hash": ""
   },
   "docs/cold-load-blocking-plan.md": {
@@ -1755,8 +1755,8 @@
     "semantic_hash": ""
   },
   "docs/decisions/026-retire-allowlist-store-is-registry.md": {
-    "mtime": 1781987173.822621,
-    "ast_hash": "ca6eaf121999bde7457c60f0cf539843",
+    "mtime": 1782058963.8037684,
+    "ast_hash": "c5366b24616f4987c2cbab464f29900c",
     "semantic_hash": ""
   },
   "docs/hardening-program-plan.md": {

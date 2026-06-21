@@ -1,7 +1,11 @@
 # ADR 026 — retire the model allowlist; the model store is the registry
 
-**Status:** Proposed (M80 / pre-implementation) — awaiting operator review of the
-change plan (`docs/collapse-persistence-plan.md`). **No production code yet.**
+**Status:** **Accepted — SHIPPED v0.10.202** (M80). The `model_allowlist` table,
+`/api/models/allow*` routes, WebUI mirrors, and the `athena allowlist` CLI are
+removed; selection is store-backed via `AthenaCore/ModelSelection.swift`
+(store-presence + class match; omit-model + >1 candidate ⇒ 400 `ambiguous_model`)
+and the per-module default lives in TOML (`athena default --module M <id>`). Plan:
+`docs/collapse-persistence-plan.md` S7.
 **Supersedes the allowlist portion of M42.** Part of the ADR-025 persistence
 cleanup; motivated by the operator's decision that a separate curated allowlist is
 redundant — *"the allow list should really just be which models are pulled into

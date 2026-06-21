@@ -6,6 +6,14 @@
 **Supersedes/relates:** refines the "Public surface" section of `CLAUDE.md`; pairs with the
 ADR 010 audio-division-of-labor correction.
 
+> **Amended (ADR 025, M80):** three native `/v1/*` data-plane surfaces were
+> **removed** as breaking changes — `/v1/vectors*` + `/v1/store/export`+`/v1/store/stats`
+> (v0.10.201) and `/v1/queue*` (v0.10.203). The "single inference surface" principle is
+> unchanged; the daemon now persists no request content, and long-running model
+> lifecycle ops stream Server-Sent Events synchronously on `POST /api/models/{pull,
+> convert,prune}` (no async queue, no job id). The CLAUDE.md "Stable `/v1/*`" list is
+> updated to match.
+
 ## Context
 
 A "keep vs toss" review mapped Athena's full HTTP surface (48 paths / 67 methods) against
