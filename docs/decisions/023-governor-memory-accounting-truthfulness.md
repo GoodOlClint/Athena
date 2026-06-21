@@ -1,6 +1,9 @@
 # ADR 023 — governor memory-accounting truthfulness + serve-path cache bound
 
-**Status:** Proposed (M79) — awaiting operator review. No production code yet.
+**Status:** Accepted (M79) — staged rollout. **G1 (bound the serve cache) SHIPPED
+v0.10.191** (commit `0d2338f`); **G3 (measured per-tenant footprint) SHIPPED
+v0.10.192** (commit `193fca1`); **G2 (reconcile admission against the real
+footprint) IN PROGRESS** (M82, this slice) — see `docs/governor-truth-plan.md`.
 Realizes the long-deferred "**next milestone = governor accounting truthfulness**"
 from ADR 011 and the standing *heartbeat-RSS-undercounts-GPU* finding. Motivated
 by a field observation: after heavy overnight use the daemon's
@@ -57,12 +60,18 @@ Three changes, smallest-blast-radius first:
    uses — no new mechanism.
 
 2. **Reconcile admission against the real allocator (truth).** The governor's
-   live-footprint probe counts `MLX.Memory.activeMemory` (+ a bounded view of
-   the cache as headroom-available-on-pressure) instead of trusting per-model
-   estimates alone, so `freeBytes` reflects what the box can actually fit and
-   admission stops overcommitting. The decision logic (what counts toward the
-   ceiling, how the cache's reclaimability is treated) stays MLX-free and
-   unit-pinned (ADR 008/009); only the probe reads the MLX counters.
+   live-footprint probe counts **`phys_footprint` minus the reclaimable MLX
+   buffer cache** — i.e. `committed = phys_footprint − mlxCacheBytes`, the
+   genuinely-pinned memory (MLX active + mmap'd weight pages), with the cache
+   treated as headroom-available-on-pressure (reclaim it before evicting) —
+   instead of trusting per-model estimates alone, so `freeBytes` reflects what
+   the box can actually fit and admission stops overcommitting. The decision
+   logic (what counts toward the ceiling, how the cache's reclaimability is
+   treated) stays MLX-free and unit-pinned (ADR 008/009); only the probe reads
+   the MLX/OS counters. **(Corrected: the denominator is `phys_footprint`, NOT
+   `MLX.Memory.activeMemory` — `activeMemory` misses the file-backed mmap'd
+   weights and would re-introduce the M5.5 order-of-magnitude undercount. See
+   the 2026-06-19 amendment below for the full rationale.)**
 
 3. **Measure per-model footprint at load (visibility).** Snapshot
    `MLX.Memory.activeMemory` before/after each module load; the delta is that

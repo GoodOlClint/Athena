@@ -1,6 +1,7 @@
 # Governor memory-accounting truthfulness — change plan (ADR 023)
 
-**Status:** Plan — awaiting operator review (no code yet).
+**Status:** G1 SHIPPED (v0.10.191) · G3 SHIPPED (v0.10.192) · **G2 DESIGNED — awaiting
+review before build** (this slice, M82, starts at v0.10.209).
 **Decision of record:** `docs/decisions/023-governor-memory-accounting-truthfulness.md`
 (+ its 2026-06-19 amendment: probe is `phys_footprint`, not `activeMemory`).
 **Milestone:** operator-assigned tag (ADR 011's long-deferred "next milestone =
@@ -55,24 +56,59 @@ unit-pinned (`GovernorMemoryTests`, 657/0); `Load.run` sets `MLX.Memory.cacheLim
 - **Risk:** low (one process-wide setting; a too-low limit only costs throughput, which
   the default avoids). Effort S–M.
 
-### G2 — admission against `committed = phys_footprint − mlxCacheBytes` (truth)
-- Give the governor a footprint probe returning `(physFootprint, cacheBytes)` (injected,
-  like `memoryProbe`, so the core stays MLX-free; the closure reads `ProcessMemory.sample`
-  + `MLX.Memory.cacheMemory` at the call site in `Load.run`).
-- Replace the admission denominator: `committed = physFootprint − cacheBytes`;
-  `freeBytes = budget − committed`. On pressure (`committed + estimate > budget`):
-  `clearCache()` → re-probe → admit if it now fits, else evict/reject as today.
-- Extract the **decision algebra** (committed computation, the reclaim-then-admit
-  ladder, what counts toward the ceiling) into a pure MLX-free function unit-pinned per
-  ADR 009 (the heart of the change is testable without MLX).
-- Keep `residentBytes`/estimates as the per-tenant *attribution* (and a fallback when the
-  probe is absent, e.g. tests); `committed` is the *admission* number.
-- **Test:** unit — admission algebra (fits/over-budget, cache-as-headroom reclaim path,
-  probe-absent fallback). RUNBOOK — mixed load does not overcommit; peak `phys_footprint`
-  stays ≤ budget.
+### G2 — admission against `committed = phys_footprint − mlxCacheBytes` (truth) — **DESIGNED, awaiting approval**
+
+**Operator decisions (2026-06-21 interview):**
+- **Denominator = `max(committed, reserved)`** (warmup-safe). `committed = physFootprint
+  − reclaimableCache` is the live ceiling (catches the ungoverned cache + real
+  footprint); `reserved` (today's `residentBytes` reservation sum) is the floor during
+  the lazy-mmap fault-in window, so a just-loaded-but-not-yet-warm model can't be
+  transiently double-admitted. Using the larger of the two never overcommits and never
+  regresses pre-G2 behavior.
+- **Default ON + revert knob.** New config `governor_admission_mode`
+  (`"footprint"` default / `"estimate"` = pre-G2 reservation-only admission). It's a
+  correctness fix (mirrors M5.5 RSS-reconcile shipping on); the knob is the escape hatch,
+  not an opt-in gate.
+
+**The pure seam (MLX-free, unit-pinned — `GovernorMemory`, ADR 008/009):**
+```swift
+enum AdmissionMode { case footprint, estimate }
+// committed = physFootprint − reclaimableCache, clamped ≥ 0
+static func committedBytes(physFootprint: Int, reclaimableCache: Int) -> Int
+// denominator = footprint ? max(committed, reserved) : reserved
+static func admissionDenominator(mode:, committed:, reserved:) -> Int
+static func freeBytes(budget:, denominator:) -> Int        // budget − denom, ≥ 0
+static func fits(request:, denominator:, budget:) -> Bool  // denom + request ≤ budget
+```
+All four are total functions over plain Ints — the entire admission decision is testable
+with no MLX/Mach. The actor only supplies the probe values.
+
+**Wiring (smallest blast radius):**
+- Add an injected `footprintProbe: @Sendable () -> (physFootprint: Int, cacheBytes: Int)?`
+  (nil ⇒ unavailable → fall back to `reserved`, i.e. today's behavior — the tests' path).
+  Backed in `Load.run` by `ProcessMemory.sample().physFootprint` + `MLX.Memory.cacheMemory`.
+  Keep the existing RSS `memoryProbe` for `relievePressure`/reconcile unchanged.
+- Add an injected `reclaimCache: @Sendable () -> Void` (backed by `MLX.Memory.clearCache()`)
+  so the admission ladder can reclaim the cache directly without going through an unload.
+- `makeRoom(for:requestedBy:)` becomes: compute `denominator` via the seam; if
+  `fits` → admit. Else the **reclaim-then-evict ladder**: `reclaimCache()` → re-probe →
+  `fits`? → else evict LRU (today's loop) → re-check → shed prompt pool → throw
+  `memoryBudgetExceeded` (unchanged terminal). When `mode == .estimate` or the probe is
+  nil, `denominator == reserved` and `makeRoom` is byte-identical to today.
+- `snapshot().freeBytes` reports the same `max(committed, reserved)`-derived honest free
+  (one cheap Mach call per healthz); `residentBytes` (reservation sum) stays for
+  per-tenant attribution + the G3 `measured` flag — never re-derived from the cache
+  (honesty boundary).
+
+**Test:** unit — `committedBytes` clamp, `max(committed,reserved)` selection, `fits`
+fits/over-budget, `.estimate`-mode + probe-nil fall back to reserved (byte-identical),
+reclaim-then-evict ordering via a fake probe sequence. RUNBOOK (gated, real model) —
+mixed LLM+ASR+diarization load: peak `phys_footprint` stays ≤ budget; admission refuses
+the load that today would overcommit.
 - **Risk:** med (touches admission; a bug over-evicts or over-admits). Mitigations: the
-  reclaim-then-admit ladder; estimate fallback when probe nil; a config switch to revert
-  to estimate-based admission. Effort M.
+  `max(committed,reserved)` floor (never under-reserves), the reclaim-then-evict ladder,
+  the probe-nil/`.estimate` fallback (exact pre-G2 path), and the `governor_admission_mode`
+  revert knob. Effort M.
 
 ### G3 — measured per-tenant footprint surfaced (visibility) — ✅ SHIPPED v0.10.192
 **Verified during build:** the per-module displayed number was *already* the reconciled
@@ -102,10 +138,21 @@ tightens.
 
 ## Sequencing & gates
 
-G1 → G2 → G3. **G1 alone** delivers most of the value (caps the runaway cache, so
-`phys_footprint` stops ballooning over budget) and is low-risk — ship it first and observe
-before the admission rework. G2 is the riskier admission change; land it behind the revert
-switch. G3 is cosmetic-truthful and can land any time after G1.
+G1 → G3 → **G2** (current). G1+G3 shipped (v0.10.191/192). **G1 alone** delivered most of
+the value (caps the runaway cache, so `phys_footprint` stops ballooning over budget) and
+was low-risk. **G2 is the remaining slice** — the riskier admission change, landing behind
+the `governor_admission_mode` revert switch (default `footprint`). Suggested commit
+breakdown (Tests → Security → Quality → Refactor pipeline, each bumping `appVersion` from
+v0.10.209):
+
+1. **G2.1 (Tests-first seam)** — `GovernorMemory` admission algebra
+   (`committedBytes`/`admissionDenominator`/`freeBytes`/`fits`) + `AdmissionMode`, with
+   its unit tests; no wiring yet. Pure, MLX-free, no behavior change.
+2. **G2.2 (wire admission)** — `footprintProbe` + `reclaimCache` injection, `makeRoom`
+   reclaim-then-evict ladder, `snapshot().freeBytes` honesty; `governor_admission_mode`
+   config (CLI + TOML + ConfigEditor/LaunchdPlist round-trip, default `footprint`).
+3. **G2.3 (surface + docs)** — healthz `admissionMode` + honest `freeBytes`, ADR 023 →
+   G2 SHIPPED, RUNBOOK soak note.
 
 ## Honesty boundary (from ADR 023, binding)
 
