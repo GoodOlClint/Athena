@@ -520,7 +520,10 @@ struct Load: AsyncParsableCommand {
                     maxBytes: intEnv("ATHENA_PROMPT_CACHE_PERSIST_MAX_BYTES")
                         ?? tomlCfg?.promptCachePersistMaxBytes,
                     maxAgeSecs: (intEnv("ATHENA_PROMPT_CACHE_PERSIST_MAX_AGE_SECS")
-                        ?? tomlCfg?.promptCachePersistMaxAgeSecs).map { UInt64(max(0, $0)) })
+                        ?? tomlCfg?.promptCachePersistMaxAgeSecs).map { UInt64(max(0, $0)) },
+                    eager: procEnv["ATHENA_PROMPT_CACHE_PERSIST_EAGER"].map {
+                        ["1", "true", "yes", "on"].contains($0.lowercased())
+                    } ?? tomlCfg?.promptCachePersistEager ?? false)
                 Logger(label: AthenaLogLabel.daemon).notice(
                     "prompt-cache disk persistence ON (ADR 027) dir=\(persistDir.path) kek=keyfile")
                 if prefixEncryptIdle {

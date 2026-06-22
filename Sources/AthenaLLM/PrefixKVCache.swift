@@ -200,9 +200,16 @@ public final class PrefixKVCache: @unchecked Sendable {
         public let maxEntries: Int?
         public let maxBytes: Int?
         public let maxAgeSecs: UInt64?
+        /// Frontier/eager spill (ADR 027 S4): when true, a new entry is written
+        /// to disk at the store seam (`save_reason=continued`), not only on
+        /// idle-drop/shutdown — so a hard CRASH (SIGKILL/panic) doesn't lose it.
+        /// Off by default (the spill is synchronous I/O on the post-prefill path,
+        /// a TTFT cost the operator opts into for crash survival).
+        public let eager: Bool
         public init(
             store: KVSnapshotStore, kek: KEKProvider, modelID: String,
-            quantTag: String = "", maxEntries: Int?, maxBytes: Int?, maxAgeSecs: UInt64?
+            quantTag: String = "", maxEntries: Int?, maxBytes: Int?, maxAgeSecs: UInt64?,
+            eager: Bool = false
         ) {
             self.store = store
             self.kek = kek
@@ -211,6 +218,7 @@ public final class PrefixKVCache: @unchecked Sendable {
             self.maxEntries = maxEntries
             self.maxBytes = maxBytes
             self.maxAgeSecs = maxAgeSecs
+            self.eager = eager
         }
     }
 
@@ -543,6 +551,10 @@ public final class PrefixKVCache: @unchecked Sendable {
             id: nextId, scope: scope, tokens: promptTokens, payload: payload,
             byteEstimate: bytes, lastUsed: now)
         entries.append(entry)
+        // ADR 027 S4 — eager/frontier spill: persist the new entry to disk now
+        // (continued save) so a crash before the next idle-drop/shutdown doesn't
+        // lose it. Only when disk persistence is on AND eager is enabled.
+        if disk?.eager == true { demoteToDisk(entry, reason: .continued) }
         evictIfNeeded()
     }
 

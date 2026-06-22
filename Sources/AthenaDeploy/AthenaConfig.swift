@@ -76,6 +76,10 @@ public struct AthenaConfig: Sendable, Equatable {
     public var promptCachePersistMaxEntries: Int?
     public var promptCachePersistMaxBytes: Int?
     public var promptCachePersistMaxAgeSecs: Int?
+    /// `prompt_cache_persist_eager` (ADR 027 S4) — spill a new entry to disk at
+    /// the store seam (not only on idle-drop/shutdown) so a crash doesn't lose
+    /// it. Off by default (synchronous post-prefill I/O is a TTFT cost).
+    public var promptCachePersistEager: Bool?
     /// `dflash_enabled` (M63) — DFlash lossless speculative decoding for
     /// attention-only targets (Gemma4) that MTP can't accelerate. Default
     /// false. When on, a request to a target with a registered drafter
@@ -216,6 +220,7 @@ public struct AthenaConfig: Sendable, Equatable {
         promptCachePersistMaxEntries: Int? = nil,
         promptCachePersistMaxBytes: Int? = nil,
         promptCachePersistMaxAgeSecs: Int? = nil,
+        promptCachePersistEager: Bool? = nil,
         dflashEnabled: Bool? = nil,
         denyDebuggerAttach: Bool? = nil,
         authKeysFile: String? = nil,
@@ -267,6 +272,7 @@ public struct AthenaConfig: Sendable, Equatable {
         self.promptCachePersistMaxEntries = promptCachePersistMaxEntries
         self.promptCachePersistMaxBytes = promptCachePersistMaxBytes
         self.promptCachePersistMaxAgeSecs = promptCachePersistMaxAgeSecs
+        self.promptCachePersistEager = promptCachePersistEager
         self.dflashEnabled = dflashEnabled
         self.denyDebuggerAttach = denyDebuggerAttach
         self.authKeysFile = authKeysFile
@@ -476,6 +482,7 @@ public struct AthenaConfig: Sendable, Equatable {
         if let v = scalar("prompt_cache_persist_max_age_secs", in: toml) {
             pcPersistMaxAge = try int("prompt_cache_persist_max_age_secs", v)
         }
+        let pcPersistEager = try bool("prompt_cache_persist_eager")
         let dflashEnabled = try bool("dflash_enabled")
         let denyDebuggerAttach = try bool("deny_debugger_attach")
         let preload = try bool("preload")
@@ -512,6 +519,7 @@ public struct AthenaConfig: Sendable, Equatable {
             promptCachePersistMaxEntries: pcPersistMaxEntries,
             promptCachePersistMaxBytes: pcPersistMaxBytes,
             promptCachePersistMaxAgeSecs: pcPersistMaxAge,
+            promptCachePersistEager: pcPersistEager,
             dflashEnabled: dflashEnabled,
             denyDebuggerAttach: denyDebuggerAttach,
             authKeysFile: scalar("auth_keys_file", in: toml),

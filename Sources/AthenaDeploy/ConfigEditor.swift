@@ -32,6 +32,7 @@ public enum ConfigEditor {
         "temperature", "speculative", "rate_limit", "preload",
         "encrypt_store", "persist_store", "prompt_cache_enabled",
         "prompt_cache_encrypt_idle", "prompt_cache_persist_to_disk",
+        "prompt_cache_persist_eager",
         "dflash_enabled", "deny_debugger_attach",
     ]
     public static let knownKeys: Set<String> = [
@@ -62,6 +63,7 @@ public enum ConfigEditor {
         "prompt_cache_persist_to_disk", "prompt_cache_persist_dir",
         "prompt_cache_persist_kek", "prompt_cache_persist_max_entries",
         "prompt_cache_persist_max_bytes", "prompt_cache_persist_max_age_secs",
+        "prompt_cache_persist_eager",
         "dflash_enabled",
     ]
 

@@ -93,6 +93,11 @@ public enum DefaultConfig {
         # prompt_cache_persist_max_entries = 0   # 0 ⇒ unbounded
         # prompt_cache_persist_max_bytes = 0     # 0 ⇒ unbounded
         # prompt_cache_persist_max_age_secs = 0  # 0 ⇒ no age expiry
+        # Eager/frontier spill (ADR 027 S4): write each new entry to disk at the
+        # store seam (not only on idle-drop/shutdown) so a hard crash doesn't lose
+        # it. Off by default — the synchronous spill is a TTFT cost. env override
+        # ATHENA_PROMPT_CACHE_PERSIST_EAGER.
+        # prompt_cache_persist_eager = false
 
 
         # ── Storage ──────────────────────────────────────────────────
