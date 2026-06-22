@@ -1,13 +1,18 @@
 # ADR 027 — disk-backed KV snapshots (versioned, encrypted, resumable)
 
-**Status:** **Proposed — brownfield design gate (2026-06-22); awaiting operator
-review, no implementation yet.** Revives **M59.5** (disk prompt cache, deferred in
-M59) with new motivation. Companion: the **ADR 024 amendment** (SEP envelope key)
-this depends on. Research basis:
-`docs/the downstream client-ssd-streaming-and-kv-snapshot-research.md` (§2.2 ground truth,
-§3a resolutions). Operator decisions taken at the gate: **disk-first with a
-swappable KEK**, **auto + frontier-interval** save triggers, **both** surfaces
-(transparent L2 + explicit named snapshots). Plan: `docs/kv-cache-disk-snapshots-plan.md`.
+**Status:** **Accepted — S1–S4 SHIPPED v0.10.212–216** (M59.5 revived). Disk tier
+proven on real Qwen3.5-27B-4bit-mtp: **bit-identical across a clean restart**
+(`e2e-m59-disk-restart.sh`) **and survives a `SIGKILL`** (`e2e-m59-disk-crash.sh`).
+**S5 (explicit named snapshots) DROPPED** — Athena's KV is prefix-keyed and
+prompt-matched, so there is no single mutable "session" to load by name (a restore
+needs the matching prompt); the transparent L2 delivers the value, and a disk-tier
+*management* surface (list/stat/clear) is left as optional future work. **S6
+(SEP-bound KEK) DEFERRED**, gated on the headless-launchd SEP operability spike (the
+blob `kek_type` reserves the slot for a drop-in swap). Companion: the **ADR 024
+amendment** (SEP envelope key). Research: `docs/the downstream client-ssd-streaming-and-kv-snapshot-research.md`;
+usage: `docs/kv-cache-disk-snapshots.md`; plan: `docs/kv-cache-disk-snapshots-plan.md`.
+Operator decisions: **disk-first with a swappable KEK**, **auto + frontier (eager)**
+triggers, transparent L2 (named-snapshot surface dropped on review).
 
 ## Context
 
@@ -81,15 +86,18 @@ beneath the in-RAM **L1** prefix cache. Seven points:
    during long sessions, so an in-progress session survives a **crash**, not only
    clean eviction/shutdown.
 
-6. **Both surfaces.** (a) **Transparent prefix-cache L2** — a request whose
-   rendered-prefix hash matches a disk blob restores transparently (decrypt →
-   `KVByteCodec.decode` → rehydrate L1 → tokenize only the new suffix), **zero new
-   API**, reusing existing principal / `prompt_cache_key` scoping
+6. **Transparent prefix-cache L2** — a request whose rendered-prefix hash matches a
+   disk blob restores transparently (decrypt → `KVByteCodec.decode` → rehydrate L1 →
+   tokenize only the new suffix), **zero new API**, reusing existing principal /
+   `prompt_cache_key` scoping
    ([PrefixKVCache.swift:82-94](../../Sources/AthenaLLM/PrefixKVCache.swift#L82)).
-   (b) **Explicit named snapshots** — extend the existing `athena cache` CLI +
-   `/api/cache/*` (M59) with **save / load / list / rm** of operator-named session
-   snapshots (**control-plane** → `OpenAPISpec.swift` + `NativeAPIDTO.swift`
-   updated in the same edit, a new RBAC permission, audited).
+   **Amended on review (S5 dropped):** the originally-planned *explicit named
+   snapshot* surface (`athena cache save/load <name>`, `/api/cache/*`) is **not
+   built** — Athena's KV is prefix-keyed and prompt-matched, so "load snapshot X"
+   has no prompt to attach to and cannot generate; the name would be a bare label
+   over the prefix-hash key, adding surface without capability. The transparent L2 is
+   the resume mechanism; a disk-tier *management* surface (list/stat/clear) is
+   optional future work. No new `/api/*` routes ⇒ the OpenAPI surface is unchanged.
 
 7. **Governor owns L1↔L2.** Disk blobs consume **disk, not the Metal budget** (no
    change to ADR 023 accounting). **Retention** caps by count / bytes / age

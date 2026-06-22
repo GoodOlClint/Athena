@@ -1,10 +1,22 @@
 # KV-cache disk snapshots — change plan (ADR 027)
 
-**Status:** Proposed (design gate). Implementation begins **only after operator
-approval** of ADR 027 + the ADR 024 amendment. House style: small, test-pinned,
-stacked slices; each slice = one commit + annotated semantic tag pushed direct to
-`origin/main`, with the `Athena.appVersion` bump **in the slice commit**. Pre-commit
-pipeline per slice: **Tests → Security → Quality → Refactor**.
+**Status:** **S1–S4 SHIPPED v0.10.212–216; S5 DROPPED; S6 DEFERRED; S7 (docs) done.**
+The disk tier is proven on real Qwen3.5-27B-4bit-mtp — bit-identical across a clean
+restart **and** survives `SIGKILL`. Per-slice ledger below. House style: small,
+test-pinned, stacked slices; each = one commit + annotated semantic tag direct to
+`origin/main`, `Athena.appVersion` bump in the slice commit; pre-commit pipeline
+**Tests → Security → Quality → Refactor**.
+
+| Slice | Status | Tag |
+|---|---|---|
+| S1 header | ✅ shipped | v0.10.212 |
+| S2 store + retention | ✅ shipped | v0.10.213 |
+| S3a entry-body + digest | ✅ shipped | v0.10.214 |
+| S3b disk wiring + restart gate | ✅ shipped (bit-identical) | v0.10.215 |
+| S4 eager spill + crash gate | ✅ shipped (survives SIGKILL) | v0.10.216 |
+| S5 named snapshots | ❌ dropped (architecture: prefix-keyed/prompt-matched; no session to name) | — |
+| S6 SEP KEK | ⏸ deferred (headless-SEP spike) | — |
+| S7 docs | ✅ done (`docs/kv-cache-disk-snapshots.md` + ADR/m59 reconciliation) | — |
 
 **ADRs:** `docs/decisions/027-disk-kv-snapshots.md`,
 `docs/decisions/024-…` (amendment). **Research:**

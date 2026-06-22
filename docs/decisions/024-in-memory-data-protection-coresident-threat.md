@@ -315,10 +315,13 @@ module or a protected-buffer allocator.
 
 ## Amendment: persisted-KV key model (ADR 027) — 2026-06-22
 
-**Status:** Proposed (design gate) alongside ADR 027. Scope: the **at-rest, on-disk**
-KV key **only**. The T3 in-RAM idle-pool decision (RAM-only `SymmetricKey`, no SEP)
-is **unchanged** — this amendment governs a *different* surface (a file on disk),
-created by ADR 027 (`docs/decisions/027-disk-kv-snapshots.md`).
+**Status:** **Accepted — envelope + keyfile KEK SHIPPED v0.10.212–215** (ADR 027
+S1–S3b); the **SEP-bound KEK (`kek_type=sep`) is DEFERRED** to S6, gated on the
+headless-launchd SEP operability spike (the blob header reserves the slot for a
+drop-in swap). Scope: the **at-rest, on-disk** KV key **only**. The T3 in-RAM
+idle-pool decision (RAM-only `SymmetricKey`, no SEP) is **unchanged** — this
+amendment governs a *different* surface (a file on disk), created by ADR 027
+(`docs/decisions/027-disk-kv-snapshots.md`).
 
 ### Why re-open SEP now
 

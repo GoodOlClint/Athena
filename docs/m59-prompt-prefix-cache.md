@@ -150,9 +150,14 @@ criterion, validated on the real 27B-mtp via the manual host-bound tier.
 - OpenAPI spec entries + bidirectional drift-guard (M32).
 - **Acceptance:** e2e gate; spec↔routes exact.
 
-### M59.5 — Disk persistence (DEFERRED)
-- Parked with §3 rationale. Not built. Revisit only if a cross-restart or
-  cross-document reuse pattern emerges; if so, flat files in the data dir, not SQLite.
+### M59.5 — Disk persistence (SHIPPED as ADR 027, v0.10.212–216)
+- No longer deferred. The cross-restart reuse pattern emerged (the downstream client/`the downstream client`
+  motivation), and the §3 blockers were overturned: the serializer now exists
+  (`KVFrame`/`KVByteCodec` from ADR 024 T3), and resume-across-restart is exactly
+  the access pattern disk pays off for. Built as **ADR 027** — encrypted flat files
+  in the data dir keyed by prefix hash (not SQLite, as predicted), a disk L2 under
+  this in-RAM L1, off by default. See `docs/decisions/027-disk-kv-snapshots.md` and
+  `docs/kv-cache-disk-snapshots.md`. Proven bit-identical across a real restart.
 
 ## 6. Config (5-touchpoint, mirrors `kv_compression`)
 
