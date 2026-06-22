@@ -1,14 +1,14 @@
 import Foundation
 
 /// Cross-cutting KV-cache compression selector (the shared `kv_compression`
-/// knob). M20 introduces the key + full plumbing with the `none` and
-/// `turboquant` cases; M21 adds the `triattention` case.
+/// knob). M20 introduced the key + plumbing; M21 added the `triattention`
+/// case. (The M20 `turboquant` case was retired when the substrate dropped
+/// its bespoke KV-quant codec in favour of upstream's `kvScheme` hook.)
 ///
-/// `turboquant` *quantizes* KV numerics; `triattention` *evicts*
-/// low-importance tokens. The substrate-typed accessors that model those
-/// (`generation`, `eviction`, `servesArch`) live in an `extension
-/// KVCompression` in `AthenaLLM`, because they reference MLX types
-/// (`KVQuantizationScheme`, `TriAttentionConfig`, `SupportedModels`).
+/// `triattention` *evicts* low-importance tokens. The substrate-typed
+/// accessors that model that (`eviction`, `servesArch`) live in an
+/// `extension KVCompression` in `AthenaLLM`, because they reference MLX
+/// types (`TriAttentionConfig`, `SupportedModels`).
 ///
 /// NB4 (M70.1b): the ENUM + the pure `resolve` precedence logic live here in
 /// the MLX-free `AthenaCore` so `ConfigEditor`'s `kv_compression ∈
@@ -22,7 +22,6 @@ import Foundation
 /// daemon start (fail-closed — never a silent fallback to `none`).
 public enum KVCompression: String, Sendable, CaseIterable, Equatable {
     case none
-    case turboquant
     case triattention
 
     public struct ResolutionError: Error, CustomStringConvertible {

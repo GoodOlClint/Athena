@@ -8,10 +8,10 @@ import Foundation
 ///
 /// Capability tiers:
 /// - **Qwen3.5 family** — the vendored model: MTP speculative decoding,
-///   TriAttention eviction, TurboQuant, and guided structured output.
-/// - **validated substrate** — sample-tested: guided structured output +
-///   TurboQuant KV-quant; MTP speculative and TriAttention eviction do not
-///   apply (they attach to the vendored Qwen3.5 model only).
+///   TriAttention eviction, and guided structured output.
+/// - **validated substrate** — sample-tested: guided structured output;
+///   MTP speculative and TriAttention eviction do not apply (they attach
+///   to the vendored Qwen3.5 model only).
 /// - **best-effort** — loadable via the substrate factory, not in the
 ///   validated set.
 public enum SupportedModels {
@@ -56,11 +56,11 @@ public enum SupportedModels {
         case .qwen35:
             return
                 "\(t) — Qwen3.5 (vendored): MTP speculative, TriAttention "
-                + "eviction, TurboQuant, guided structured output"
+                + "eviction, guided structured output"
         case .validated:
             return
                 "\(t) — validated substrate arch: guided structured output "
-                + "+ TurboQuant (no MTP speculative / TriAttention eviction)"
+                + "(no MTP speculative / TriAttention eviction)"
         case .bestEffort:
             return
                 "\(t) — best-effort: loads via the substrate factory; not "

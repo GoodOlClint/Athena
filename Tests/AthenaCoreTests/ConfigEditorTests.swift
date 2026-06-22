@@ -93,10 +93,10 @@ final class ConfigEditorTests: XCTestCase {
         try ConfigEditor.setScalarThrowing(
             key: "engine", value: "stub", in: url)
         try ConfigEditor.setScalarThrowing(
-            key: "kv_compression", value: "turboquant", in: url)
+            key: "kv_compression", value: "triattention", in: url)
         let out = try String(contentsOf: url, encoding: .utf8)
         XCTAssertTrue(out.contains("engine = \"stub\""))
-        XCTAssertTrue(out.contains("kv_compression = \"turboquant\""))
+        XCTAssertTrue(out.contains("kv_compression = \"triattention\""))
     }
 
     /// B15: a NEW bare top-level key must be inserted BEFORE the first

@@ -141,27 +141,15 @@ Open `ath_web` (`http://<studio>:7447/ui`) in Safari/Chrome.
 | F3 | Fill the store volume; `ath store export` | graceful error, daemon survives | ☐ |
 | F4 | Governor stress: 1 model + concurrent requests until budget hit | **503 `metal_oom`** (not a crash); eviction/reconcile/prompt-cache-cap visible in `/healthz` | ☐ |
 
-## G — KV-cache compression / TurboQuant (Studio + MacBook) · P0*
+## G — KV-cache compression / TurboQuant — RETIRED
 
-Exercises the `kv_compression` knob (M20) on the **real model** — the
-codec changes KV-cache numerics under genuine MLX inference and the
-governor's prompt-cache accounting, which the stub gate and the
-single-node automated `TurboQuantE2ETests` cannot cover off-box.
-TurboQuant is **off by default**; bring the host up in the TurboQuant
-posture with `KV_COMPRESSION=turboquant … studio-setup.sh`, or per G1
-toggle it live. `kv_compression` is resolved **once at daemon start**,
-so every change needs a daemon restart. `*`P0 **only for a release
-that touches the kv_compression / KV-codec path** — otherwise N/A
-(opt-in feature, default off; do not block unrelated releases).
-
-| # | Action | Expected | Result |
-|---|---|---|---|
-| G1 | Studio: `athena config set kv_compression turboquant` → `athena stop` → `athena start …` ; `curl $B/healthz` | daemon healthy with TurboQuant active | ☐ |
-| G2 | MacBook: `ath run "$TEST_MODEL" "name three primary colors"` (daemon from G1) | coherent real completion (no degenerate single-token/char loops) | ☐ |
-| G3 | Studio: keep TOML `kv_compression = none`; restart daemon with `ATHENA_KV_COMPRESSION=turboquant` in its env ; check `athena logs --source start` | env wins over TOML — TurboQuant active (precedence env > TOML) | ☐ |
-| G4 | Studio: `athena config set kv_compression bogus` (also try an unknown like `snapkv`) → restart | daemon **refuses to start**; clear "unrecognized kv_compression" error; **no silent fallback to none** (fail-closed). `triattention` is now a valid value — see scenario H | ☐ |
-| G5 | Restore `kv_compression = none`, restart; `ath run "$TEST_MODEL" "<fixed long-ish prompt>"`, note output; repeat with `turboquant` (G1) | both coherent; outputs need **not** match (numerics differ by design) — neither degenerates | ☐ (P1) |
-| G6 | At a low `--prompt-cache-cap-bytes`, send a context that **503s `prompt_cache_cap_exceeded`** under `none`; restart with `turboquant`, resend | same context now **admitted** (per-token KV 256→64 KiB accounting); cap still enforced for an even larger context | ☐ (P1) |
+The M20 `turboquant` codec was removed when the substrate dropped its
+bespoke KV-quant backend in favour of upstream's `kvScheme` hook. The
+`kv_compression` knob now accepts only `none` (default) and
+`triattention` (scenario H); `turboquant` is an unrecognized value and
+fail-closes the daemon at start, the same as any unknown value. No
+manual scenario remains here — the fail-closed contract for the retired
+value is covered by the automated `e2e-rbac.sh` phase-12 gate.
 
 ## H — KV-cache compression / TriAttention (Studio + MacBook) · P0*
 
@@ -198,12 +186,11 @@ kv_compression path** — otherwise N/A.
 
 | # | Action | Expected | Result |
 |---|---|---|---|
-| I1 | Studio: `athena show "$TEST_MODEL"` (non-Qwen) | `type:` matches (e.g. `llama`); support line = "validated substrate arch: guided structured output + TurboQuant (no MTP / TriAttention)" (M23 fork D) | ☐ |
+| I1 | Studio: `athena show "$TEST_MODEL"` (non-Qwen) | `type:` matches (e.g. `llama`); support line = "validated substrate arch: guided structured output (no MTP speculative / TriAttention eviction)" (M23 fork D) | ☐ |
 | I2 | MacBook: `ath run "$TEST_MODEL" "name three primary colors"` | coherent real completion from the substrate stream | ☐ |
 | I3 | `curl $B/v1/chat/completions` with `response_format` json_schema (integer field) | **schema-valid JSON** — the substrate-path guided decoder enforces it; before M23 this was unconstrained prose (M23 fork A) | ☐ |
 | I4 | `curl $B/v1/chat/completions` with `tools` + a forced `tool_choice` | a `tool_calls` response with valid JSON arguments (guided on the substrate path) | ☐ |
 | I5 | Studio: start with `kv_compression=triattention` on the non-Qwen model; `athena logs --source start` | startup **warns** "inert for model type … running uncompressed"; generation still works (M23 fork B) | ☐ |
-| I6 | Studio: restart with `kv_compression=turboquant` on the non-Qwen model | **no** inert warning; coherent output (TurboQuant applies to any arch) | ☐ |
 | I7 | (control) point `TEST_MODEL` at the Qwen3.5 model; redo I2–I3 | unchanged — vendored path, MTP/structured intact (no regression) | ☐ (P1) |
 
 ---
@@ -230,11 +217,6 @@ vision/VLM load or chat-image path** — otherwise N/A.
 | J4 | Plain text chat (no image parts) to the same vision model | normal completion — text path still works through the VLM container | ☐ |
 | J5 | (control) point `TEST_MODEL` at a TEXT model; redo J2 | **400** `vision_not_supported` — a text-only model refuses image input | ☐ |
 | J6 | Studio: `athena logs` during J2 | governor counts ONE resident copy (no double-load); decode heartbeats fire | ☐ |
-
-> NOTE (M71.2): a vision checkpoint loads via the VLM path, which **disables
-> DFlash for that model** (the drafter seam is bound to the text
-> `MLXLLM.Gemma4`). Qwen3.5-MTP / structured output are unaffected. Re-wiring
-> DFlash onto the VLM's inner text backbone is a deferred follow-on.
 
 > **VALIDATED 2026-06-17 (v0.10.160)** on `mlx-community/gemma-4-e2b-it-4bit`
 > (`model_type: gemma4_audio`, full `vision_tower`, 3.58 GB): J2 returned an
@@ -312,18 +294,18 @@ deploy/integration/studio-setup.sh --teardown --purge    # + creds
 | Pinned model | |
 | Studio macOS / hardware | |
 | P0 result (A–E + F4) | ☐ all PASS / ☐ blocked |
-| G result (kv_compression / TurboQuant) | ☐ N/A (release untouched) / ☐ G1–G4 PASS / ☐ blocked |
+| G result (kv_compression / TurboQuant) | ☐ N/A (codec retired) |
 | H result (kv_compression / TriAttention) | ☐ N/A (release untouched) / ☐ H1–H4 PASS / ☐ blocked |
-| I result (multi-architecture) | ☐ N/A (release untouched) / ☐ I1–I6 PASS / ☐ blocked |
+| I result (multi-architecture) | ☐ N/A (release untouched) / ☐ I1–I5,I7 PASS / ☐ blocked |
 | P1 result | |
 | Notes / filed issues | |
 
 > Release rule: a version tag is **not** shipped until every **P0**
 > row (A, B, C, D1–D6, E, F4) is PASS on the two boxes — **plus
-> G1–G4 (TurboQuant) and/or H1–H4 (TriAttention) for any release
-> that touches the `kv_compression` / KV path, and I1–I6 (multi-arch)
-> for any release that touches the model-load / structured-output path**
-> (else G/H/I are N/A).
+> H1–H4 (TriAttention) for any release that touches the
+> `kv_compression` / KV path, and I1–I5,I7 (multi-arch) for any release
+> that touches the model-load / structured-output path** (else H/I are
+> N/A; scenario G is retired with the TurboQuant codec).
 > Archive this completed file to
 > `results/<tag>-<date>.md`. The automated stub gate stays the
 > per-PR gate; this is the pre-release gate.

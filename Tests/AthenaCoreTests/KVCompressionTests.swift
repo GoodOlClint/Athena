@@ -4,9 +4,9 @@ import AthenaCore  // NB4 (M70.1b): the KVCompression enum + resolve moved here.
 @testable import AthenaLLM  // the MLX-coupled .generation/.eviction/.servesArch extension
 
 /// The shared `kv_compression` knob: precedence (env > TOML > none),
-/// fail-closed validation, and the codec→scheme mapping. Pure logic —
-/// no MLX, always runs in CI. M20.2 owns this contract; M21 extends it
-/// with the `triattention` case.
+/// fail-closed validation, and the eviction seam. Pure logic — no MLX,
+/// always runs in CI. M20.2 introduced this contract; M21 added the
+/// `triattention` case (the M20 `turboquant` case has since been retired).
 final class KVCompressionTests: XCTestCase {
 
     func testDefaultsToNoneWhenUnsetOrBlank() throws {
@@ -16,23 +16,23 @@ final class KVCompressionTests: XCTestCase {
 
     func testTomlUsedWhenNoEnv() throws {
         XCTAssertEqual(
-            try KVCompression.resolve(env: nil, toml: "turboquant"),
-            .turboquant)
+            try KVCompression.resolve(env: nil, toml: "triattention"),
+            .triattention)
     }
 
     func testEnvOverridesToml() throws {
         XCTAssertEqual(
-            try KVCompression.resolve(env: "none", toml: "turboquant"),
+            try KVCompression.resolve(env: "none", toml: "triattention"),
             .none)
         XCTAssertEqual(
-            try KVCompression.resolve(env: "turboquant", toml: "none"),
-            .turboquant)
+            try KVCompression.resolve(env: "triattention", toml: "none"),
+            .triattention)
     }
 
     func testCaseInsensitiveAndTrimmed() throws {
         XCTAssertEqual(
-            try KVCompression.resolve(env: "  TurboQuant\n", toml: nil),
-            .turboquant)
+            try KVCompression.resolve(env: "  TriAttention\n", toml: nil),
+            .triattention)
     }
 
     func testUnknownValueFailsClosed() {
@@ -52,24 +52,9 @@ final class KVCompressionTests: XCTestCase {
             .triattention)
     }
 
-    func testGenerationMapping() {
-        XCTAssertNil(KVCompression.none.generation.kvBits)
-        XCTAssertEqual(KVCompression.none.generation.scheme, .uniform)
-        XCTAssertEqual(KVCompression.turboquant.generation.kvBits, 4.0)
-        XCTAssertEqual(
-            KVCompression.turboquant.generation.scheme, .turboQuant)
-        // TriAttention evicts, it does not quantize KV: no kvBits, the
-        // plain (uniform) scheme — the eviction lives on `eviction`.
-        XCTAssertNil(KVCompression.triattention.generation.kvBits)
-        XCTAssertEqual(
-            KVCompression.triattention.generation.scheme, .uniform)
-    }
-
-    /// The eviction seam is distinct from the quant tuple: non-nil only
-    /// for `triattention`.
+    /// The eviction seam is non-nil only for `triattention`.
     func testEvictionAccessor() {
         XCTAssertNil(KVCompression.none.eviction)
-        XCTAssertNil(KVCompression.turboquant.eviction)
         XCTAssertNotNil(KVCompression.triattention.eviction)
     }
 }

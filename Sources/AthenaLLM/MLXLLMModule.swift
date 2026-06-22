@@ -63,15 +63,6 @@ public struct LLMGenerationParameters: Sendable {
 /// Memory accounting in M1 is the on-disk safetensors footprint: an honest
 /// pre-load admission estimate for the governor. Live Metal-footprint
 /// reconciliation is deferred to M5 (OOM/cache hardening).
-/// `@unchecked Sendable` holder so the (non-Sendable, MLXArray-bearing)
-/// DFlash drafter can cross into the `container.perform` `@Sendable` closure
-/// — the same pattern the module uses for `StructuredVocabulary`. The actor
-/// owns the single instance; the closure only reads it under the actor's
-/// serialized model domain. M63.3b.
-final class DFlashDraftBox: @unchecked Sendable {
-    let model: DFlashDraftModel
-    init(_ model: DFlashDraftModel) { self.model = model }
-}
 
 public actor MLXLLMModule: LLMModule, ModelSelectable {
     public nonisolated let id: ModuleID = .llm
@@ -105,8 +96,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     private var residentName: String?
     /// M71.2 — true when the resident container was loaded via the substrate's
     /// `VLMModelFactory` (a vision checkpoint with an image tower). Drives the
-    /// `servesVision` capability and disables the DFlash drafter (its capture
-    /// seam is bound to the text `MLXLLM.Gemma4` model, not the VLM model).
+    /// `servesVision` capability.
     private var residentIsVision = false
     /// M62 — the model the NEXT cold `load(reservation:)` will bind, set by
     /// `selectColdLoadModel` before the governor's non-blocking cold-load is
@@ -160,9 +150,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     /// Per-token KV upper bound fed to the governor's prompt-cache cap,
     /// derived from config.json (2·layers·kv_heads·head_dim·fp16) so it
     /// tracks the real KV geometry per arch; falls back to a conservative
-    /// constant when the dims are absent. TurboQuant stores ~4-bit K/V so
-    /// it gets a quarter of the fp16 bound (still over-estimates — the
-    /// safe direction for an OOM guard). M20.2 / M23 fork C.
+    /// constant when the dims are absent. M23 fork C.
     /// M41.2: recomputed on each rebind from the new model's config.
     private var perTokenKVBytes: Int
     /// `vocab_size` from config.json (captured per loaded model). M23
@@ -176,18 +164,6 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     /// Entries are keyed by resident model id (M59.1 scope).
     private let prefixCache: PrefixKVCache?
 
-    /// M63.3b — DFlash lossless speculative decoding (default off). When
-    /// enabled, an unguided greedy request to a target with a registered
-    /// drafter (`DFlashRegistry`) decodes through the block draft/verify
-    /// engine. The drafter is operator-pulled from Hugging Face on first
-    /// use and held here, boxed `@unchecked Sendable` so it crosses into the
-    /// `container.perform` closure; cleared on rebind. `dflashDraftBytes`
-    /// feeds `residentBytes` so the governor accounts for the loaded drafter.
-    private let dflashEnabled: Bool
-    private var dflashDraft: DFlashDraftBox?
-    private var dflashDraftFor: String?
-    private var dflashDraftBytes: Int = 0
-
     /// Single-model convenience init kept for source-compat with M27/M40
     /// call sites (and tests): the directory IS a store entry, so the store
     /// root is its parent and the directory's basename is the configured
@@ -196,16 +172,14 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         modelDirectory: URL,
         parameters: LLMGenerationParameters = .init(),
         promptCacheCapBytes: Int = 0,
-        prefixCache: PrefixKVCache? = nil,
-        dflashEnabled: Bool = false
+        prefixCache: PrefixKVCache? = nil
     ) {
         self.init(
             modelStoreRoot: modelDirectory.deletingLastPathComponent(),
             configuredDefault: modelDirectory.lastPathComponent,
             parameters: parameters,
             promptCacheCapBytes: promptCacheCapBytes,
-            prefixCache: prefixCache,
-            dflashEnabled: dflashEnabled)
+            prefixCache: prefixCache)
     }
 
     /// ADR 026 — the LLM slot serves whatever LLM/vision models are in the
@@ -216,11 +190,9 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         configuredDefault: String? = nil,
         parameters: LLMGenerationParameters = .init(),
         promptCacheCapBytes: Int = 0,
-        prefixCache: PrefixKVCache? = nil,
-        dflashEnabled: Bool = false
+        prefixCache: PrefixKVCache? = nil
     ) {
         self.prefixCache = prefixCache
-        self.dflashEnabled = dflashEnabled
         self.modelStoreRoot = modelStoreRoot
         let cleanDefault = (configuredDefault?.isEmpty == true)
             ? nil : configuredDefault
@@ -254,10 +226,10 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         self.configVocabSize = info?.vocabSize
         let fp16PerToken =
             info?.perTokenKVBytes(bytesPerElement: 2) ?? (256 * 1024)
-        switch parameters.kvCompression {
-        case .turboquant: self.perTokenKVBytes = max(1, fp16PerToken / 4)
-        case .none, .triattention: self.perTokenKVBytes = fp16PerToken
-        }
+        // `none`/`triattention` both leave KV numerics fp16 (TriAttention
+        // evicts tokens, it does not quantize), so the per-token bound is
+        // the fp16 geometry for every codec.
+        self.perTokenKVBytes = fp16PerToken
     }
 
     /// The store directory for `name` (ADR 026): resolve via the shared
@@ -344,7 +316,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     }
 
     public var residentBytes: Int {
-        container == nil ? 0 : estimatedBytes + dflashDraftBytes
+        container == nil ? 0 : estimatedBytes
     }
 
     /// M71.2 — true when the resident model accepts image inputs (loaded via
@@ -360,9 +332,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     /// model changes; centralizing it stops a new cache field from being
     /// added to some invalidation sites and missed at others (the M53 drift
     /// that left `cachedStructuredVocabulary` nil'd at only some of the five
-    /// former copy-pasted sites). Idempotent. NOTE: the DFlash drafter is also
-    /// per-model but has its own reset on the load path (it carries governor
-    /// byte accounting), so it is intentionally not folded in here.
+    /// former copy-pasted sites). Idempotent.
     private func resetStructuredCaches() {
         vocabBuild?.cancel()
         vocabBuild = nil
@@ -509,7 +479,6 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                     if isVision {
                         // Single VLM container serves BOTH text and image for a
                         // vision checkpoint (ADR 010/011: one resident copy).
-                        // DFlash is intentionally disabled for this load.
                         return try await VLMModelFactory.shared.loadContainer(
                             from: resolved, using: loader)
                     }
@@ -523,69 +492,13 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         configVocabSize = info?.vocabSize
         let fp16PerToken =
             info?.perTokenKVBytes(bytesPerElement: 2) ?? (256 * 1024)
-        switch params.kvCompression {
-        case .turboquant: perTokenKVBytes = max(1, fp16PerToken / 4)
-        case .none, .triattention: perTokenKVBytes = fp16PerToken
-        }
+        perTokenKVBytes = fp16PerToken
         // Different model ⇒ a fresh structured-vocab cache; the old
         // tokens belong to the previous tokenizer (C3/C10).
         resetStructuredCaches()
-        // M63.3b — the drafter is target-specific; drop it on rebind so the
-        // next DFlash request reloads the one registered for the new model.
-        dflashDraft = nil
-        dflashDraftFor = nil
-        dflashDraftBytes = 0
         container = loaded
         residentName = name
         residentIsVision = isVision  // M71.2
-    }
-
-    /// M63.3b — ensure the DFlash drafter registered for the resident model
-    /// is loaded, returning it boxed for the `perform` closure. Returns nil
-    /// when DFlash is off, no model is resident, or no drafter is registered
-    /// for it — in which case the request decodes normally. The drafter is
-    /// fetched from Hugging Face on first use (the passive-oracle weight-fetch
-    /// carve-out) and cached until rebind.
-    private func ensureDFlashDraft() async throws -> DFlashDraftBox? {
-        // M71.2 — a VLM-loaded model can't use DFlash: the capture seam
-        // (`DFlashGemma4Backbone`) is bound to the text `MLXLLM.Gemma4` model,
-        // not the substrate VLM model. Skip the drafter download entirely
-        // (the dispatch at the perform site would no-op anyway).
-        guard !residentIsVision else { return nil }
-        guard dflashEnabled, let name = residentName,
-            let draftId = DFlashRegistry.draftId(forModel: name)
-        else { return nil }
-        if let box = dflashDraft, dflashDraftFor == name { return box }
-        let dir = try await #hubDownloader(
-            HuggingFace.HubClient(session: AthenaProxy.proxiedURLSession())
-        ).download(
-            id: draftId, revision: nil,
-            matching: ["*.json", "*.safetensors"],
-            useLatest: false, progressHandler: { _ in })
-        let model = try DFlashDraftLoader.load(directory: dir)
-        let box = DFlashDraftBox(model)
-        dflashDraft = box
-        dflashDraftFor = name
-        dflashDraftBytes = Self.directoryWeightBytes(dir)
-        Self.log.notice(
-            "DFlash drafter loaded id=\(draftId) for=\(name) bytes=\(dflashDraftBytes)",
-            metadata: ["function": "ensureDFlashDraft"])
-        return box
-    }
-
-    /// Sum of the `*.safetensors` file sizes in a checkpoint dir — the
-    /// drafter's resident-byte estimate for the governor.
-    private static func directoryWeightBytes(_ dir: URL) -> Int {
-        guard
-            let items = try? FileManager.default.contentsOfDirectory(
-                at: dir, includingPropertiesForKeys: [.fileSizeKey])
-        else { return 0 }
-        return items
-            .filter { $0.pathExtension == "safetensors" }
-            .reduce(0) {
-                $0 + ((try? $1.resourceValues(forKeys: [.fileSizeKey]))?
-                    .fileSize ?? 0)
-            }
     }
 
     // M41 / ADR 026 — ModelSelectable over the store-classified selectable set.
@@ -948,17 +861,6 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                 model: residentName ?? (configuredDefault ?? ""),
                 principal: principal, cacheKey: promptCacheKey)
         }
-        // M63.3b — for an unguided greedy request, load the DFlash drafter
-        // registered for the resident model (lazy HF pull on first use).
-        // Non-nil only when DFlash is enabled AND a drafter exists for this
-        // model AND the request is speculative-greedy + unstructured; the
-        // dispatch branch below then routes a Gemma4 target through the
-        // DFlash engine. nil ⇒ unchanged behavior.
-        let dflashBox: DFlashDraftBox? =
-            (dflashEnabled && schemaJSON == nil && greedyEligible
-                && logprobSink == nil)
-            ? try await ensureDFlashDraft() : nil
-
         // The closure returns the decoded text, the completion token count
         // (`ids.count`), and the cached-prefix token count (M59.3); the
         // prompt count is `promptTokens.count` from the outer scope. nil ⇒
@@ -1047,32 +949,6 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                     cachedTokens, builtLogprobs())
             }
 
-            // M63.3b — DFlash lossless speculative decoding for an
-            // attention-only target (Gemma4) with a loaded drafter. Engages
-            // for the unguided greedy path only (`dflashBox` is nil
-            // otherwise); structured output stays on the substrate path
-            // until M63.4. Output is the target's block-forward greedy.
-            if let dflashBox, let target = ctx.model as? DFlashGemma4Backbone {
-                // Full stop-token set, matching the substrate generation path
-                // (config eos_token_id + tokenizer EOS + extra EOS like
-                // Gemma's <end_of_turn>) so DFlash stops where normal decode
-                // would, not just on the tokenizer's single eosTokenId.
-                var stopTokens = ctx.configuration.eosTokenIds
-                if let e = ctx.tokenizer.eosTokenId { stopTokens.insert(e) }
-                for tok in ctx.configuration.extraEOSTokens {
-                    if let id = ctx.tokenizer.convertTokenToId(tok) {
-                        stopTokens.insert(id)
-                    }
-                }
-                let ids = DFlashGeneration.generate(
-                    target: target, draft: dflashBox.model,
-                    promptTokens: promptTokens, maxTokens: maxTokens,
-                    stopTokens: stopTokens)
-                // dflashBox is nil when logprobs are requested, so no capture
-                // here (greedy logprobs route to GuidedGreedy/GuidedSubstrate).
-                return (ctx.tokenizer.decode(tokenIds: ids), ids.count, 0, nil)
-            }
-
             // Any other architecture: schema-guided decoding on the
             // substrate generation path (M23 fork A). Unstructured
             // requests with no logprobs (no guide, no sink) return nil → the
@@ -1145,7 +1021,6 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         // `sending` UserInput/LMInput are constructed and consumed entirely
         // inside the closure so no non-Sendable value crosses its boundary.
         let evictionPolicy = params.kvCompression.eviction
-        let gen = params.kvCompression.generation
         // M24.3: per-request max_tokens/temperature override the loaded
         // defaults (a negative/zero temperature override is ignored).
         let temp =
@@ -1172,8 +1047,6 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         }
         let gp = GenerateParameters(
             maxTokens: Self.effectiveMaxTokens(maxTokens, params.maxTokens),
-            kvBits: gen.kvBits,
-            kvQuantizationScheme: gen.scheme,
             temperature: temp,
             topP: tp,
             seed: requestSeed)

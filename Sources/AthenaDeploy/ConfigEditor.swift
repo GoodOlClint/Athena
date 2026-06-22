@@ -33,7 +33,7 @@ public enum ConfigEditor {
         "encrypt_store", "persist_store", "prompt_cache_enabled",
         "prompt_cache_encrypt_idle", "prompt_cache_persist_to_disk",
         "prompt_cache_persist_eager",
-        "dflash_enabled", "deny_debugger_attach",
+        "deny_debugger_attach",
     ]
     public static let knownKeys: Set<String> = [
         "listen_host", "listen_port", "budget_bytes", "engine",
@@ -64,7 +64,6 @@ public enum ConfigEditor {
         "prompt_cache_persist_kek", "prompt_cache_persist_max_entries",
         "prompt_cache_persist_max_bytes", "prompt_cache_persist_max_age_secs",
         "prompt_cache_persist_eager",
-        "dflash_enabled",
     ]
 
     /// `--config` wins; else `$ATHENA_CONFIG`; else the installed file at

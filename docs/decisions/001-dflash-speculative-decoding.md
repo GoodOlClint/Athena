@@ -1,6 +1,6 @@
 # 001 — DFlash speculative decoding for non-MTP targets (Gemma4-first)
 
-**Status:** Accepted — Implemented (M63.1–.4 shipped v0.10.108–112, 31B dense path complete; M63.5/MoE shipped as M64.4 v0.10.116). Remaining deferrals (DFlash-accelerated structured output, temp>0 sampling, Metal kernels, Qwen/GDN targets) are tracked in §Status below — none are silent descopes.
+**Status:** **SUPERSEDED by [ADR 028](028-retire-dflash-turboquant-upstream-sync.md) — DFlash removed v0.10.217.** The substrate fork is being consolidated to track upstream `mlx-swift-lm`, which drops the bespoke `Gemma4TextModel.callReturningHidden` capture seam DFlash bound to; with no external consumer and default-off, DFlash was hard-removed. Revival belongs upstream (a *generic* capture seam, not the copy-paste). The history below is retained for context. _(Originally: Accepted — Implemented M63.1–.4 v0.10.108–112, 31B dense path; M63.5/MoE as M64.4 v0.10.116.)_
 **Date:** 2026-06-11
 **Milestone:** M63
 

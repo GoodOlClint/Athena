@@ -50,7 +50,7 @@ public enum DefaultConfig {
         # max_tokens = 1024
         # temperature = 0.7
         # speculative = false
-        # KV-cache compression: "none" | "turboquant" | "triattention".
+        # KV-cache compression: "none" | "triattention".
         # kv_compression = "none"
 
         # ── [prompt_cache] cross-request prompt-prefix KV reuse (M59) ──

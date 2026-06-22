@@ -18,7 +18,7 @@ final class AthenaModelsConfigTests: XCTestCase {
     /// Prefer a local mtp checkpoint; else the checked-in fixture (a real,
     /// weights-free dense `qwen3_5` config with an MTP head). Source-relative
     /// path — `Fixtures/` is excluded from the bundle, mirroring the other
-    /// fixture tests (DFlashDraftParityTests etc.).
+    /// fixture tests.
     private func qwen35ConfigURL() -> URL {
         let local = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(

@@ -13,9 +13,9 @@
 #   5. CLI escalation guards   (unknown role / unknown user refused)
 #   6. fail-safe startup       (no creds + non-loopback ⇒ refuse)
 #   7. auth-disabled loopback  (no creds + loopback ⇒ open)
-#   8. kv_compression knob     (triattention/turboquant accepted at
-#                               daemon start; unknown ⇒ fail-closed
-#                               start refusal, not a silent fallback)
+#   8. kv_compression knob     (triattention accepted at daemon start;
+#                               unknown (incl. retired turboquant) ⇒
+#                               fail-closed start refusal, not a fallback)
 #   9. lifecycle UX (M22)       (`stop` halts a user daemon and surfaces
 #                               sudo guidance for a system one; `init`
 #                               aux-pull is idempotent; `install`
@@ -2006,13 +2006,14 @@ else
 fi
 
 echo
-echo "== phase 12: kv_compression knob — daemon-start contract (M20/M21) =="
+echo "== phase 12: kv_compression knob — daemon-start contract (M21) =="
 # `kv_compression` is resolved ONCE at daemon start (Load.swift),
 # independent of the engine — so the stub daemon exercises the real
-# accept / fail-closed contract. TriAttention (M21) is token eviction;
-# turboquant (M20) is a quant codec; both must be accepted. An unknown
-# value must REFUSE to start (no silent fallback to none). Honors this
-# script's invariants: --engine stub, loopback, ephemeral data dir.
+# accept / fail-closed contract. TriAttention (M21) is token eviction and
+# must be accepted. An unknown value must REFUSE to start (no silent
+# fallback to none) — this now includes the retired M20 `turboquant`
+# codec. Honors this script's invariants: --engine stub, loopback,
+# ephemeral data dir.
 kv_daemon() { # KVVALUE  -> rc 0 = came up healthy, 1 = process exited
   local kv="$1" dd rc=1
   dd="$(mktemp -d)"
@@ -2037,9 +2038,9 @@ else
   bad "kv_compression=triattention rejected"; cat "$D/kv-triattention.log"
 fi
 if kv_daemon turboquant; then
-  ok "kv_compression=turboquant accepted (daemon healthy)"
+  bad "kv_compression=turboquant started (retired M20 codec, should fail closed)"
 else
-  bad "kv_compression=turboquant rejected"; cat "$D/kv-turboquant.log"
+  ok "kv_compression=turboquant fail-closed (retired codec rejected)"
 fi
 if kv_daemon bogus; then
   bad "kv_compression=bogus started (should fail closed, no fallback)"

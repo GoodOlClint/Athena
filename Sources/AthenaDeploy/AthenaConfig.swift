@@ -40,8 +40,8 @@ public struct AthenaConfig: Sendable, Equatable {
     public var maxTokens: Int?
     public var temperature: String?
     public var speculative: Bool?
-    /// KV-cache compression codec: `none` (default), `turboquant`, or
-    /// `triattention`. Optional — daemon defaults to `none` when absent.
+    /// KV-cache compression codec: `none` (default) or `triattention`.
+    /// Optional — daemon defaults to `none` when absent.
     /// The `ATHENA_KV_COMPRESSION` env var overrides this at startup.
     public var kvCompression: String?
     /// `[prompt_cache]` — cross-request prompt-prefix KV reuse (M59).
@@ -80,13 +80,6 @@ public struct AthenaConfig: Sendable, Equatable {
     /// the store seam (not only on idle-drop/shutdown) so a crash doesn't lose
     /// it. Off by default (synchronous post-prefill I/O is a TTFT cost).
     public var promptCachePersistEager: Bool?
-    /// `dflash_enabled` (M63) — DFlash lossless speculative decoding for
-    /// attention-only targets (Gemma4) that MTP can't accelerate. Default
-    /// false. When on, a request to a target with a registered drafter
-    /// (`DFlashRegistry`) decodes via the block draft/verify engine; the
-    /// drafter is operator-pulled from Hugging Face on first use. The
-    /// `ATHENA_DFLASH` env var (1/true/0/false) overrides this at startup.
-    public var dflashEnabled: Bool?
     /// ADR 024 Tier 2 (defense-in-depth, opt-in): call `ptrace(PT_DENY_ATTACH)`
     /// at startup so a debugger cannot attach to the daemon. Redundant with the
     /// Tier-1 Hardened Runtime / no-`get-task-allow` lockdown (which already
@@ -221,7 +214,6 @@ public struct AthenaConfig: Sendable, Equatable {
         promptCachePersistMaxBytes: Int? = nil,
         promptCachePersistMaxAgeSecs: Int? = nil,
         promptCachePersistEager: Bool? = nil,
-        dflashEnabled: Bool? = nil,
         denyDebuggerAttach: Bool? = nil,
         authKeysFile: String? = nil,
         tlsCert: String? = nil, tlsKey: String? = nil,
@@ -273,7 +265,6 @@ public struct AthenaConfig: Sendable, Equatable {
         self.promptCachePersistMaxBytes = promptCachePersistMaxBytes
         self.promptCachePersistMaxAgeSecs = promptCachePersistMaxAgeSecs
         self.promptCachePersistEager = promptCachePersistEager
-        self.dflashEnabled = dflashEnabled
         self.denyDebuggerAttach = denyDebuggerAttach
         self.authKeysFile = authKeysFile
         self.tlsCert = tlsCert
@@ -483,7 +474,6 @@ public struct AthenaConfig: Sendable, Equatable {
             pcPersistMaxAge = try int("prompt_cache_persist_max_age_secs", v)
         }
         let pcPersistEager = try bool("prompt_cache_persist_eager")
-        let dflashEnabled = try bool("dflash_enabled")
         let denyDebuggerAttach = try bool("deny_debugger_attach")
         let preload = try bool("preload")
         let encStore = try bool("encrypt_store")
@@ -520,7 +510,6 @@ public struct AthenaConfig: Sendable, Equatable {
             promptCachePersistMaxBytes: pcPersistMaxBytes,
             promptCachePersistMaxAgeSecs: pcPersistMaxAge,
             promptCachePersistEager: pcPersistEager,
-            dflashEnabled: dflashEnabled,
             denyDebuggerAttach: denyDebuggerAttach,
             authKeysFile: scalar("auth_keys_file", in: toml),
             tlsCert: scalar("tls_cert", in: toml),

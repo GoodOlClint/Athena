@@ -66,9 +66,9 @@ let package = Package(
             url: "https://github.com/swift-server/swift-service-lifecycle",
             from: "2.11.0"),
         // The MLX substrate. Local clone per the the platform environment
-        // (~/Source/mlx-swift-lm); a path dependency keeps M1 buildable
+        // (~/Source/mlx/mlx-swift-lm); a path dependency keeps M1 buildable
         // against the exact reusable Qwen3.5/TokenIterator code.
-        .package(path: "../mlx-swift-lm"),
+        .package(path: "../mlx/mlx-swift-lm"),
         // Direct mlx-swift dep: the vendored AthenaModels Qwen3.5 needs the
         // MLX/MLXNN modules (products of mlx-swift, not mlx-swift-lm).
         // Same range mlx-swift-lm pins, so SwiftPM unifies the version.
@@ -155,8 +155,7 @@ let package = Package(
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXNN", package: "mlx-swift"),
             ],
-            path: "Sources/AthenaModels",
-            exclude: ["DFlash/NOTICE"]),
+            path: "Sources/AthenaModels"),
 
         // Inference modules. M0 ships governed stubs that conform to the
         // module protocol and reserve/release real budget; the MLX-backed

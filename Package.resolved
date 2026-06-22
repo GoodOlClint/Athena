@@ -1,5 +1,5 @@
 {
-  "originHash" : "7143204d682aa7fa30453c4c29b1816ce2a9170d77cc13f3282c489cde67a88e",
+  "originHash" : "5ecd775d58724978cdf3ad9037f4928b818b20ecbcbd0880b561e8656a803354",
   "pins" : [
     {
       "identity" : "applesiliconmetrics",
@@ -42,8 +42,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/ml-explore/mlx-swift",
       "state" : {
-        "revision" : "61b9e011e09a62b489f6bd647958f1555bdf2896",
-        "version" : "0.31.3"
+        "revision" : "dc43e62d7055353c7f99fa071a4e71d29dfddc44",
+        "version" : "0.31.4"
       }
     },
     {

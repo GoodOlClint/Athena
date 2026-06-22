@@ -788,7 +788,7 @@ enum OpenAPISpec {
                   "logprobs": { "description": "Honored on the deterministic decode path (temperature 0 or structured); returns choices[].logprobs.content. A sampling request (temperature>0, no schema) with logprobs ⇒ 400." },
                   "top_logprobs": { "type": "integer", "description": "0–20 top alternatives per token; requires logprobs:true. Out of range ⇒ 400." },
                   "logit_bias": { "type": "object", "description": "Rejected with 400 when non-empty." },
-                  "speculative": { "type": "boolean", "description": "Athena extension. Per-request speculative-decoding override: true opts into speculative decoding — for an MTP-capable model, the bit-identical-greedy MTP loop at temperature=0 or the Leviathan/Chen sampling loop (distributionally identical to non-speculative sampling at the same temp/top_p/seed) at temperature>0; for a DFlash-enabled attention-only target (Gemma4) on the unstructured greedy path, the DFlash block draft/verify engine (lossless — every emitted token is the target's argmax under the verify forward). false forces the standard path. omit ⇒ daemon's --speculative default." }
+                  "speculative": { "type": "boolean", "description": "Athena extension. Per-request speculative-decoding override for an MTP-capable model: true opts into the bit-identical-greedy MTP loop at temperature=0 or the Leviathan/Chen sampling loop (distributionally identical to non-speculative sampling at the same temp/top_p/seed) at temperature>0. false forces the standard path. omit ⇒ daemon's --speculative default." }
                 }
               },
               "ChatChoice": {
@@ -881,7 +881,7 @@ enum OpenAPISpec {
                   "max_tokens": { "type": "integer", "description": "Output-token cap (deprecated alias of max_completion_tokens; max_completion_tokens wins if both are sent)." },
                   "max_completion_tokens": { "type": "integer", "description": "Output-token cap (OpenAI's current field). Absent ⇒ the daemon default." },
                   "temperature": { "type": "number" },
-                  "speculative": { "type": "boolean", "description": "Per-request speculative-decoding override (same semantics as on /v1/chat/completions; MTP greedy/sampling on MTP models, the DFlash block engine on a DFlash-enabled Gemma4 target)." }
+                  "speculative": { "type": "boolean", "description": "Per-request speculative-decoding override (same semantics as on /v1/chat/completions; MTP greedy/sampling on MTP models)." }
                 }
               },
               "AthenaChatResponse": { "type": "object", "properties": { "model": { "type": "string" }, "content": { "type": "string" }, "done": { "type": "boolean" } } },

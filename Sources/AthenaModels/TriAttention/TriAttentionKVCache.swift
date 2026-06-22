@@ -8,8 +8,7 @@ import MLXNN
 /// directly (NOT a `BaseKVCache` subclass: that class's initializer is
 /// `internal`, so external subclassing is impossible). Protocol
 /// conformance is the entire integration seam, so the substrate clone
-/// stays pristine — contrast M20/TurboQuant, which had to modify shared
-/// `MLXLMCommon` cache routing.
+/// stays pristine.
 ///
 /// Storage is exactly-sized (concat on update, slice on read):
 /// correctness-first, mirroring the M20.1 host-round-trip precedent. A

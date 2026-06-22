@@ -74,8 +74,6 @@ extension ConfigEditor {
         case "kv_compression": return cfg.kvCompression
         case "prompt_cache_enabled":
             return cfg.promptCacheEnabled.map { $0 ? "true" : "false" }
-        case "dflash_enabled":
-            return cfg.dflashEnabled.map { $0 ? "true" : "false" }
         case "prompt_cache_max_entries":
             return cfg.promptCacheMaxEntries.map(String.init)
         case "prompt_cache_max_bytes":

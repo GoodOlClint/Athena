@@ -418,15 +418,6 @@ struct Load: AsyncParsableCommand {
         let prefixEncryptIdle =
             prefixEncryptEnv ?? tomlCfg?.promptCacheEncryptIdle ?? false
 
-        // M63 — DFlash lossless speculative decoding, default OFF. Same
-        // precedence: env ATHENA_DFLASH (1/true/0/false) > TOML
-        // dflash_enabled > built-in false.
-        let dflashEnvEnabled = ProcessInfo.processInfo
-            .environment["ATHENA_DFLASH"]
-            .map { $0 == "1" || $0.lowercased() == "true" }
-        let dflashEnabled =
-            dflashEnvEnabled ?? tomlCfg?.dflashEnabled ?? false
-
         // ADR 024 Tier 2 (opt-in) — deny debugger attach. Precedence mirrors
         // the other startup toggles: env ATHENA_DENY_DEBUGGER (1/true/0/false)
         // > TOML deny_debugger_attach > built-in false. Redundant with the
@@ -730,8 +721,7 @@ struct Load: AsyncParsableCommand {
                     speculative: speculative,
                     kvCompression: kvCompression),
                 promptCacheCapBytes: config.promptCacheCapBytes,
-                prefixCache: prefixCache,
-                dflashEnabled: dflashEnabled)
+                prefixCache: prefixCache)
         }
         let embedding: any EmbeddingModule
         switch engine {

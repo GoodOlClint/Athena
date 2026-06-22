@@ -44,8 +44,8 @@ final class SpeculativeStatsTests: XCTestCase {
     /// real loop's iterations.
     func testObserverTaskLocalReachesPublisher() {
         let obs = CountingObserver()
-        // accepted pattern: 64 accepts out of 100 — the M64.4 DFlash-on-MoE
-        // smoke measured acc 0.64, the natural backbone/MTP agreement rate.
+        // accepted pattern: 64 accepts out of 100 — a representative
+        // backbone/MTP agreement rate for the acceptance observer.
         let pattern = (0..<100).map { $0 < 64 }
         SpeculativeStats.$observer.withValue(obs) {
             simulateSpeculativeIterations(pattern)

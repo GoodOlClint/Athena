@@ -42,11 +42,9 @@ final class SupportedModelsTests: XCTestCase {
 
     // MARK: - fork B: does the codec serve the arch?
 
-    func testNoneAndTurboquantServeEveryArch() {
+    func testNoneServesEveryArch() {
         for t in ["qwen3_5", "llama", "gemma3", "gemma4_unified", nil] {
             XCTAssertTrue(KVCompression.none.servesArch(modelType: t))
-            XCTAssertTrue(
-                KVCompression.turboquant.servesArch(modelType: t))
         }
     }
 

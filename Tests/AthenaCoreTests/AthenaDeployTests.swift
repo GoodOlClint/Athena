@@ -348,13 +348,11 @@ final class AthenaConfigTests: XCTestCase {
             preload = 1
             encrypt_store = YES
             speculative = on
-            dflash_enabled = Off
             """
         let c = try AthenaConfig.parse(toml: toml)
         XCTAssertEqual(c.preload, true)
         XCTAssertEqual(c.encryptStore, true)
         XCTAssertEqual(c.speculative, true)
-        XCTAssertEqual(c.dflashEnabled, false)
     }
 
     func testBoolKeyInvalidValueThrows() {
@@ -463,7 +461,7 @@ final class DefaultConfigTests: XCTestCase {
             listen_port = 7447
             engine = "mlx"
             log_dir = "/var/log/athena"
-            kv_compression = "turboquant"
+            kv_compression = "triattention"
             prompt_cache_enabled = true
             prompt_cache_max_entries = 8
             prompt_cache_max_bytes = 123456
@@ -472,7 +470,7 @@ final class DefaultConfigTests: XCTestCase {
             prompt_cache_encrypt_idle = true
             """
         let c = try AthenaConfig.parse(toml: toml)
-        XCTAssertEqual(c.kvCompression, "turboquant")
+        XCTAssertEqual(c.kvCompression, "triattention")
         XCTAssertEqual(c.promptCacheEnabled, true)
         XCTAssertEqual(c.promptCacheMaxEntries, 8)
         XCTAssertEqual(c.promptCacheMaxBytes, 123_456)
