@@ -37,6 +37,17 @@ Compute-style protection") lands, so we do not get pushed into re-litigating an
 unbuildable NVIDIA-Confidential-Computing port. Motivated by a consumer floating
 PCC/NVIDIA-CC as a model for protecting the M59 prompt-prefix cache in memory.
 
+> **Amendment (2026-06-22) — SEP envelope key for *persisted* KV (triggers the
+> re-open condition below; see the new section "Amendment: persisted-KV key model
+> (ADR 027)" at the end of this file).** T3's "RAM-only key, NO Secure Enclave"
+> decision was **explicitly scoped to a process-ephemeral key** and recorded the
+> condition *"Re-open SEP only if a future M59.5 persists the key."* **ADR 027
+> (disk-backed KV snapshots) persists the key — that condition is now met.** The
+> amendment adopts a **DEK/KEK envelope** with a **swappable KEK**
+> (passphrase/keyfile now → SEP-bound later), reopening SEP **for the persisted
+> path only**. The in-RAM T3 decision (RAM-only key for the idle pool) is
+> **unchanged**.
+
 **Phase-0 Spike B (2026-06-20) validated T1 on the real binary:** re-signing
 `athena` with the Hardened Runtime + `get-task-allow=false` flipped a
 debugger/`debugserver` attach from "reaches the task" (baseline adhoc:
@@ -301,3 +312,78 @@ Primary-source check of the rejected premises and the honesty boundary:
 Net: the ADR's rejected premises and honesty boundary stand, now anchored to a
 dated source check. Re-verify if a future MLX release adds a security/crypto
 module or a protected-buffer allocator.
+
+## Amendment: persisted-KV key model (ADR 027) — 2026-06-22
+
+**Status:** Proposed (design gate) alongside ADR 027. Scope: the **at-rest, on-disk**
+KV key **only**. The T3 in-RAM idle-pool decision (RAM-only `SymmetricKey`, no SEP)
+is **unchanged** — this amendment governs a *different* surface (a file on disk),
+created by ADR 027 (`docs/decisions/027-disk-kv-snapshots.md`).
+
+### Why re-open SEP now
+
+T3 rejected SEP for a **process-ephemeral** key and recorded the explicit gate:
+*"Re-open SEP only if a future M59.5 persists the key."* ADR 027 persists KV (and
+therefore a key) to disk for **resume-across-restart**. A RAM-only key is, by
+construction, gone after restart — so it **cannot** decrypt a disk blob on the next
+boot. Persistence forces a persisted key, which forces the SEP question back open.
+
+### Decision — DEK/KEK envelope with a swappable KEK
+
+Do **not** encrypt the KV blob directly under a persisted key (that path is the
+"hardware-locked-forever / key-on-disk" trap). Instead:
+
+- **DEK (data key):** a random per-blob `SymmetricKey(.bits256)`; AES-256-GCM over
+  the `KVByteCodec` bytes — i.e. the **existing `IdleKVCipher` cipher, reused
+  verbatim**. The DEK never persists in the clear.
+- **KEK (key-encrypting key):** wraps the DEK; the **wrapped-DEK is stored in the
+  blob header** (ADR 027 §4). The KEK is **swappable**, recorded by a header
+  `kek_type`:
+  - **`keyfile` / `passphrase` (ship first).** A high-entropy operator keyfile
+    (HKDF-derived wrapping key) or passphrase (KDF-derived). Cross-restart works
+    immediately; **encrypted-at-rest**, but the key material lives on the host —
+    defends disk theft / backups / another local user, **not** an adversary holding
+    the key.
+  - **`sep` (follow-up slice).** A Secure-Enclave-backed **P-256** key
+    (non-extractable) wraps the DEK via key-agreement/ECIES. The DEK is unwrapped
+    *inside* the enclave path; the wrapping key never leaves the chip. Drop-in: a
+    new `kek_type` + a `KEKProvider` implementation, **no blob-format change**.
+- **Multi-node (deferred, reachable):** because SEP keys are **asymmetric**, a
+  future cluster wraps the DEK **once per peer** (ECIES to each node's SEP *public*
+  key — multi-recipient), or re-wraps online when a node joins. **No SEP key ever
+  leaves any chip**, and the blob is **not hardware-locked-forever** — provided the
+  DEK/KEK split exists now. (Research: `docs/the downstream client-ssd-streaming-and-kv-snapshot-research.md`
+  §3a.1.)
+
+### New at-rest secret class — threat notes
+
+- The persisted artifact is **{AES-256-GCM ciphertext blob + a wrapped-DEK in its
+  header}**. Confidentiality reduces to the **KEK**, and the header's `kek_type`
+  states the posture honestly — we never claim SEP-grade protection for a keyfile
+  KEK.
+- **In-RAM boundary is unchanged.** During a restore the DEK and the decrypted KV
+  are briefly plaintext in RAM — exactly the T3 window, governed by the existing
+  honesty boundary above. This amendment adds **nothing** to the in-RAM exposure;
+  it only ensures the **disk** copy is never plaintext.
+- **Operability (open spike, ADR 027 plan):** a headless launchd daemon must access
+  the SEP KEK **without biometric/user-presence** (device-bound,
+  `kSecAttrAccessibleAfterFirstUnlock`-class) → the Mac must be unlocked once
+  post-boot; key-loss/recovery if the data dir is restored to a *different* Mac is a
+  named operability question, not a blocker for the `keyfile`/`passphrase` ship.
+
+### Honesty boundary (unchanged, restated for the disk surface)
+
+The envelope protects **data at rest on disk**. It does **not** create
+encrypted-compute, does **not** change the irreducibly-plaintext active working set,
+and does **not** defend a kernel/SIP-off adversary who can read the unwrapped DEK
+from RAM during a restore. SEP raises the bar for the *persisted key* (non-extractable,
+hardware-bound); it does not move the in-RAM ceiling.
+
+### Validation (on implementation)
+
+- Envelope **DEK/KEK wrap→unwrap** round-trip, tamper-reject, and **`kek_type`
+  dispatch** — MLX-free unit tests (ADR 008/009).
+- `keyfile`/`passphrase` KEK: wrong-key ⇒ clean refusal, never a partial/garbage
+  restore.
+- `sep` KEK (when built): unwrap requires the enclave; assert the wrapping key is
+  non-extractable and the daemon path works headless under launchd.
