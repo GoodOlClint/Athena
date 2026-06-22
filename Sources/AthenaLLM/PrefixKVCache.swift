@@ -183,9 +183,45 @@ public final class PrefixKVCache: @unchecked Sendable {
         }
     }
 
+    // MARK: - Disk tier (ADR 027)
+
+    /// Optional disk L2 under the in-RAM L1 pool. When present, idle entries
+    /// being dropped (evict / idle-sweep / flush) are **demoted to disk** instead
+    /// of discarded, and an in-RAM miss falls through to a disk restore. Off by
+    /// default; constructed by the daemon only when `prompt_cache_persist_to_disk`
+    /// is on and the daemon is not in a no-write loopback posture (ADR 025).
+    public struct DiskTier {
+        public let store: KVSnapshotStore
+        public let kek: KEKProvider
+        /// Skip-on-skew identity written into each blob header. The served model
+        /// id (which encodes quant for store models); `quantTag` reserved.
+        public let modelID: String
+        public let quantTag: String
+        public let maxEntries: Int?
+        public let maxBytes: Int?
+        public let maxAgeSecs: UInt64?
+        public init(
+            store: KVSnapshotStore, kek: KEKProvider, modelID: String,
+            quantTag: String = "", maxEntries: Int?, maxBytes: Int?, maxAgeSecs: UInt64?
+        ) {
+            self.store = store
+            self.kek = kek
+            self.modelID = modelID
+            self.quantTag = quantTag
+            self.maxEntries = maxEntries
+            self.maxBytes = maxBytes
+            self.maxAgeSecs = maxAgeSecs
+        }
+    }
+
+    /// Sentinel `Hit.entryId` for a disk-restored working set: there is no RAM
+    /// `Entry` to refcount, so `release` is a no-op for it.
+    private static let diskEntryId = -1
+
     // MARK: - State
 
     private let lock = NSLock()
+    private let disk: DiskTier?
     private let maxEntries: Int
     /// Pool byte cap (M59.2). Default governor-derived (= promptCacheCapBytes)
     /// so the persistent pool and the per-request admission guard share one
@@ -210,14 +246,19 @@ public final class PrefixKVCache: @unchecked Sendable {
 
     public init(
         maxEntries: Int, maxBytes: Int = 0, idleTTLSecs: Int = 600,
-        scope: ScopeMode = .principal, encryptIdle: Bool = false
+        scope: ScopeMode = .principal, encryptIdle: Bool = false,
+        disk: DiskTier? = nil
     ) {
         self.maxEntries = max(1, maxEntries)
         self.maxBytes = max(0, maxBytes)
         self.idleTTL = TimeInterval(max(0, idleTTLSecs))
         self.scopeMode = scope
         self.cipher = encryptIdle ? IdleKVCipher() : nil
+        self.disk = disk
     }
+
+    /// Whether a disk L2 tier is attached (ADR 027).
+    public var persistsToDisk: Bool { disk != nil }
 
     /// Whether idle entries are held as AES-256-GCM ciphertext (ADR 024 T3).
     public var encryptsIdleEntries: Bool { cipher != nil }
@@ -251,6 +292,13 @@ public final class PrefixKVCache: @unchecked Sendable {
             if best == nil || b > best!.B { best = (e, l, b) }
         }
         guard let pick = best else {
+            // No in-RAM (L1) entry — fall through to the disk (L2) tier.
+            if let hit = restoreFromDisk(
+                scope: scope, promptTokens: promptTokens, model: model)
+            {
+                hits += 1
+                return hit
+            }
             misses += 1
             return nil
         }
@@ -331,8 +379,115 @@ public final class PrefixKVCache: @unchecked Sendable {
     public func release(_ hit: Hit) {
         lock.lock()
         defer { lock.unlock() }
+        // A disk-restored hit has no RAM entry to refcount — no-op.
         if let e = entries.first(where: { $0.id == hit.entryId }), e.refcount > 0 {
             e.refcount -= 1
+        }
+    }
+
+    // MARK: - Disk tier restore/spill (ADR 027)
+
+    /// On an in-RAM miss, probe the disk store at descending chunk boundaries of
+    /// the prompt (`KVPrefixDigest`). The largest boundary with a digest hit whose
+    /// blob decrypts + decodes + rebuilds is the restore point. `nil` when no disk
+    /// tier, no hit, or every candidate fails to materialize (caller cold-prefills).
+    /// Called with `lock` held.
+    private func restoreFromDisk(
+        scope: String, promptTokens: [Int], model: AthenaQwen35Model
+    ) -> Hit? {
+        guard let disk else { return nil }
+        for b in KVPrefixDigest.probeBoundaries(
+            promptCount: promptTokens.count, chunkSize: Self.chunkSize)
+        {
+            let key = KVPrefixDigest.prefixHash(
+                scope: scope, tokens: promptTokens, count: b)
+            guard
+                let bodyData = disk.store.load(
+                    prefixHash: key, requireModel: disk.modelID,
+                    requireQuant: disk.quantTag, kek: disk.kek),
+                let body = try? KVEntryBody.decode(bodyData),
+                let working = rebuildWorkingFromDisk(body: body, b: b, model: model)
+            else { continue }
+            Self.log.notice(
+                """
+                prefix-cache DISK HIT prompt=\(promptTokens.count) B=\(b) \
+                suffix=\(promptTokens.count - b)
+                """,
+                metadata: ["function": "PrefixKVCache.restoreFromDisk"])
+            return Hit(
+                caches: working, startOffset: b, commonPrefix: b,
+                entryId: Self.diskEntryId)
+        }
+        return nil
+    }
+
+    /// Rebuild a fresh working cache from a disk body whose attention slots were
+    /// stored already trimmed to `b` (so setting `.state` lands the cache at
+    /// offset `b`) and whose recurrent layers are the checkpoint at `b`. `nil` on
+    /// any decode failure (treated as a miss).
+    private func rebuildWorkingFromDisk(
+        body: KVEntryBody, b: Int, model: AthenaQwen35Model
+    ) -> [KVCache]? {
+        var working = model.newCache(parameters: nil)
+        for i in working.indices {
+            if let mc = working[i] as? MambaCache {
+                if let blob = body.recurrentLayers[i] {
+                    guard let arrays = try? KVByteCodec.decode(blob) else { return nil }
+                    mc.state = arrays
+                    mc.offset = b
+                }
+            } else if i < body.attnSlots.count, let blob = body.attnSlots[i] {
+                guard let arrays = try? KVByteCodec.decode(blob) else { return nil }
+                working[i].state = arrays  // arrays are length-b ⇒ offset == b
+            }
+        }
+        return working
+    }
+
+    /// Demote a `.plain` entry to disk before it is dropped — one blob per stored
+    /// 512-boundary (attention trimmed to that boundary + the recurrent
+    /// checkpoint), so a returning prompt finds its largest shared boundary,
+    /// matching the in-RAM divergent-reuse semantics. Best-effort: a write failure
+    /// is swallowed (the entry is dropped from RAM regardless). Sealed entries
+    /// (`prompt_cache_encrypt_idle` on) are not spilled in this slice — RAM-cipher
+    /// and disk-cipher are alternative at-rest strategies (see the construction
+    /// warning). Called with `lock` held.
+    private func demoteToDisk(_ e: Entry, reason: KVSnapshotHeader.SaveReason) {
+        guard let disk else { return }
+        guard case .plain(let attn, let checkpoints) = e.payload else { return }
+        let now = UInt64(max(0, Date().timeIntervalSince1970))
+        for (b, recurLayers) in checkpoints {
+            var slots = [Data?](repeating: nil, count: attn.count)
+            for i in attn.indices {
+                guard let cache = attn[i] else { continue }
+                let c = cache.copy()
+                _ = c.trim(e.tokens.count - b)
+                eval(c.state)
+                slots[i] = KVByteCodec.encode(c.state)
+            }
+            var recurrent: [Int: Data] = [:]
+            for (layer, arrays) in recurLayers {
+                recurrent[layer] = KVByteCodec.encode(arrays)
+            }
+            let body = KVEntryBody(attnSlots: slots, recurrentLayers: recurrent)
+            let key = KVPrefixDigest.prefixHash(scope: e.scope, tokens: e.tokens, count: b)
+            try? disk.store.save(
+                prefixHash: key, modelID: disk.modelID, quantTag: disk.quantTag,
+                scopeKey: e.scope, tokenCount: UInt64(b),
+                contextSize: UInt64(e.tokens.count), saveReason: reason,
+                createdUnix: now, lastUsedUnix: now, body: body.encode(), kek: disk.kek)
+        }
+        disk.store.enforceRetention(
+            maxEntries: disk.maxEntries, maxBytes: disk.maxBytes,
+            maxAgeSecs: disk.maxAgeSecs, now: now)
+    }
+
+    /// Demote each soon-to-be-dropped victim to disk (if a disk tier exists).
+    /// Called with `lock` held, before the victims leave `entries`.
+    private func demoteVictims(_ victims: Set<Int>, reason: KVSnapshotHeader.SaveReason) {
+        guard disk != nil, !victims.isEmpty else { return }
+        for (i, e) in entries.enumerated() where victims.contains(i) {
+            demoteToDisk(e, reason: reason)
         }
     }
 
@@ -486,6 +641,7 @@ public final class PrefixKVCache: @unchecked Sendable {
             PrefixCachePolicy.idleVictimIndices(
                 entryMetas(), now: now, idleTTL: idleTTL))
         guard !victims.isEmpty else { return }
+        demoteVictims(victims, reason: .evict)  // ADR 027 — demote-to-disk, not drop
         let before = entries.count
         entries = entries.enumerated()
             .filter { !victims.contains($0.offset) }.map { $0.element }
@@ -513,10 +669,11 @@ public final class PrefixKVCache: @unchecked Sendable {
     /// operator flush (M59.4). Entries held by an in-flight generation
     /// survive — they're freed when that request releases them.
     @discardableResult
-    public func flushIdle() -> Int {
+    public func flushIdle(reason: KVSnapshotHeader.SaveReason = .evict) -> Int {
         lock.lock()
         defer { lock.unlock() }
         let victims = Set(PrefixCachePolicy.flushIdleIndices(entryMetas()))
+        demoteVictims(victims, reason: reason)  // ADR 027 — spill to disk before dropping
         let before = entries.count
         entries = entries.enumerated()
             .filter { !victims.contains($0.offset) }.map { $0.element }

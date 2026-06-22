@@ -80,6 +80,19 @@ public enum DefaultConfig {
         # the active working set + weights stay plaintext; not a defense
         # against a kernel/root adversary.
         # prompt_cache_encrypt_idle = false
+        # Disk L2 tier (ADR 027). When ON, idle KV entries are spilled to
+        # encrypted blobs under <data_dir>/prompt-cache so a session resumes
+        # ACROSS A RESTART with zero re-prefill. Default OFF (a loopback daemon
+        # writes nothing — ADR 025). Encryption is MANDATORY when on: set
+        # prompt_cache_persist_kek to a keyfile holding ≥32 random bytes
+        # ("keyfile:/path"); SEP-bound keys are the follow-up. env overrides:
+        # ATHENA_PROMPT_CACHE_PERSIST (1/true), ATHENA_PROMPT_CACHE_PERSIST_KEYFILE.
+        # prompt_cache_persist_to_disk = false
+        # prompt_cache_persist_kek = "keyfile:/etc/athena/prompt-cache.key"
+        # prompt_cache_persist_dir = ""          # default <data_dir>/prompt-cache
+        # prompt_cache_persist_max_entries = 0   # 0 ⇒ unbounded
+        # prompt_cache_persist_max_bytes = 0     # 0 ⇒ unbounded
+        # prompt_cache_persist_max_age_secs = 0  # 0 ⇒ no age expiry
 
 
         # ── Storage ──────────────────────────────────────────────────

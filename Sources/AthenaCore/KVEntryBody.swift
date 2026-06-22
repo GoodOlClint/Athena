@@ -128,9 +128,19 @@ public enum KVPrefixDigest {
     /// `SHA-256` of the first `count` token ids serialized as little-endian
     /// `Int64`. `count` is clamped to `[0, tokens.count]`.
     public static func prefixHash(tokens: [Int], count: Int) -> Data {
+        prefixHash(scope: "", tokens: tokens, count: count)
+    }
+
+    /// Scope-bound prefix hash for the disk tier: `SHA-256(scope ‖ 0x1 ‖
+    /// tokens[0..<count])`. Binding the scope into the key means two principals
+    /// (or cache_key scopes) with the *same* prompt map to **different** files —
+    /// a disk snapshot is never reused across the scope boundary the in-RAM pool
+    /// enforces. `count` is clamped to `[0, tokens.count]`.
+    public static func prefixHash(scope: String, tokens: [Int], count: Int) -> Data {
         let n = max(0, min(count, tokens.count))
-        var bytes = Data()
-        bytes.reserveCapacity(n * 8)
+        var bytes = Data(scope.utf8)
+        bytes.append(0x1)
+        bytes.reserveCapacity(bytes.count + n * 8)
         for i in 0 ..< n {
             var le = Int64(tokens[i]).littleEndian
             Swift.withUnsafeBytes(of: &le) { bytes.append(contentsOf: $0) }

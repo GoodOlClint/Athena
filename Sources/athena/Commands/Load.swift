@@ -481,6 +481,57 @@ struct Load: AsyncParsableCommand {
             PrefixKVCache.ScopeMode(
                 rawValue: tomlCfg?.promptCacheScope ?? "principal")
             ?? .principal
+        // ADR 027 — optional disk L2 tier under the in-RAM prompt cache. Off by
+        // default; encryption is MANDATORY when on (a keyfile KEK now; SEP is the
+        // S6 follow-up). env overrides TOML, mirroring the other prompt_cache_*
+        // knobs. A loopback default (flag off) writes nothing (ADR 025).
+        var prefixDisk: PrefixKVCache.DiskTier?
+        let procEnv = ProcessInfo.processInfo.environment
+        let persistEnv = procEnv["ATHENA_PROMPT_CACHE_PERSIST"].map {
+            ["1", "true", "yes", "on"].contains($0.lowercased())
+        }
+        let persistToDisk =
+            persistEnv ?? tomlCfg?.promptCachePersistToDisk ?? false
+        if prefixCacheEnabled && persistToDisk {
+            let dirOverride =
+                procEnv["ATHENA_PROMPT_CACHE_PERSIST_DIR"] ?? tomlCfg?.promptCachePersistDir
+            let baseData =
+                dataDir.map { URL(fileURLWithPath: $0, isDirectory: true) }
+                ?? AthenaEnv.userHome().appendingPathComponent(".athena", isDirectory: true)
+            let persistDir =
+                dirOverride.map { URL(fileURLWithPath: $0, isDirectory: true) }
+                ?? baseData.appendingPathComponent("prompt-cache", isDirectory: true)
+            let keyfilePath =
+                procEnv["ATHENA_PROMPT_CACHE_PERSIST_KEYFILE"]
+                ?? tomlCfg?.promptCachePersistKek.flatMap {
+                    $0.hasPrefix("keyfile:") ? String($0.dropFirst(8)) : nil
+                }
+            let intEnv: (String) -> Int? = { procEnv[$0].flatMap(Int.init) }
+            if let keyfilePath,
+                let keyData = try? Data(contentsOf: URL(fileURLWithPath: keyfilePath)),
+                let kek = try? KeyfileKEK(keyfile: keyData)
+            {
+                prefixDisk = PrefixKVCache.DiskTier(
+                    store: KVSnapshotStore(directory: persistDir),
+                    kek: kek,
+                    modelID: model ?? "",
+                    maxEntries: intEnv("ATHENA_PROMPT_CACHE_PERSIST_MAX_ENTRIES")
+                        ?? tomlCfg?.promptCachePersistMaxEntries,
+                    maxBytes: intEnv("ATHENA_PROMPT_CACHE_PERSIST_MAX_BYTES")
+                        ?? tomlCfg?.promptCachePersistMaxBytes,
+                    maxAgeSecs: (intEnv("ATHENA_PROMPT_CACHE_PERSIST_MAX_AGE_SECS")
+                        ?? tomlCfg?.promptCachePersistMaxAgeSecs).map { UInt64(max(0, $0)) })
+                Logger(label: AthenaLogLabel.daemon).notice(
+                    "prompt-cache disk persistence ON (ADR 027) dir=\(persistDir.path) kek=keyfile")
+                if prefixEncryptIdle {
+                    Logger(label: AthenaLogLabel.daemon).warning(
+                        "prompt_cache_encrypt_idle + persist_to_disk both on — sealed RAM entries are not spilled to disk in this slice")
+                }
+            } else {
+                Logger(label: AthenaLogLabel.daemon).error(
+                    "prompt_cache_persist_to_disk on but no readable ≥32-byte keyfile (ATHENA_PROMPT_CACHE_PERSIST_KEYFILE / prompt_cache_persist_kek=keyfile:PATH) — disk persistence DISABLED (encryption mandatory)")
+            }
+        }
         let prefixCache: PrefixKVCache? =
             prefixCacheEnabled
             ? PrefixKVCache(
@@ -488,7 +539,8 @@ struct Load: AsyncParsableCommand {
                 maxBytes: prefixMaxBytes,
                 idleTTLSecs: prefixIdleTTL,
                 scope: prefixScope,
-                encryptIdle: prefixEncryptIdle)
+                encryptIdle: prefixEncryptIdle,
+                disk: prefixDisk)
             : nil
         var prefixPoolProbe: MemoryGovernor.PromptCachePoolProbe?
         var prefixPoolRelief: MemoryGovernor.PromptCacheReliefHook?

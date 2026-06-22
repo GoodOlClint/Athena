@@ -63,6 +63,19 @@ public struct AthenaConfig: Sendable, Equatable {
     /// opt-in hardening for HIPAA/PCI-sensitive idle prefixes, mirroring
     /// `encrypt_store`.
     public var promptCacheEncryptIdle: Bool?
+    /// `[prompt_cache]` disk tier (ADR 027). `prompt_cache_persist_to_disk`
+    /// (default false) opts the in-RAM pool into a disk L2 that survives a
+    /// restart; encryption is MANDATORY when on (`prompt_cache_persist_kek =
+    /// "keyfile:/path"`, a ≥32-byte key — SEP is the follow-up). Off by default
+    /// ⇒ a loopback daemon writes nothing (ADR 025). `prompt_cache_persist_dir`
+    /// overrides the default `<data_dir>/prompt-cache`; the
+    /// `*_max_{entries,bytes,age_secs}` keys bound the on-disk set.
+    public var promptCachePersistToDisk: Bool?
+    public var promptCachePersistDir: String?
+    public var promptCachePersistKek: String?
+    public var promptCachePersistMaxEntries: Int?
+    public var promptCachePersistMaxBytes: Int?
+    public var promptCachePersistMaxAgeSecs: Int?
     /// `dflash_enabled` (M63) — DFlash lossless speculative decoding for
     /// attention-only targets (Gemma4) that MTP can't accelerate. Default
     /// false. When on, a request to a target with a registered drafter
@@ -197,6 +210,12 @@ public struct AthenaConfig: Sendable, Equatable {
         promptCacheIdleTtlSecs: Int? = nil,
         promptCacheScope: String? = nil,
         promptCacheEncryptIdle: Bool? = nil,
+        promptCachePersistToDisk: Bool? = nil,
+        promptCachePersistDir: String? = nil,
+        promptCachePersistKek: String? = nil,
+        promptCachePersistMaxEntries: Int? = nil,
+        promptCachePersistMaxBytes: Int? = nil,
+        promptCachePersistMaxAgeSecs: Int? = nil,
         dflashEnabled: Bool? = nil,
         denyDebuggerAttach: Bool? = nil,
         authKeysFile: String? = nil,
@@ -242,6 +261,12 @@ public struct AthenaConfig: Sendable, Equatable {
         self.promptCacheIdleTtlSecs = promptCacheIdleTtlSecs
         self.promptCacheScope = promptCacheScope
         self.promptCacheEncryptIdle = promptCacheEncryptIdle
+        self.promptCachePersistToDisk = promptCachePersistToDisk
+        self.promptCachePersistDir = promptCachePersistDir
+        self.promptCachePersistKek = promptCachePersistKek
+        self.promptCachePersistMaxEntries = promptCachePersistMaxEntries
+        self.promptCachePersistMaxBytes = promptCachePersistMaxBytes
+        self.promptCachePersistMaxAgeSecs = promptCachePersistMaxAgeSecs
         self.dflashEnabled = dflashEnabled
         self.denyDebuggerAttach = denyDebuggerAttach
         self.authKeysFile = authKeysFile
@@ -438,6 +463,19 @@ public struct AthenaConfig: Sendable, Equatable {
             pcIdleTtl = try int("prompt_cache_idle_ttl_secs", pt)
         }
         let pcEncryptIdle = try bool("prompt_cache_encrypt_idle")
+        let pcPersist = try bool("prompt_cache_persist_to_disk")
+        var pcPersistMaxEntries: Int?
+        if let v = scalar("prompt_cache_persist_max_entries", in: toml) {
+            pcPersistMaxEntries = try int("prompt_cache_persist_max_entries", v)
+        }
+        var pcPersistMaxBytes: Int?
+        if let v = scalar("prompt_cache_persist_max_bytes", in: toml) {
+            pcPersistMaxBytes = try int("prompt_cache_persist_max_bytes", v)
+        }
+        var pcPersistMaxAge: Int?
+        if let v = scalar("prompt_cache_persist_max_age_secs", in: toml) {
+            pcPersistMaxAge = try int("prompt_cache_persist_max_age_secs", v)
+        }
         let dflashEnabled = try bool("dflash_enabled")
         let denyDebuggerAttach = try bool("deny_debugger_attach")
         let preload = try bool("preload")
@@ -468,6 +506,12 @@ public struct AthenaConfig: Sendable, Equatable {
             promptCacheIdleTtlSecs: pcIdleTtl,
             promptCacheScope: scalar("prompt_cache_scope", in: toml),
             promptCacheEncryptIdle: pcEncryptIdle,
+            promptCachePersistToDisk: pcPersist,
+            promptCachePersistDir: scalar("prompt_cache_persist_dir", in: toml),
+            promptCachePersistKek: scalar("prompt_cache_persist_kek", in: toml),
+            promptCachePersistMaxEntries: pcPersistMaxEntries,
+            promptCachePersistMaxBytes: pcPersistMaxBytes,
+            promptCachePersistMaxAgeSecs: pcPersistMaxAge,
             dflashEnabled: dflashEnabled,
             denyDebuggerAttach: denyDebuggerAttach,
             authKeysFile: scalar("auth_keys_file", in: toml),
