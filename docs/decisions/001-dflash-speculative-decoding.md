@@ -219,8 +219,8 @@ Key design choices:
 ## Implementation plan (sliced — conventions: appVersion bump IN each slice
 commit in BOTH `Sources/athena/Athena.swift` and
 `clients/Sources/athena/Athena.swift`; direct-to-main commit + annotated semantic
-tag per slice; xcodebuild not swift build for MLX; e2e gate; `graphify update .`
-after code changes; error envelope unchanged; passive-oracle preserved)
+tag per slice; xcodebuild not swift build for MLX; e2e gate;
+error envelope unchanged; passive-oracle preserved)
 
 - **M63.0 — Feasibility benchmark (Python only, no Athena code, no version
   bump).** Stand up dflash-mlx in a venv; pull `gemma-4-31b-it-4bit` +
@@ -244,7 +244,7 @@ after code changes; error envelope unchanged; passive-oracle preserved)
   draft attached); config 5-touchpoint (`dflash_enabled` + target→draft registry/
   override + `ATHENA_DFLASH`). **Bit-identical-greedy A/B gate + acceptance-rate
   observer = slice deliverables.** Governor + lifecycle registration of the
-  drafter. e2e gate; graphify update.
+  drafter. e2e gate.
 - **M63.4 — Structured output + observability + OpenAPI.** Validate Guide masking
   end-to-end through DFlash on a structured prompt (M47 draft-self-rejection fix +
   target-only auto-fallback safety valve); reuse the `speculative` flag (runtime

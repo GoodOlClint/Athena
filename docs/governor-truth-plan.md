@@ -16,7 +16,7 @@ Smallest-blast-radius first. The decode/inference numerics are byte-unchanged; t
 changes only the governor's *accounting* and a process-wide *cache bound*. All
 decision logic stays MLX-free and unit-pinned (ADR 008/009); only the probe reads the
 MLX/OS counters. Each slice: `./deploy/build.sh Release` → unit + `deploy/e2e-rbac.sh`
-→ appVersion bump in the slice commit → annotated tag → `graphify update .`.
+→ appVersion bump in the slice commit → annotated tag.
 
 ## Current state (verified)
 

@@ -297,8 +297,8 @@ fail-closed (it's opt-in hardening, like the other T-tier toggles).
 > Pre-commit pipeline per slice: **Tests → Security → Quality → Refactor**.
 > Build with full Xcode (`./deploy/build.sh Release`); run tests as
 > `./deploy/test.sh > /tmp/t3-test.log 2>&1; echo EXIT=$?` (the `tee|tail` idiom
-> masks the exit code) and grep for `error:`. `graphify update .` before each
-> commit. Direct-to-main, annotated semantic tags, messages framed by the
+> masks the exit code) and grep for `error:`.
+> Direct-to-main, annotated semantic tags, messages framed by the
 > Athena-internal security reason (never name the consumer repo).
 
 - **T3.1 — `v0.10.206`: serialize/deserialize seam + MLX-free cipher, dormant.**

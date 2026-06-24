@@ -60,7 +60,7 @@ now is the same effort as listing vision.
 - `Sources/AthenaLLM/ModelConfigInfo.swift` — `hasVisionConfig` (reuse M71.2's detector).
 - `MLXVLM.Gemma4` — serves MoE + vision (validated; no change).
 
-## Slices (each: xcodebuild Release → swift test + e2e phase → annotated tag → graphify)
+## Slices (each: xcodebuild Release → swift test + e2e phase → annotated tag)
 
 - **M72.1 — complete vision-aware convert (load + quantize + config). SHIPPED v0.10.161.**
   Load/quant/config are interdependent (vision-aware load without the quant filter would

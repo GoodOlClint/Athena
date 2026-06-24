@@ -53,7 +53,7 @@ constrained/structured decoding over the VLM path (open question, not needed by 
 - `Sources/AthenaLLM/MLXLLMModule.swift:234,309,312,1102` — governor byte estimate
   (`estimateBytes` sums `*.safetensors`, already counts the vision tower).
 
-## Slices (each: xcodebuild Release → e2e phase → annotated tag direct-to-main → graphify update)
+## Slices (each: xcodebuild Release → e2e phase → annotated tag direct-to-main)
 
 - **M71.1 — wire protocol. ✅ SHIPPED v0.10.159.** `ChatMessage.content` decodes
   `String | [part]` (custom `Codable`, text-only callers unchanged); `ChatTurn` gains an

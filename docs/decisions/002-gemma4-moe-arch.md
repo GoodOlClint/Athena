@@ -146,7 +146,7 @@ path-dep fork, Gemma4-first (26B-A4B), reusing the substrate `SwitchGLU`.
 ## Implementation plan (sliced — conventions: substrate commit + Athena
 `appVersion` bump IN the slice commit in BOTH `Sources/athena/Athena.swift` and
 `clients/Sources/athena/Athena.swift`; direct-to-main commit + annotated semantic
-tag per slice; xcodebuild not swift build for MLX; `graphify update .` after code;
+tag per slice; xcodebuild not swift build for MLX;
 error envelope + passive-oracle unchanged; **dense Gemma4 path byte-unchanged,
 gated on `enableMoeBlock`**). Current `appVersion` = 0.10.112.
 

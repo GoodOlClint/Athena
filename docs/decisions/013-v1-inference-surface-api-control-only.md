@@ -52,7 +52,7 @@ logs, cache — things OpenAI has no shape for). One clean story: *OpenAI dialec
 inference, native dialect for governing the daemon.* Amends the `CLAUDE.md` "Public surface"
 table (`/api/*` is **control**, not "native inference").
 
-Staged, non-breaking rollout (each its own commit + tag + graphify, appVersion bump in the
+Staged, non-breaking rollout (each its own commit + tag, appVersion bump in the
 slice commit):
 
 - **(a) `/api/embed` → deprecate immediately.** No callers. Mark `deprecated: true` in

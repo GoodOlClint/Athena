@@ -73,7 +73,7 @@ endpoints stay canonical); audio **output**/TTS (`modalities:["audio"]` — sepa
 substrate support, no TTS model); outbound `http(s)` audio fetch (400); non-Gemma audio
 arches; native `/api/chat` (stays text-only, like vision — audio goes through `/v1`).
 
-## Slices (each: xcodebuild Release → e2e phase → annotated tag direct-to-main → graphify update; appVersion bump IN the slice commit)
+## Slices (each: xcodebuild Release → e2e phase → annotated tag direct-to-main; appVersion bump IN the slice commit)
 
 - **M72.1 — substrate audio-tower PARITY SPIKE (de-risk; STOP-and-review after).** No
   daemon code. In the `~/Source/mlx-swift-lm` fork: (a) identify the Python `mlx-vlm`

@@ -87,7 +87,7 @@ the server never needs the tokenizer).
 `invalid_top_logprobs`; `top_logprobs` present ⇒ requires `logprobs:true` else 400. Keep
 `n>1` and non-empty `logit_bias` → 400. This split is MLX-free → unit-pinned.
 
-## Slices (each: Release build → unit + e2e → appVersion bump → tag → graphify)
+## Slices (each: Release build → unit + e2e → appVersion bump → tag)
 
 - **C2.1 — DTOs + validation + `LogprobMath` (pure).** Response DTOs, `ChatChoice`/
   `ChatChunkChoice` fields, the `unsupportedParameter` split, and the pure

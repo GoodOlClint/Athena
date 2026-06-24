@@ -12,7 +12,7 @@ Three independent workstreams, ordered low-risk / high-legibility first. Each sl
 stacked, test-pinned commit honoring the pre-commit pipeline (Tests → Security → Quality →
 Refactor): `./deploy/build.sh Release` (xcodebuild — MLX needs full Xcode) → unit test +
 a `deploy/e2e-rbac.sh` phase → **appVersion bump in the slice commit** → annotated tag
-direct-to-main → `graphify update .`. Every fix lands with a regression test; the
+direct-to-main. Every fix lands with a regression test; the
 spec↔routes drift-guard stays green across any `OpenAPISpec.swift` change.
 
 ## Status (verified against code 2026-06-19, v0.10.187)

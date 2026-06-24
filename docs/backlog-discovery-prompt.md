@@ -48,8 +48,8 @@ For each candidate item:
 2. **Verify the real state in the code** — this is the crux. A doc that says
    "shipped" may be partial; one that says "deferred" may have quietly landed.
    Use `grep`/read on `Sources/` (and `Tests/`, `deploy/`) to confirm whether the
-   thing exists, is wired to a route/CLI, and is tested. Prefer
-   `graphify query "<concept>"` for relationship/where-implemented questions.
+   thing exists, is wired to a route/CLI, and is tested. Prefer the
+   code-intel MCP `search` for relationship/where-implemented questions.
    Record the evidence (path:line) for the verdict.
 3. **Detect drift / contradictions explicitly** — e.g. "ADR 0XX claims X is
    Accepted+shipped, but no `Sources/**` symbol implements it" or "memory says Y
