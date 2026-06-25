@@ -222,7 +222,15 @@ public enum ModelConvert {
                     mixedPrecision: mixedPrecision)
                 quantize(
                     model: model,
-                    filter: { path, _ in rule.quantization(forPath: path) })
+                    filter: { path, _ in
+                        // New 4-arg `apply` API: the per-layer filter now also
+                        // carries a `QuantizationMode`. `.affine` is what the
+                        // old (groupSize, bits) form defaulted to — no behavior
+                        // change, just the new tuple shape.
+                        rule.quantization(forPath: path).map {
+                            ($0.groupSize, $0.bits, .affine)
+                        }
+                    })
             }
             let weights = Dictionary(
                 uniqueKeysWithValues:
