@@ -33,7 +33,7 @@ still live on an adjacent code path.
 | 7 | `athena show` vision-capability line (M71.3) | ADR 010; `m71-vision-input-plan.md:86` | **DONE v0.10.194** — `show` prints `vision: yes/no` from `hasVisionConfig` | **DONE** | S | low | — |
 | 8 | M70.3 CI test-debt backfill (ND14/ND15 whisper-lang/RMS/clustering) | `audit-remediation-plan.md:305` | Unchecked, no test file | **DO SOON** | S–M | low | none |
 | 9 | Finish ADR 013 §5 error reclassification (rebind catch-alls + queue-submit) | ADR 013 §5 | Audio/template legs shipped; rebind/queue legs unconfirmed | **DO SOON** | S | low | none |
-| 10 | Substrate fork+pin to a remote (release blocker R1) | `release-distribution.md:17` | `Package.swift:71` still `path: "../mlx-swift-lm"`; un-pushed delta grew | **DO SOON** | M | low | user creates org fork repo |
+| 10 | Substrate fork+pin to a remote (release blocker R1) | `release-distribution.md:17` | `Package.swift:71` still `path: "../mlx/mlx-swift-lm"`; un-pushed delta grew | **DO SOON** | M | low | user creates org fork repo |
 | 11 | Allowlist offline `--data-dir` path (usability #3 / M43.5) | `usability-audit:52`; `m43` memory | **DONE v0.10.195** — macOS `allowlist` verb opens AthenaStore directly when `--data-dir` given | **DONE** | M | low | — |
 | 12 | Auth-deny envelopes carry no recovery `hint` (usability #5) | `usability-audit:85` | **DONE v0.10.196** — middleware 401/403 hint already shipped (M43.4); filled the in-handler `deny403` gap | **DONE** | S | low | — |
 | 13 | K2 — client SSE readers don't check HTTP status (lone "High" in M71 tail) | `audit-remediation-plan.md:312` | **DONE v0.10.197** — fixed the two queue-events SSE followers; `RemoteLogs` already guarded | **DONE** | S | low | — |
@@ -193,7 +193,7 @@ still live on an adjacent code path.
 - **Why it matters:** The build is **not reproducible off this machine** — `Package.swift:71` path-deps a
   local clone carrying un-pushed deltas (3 TurboQuant + the C11 seeded-sampling commit; the delta has
   *grown* since the memory was written). Blocks the entire release pipeline (#37) and any CI.
-- **Evidence (doc → code):** `release-distribution.md:17` → `Package.swift:71` `.package(path: "../mlx-swift-lm")`; cf. the already-correct `AppleSiliconMetrics` git-URL pin at `:100`.
+- **Evidence (doc → code):** `release-distribution.md:17` → `Package.swift:71` `.package(path: "../mlx/mlx-swift-lm")`; cf. the already-correct `AppleSiliconMetrics` git-URL pin at `:100`.
 - **Proposed first slice:** Operator creates the org fork repo; push the deltas; switch the dep to `url+revision`. **Test:** clean-clone build on a second checkout. **Effort:** M · **Risk:** low · **Gate:** user must create/authorize the fork repo.
 
 ### #11 (DO SOON) — Allowlist offline `--data-dir`

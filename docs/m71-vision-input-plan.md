@@ -47,7 +47,7 @@ constrained/structured decoding over the VLM path (open question, not needed by 
   spec↔routes drift-guard that any schema change must satisfy).
 - `Package.swift:131,150` — daemon targets pull `MLXLLM` only; add `MLXVLM` here, **not**
   to `clients/`.
-- Substrate `~/Source/mlx-swift-lm/Libraries/MLXVLM/Models/Gemma4.swift` —
+- Substrate `~/Source/mlx/mlx-swift-lm/Libraries/MLXVLM/Models/Gemma4.swift` —
   `Gemma4VisionModel`, `Gemma4MultimodalEmbedder`, `Gemma4Processor`, `VLMModelFactory`
   (already implemented; just unlinked). `sanitize()` strips `audio_tower`/`embed_audio`.
 - `Sources/AthenaLLM/MLXLLMModule.swift:234,309,312,1102` — governor byte estimate

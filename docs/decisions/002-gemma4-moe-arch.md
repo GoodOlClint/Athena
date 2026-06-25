@@ -174,7 +174,7 @@ gated on `enableMoeBlock`**). Current `appVersion` = 0.10.112.
 ## Status (2026-06-11) — Implemented
 
 All four slices shipped (v0.10.113–116); the substrate Gemma4 MoE delta lives at
-`../mlx-swift-lm @ ce29d00` (additive, dense path byte-unchanged). Gates passed:
+`../mlx/mlx-swift-lm @ ce29d00` (additive, dense path byte-unchanged). Gates passed:
 M64.1 dense bit-identical A/B on `gemma-4-12B-it-8bit`; M64.2 Python-parity on
 `gemma-4-26b-a4b-it-4bit` (next-token argmax matches, cosine 0.99967, all
 mismatches verified bf16 near-ties, dense 31B as the methodology control); M64.3

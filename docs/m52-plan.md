@@ -89,7 +89,7 @@ opens 2× context length at the same memory budget.
 ### Scope
 
 - Vendor / port the #909 1024-thread + 2-pass decode kernels into
-  Athena's substrate fork at `~/Source/mlx-swift-lm`.
+  Athena's substrate fork at `~/Source/mlx/mlx-swift-lm`.
 - Wire them into `TurboQuant`-mode KV cache decode in
   `Sources/AthenaModels/.../TurboQuantCache.swift`.
 - Gate behind the existing `kv_compression = turboquant` knob —
@@ -122,7 +122,7 @@ blocker's weight.
 ### Dependencies
 
 - Substrate fork access (already in place at
-  `~/Source/mlx-swift-lm`)
+  `~/Source/mlx/mlx-swift-lm`)
 - The M20.4 `TurboQuantE2ETests` heavy regression gate
 - Apple Metal toolchain (already required for Athena build)
 

@@ -26,7 +26,7 @@ Current state (verified against live code 2026-06-17, not the 5-day-old memory):
   tower** — i.e. the image-encoder weights are in the files we already download, and we
   discard them.
 - **The Swift vision tower already exists in the substrate.** The path-dep fork
-  (`~/Source/mlx-swift-lm`) ships a complete `MLXVLM` library with `Models/Gemma4.swift`:
+  (`~/Source/mlx/mlx-swift-lm`) ships a complete `MLXVLM` library with `Models/Gemma4.swift`:
   `Gemma4VisionModel`, patch embedder, vision attention, `Gemma4MultimodalEmbedder` (the
   `vision_embedder` projection), the `prepare()` image-embedding splice, and
   `Gemma4Processor` (`UserInputProcessor`, takes `[CIImage]`). `VLMModelFactory` exists

@@ -10,7 +10,7 @@ for audio *reasoning*. This doc is the design-on-file for when it's revisited.
 
 Unlike vision (M71), **this is a substrate port, not a wiring job.** Verified state:
 
-- `~/Source/mlx-swift-lm/Libraries/MLXVLM/Models/Gemma4.swift:1750-1753` — `sanitize()`
+- `~/Source/mlx/mlx-swift-lm/Libraries/MLXVLM/Models/Gemma4.swift:1750-1753` — `sanitize()`
   **strips** `audio_tower` and `embed_audio` from the weights at load time. Comment:
   *"This port currently supports text + vision only."*
 - `Gemma4.swift:393` — config carries `audioTokenId`, and `getInputEmbeddings`
@@ -76,7 +76,7 @@ arches; native `/api/chat` (stays text-only, like vision — audio goes through 
 ## Slices (each: xcodebuild Release → e2e phase → annotated tag direct-to-main; appVersion bump IN the slice commit)
 
 - **M72.1 — substrate audio-tower PARITY SPIKE (de-risk; STOP-and-review after).** No
-  daemon code. In the `~/Source/mlx-swift-lm` fork: (a) identify the Python `mlx-vlm`
+  daemon code. In the `~/Source/mlx/mlx-swift-lm` fork: (a) identify the Python `mlx-vlm`
   Gemma audio-encoder reference and map its architecture (Conformer/USM blocks, subsampling,
   `embed_audio` projection); (b) confirm a real `gemma4_audio` checkpoint actually ships
   audio-tower weights (the daemon's checkpoint, `gemma-4-e2b-it-4bit`, validated for vision
@@ -134,7 +134,7 @@ arches; native `/api/chat` (stays text-only, like vision — audio goes through 
   body, like images and like the transcription endpoints; no outbound fetch.
 - **Backward-compat:** text-only and image chat are wire-unchanged; the audio path engages
   only when `input_audio` parts are present against an audio-capable model.
-- **Substrate:** a **tracked delta** to the `~/Source/mlx-swift-lm` fork (precedent:
+- **Substrate:** a **tracked delta** to the `~/Source/mlx/mlx-swift-lm` fork (precedent:
   TurboQuant/MTP ports). Record the commit; reproducibility pins to it.
 - **Biggest risk:** the audio-encoder port is the unknown. M72.1 exists to convert that
   unknown into a number before any further commitment.
