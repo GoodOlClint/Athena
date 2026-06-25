@@ -439,6 +439,27 @@ struct Load: AsyncParsableCommand {
             listenPort: port,
             promptCacheCapBytes: promptCacheCapBytes
         )
+        // Capture MLX runtime errors before they hit the default
+        // `fatalError`, which prints to stderr that launchd discards — so a
+        // crash during eval (e.g. the gemma4-MoE long-context graphify repro)
+        // leaves no message anywhere. MUST be the global handler, not
+        // `withError {}`: async_eval errors fire on MLX's own worker thread
+        // (`default-qos.cooperative`) where withError's @TaskLocal handler is
+        // invisible (mlx-swift `ErrorHandler.dispatch`). ponytail:
+        // `setErrorHandler` is deprecated upstream, but its replacements
+        // (`withError`/`withErrorHandler`) are TaskLocal-scoped and provably
+        // can't see cross-thread async-eval faults — this is the only lever.
+        // Re-fatals after logging on purpose: MLX state is undefined after an
+        // eval error, so we want the message + a clean launchd restart, NOT
+        // (yet) recovery. Upgrade path: degrade recoverable errors to a
+        // request 500 once the captured messages show which are safe.
+        MLX.setErrorHandler({ message, _ in
+            let m = message.map { String(cString: $0) } ?? "(no message)"
+            Logging.Logger(label: "athena.mlx").critical(
+                "MLX eval error: \(m)")
+            fatalError("MLX eval error: \(m)")
+        })
+
         // M5.2: cap MLX's own allocator at the global budget so its
         // buffer pool can't overshoot the box into a Metal OOM.
         MLX.Memory.memoryLimit = config.totalBudgetBytes
