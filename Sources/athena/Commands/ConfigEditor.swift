@@ -31,6 +31,7 @@ extension ConfigEditor {
         case "log_level": return cfg.logLevel
         case "log_dir": return cfg.logDir
         case "max_tokens": return cfg.maxTokens.map(String.init)
+        case "max_prompt_tokens": return cfg.maxPromptTokens.map(String.init)
         case "temperature": return cfg.temperature
         case "speculative":
             return cfg.speculative.map { $0 ? "true" : "false" }

@@ -204,6 +204,25 @@ final class EffectiveMaxTokensTests: XCTestCase {
     }
 }
 
+/// `max_prompt_tokens` prefill guard (ADR 009 decision seam): a positive cap
+/// refuses prompts strictly above it; nil/non-positive ⇒ unbounded so the
+/// legacy "no cap" behavior is preserved. Pure, CI-safe.
+final class PromptExceedsCapTests: XCTestCase {
+    func testUnboundedWhenCapNil() {
+        XCTAssertFalse(MLXLLMModule.promptExceedsCap(1_000_000, cap: nil))
+    }
+    func testUnboundedWhenCapNonPositive() {
+        XCTAssertFalse(MLXLLMModule.promptExceedsCap(50, cap: 0))
+        XCTAssertFalse(MLXLLMModule.promptExceedsCap(50, cap: -1))
+    }
+    func testOverCapExceeds() {
+        XCTAssertTrue(MLXLLMModule.promptExceedsCap(32_769, cap: 32_768))
+    }
+    func testAtCapAllowed() {
+        XCTAssertFalse(MLXLLMModule.promptExceedsCap(32_768, cap: 32_768))
+    }
+}
+
 /// Stub LLM model selection + governor-accounting discipline. Pure,
 /// CI-safe (no MLX / model).
 final class StubLLMModuleSelectionTests: XCTestCase {

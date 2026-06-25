@@ -77,6 +77,12 @@ struct Load: AsyncParsableCommand {
     @Option(help: "Max generated tokens.")
     var maxTokens: Int = 1024
 
+    @Option(
+        help:
+            "Cap on prompt length in tokens (post chat-template). Absent ⇒ unbounded. Prefill attention is O(seq²); past a model/hardware-specific length a single score buffer exceeds Metal's per-buffer limit and the MLX eval aborts the daemon — this refuses an oversized prompt with a 400 (input_too_long) before prefill. Set to a value your model+GPU can hold (calibration knob)."
+    )
+    var maxPromptTokens: Int?
+
     @Flag(
         help:
             "Enable MTP speculative decoding. Bit-identical-greedy at temperature 0; Leviathan/Chen sampling speculative (distributionally identical to non-speculative sampling at the same temp/top_p/seed) at temperature > 0. Requires the loaded model to have an MTP head. Per-request `speculative` override available on /v1 + /api."
@@ -740,7 +746,8 @@ struct Load: AsyncParsableCommand {
                     maxTokens: maxTokens,
                     temperature: Float(temperature ?? 0.7),
                     speculative: speculative,
-                    kvCompression: kvCompression),
+                    kvCompression: kvCompression,
+                    maxPromptTokens: maxPromptTokens),
                 promptCacheCapBytes: config.promptCacheCapBytes,
                 prefixCache: prefixCache)
         }

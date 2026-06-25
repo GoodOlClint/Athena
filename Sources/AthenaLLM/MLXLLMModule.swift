@@ -26,17 +26,29 @@ public struct LLMGenerationParameters: Sendable {
     public var speculative: Bool
     /// KV-cache compression codec (the `kv_compression` knob). M20.
     public var kvCompression: KVCompression
+    /// Operator cap on the post-chat-template prompt length, in tokens
+    /// (`max_prompt_tokens`). nil ⇒ unbounded (legacy behavior). Prefill
+    /// attention is O(seq²); past a model/hardware-specific length a single
+    /// score buffer exceeds Metal's `maxBufferLength` and the MLX eval aborts
+    /// the daemon process-wide (observed: gemma4-MoE at ~61k tokens needing a
+    /// 111 GiB buffer vs an 80.6 GiB device cap). This refuses an oversized
+    /// prompt with a clean 400 (`input_too_long`) before prefill, instead of a
+    /// crash. The right value is hardware+model specific — it's a calibration
+    /// knob, not a derivable constant — so it is operator-set, default-off.
+    public var maxPromptTokens: Int?
 
     public init(
         maxTokens: Int = 1024, temperature: Float = 0.7,
         topP: Float = 0.95, speculative: Bool = false,
-        kvCompression: KVCompression = .none
+        kvCompression: KVCompression = .none,
+        maxPromptTokens: Int? = nil
     ) {
         self.maxTokens = maxTokens
         self.temperature = temperature
         self.topP = topP
         self.speculative = speculative
         self.kvCompression = kvCompression
+        self.maxPromptTokens = maxPromptTokens
     }
 
     /// Whether THIS request is opted into MTP speculative decoding.
@@ -762,6 +774,18 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                 chat: Self.chatMessages(messages), tools: tools,
                 additionalContext: chatTemplateKwargs))
         let promptTokens = lmInput.text.tokens.asArray(Int.self)
+        // Prefill attention is O(seq²): past a model/hardware-specific length
+        // a single score buffer exceeds Metal's `maxBufferLength` and the MLX
+        // eval aborts the daemon (gemma4-MoE at ~61k tokens → a 111 GiB buffer
+        // vs an 80.6 GiB cap). Refuse an over-cap prompt with a 400 here,
+        // before prefill, instead of crashing the process. Off unless the
+        // operator sets `max_prompt_tokens` (calibration knob — the ceiling is
+        // hardware+model specific, not derivable).
+        if Self.promptExceedsCap(promptTokens.count, cap: params.maxPromptTokens) {
+            throw AthenaError.inputTooLong(
+                module: .llm, tokens: promptTokens.count,
+                maxTokens: params.maxPromptTokens!)
+        }
         // M24.3: a positive per-request override wins over the loaded
         // default; the greedy/MTP paths are length-only (temperature is
         // inert under the Guide / speculative greedy).
@@ -1071,6 +1095,14 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     static func effectiveMaxTokens(_ override: Int?, _ fallback: Int) -> Int {
         if let o = override, o > 0 { return o }
         return fallback
+    }
+
+    /// True iff a `max_prompt_tokens` cap is set (positive) and the prompt
+    /// exceeds it. nil/non-positive cap ⇒ unbounded (never exceeds). The
+    /// MLX-free decision seam for the prefill prompt-length guard (ADR 009).
+    static func promptExceedsCap(_ promptCount: Int, cap: Int?) -> Bool {
+        guard let cap, cap > 0 else { return false }
+        return promptCount > cap
     }
 
     /// Resident footprint estimate = sum of the model's `*.safetensors`

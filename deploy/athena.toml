@@ -66,6 +66,17 @@ engine = "mlx"
 # Max generated tokens per request (default 1024).
 # max_tokens = 1024
 
+# Cap on PROMPT length in tokens (post chat-template). Commented ⇒ unbounded.
+# Prefill attention is O(seq²): past a model/hardware-specific length a single
+# attention-score buffer exceeds Metal's per-buffer limit (~80.6 GiB on a 96 GB
+# Mac) and the MLX eval aborts the daemon process-wide. With this set, an
+# over-cap prompt is refused with a clean 400 (`input_too_long`) BEFORE prefill
+# instead of crashing. The safe value is hardware+model specific — e.g. a
+# full-attention fp32 path on a 96 GB Mac overflows near ~52k tokens — so this
+# is a calibration knob, not a derivable constant. Tune to what your model+GPU
+# can hold; lower it if you see `[metal::malloc] … maximum allowed buffer size`.
+# max_prompt_tokens = 32768
+
 # Sampling temperature; 0 = deterministic greedy (default 0.7).
 # Bare number, not quoted.
 # temperature = 0.7

@@ -38,6 +38,11 @@ public struct AthenaConfig: Sendable, Equatable {
     /// raw scalar for temperature so the value passes straight to
     /// `--temperature`.
     public var maxTokens: Int?
+    /// Cap on prompt length in tokens (`max_prompt_tokens`). nil ⇒ unbounded.
+    /// Refuses an oversized prompt with a 400 before prefill instead of letting
+    /// an O(seq²) attention buffer overrun Metal's per-buffer cap and abort the
+    /// daemon. Hardware+model specific — a calibration knob.
+    public var maxPromptTokens: Int?
     public var temperature: String?
     public var speculative: Bool?
     /// KV-cache compression codec: `none` (default) or `triattention`.
@@ -198,7 +203,8 @@ public struct AthenaConfig: Sendable, Equatable {
         modelStore: String? = nil,
         dataDir: String? = nil,
         logLevel: String? = nil,
-        maxTokens: Int? = nil, temperature: String? = nil,
+        maxTokens: Int? = nil, maxPromptTokens: Int? = nil,
+        temperature: String? = nil,
         speculative: Bool? = nil,
         kvCompression: String? = nil,
         promptCacheEnabled: Bool? = nil,
@@ -249,6 +255,7 @@ public struct AthenaConfig: Sendable, Equatable {
         self.dataDir = dataDir
         self.logLevel = logLevel
         self.maxTokens = maxTokens
+        self.maxPromptTokens = maxPromptTokens
         self.temperature = temperature
         self.speculative = speculative
         self.kvCompression = kvCompression
@@ -393,6 +400,10 @@ public struct AthenaConfig: Sendable, Equatable {
         if let m = scalar("max_tokens", in: toml) {
             maxTok = try int("max_tokens", m)
         }
+        var maxPromptTok: Int?
+        if let m = scalar("max_prompt_tokens", in: toml) {
+            maxPromptTok = try int("max_prompt_tokens", m)
+        }
         var rateBurst: Int?
         if let rb = scalar("rate_burst", in: toml) {
             rateBurst = try int("rate_burst", rb)
@@ -494,6 +505,7 @@ public struct AthenaConfig: Sendable, Equatable {
             dataDir: scalar("data_dir", in: toml),
             logLevel: scalar("log_level", in: toml),
             maxTokens: maxTok,
+            maxPromptTokens: maxPromptTok,
             temperature: scalar("temperature", in: toml),
             speculative: spec,
             kvCompression: scalar("kv_compression", in: toml),

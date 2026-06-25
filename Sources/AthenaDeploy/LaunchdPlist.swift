@@ -79,6 +79,9 @@ public enum LaunchdPlist {
         if let maxTokens = config.maxTokens {
             args += ["--max-tokens", String(maxTokens)]
         }
+        if let maxPromptTokens = config.maxPromptTokens {
+            args += ["--max-prompt-tokens", String(maxPromptTokens)]
+        }
         if let temperature = config.temperature {
             args += ["--temperature", temperature]
         }
