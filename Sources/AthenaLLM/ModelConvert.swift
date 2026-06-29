@@ -295,6 +295,13 @@ public enum ModelConvert {
         let src = snapshot.appendingPathComponent("config.json")
             .resolvingSymlinksInPath()
         let data = try Data(contentsOf: src)
+        let destConfig = dest.appendingPathComponent("config.json")
+        // No-quantize convert: the source config is already ecosystem-correct,
+        // so copy it through byte-for-byte (no round-trip to corrupt floats).
+        guard let bits else {
+            try data.write(to: destConfig)
+            return
+        }
         guard
             var obj = try JSONSerialization.jsonObject(with: data)
                 as? [String: Any]
@@ -302,22 +309,23 @@ public enum ModelConvert {
             throw AthenaError.moduleLoadFailed(
                 .llm, reason: "source config.json is not an object")
         }
-        if let bits {
-            let rule = Gemma4QuantRule(
-                groupSize: groupSize, bits: bits,
-                mixedPrecision: mixedPrecision)
-            var quant: [String: Any] = [
-                "group_size": groupSize, "bits": bits, "mode": "affine",
-            ]
-            for o in rule.overrides(forModules: quantizedModules) {
-                quant[o.path] = ["group_size": o.groupSize, "bits": o.bits]
-            }
-            obj["quantization"] = quant
+        let rule = Gemma4QuantRule(
+            groupSize: groupSize, bits: bits,
+            mixedPrecision: mixedPrecision)
+        var quant: [String: Any] = [
+            "group_size": groupSize, "bits": bits, "mode": "affine",
+        ]
+        for o in rule.overrides(forModules: quantizedModules) {
+            quant[o.path] = ["group_size": o.groupSize, "bits": o.bits]
         }
-        let out = try JSONSerialization.data(
-            withJSONObject: obj,
-            options: [.prettyPrinted, .sortedKeys])
-        try out.write(to: dest.appendingPathComponent("config.json"))
+        obj["quantization"] = quant
+        // Float-faithful emit: Foundation's serializers collapse whole-valued
+        // floats (e.g. gemma4 `final_logit_softcapping: 30.0`) to ints, which
+        // upstream transformers/mlx-lm strict-config validation rejects. The
+        // `JSONSerialization` parse above keeps the float flag; this preserves it
+        // (ADR 016 — all converts must load anywhere an mlx-community convert does).
+        let out = try ConfigJSONEmit.data(from: obj)
+        try out.write(to: destConfig)
     }
 
     private static func copyAux(from snapshot: URL, to dest: URL) throws
