@@ -23,6 +23,49 @@ public enum GovernorMemory {
         return budgetBytes / fractionDenominator
     }
 
+    /// Whether the serve path bounded the MLX buffer cache via
+    /// `MLX.Memory.cacheLimit` at boot (i.e. `resolveCacheLimit` returned a
+    /// value). When `true`, MLX evicts the cache itself, so the custom decode
+    /// loops' legacy per-256-token `MLX.Memory.clearCache()` is redundant and
+    /// only defeats the buffer pool — they skip it. When `false` (operator
+    /// opt-out, `mlx_cache_limit_bytes ≤ 0`), the periodic flush stays the only
+    /// bound on the otherwise-unbounded cache.
+    ///
+    /// ponytail: write-once at daemon boot before any request; a plain global,
+    /// not an actor — if it ever became runtime-mutable, gate it behind the
+    /// governor actor.
+    public nonisolated(unsafe) static var serveCacheBounded = false
+
+    /// ADR 030 — default ceiling on the post-chat-template prompt length, in
+    /// tokens, when the operator has not set `max_prompt_tokens`. Prefill
+    /// attention scores are an O(seq²) buffer; once a single score buffer
+    /// exceeds the device's max single Metal buffer (`maxBufferBytes`, from
+    /// `MLX.GPU.deviceInfo().maxBufferSize`) the MLX allocator throws and
+    /// (pre-degrade) aborts the daemon. We can't read per-model head/dtype for
+    /// arbitrary substrate arches at the serve layer, so assume a conservative
+    /// worst-case score buffer of ~`bytesPerScoreElem` per seq² element
+    /// (≈64 query heads × fp16) and keep the largest seq whose single buffer
+    /// stays under the device cap.
+    ///
+    /// ponytail: a conservative heuristic FLOOR, not a guarantee — a low-head
+    /// model could safely take several× more, so the operator raises it via
+    /// `max_prompt_tokens`. Calibrated against the gemma4-MoE 61k-token → 111 GiB
+    /// abort. Upgrade path: derive the real per-model factor once the substrate
+    /// exposes head count/dtype here. `maxBufferBytes ≤ 0` (device unknown) ⇒ a
+    /// fixed safe floor.
+    public static func defaultPromptTokenCeiling(
+        maxBufferBytes: Int, bytesPerScoreElem: Int = 128
+    ) -> Int {
+        let unknownDeviceFloor = 16_384
+        let minCeiling = 4_096
+        guard maxBufferBytes > 0, bytesPerScoreElem > 0 else {
+            return unknownDeviceFloor
+        }
+        let seq = Int(
+            (Double(maxBufferBytes) / Double(bytesPerScoreElem)).squareRoot())
+        return max(minCeiling, seq)
+    }
+
     // MARK: - G2 — admission against the real footprint
 
     /// How the governor sizes the admission denominator (ADR 023 G2).

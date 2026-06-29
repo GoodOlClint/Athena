@@ -313,7 +313,12 @@ enum SpeculativeGeneration {
                 if trace { tDraftPick += dt(t0) }
             }
 
-            if out.count % 256 == 0 { MLX.Memory.clearCache() }
+            // ADR 023 G1: skip the legacy periodic flush when the serve path
+            // already bounds the MLX cache (it only churns the buffer pool);
+            // keep it only under the unbounded operator opt-out.
+            if !GovernorMemory.serveCacheBounded, out.count % 256 == 0 {
+                MLX.Memory.clearCache()
+            }
         }
         let secs = Date().timeIntervalSince(genStart)
         let rate = specIters > 0 ? Double(specAccepts) / Double(specIters) : 0

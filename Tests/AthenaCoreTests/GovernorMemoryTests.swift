@@ -50,6 +50,40 @@ final class GovernorMemoryTests: XCTestCase {
             1234)
     }
 
+    // MARK: - ADR 030 — default prefill prompt-token ceiling
+
+    func testPromptCeilingScalesWithDeviceBuffer() {
+        // sqrt(maxBuffer / bytesPerScoreElem). 72 GiB / 128 ⇒ ~23.7k.
+        let buf = 72 * 1024 * 1024 * 1024
+        let ceil = GovernorMemory.defaultPromptTokenCeiling(maxBufferBytes: buf)
+        let expected = Int((Double(buf) / 128.0).squareRoot())
+        XCTAssertEqual(ceil, expected)
+        // The conservative default must sit safely below the observed 61k-token
+        // abort on an ~80 GiB-class device.
+        XCTAssertLessThan(ceil, 61_000)
+    }
+
+    func testPromptCeilingUnknownDeviceUsesSafeFloor() {
+        XCTAssertEqual(
+            GovernorMemory.defaultPromptTokenCeiling(maxBufferBytes: 0), 16_384)
+        XCTAssertEqual(
+            GovernorMemory.defaultPromptTokenCeiling(maxBufferBytes: -1), 16_384)
+    }
+
+    func testPromptCeilingNeverBelowMinForTinyDevice() {
+        // A pathologically tiny buffer still permits a usable prompt.
+        XCTAssertEqual(
+            GovernorMemory.defaultPromptTokenCeiling(maxBufferBytes: 1024), 4_096)
+    }
+
+    func testPromptCeilingLargerDeviceAllowsLongerPrompt() {
+        let small = GovernorMemory.defaultPromptTokenCeiling(
+            maxBufferBytes: 16 * 1024 * 1024 * 1024)
+        let large = GovernorMemory.defaultPromptTokenCeiling(
+            maxBufferBytes: 128 * 1024 * 1024 * 1024)
+        XCTAssertGreaterThan(large, small)
+    }
+
     // MARK: - G2 — admission against the real footprint (ADR 023)
 
     func testAdmissionModeParseDefaultsToFootprint() {

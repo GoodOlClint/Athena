@@ -96,7 +96,11 @@ enum GuidedSubstrate {
             // path here is also fully synchronous and only surfaces
             // one `.text` event at completion.
             DecodeProgress.counter?.incrementToken()
-            if out.count % 256 == 0 { MLX.Memory.clearCache() }
+            // ADR 023 G1: skip the legacy flush when the serve path bounds the
+            // MLX cache; keep it only under the unbounded operator opt-out.
+            if !GovernorMemory.serveCacheBounded, out.count % 256 == 0 {
+                MLX.Memory.clearCache()
+            }
         }
         return out
     }

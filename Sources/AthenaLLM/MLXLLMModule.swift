@@ -87,6 +87,13 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     /// diagnosing a specific request shape.
     nonisolated static let log = Logger(label: "athena.llm")
 
+    /// ADR 030 — the device's maximum single Metal buffer size, read once.
+    /// Feeds the default prompt-length ceiling (`defaultPromptTokenCeiling`)
+    /// when the operator hasn't set `max_prompt_tokens`. Device-constant, so a
+    /// lazily-computed global is correct and cheap.
+    nonisolated static let deviceMaxBufferBytes: Int = MLX.GPU.deviceInfo()
+        .maxBufferSize
+
     /// ADR 026 — the selectable set is the model store classified by
     /// `ModelSupport` (an LLM slot accepts `.llm` and `.vision`), scanned live
     /// from `modelStoreRoot`; there is no pushed-in allowlist. `configuredDefault`
@@ -774,18 +781,11 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                 chat: Self.chatMessages(messages), tools: tools,
                 additionalContext: chatTemplateKwargs))
         let promptTokens = lmInput.text.tokens.asArray(Int.self)
-        // Prefill attention is O(seq²): past a model/hardware-specific length
-        // a single score buffer exceeds Metal's `maxBufferLength` and the MLX
-        // eval aborts the daemon (gemma4-MoE at ~61k tokens → a 111 GiB buffer
-        // vs an 80.6 GiB cap). Refuse an over-cap prompt with a 400 here,
-        // before prefill, instead of crashing the process. Off unless the
-        // operator sets `max_prompt_tokens` (calibration knob — the ceiling is
-        // hardware+model specific, not derivable).
-        if Self.promptExceedsCap(promptTokens.count, cap: params.maxPromptTokens) {
-            throw AthenaError.inputTooLong(
-                module: .llm, tokens: promptTokens.count,
-                maxTokens: params.maxPromptTokens!)
-        }
+        // ADR 030 — refuse an over-ceiling prompt with a 400 before prefill so
+        // the O(seq²) score buffer can't exceed the device's max Metal buffer
+        // and abort the daemon. Shared with the substrate-stream path
+        // (`beginGeneration`) so BOTH decode routes are covered.
+        try enforcePromptCeiling(tokenCount: promptTokens.count)
         // M24.3: a positive per-request override wins over the loaded
         // default; the greedy/MTP paths are length-only (temperature is
         // inert under the Guide / speculative greedy).
@@ -1084,6 +1084,9 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                 chat: Self.chatMessages(messages), tools: tools,
                 additionalContext: chatTemplateKwargs)
             let lmInput = try await container.prepare(input: userInput)
+            // ADR 030 — same prefill ceiling as runSpeculative; this is the
+            // substrate-stream path the gemma4-MoE long-context abort took.
+            try enforcePromptCeiling(tokenCount: lmInput.text.tokens.size)
             return try await container.generate(
                 input: lmInput, parameters: gp)
         }
@@ -1103,6 +1106,24 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     static func promptExceedsCap(_ promptCount: Int, cap: Int?) -> Bool {
         guard let cap, cap > 0 else { return false }
         return promptCount > cap
+    }
+
+    /// ADR 030 — enforce the prefill prompt ceiling for THIS request before any
+    /// MLX eval: the operator's `max_prompt_tokens` if set, else the
+    /// device-derived default (`defaultPromptTokenCeiling`). An over-ceiling
+    /// prompt throws `inputTooLong` (400) instead of letting the O(seq²) score
+    /// buffer abort the daemon. An explicit operator `0` (≤0) stays the
+    /// unbounded opt-out (calibration knob). Called at every `container.prepare`
+    /// chokepoint (runSpeculative + beginGeneration).
+    private func enforcePromptCeiling(tokenCount: Int) throws {
+        let cap =
+            params.maxPromptTokens
+            ?? GovernorMemory.defaultPromptTokenCeiling(
+                maxBufferBytes: Self.deviceMaxBufferBytes)
+        if Self.promptExceedsCap(tokenCount, cap: cap) {
+            throw AthenaError.inputTooLong(
+                module: .llm, tokens: tokenCount, maxTokens: cap)
+        }
     }
 
     /// Resident footprint estimate = sum of the model's `*.safetensors`

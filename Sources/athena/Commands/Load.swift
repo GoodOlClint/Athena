@@ -479,6 +479,9 @@ struct Load: AsyncParsableCommand {
             budgetBytes: config.totalBudgetBytes)
         {
             MLX.Memory.cacheLimit = cacheLimit
+            // Tell the decode loops MLX now bounds the cache, so they can drop
+            // their legacy per-256-token clearCache() (which defeats the pool).
+            GovernorMemory.serveCacheBounded = true
             Logging.Logger(label: AthenaLog.daemonLabel).notice(
                 "MLX cache limit bounded to \(cacheLimit) bytes (ADR 023 G1)")
         }
