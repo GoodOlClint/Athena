@@ -126,6 +126,18 @@ public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule,
     public func embed(
         audio: Data, filename: String?, segments: [SpeakerSegmentRequest]
     ) async throws -> SpeakerEmbeddingResult {
+        // ADR 029 — gate the per-segment model.embed Metal forwards against
+        // other tenants via an actor self-hop (the @Sendable closure never
+        // captures the non-Sendable model).
+        try await InferenceGate.shared.withExclusiveExecution {
+            try await self.embedWorker(
+                audio: audio, filename: filename, segments: segments)
+        }
+    }
+
+    private func embedWorker(
+        audio: Data, filename: String?, segments: [SpeakerSegmentRequest]
+    ) async throws -> SpeakerEmbeddingResult {
         guard let model else {
             throw AthenaError.moduleLoadFailed(
                 .speakerEmbedding, reason: "embed called before load")
@@ -188,6 +200,18 @@ public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule,
     }
 
     public func windowEmbeddings(
+        audio: Data, filename: String?,
+        windowSeconds: Double, hopSeconds: Double
+    ) async throws -> SpeakerEmbeddingResult {
+        // ADR 029 — gate the Metal forwards via an actor self-hop.
+        try await InferenceGate.shared.withExclusiveExecution {
+            try await self.windowEmbeddingsWorker(
+                audio: audio, filename: filename,
+                windowSeconds: windowSeconds, hopSeconds: hopSeconds)
+        }
+    }
+
+    private func windowEmbeddingsWorker(
         audio: Data, filename: String?,
         windowSeconds: Double, hopSeconds: Double
     ) async throws -> SpeakerEmbeddingResult {

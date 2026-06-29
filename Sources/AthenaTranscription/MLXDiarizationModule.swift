@@ -238,9 +238,15 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
         let mySeq = generateSeq
         let task = Task { () async throws -> DiarizationResult in
             _ = try? await prior?.value
-            return streaming
-                ? try await Self.runStreaming(send)
-                : try await Self.runOffline(send)
+            // ADR 029 — one Metal-executing tenant at a time. The
+            // generateInFlight chain serializes diarizations within this
+            // module; the gate serializes this forward against the LLM/audio
+            // tenants on the one Metal pool.
+            return try await InferenceGate.shared.withExclusiveExecution {
+                streaming
+                    ? try await Self.runStreaming(send)
+                    : try await Self.runOffline(send)
+            }
         }
         generateInFlight = task
         generateGateSeq = mySeq
@@ -266,9 +272,12 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
         // so the whole file is segmented in one pass; box the non-Sendable
         // model+pcm so the detached run can capture it (the actor serialises).
         let send = Send((segmentationModel, pcm))
-        let task = Task { () -> [SpeakerActivityRegion] in
-            let (m, samples) = send.v
-            return m.segment(samples)
+        let task = Task { () async throws -> [SpeakerActivityRegion] in
+            // ADR 029 — gate the segmentation forward against other tenants.
+            try await InferenceGate.shared.withExclusiveExecution {
+                let (m, samples) = send.v
+                return m.segment(samples)
+            }
         }
         return try await task.value
     }

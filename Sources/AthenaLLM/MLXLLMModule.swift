@@ -598,53 +598,64 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         // cap both generation paths enforce.
         AsyncStream { continuation in
             let task = Task {
-                var usage = TokenUsage.zero
                 do {
-                    if let speculative = try await self.runSpeculative(
-                        messages: messages, schemaJSON: schemaJSON,
-                        tools: tools, maxTokens: maxTokens,
-                        requestSpeculative: speculative,
-                        requestTemperature: temperature,
-                        requestTopP: topP, requestSeed: seed,
-                        chatTemplateKwargs: chatTemplateKwargs,
-                        promptCacheKey: promptCacheKey, principal: principal,
-                        logprobs: logprobs)
-                    {
-                        usage = speculative.usage
-                        continuation.yield(.text(speculative.text))
-                        continuation.yield(.usage(usage))
-                        // C2 (ADR 013 §4): per-token logprobs when requested.
-                        if let lps = speculative.logprobs {
-                            continuation.yield(.logprobs(lps))
-                        }
-                    } else {
-                        // runSpeculative returns nil only for UNstructured
-                        // requests (no schema) — those stream from the
-                        // standard substrate path. Structured requests are
-                        // always guided: the vendored Qwen3.5 path, or the
-                        // substrate-guided path for other arches (M23).
-                        let stream = try await self.beginGeneration(
-                            messages: messages, tools: tools,
-                            maxTokens: maxTokens, temperature: temperature,
-                            topP: topP, seed: seed,
-                            chatTemplateKwargs: chatTemplateKwargs)
-                        for await event in stream {
-                            switch event {
-                            case .chunk(let text):
-                                continuation.yield(.text(text))
-                            case .info(let info):
-                                // Substrate's terminal completion record
-                                // carries the real token geometry.
-                                usage = TokenUsage(
-                                    promptTokens: info.promptTokenCount,
-                                    completionTokens:
-                                        info.generationTokenCount)
-                            default:
-                                break
+                    // ADR 029 — hold the process-global inference execution gate
+                    // for the WHOLE decode so no other tenant (or a warm rebind)
+                    // drives MLX kernels on the one Metal pool concurrently. The
+                    // gate wraps token production, not the lazy stream
+                    // consumption: `AsyncStream`'s default unbounded buffering
+                    // means this Task is decode-bound, so a slow SSE consumer
+                    // never holds the gate. `usage` is returned OUT of the
+                    // @Sendable closure (not captured as a mutable var).
+                    let usage = try await InferenceGate.shared
+                        .withExclusiveExecution { () async throws -> TokenUsage in
+                            var u = TokenUsage.zero
+                            if let speculative = try await self.runSpeculative(
+                                messages: messages, schemaJSON: schemaJSON,
+                                tools: tools, maxTokens: maxTokens,
+                                requestSpeculative: speculative,
+                                requestTemperature: temperature,
+                                requestTopP: topP, requestSeed: seed,
+                                chatTemplateKwargs: chatTemplateKwargs,
+                                promptCacheKey: promptCacheKey,
+                                principal: principal, logprobs: logprobs)
+                            {
+                                u = speculative.usage
+                                continuation.yield(.text(speculative.text))
+                                continuation.yield(.usage(u))
+                                // C2 (ADR 013 §4): per-token logprobs.
+                                if let lps = speculative.logprobs {
+                                    continuation.yield(.logprobs(lps))
+                                }
+                            } else {
+                                // runSpeculative returns nil only for
+                                // UNstructured requests (no schema) — those
+                                // stream from the standard substrate path.
+                                let stream = try await self.beginGeneration(
+                                    messages: messages, tools: tools,
+                                    maxTokens: maxTokens,
+                                    temperature: temperature,
+                                    topP: topP, seed: seed,
+                                    chatTemplateKwargs: chatTemplateKwargs)
+                                for await event in stream {
+                                    switch event {
+                                    case .chunk(let text):
+                                        continuation.yield(.text(text))
+                                    case .info(let info):
+                                        // Substrate's terminal completion
+                                        // record carries the token geometry.
+                                        u = TokenUsage(
+                                            promptTokens: info.promptTokenCount,
+                                            completionTokens:
+                                                info.generationTokenCount)
+                                    default:
+                                        break
+                                    }
+                                }
+                                continuation.yield(.usage(u))
                             }
+                            return u
                         }
-                        continuation.yield(.usage(usage))
-                    }
                     // M31.2: the effective cap is the same positive-wins
                     // resolution both paths apply; hitting it ⇒ truncated.
                     let cap = await Self.effectiveMaxTokens(

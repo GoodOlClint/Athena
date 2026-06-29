@@ -244,7 +244,13 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
         let mySeq = embedSeq
         let task = Task { () async throws -> EmbeddingBatch in
             _ = try? await prior?.value
-            return try await self.embedSerialized(texts, target: target)
+            // ADR 029 — one Metal-executing tenant at a time. The embedInFlight
+            // chain above serializes embeds within this module; the gate
+            // serializes this forward against the LLM/audio tenants on the one
+            // Metal pool.
+            return try await InferenceGate.shared.withExclusiveExecution {
+                try await self.embedSerialized(texts, target: target)
+            }
         }
         embedInFlight = task
         embedGateSeq = mySeq

@@ -218,7 +218,7 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
             from: audio, filename: filename, module: .transcription)
         // ADR 024 T2: best-effort zeroize the decoded speech PCM on the way out.
         defer { ProcessHardening.secureZero(&pcm) }
-        return try transcribePCM(
+        return try await transcribePCM(
             pcm, language: language, wordTimestamps: wordTimestamps)
     }
 
@@ -228,6 +228,18 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
     /// the identical Whisper/Parakeet dispatch, chunking, and timestamping with
     /// no re-encode. Actor-isolated (reads `engine`); callers `await` it.
     public func transcribePCM(
+        _ pcm: [Float], language: String?, wordTimestamps: Bool
+    ) async throws -> TranscriptionResult {
+        // ADR 029 — gate the Metal forward against other tenants on the one
+        // Metal pool. The actor-isolated worker runs inside the gate via a
+        // self-hop so the @Sendable closure never captures actor state.
+        try await InferenceGate.shared.withExclusiveExecution {
+            try await self.decodePCM(
+                pcm, language: language, wordTimestamps: wordTimestamps)
+        }
+    }
+
+    private func decodePCM(
         _ pcm: [Float], language: String?, wordTimestamps: Bool
     ) throws -> TranscriptionResult {
         guard let engine else {

@@ -167,6 +167,11 @@ public struct AthenaConfig: Sendable, Equatable {
     /// reservation-only denominator (the escape hatch). Absent / unknown ⇒
     /// `"footprint"` (the correctness default; not a parse error).
     public var governorAdmissionMode: String?
+    /// ADR 029 — the inference execution gate (one Metal-executing tenant at a
+    /// time). Absent / true ⇒ ON (the default). `false` is the revert switch:
+    /// every module's execution and warm rebind runs unserialized (pre-029
+    /// behavior). Env `ATHENA_INFERENCE_GATE=0` overrides this to off.
+    public var inferenceGateEnabled: Bool?
     /// Preload (warm) the LLM at startup instead of lazily on first
     /// request (M33.3). Optional — absent / false ⇒ lazy load (default).
     /// Opt-in: the operator trades a slower start for a warm first
@@ -235,6 +240,7 @@ public struct AthenaConfig: Sendable, Equatable {
         maxRequestBodyBytes: Int? = nil,
         mlxCacheLimitBytes: Int? = nil,
         governorAdmissionMode: String? = nil,
+        inferenceGateEnabled: Bool? = nil,
         preload: Bool? = nil,
         encryptStore: Bool? = nil,
         persistStore: Bool? = nil,
@@ -289,6 +295,7 @@ public struct AthenaConfig: Sendable, Equatable {
         self.maxRequestBodyBytes = maxRequestBodyBytes
         self.mlxCacheLimitBytes = mlxCacheLimitBytes
         self.governorAdmissionMode = governorAdmissionMode
+        self.inferenceGateEnabled = inferenceGateEnabled
         self.preload = preload
         self.encryptStore = encryptStore
         self.persistStore = persistStore
@@ -486,6 +493,7 @@ public struct AthenaConfig: Sendable, Equatable {
         }
         let pcPersistEager = try bool("prompt_cache_persist_eager")
         let denyDebuggerAttach = try bool("deny_debugger_attach")
+        let inferenceGateEnabled = try bool("inference_gate_enabled")
         let preload = try bool("preload")
         let encStore = try bool("encrypt_store")
         let persistStore = try bool("persist_store")
@@ -539,6 +547,7 @@ public struct AthenaConfig: Sendable, Equatable {
             maxRequestBodyBytes: maxRequestBody,
             mlxCacheLimitBytes: mlxCacheLimit,
             governorAdmissionMode: scalar("governor_admission_mode", in: toml),
+            inferenceGateEnabled: inferenceGateEnabled,
             preload: preload,
             encryptStore: encStore,
             persistStore: persistStore,

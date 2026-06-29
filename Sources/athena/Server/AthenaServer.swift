@@ -3529,7 +3529,14 @@ struct AthenaServer {
     ) async throws {
         let sel = selectable(module)
         let before = await sel.residentModelId()
-        try await sel.rebind(to: target)
+        // ADR 029 — a warm swap loads the new model's weights; gate it so it
+        // can't run while a decode holds the slot (which retains the OLD
+        // container via ARC → transient double-residency → OOM) or while
+        // another tenant executes. Cold-load (`performLoad`) stays UNgated —
+        // that is the governor's load wait, not Metal execution.
+        try await InferenceGate.shared.withExclusiveExecution {
+            try await sel.rebind(to: target)
+        }
         let after = await sel.residentModelId()
         guard before != after, let request else { return }
         await audit(

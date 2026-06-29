@@ -1,7 +1,28 @@
 # 029 — Execution-exclusive inference slot (one Metal-executing tenant at a time)
 
-**Status:** Accepted. **Primitive + M1 backstop IMPLEMENTED; call-site wiring
-PENDING** (staged so the H3 atomicity refactor isn't rushed). Done: the
+**Status:** Accepted — **IMPLEMENTED** (primitive + M1 in v0.10.223; call-site
+wiring follows). Wiring: every module's leaf Metal execution now runs inside
+`InferenceGate.shared.withExclusiveExecution` — LLM decode (the `generateMetered`
+stream Task, held across the streamed decode; `AsyncStream` unbounded buffering
+keeps it decode-bound so a slow SSE consumer never holds the gate), embeddings
+(`embedSerialized` via the `embedInFlight` chain), transcription (`transcribePCM`
+via an actor self-hop worker), diarization (`runOffline`/`runStreaming`/`segment`),
+speaker-embedding (`embed`/`windowEmbeddings` via self-hop workers) — plus the
+warm rebind (`auditedRebind` → `sel.rebind`), so a swap can't load a second
+model's weights while a decode holds the slot (closes the H3 double-residency +
+co-execution). Cold-load `awaitLoad`/`performLoad` stays UNgated (rule 1). Revert
+knob wired from `inference_gate_enabled` (TOML) / `ATHENA_INFERENCE_GATE` (env),
+default ON.
+
+**Residual (follow-up):** the narrow concurrent-DIFFERENT-model wrong-MODEL
+*selection* window (A requests X, B requests Y at the same instant; A may decode
+Y because the server-side rebind and the gated decode are two separate gate
+acquisitions). This is a pre-existing logical mis-selection — NOT worsened by the
+gate, and with NO crash/co-execution/double-residency (those are closed). Closing
+it fully needs the rebind folded into the gated decode Task (or a pinned-container
+hand-off through `runSpeculative`); deferred as a small slice.
+
+Earlier (v0.10.223): the
 `InferenceGate` actor (`Sources/AthenaCore/InferenceGate.swift`) — a FIFO,
 cancellation-aware async semaphore with `withExclusiveExecution`, default-on
 `enabled` revert knob, MLX-free + unit-pinned (4 tests: mutual exclusion, revert

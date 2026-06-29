@@ -486,6 +486,21 @@ struct Load: AsyncParsableCommand {
                 "MLX cache limit bounded to \(cacheLimit) bytes (ADR 023 G1)")
         }
 
+        // ADR 029 — the inference execution gate (one Metal-executing tenant at
+        // a time). Default ON; precedence env > TOML > built-in true. Set once
+        // here, before the HTTP surface accepts requests.
+        if let gateEnv = ProcessInfo.processInfo
+            .environment["ATHENA_INFERENCE_GATE"]?.lowercased()
+        {
+            InferenceGate.enabled = !["0", "false", "no", "off"].contains(gateEnv)
+        } else {
+            InferenceGate.enabled = tomlCfg?.inferenceGateEnabled ?? true
+        }
+        if !InferenceGate.enabled {
+            Logging.Logger(label: AthenaLog.daemonLabel).notice(
+                "inference execution gate DISABLED (ADR 029 revert knob)")
+        }
+
         // M59.2 — build the ONE shared pool instance now (when enabled), so
         // the SAME object is injected into the LLM module (reuse) and the
         // governor (pool-byte snapshot + pressure relief). `max_bytes`
