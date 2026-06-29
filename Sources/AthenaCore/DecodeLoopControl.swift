@@ -24,6 +24,13 @@ public enum DecodeLoopControl {
     /// counter (no metered context) ⇒ `false`, the production default outside
     /// `collectMetered`.
     public static func isCancelled() -> Bool {
-        DecodeProgress.counter?.isCancelled == true
+        // ADR 029 / M1 — the counter (a TaskLocal set by `collectMetered`) is
+        // the primary disconnect/deadline signal, but it only works because the
+        // generate Task is created INSIDE the `withValue` scope so it inherits
+        // the value. `Task.isCancelled` is a backstop that does not depend on
+        // that inheritance, so a cancelled request still stops the decode (and
+        // frees the inference slot) even if a future refactor moves the Task
+        // out of the scope or the metered context is absent.
+        DecodeProgress.counter?.isCancelled == true || Task.isCancelled
     }
 }
