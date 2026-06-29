@@ -334,6 +334,10 @@ public enum AthenaError: Error, Sendable, Equatable {
             "failed to allocate", "cannot allocate",
             "metal allocation", "mtlbuffer", "newbufferwithlength",
             "[metal] out", "vm_allocate",
+            // The canonical MLX device-allocator failure: `[metal::malloc]
+            // Attempting to allocate N bytes which is greater than the maximum
+            // allowed buffer size of M`. None of the above substrings match it.
+            "metal::malloc", "maximum allowed buffer size",
         ]
         return needles.contains { s.contains($0) }
     }

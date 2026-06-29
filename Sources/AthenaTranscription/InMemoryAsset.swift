@@ -68,13 +68,6 @@ public final class InMemoryResourceLoader: NSObject, AVAssetResourceLoaderDelega
 public enum InMemoryAsset {
     static let scheme = "athena-mem"
 
-    /// UTI for an upload's filename extension (best-effort; nil when unknown).
-    static func uti(forFilename filename: String?) -> String? {
-        let ext = (filename as NSString?)?.pathExtension ?? ""
-        guard !ext.isEmpty else { return nil }
-        return UTType(filenameExtension: ext)?.identifier
-    }
-
     /// Sniff the container from the upload's magic bytes → a filename extension.
     /// A resource-loader-backed `AVURLAsset` does NOT byte-sniff (unlike
     /// `AVAudioFile(forReading:)`, which the pre-S5 temp-file path relied on), so
@@ -117,12 +110,34 @@ public enum InMemoryAsset {
         // extension is advisory; contentType drives detection.
         let nameExt = ((filename as NSString?)?.pathExtension)
             .flatMap { $0.isEmpty ? nil : $0 }
-        let ext = nameExt ?? sniffExtension(data) ?? ""
+        // The filename extension is attacker-controlled; a URL-illegal byte in
+        // it (space, `|`, control char) would make `URL(string:)` return nil
+        // and a force-unwrap would abort the daemon. Use the filename ext only
+        // when it's a safe (alphanumeric) token; otherwise recover a safe
+        // extension by sniffing the magic bytes — so a valid upload with a
+        // hostile filename still decodes (AVFoundation uses the URL path
+        // extension as a primary type hint, not just contentType). The final
+        // `?? UUID-only` keeps the URL build total even if all hints fail.
+        func safe(_ e: String?) -> String? {
+            guard let e, !e.isEmpty,
+                e.unicodeScalars.allSatisfy({ CharacterSet.alphanumerics.contains($0) })
+            else { return nil }
+            return e
+        }
+        let ext = safe(nameExt) ?? safe(sniffExtension(data)) ?? ""
         let suffix = ext.isEmpty ? "" : ".\(ext)"
-        let url = URL(string: "\(scheme)://\(UUID().uuidString)\(suffix)")!
+        let url =
+            URL(string: "\(scheme)://\(UUID().uuidString)\(suffix)")
+            ?? URL(string: "\(scheme)://\(UUID().uuidString)")!
         let asset = AVURLAsset(url: url)
-        let contentType = uti(forFilename: filename)
-            ?? sniffExtension(data).flatMap { UTType(filenameExtension: $0)?.identifier }
+        // Derive the contentType from the SAME resolved-safe `ext`, not the raw
+        // filename: `UTType(filenameExtension:)` on a hostile extension (e.g.
+        // "wav evil") returns a bogus `dyn.*` dynamic type — not nil — which
+        // would poison detection and make AVFoundation fail to open even valid
+        // audio. `ext` is already either a safe filename ext or a sniffed known
+        // format token.
+        let contentType = ext.isEmpty
+            ? nil : UTType(filenameExtension: ext)?.identifier
         let loader = InMemoryResourceLoader(data: data, contentType: contentType)
         let queue = DispatchQueue(label: "athena.inmem-asset.\(UUID().uuidString)")
         asset.resourceLoader.setDelegate(loader, queue: queue)

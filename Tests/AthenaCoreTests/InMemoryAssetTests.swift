@@ -82,6 +82,30 @@ final class InMemoryAssetTests: XCTestCase {
         }
     }
 
+    /// A multipart `filename` whose extension carries a URL-illegal byte
+    /// (space, `|`, control char) must NOT abort the daemon: the old
+    /// force-unwrapped `URL(string:)` trapped on these. The decode must succeed
+    /// (the bad extension is dropped; contentType drives detection).
+    func testMaliciousFilenameExtensionDoesNotTrap() async throws {
+        let data = try makeWavData(frames: 8_000)
+        for bad in ["clip.wav evil", "clip.w|av", "clip.wav\u{01}", "clip.💥"] {
+            let mem = try await AudioDecode.pcm16kMono(
+                from: data, filename: bad, module: .transcription)
+            XCTAssertEqual(Double(mem.count), 8_000, accuracy: 256,
+                           "decode should survive filename \(bad.debugDescription)")
+        }
+    }
+
+    /// `InMemoryAsset.make` always yields a usable asset URL regardless of the
+    /// filename — the safe-extension filter never produces a nil URL.
+    func testMakeNeverProducesNilURL() {
+        for bad in ["a.x y", "a.<b>", "a.\u{7f}", "..."] {
+            let (asset, _) = InMemoryAsset.make(
+                data: Data([0, 1, 2, 3]), filename: bad)
+            XCTAssertEqual(asset.url.scheme, "athena-mem")
+        }
+    }
+
     /// The boot sweep removes legacy `athena-*` upload temp files and leaves
     /// unrelated files untouched.
     func testSweepRemovesOnlyLegacyAthenaFiles() throws {

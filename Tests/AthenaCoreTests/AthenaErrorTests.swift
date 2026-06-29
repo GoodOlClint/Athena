@@ -19,11 +19,32 @@ final class AthenaErrorTests: XCTestCase {
             "Insufficient Memory for MTLBuffer",
             "newBufferWithLength returned nil",
             "cannot allocate region / vm_allocate",
+            // The canonical MLX device-allocator failure string — the one a
+            // too-large prefill actually throws. Must be flagged so it routes
+            // to a 503, not a 500 / process abort.
+            "[metal::malloc] Attempting to allocate 119185342464 bytes which "
+                + "is greater than the maximum allowed buffer size of "
+                + "86571089920 bytes.",
         ] {
             XCTAssertTrue(
                 AthenaError.isMetalOOM(Fake(description: m)),
                 "should flag: \(m)")
         }
+    }
+
+    /// Regression: the canonical `[metal::malloc] … maximum allowed buffer
+    /// size` fault must classify to a governed 503, not a bare 500.
+    func testClassifyRoutesMetalMallocCapTo503() {
+        let err = AthenaError.classify(
+            Fake(
+                description:
+                    "[metal::malloc] Attempting to allocate 1 bytes which is "
+                    + "greater than the maximum allowed buffer size of 0 bytes."),
+            module: .llm)
+        guard case .metalOutOfMemory = err else {
+            return XCTFail("expected metalOutOfMemory, got \(err)")
+        }
+        XCTAssertEqual(err.httpStatus, 503)
     }
 
     func testIgnoresNonOOMAndAlreadyClassified() {
