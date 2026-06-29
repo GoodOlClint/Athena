@@ -428,14 +428,12 @@ struct AthenaServer {
         // entirely. Inference is synchronous on `/v1/*`; long-running model
         // ops stream SSE progress on `/api/models/{pull,convert,prune}`.
 
-        // Athena-native API (M16). `/v1/*` stays OpenAI-compatible;
-        // `/api/*` is Athena's OWN dialect (clean minimal JSON, NOT
-        // Ollama, NOT OpenAI), routed through the SAME governed module
-        // paths. Ollama was deleted entirely (no /api/version, /tags,
-        // /generate, /embeddings).
-        router.post("/api/chat") { request, _ -> Response in
-            await handleNativeChat(request)
-        }
+        // Athena-native API (M16). `/v1/*` is the single inference surface;
+        // `/api/*` is the CONTROL plane (clean minimal JSON, NOT Ollama, NOT
+        // OpenAI). Native inference `/api/chat` was removed (ADR 031/013) — it
+        // duplicated `/v1/chat/completions` with zero callers; `/api/embed`
+        // stays for now on the shared governed embed path (ADR 013 deprecated,
+        // 0 callers).
         router.post("/api/embed") { request, _ -> Response in
             await handleNativeEmbed(request)
         }
@@ -3202,117 +3200,6 @@ struct AthenaServer {
             body: ResponseBody(asyncSequence: stream))
     }
 
-    /// `POST /api/chat` — Athena-native chat. Same governed LLM path as
-    /// `/v1/chat/completions`; only the JSON dialect differs. Non-
-    /// stream → one `AthenaChatResponse`; `stream:true` → NDJSON
-    /// `AthenaChatChunk` lines, final `{content:"",done:true}`.
-    private func handleNativeChat(_ request: Request) async -> Response {
-        let decoded = await decodeJSON(request, AthenaChatRequest.self)
-        guard case .ok(let body) = decoded else {
-            if case .fail(let r) = decoded { return r }
-            fatalError()
-        }
-        // M24.1: full conversation reaches the model (system + prior
-        // turns), not a user-only join. M41.2: body.model selects the
-        // LLM slot's resident model from the allowlist (governedPreflight
-        // does the rebind under the governor).
-        let turns = body.messages.map {
-            ChatTurn(role: $0.role, content: $0.content)
-        }
-        if let err = await governedPreflight(
-            messages: turns, requestedModel: body.model,
-            request: request)
-        {
-            return err
-        }
-        let model = await servedLLMModel()
-        // M59.3 — route through `generateMetered` (not the String filter) so
-        // the prompt-prefix cache is scoped by the authenticated principal
-        // (never crossing callers) + the native `prompt_cache_key` hint, and
-        // so the non-stream reply can report real `cached_tokens`.
-        let principal = await usagePrincipal(request)
-        if body.stream == true {
-            let deadlineSecs = requestTimeoutSecs
-            // A8/E3/E13 — same cancel bridge as /v1/chat streaming: bind a
-            // cancel counter so generateMetered's decode loop sees it, and
-            // flip it on disconnect AND deadline truncation so the loop stops.
-            let cancelCounter = HeartbeatCounter()
-            return DecodeProgress.$counter.withValue(cancelCounter) {
-                Self.streamNDJSON(
-                    tokens: deadlineBounded(
-                        seconds: deadlineSecs,
-                        Self.textChunks(
-                            llm.generateMetered(
-                                messages: turns, schemaJSON: nil, tools: nil,
-                                maxTokens: body.max_tokens,
-                                temperature: body.temperature,
-                                topP: nil, seed: nil,
-                                speculative: body.speculative,
-                                chatTemplateKwargs: nil,
-                                promptCacheKey: body.prompt_cache_key,
-                                principal: principal, logprobs: nil)),
-                        onTimerFired: {
-                            cancelCounter.cancelGeneration()
-                            Self.log.warning(
-                                """
-                                streamed request truncated by deadline \
-                                path=/api/chat seconds=\(deadlineSecs) \
-                                model=\(model)
-                                """)
-                        }),
-                    onConsumerCancel: { cancelCounter.cancelGeneration() }
-                ) { content, done in
-                    try? JSONEncoder().encode(
-                        AthenaChatChunk(
-                            content: done ? "" : content, done: done))
-                }
-            }
-        }
-        let collected: GenCollected
-        do {
-            collected = try await collectMetered(seconds: requestTimeoutSecs) {
-                llm.generateMetered(
-                    messages: turns, schemaJSON: nil, tools: nil,
-                    maxTokens: body.max_tokens, temperature: body.temperature,
-                    topP: nil, seed: nil, speculative: body.speculative,
-                    chatTemplateKwargs: nil,
-                    promptCacheKey: body.prompt_cache_key,
-                    principal: principal, logprobs: nil)
-            }
-        } catch let e as AthenaError {
-            return Self.error(
-                status: HTTPResponse.Status(code: e.httpStatus),
-                message: e.message, type: "server_error", code: e.code)
-        } catch {
-            return Self.classified(error, module: .llm)
-        }
-        await meter(principal: principal, usage: collected.usage)
-        return Self.json(
-            AthenaChatResponse(
-                model: model, content: collected.text, done: true,
-                usage: AthenaUsage(
-                    prompt_tokens: collected.usage.promptTokens,
-                    completion_tokens: collected.usage.completionTokens,
-                    cached_tokens: collected.usage.cachedTokens)))
-    }
-
-    /// Forward only the `.text` chunks of a metered stream as a plain
-    /// `AsyncStream<String>` (drops the terminal usage/finish) — used by the
-    /// native NDJSON `/api/chat` stream, which carries no usage object.
-    private static func textChunks(
-        _ events: AsyncStream<GenChunk>
-    ) -> AsyncStream<String> {
-        AsyncStream { continuation in
-            let task = Task {
-                for await event in events {
-                    if case .text(let t) = event { continuation.yield(t) }
-                }
-                continuation.finish()
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
-    }
-
     /// Governed embedding helper shared by `/api/embed` and `/v1/embeddings`.
     /// Returns the
     /// whole batch so callers can echo the model ACTUALLY served (M39).
@@ -5124,18 +5011,15 @@ struct AthenaServer {
     /// finishes. 5 s is the brief's locked default; long enough to not
     /// thrash, short enough to feel responsive.
     private static func coldLoadResponse(_ id: ModuleID) -> Response {
-        let body =
-            #"{"error":{"message":"module "# + id.rawValue
-            + #" is loading; retry shortly","type":"server_error","#
-            + #""code":"module_loading"}}"#
-        var buf = ByteBuffer()
-        buf.writeBytes(Data(body.utf8))
-        var headers = HTTPFields()
-        headers[.contentType] = "application/json"
-        headers[.retryAfter] = "5"
-        return Response(
-            status: .serviceUnavailable, headers: headers,
-            body: ResponseBody(byteBuffer: buf))
+        // Route through the canonical `error(...)` envelope helper (one error
+        // shape, SSOT) instead of hand-building the JSON — same wire body, plus
+        // the server-side warn-log side effect — then attach the paced retry.
+        var response = error(
+            status: .serviceUnavailable,
+            message: "module \(id.rawValue) is loading; retry shortly",
+            type: "server_error", code: "module_loading")
+        response.headers[.retryAfter] = "5"
+        return response
     }
 
     /// Classify an arbitrary inference error: a genuine MLX/Metal OOM

@@ -8,53 +8,9 @@ import Foundation
 // dialect. Errors reuse the standard `{"error":{message,type,code}}`
 // body (`APIErrorBody`) — not dialect-specific.
 
-struct AthenaChatMessage: Codable {
-    let role: String
-    let content: String
-}
-
-struct AthenaChatRequest: Codable {
-    let model: String?
-    let messages: [AthenaChatMessage]
-    let stream: Bool?
-    /// Per-request generation overrides (M24.3); absent ⇒ loaded defaults.
-    let max_tokens: Int?
-    let temperature: Double?
-    /// Per-request MTP speculative override. Absent ⇒ loaded
-    /// `--speculative` default; `true` opts into MTP speculative
-    /// (greedy at temp 0, sampling at temp > 0; requires an
-    /// MTP-capable model), `false` forces the standard path.
-    let speculative: Bool?
-    /// Prompt-prefix cache scoping hint (M59.3) — the native dialect's
-    /// equivalent of OpenAI `prompt_cache_key`. Absent ⇒ scope by the
-    /// authenticated principal alone.
-    let prompt_cache_key: String?
-}
-
-/// Compact token accounting on the native non-stream reply (M59.3).
-/// `cached_tokens` is the prompt-prefix-cache reuse count.
-struct AthenaUsage: Codable {
-    let prompt_tokens: Int
-    let completion_tokens: Int
-    let cached_tokens: Int
-}
-
-/// Non-streamed `/api/chat` reply. The full generation is in
-/// `content`; `done` is always true here (a single object). `usage`
-/// (M59.3) carries real token counts incl. `cached_tokens`.
-struct AthenaChatResponse: Codable {
-    let model: String
-    let content: String
-    let done: Bool
-    let usage: AthenaUsage?
-}
-
-/// One NDJSON line of a streamed `/api/chat`: an incremental
-/// `content` piece, then a final `{content:"",done:true}` line.
-struct AthenaChatChunk: Codable {
-    let content: String
-    let done: Bool
-}
+// Native `/api/chat` inference DTOs (AthenaChatRequest/Response/Chunk/Message
+// + AthenaUsage) were removed with the route (ADR 031/013) — `/v1` is the
+// single inference surface and they duplicated its shapes.
 
 /// `GET /api/cache/prompt` (M59.4) — prompt-prefix KV pool stats.
 struct PromptCacheStatsResponse: Codable {

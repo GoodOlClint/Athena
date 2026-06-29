@@ -86,7 +86,7 @@ enum OpenAPISpec {
               "post": {
                 "tags": ["Chat"],
                 "summary": "Create a chat completion.",
-                "description": "OpenAI-compatible. Set `stream:true` for an SSE stream of `chat.completion.chunk` events terminated by `data: [DONE]`; with `stream_options.include_usage:true` a final usage-only chunk precedes it. `response_format`/`tools` route into structured output. `top_p`/`seed` are honored only on the sampling path and are inert under greedy/MTP/structured decoding. `logprobs`/`top_logprobs` (0–20) are honored on the deterministic decode path (temperature 0 or structured) and return `choices[].logprobs.content`; a sampling request (temperature>0, no schema) with `logprobs` ⇒ 400. `n>1` and non-empty `logit_bias` are rejected 400.",
+                "description": "OpenAI-compatible. Set `stream:true` for an SSE stream of `chat.completion.chunk` events terminated by `data: [DONE]`; with `stream_options.include_usage:true` a final usage-only chunk precedes it. `response_format`/`tools` route into structured output. `top_p`/`seed` are honored only on the sampling path and are inert under greedy/MTP/structured decoding. `logprobs`/`top_logprobs` (0–20) are honored on the deterministic decode path (temperature 0 or structured) and return `choices[].logprobs.content`; a sampling request (temperature>0, no schema) with `logprobs` ⇒ 400. `n>1` and non-empty `logit_bias` are rejected 400. Requires `inference`.",
                 "requestBody": {
                   "required": true,
                   "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ChatCompletionRequest" } } }
@@ -111,7 +111,7 @@ enum OpenAPISpec {
               "get": {
                 "tags": ["Models"],
                 "summary": "List available models.",
-                "description": "OpenAI list shape. Requires `model.read`.",
+                "description": "OpenAI-compatible list shape. Requires `model.read`.",
                 "responses": {
                   "200": { "description": "Model list.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OpenAIModelList" } } } },
                   "401": { "$ref": "#/components/responses/Unauthorized" },
@@ -123,7 +123,7 @@ enum OpenAPISpec {
               "get": {
                 "tags": ["Models"],
                 "summary": "Retrieve a model.",
-                "description": "OpenAI retrieve shape. Requires `model.read`.",
+                "description": "OpenAI-compatible retrieve shape. Requires `model.read`.",
                 "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Model id (store entry name)." } ],
                 "responses": {
                   "200": { "description": "The model.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OpenAIModel" } } } },
@@ -138,7 +138,7 @@ enum OpenAPISpec {
               "post": {
                 "tags": ["Embeddings"],
                 "summary": "Create embeddings.",
-                "description": "OpenAI-compatible. `input` is a string or array of strings.",
+                "description": "OpenAI-compatible. `input` is a string or array of strings. Requires `inference`.",
                 "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmbeddingRequest" } } } },
                 "responses": {
                   "200": { "description": "Embeddings.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmbeddingResponse" } } } },
@@ -154,7 +154,7 @@ enum OpenAPISpec {
               "post": {
                 "tags": ["Audio"],
                 "summary": "Transcribe audio.",
-                "description": "OpenAI-compatible multipart upload. `response_format` of `json` (default), `text`, `srt`, `vtt`, or `verbose_json`; `timestamp_granularities[]=word` adds word timings; `diarize=true` adds per-segment speaker ids in verbose_json. `diarized_json` is an **Athena-native** alias (ADR 013 #3) that *implies* diarization (no `diarize` flag needed) and returns the verbose envelope with every segment speaker-labeled — speaker is Athena's integer id, not OpenAI's string label. The engine is chosen by the resident model's class (ADR 020): Whisper (default) or Parakeet-TDT (multilingual; word/segment timestamps from TDT durations). Max upload size = `max_audio_upload_bytes` (default 100 MiB) over the raw multipart body; over it ⇒ 413 payload_too_large.",
+                "description": "OpenAI-compatible multipart upload. `response_format` of `json` (default), `text`, `srt`, `vtt`, or `verbose_json`; `timestamp_granularities[]=word` adds word timings; `diarize=true` adds per-segment speaker ids in verbose_json. `diarized_json` is an **Athena-native** alias (ADR 013 #3) that *implies* diarization (no `diarize` flag needed) and returns the verbose envelope with every segment speaker-labeled — speaker is Athena's integer id, not OpenAI's string label. The engine is chosen by the resident model's class (ADR 020): Whisper (default) or Parakeet-TDT (multilingual; word/segment timestamps from TDT durations). Max upload size = `max_audio_upload_bytes` (default 100 MiB) over the raw multipart body; over it ⇒ 413 payload_too_large. Requires `inference`.",
                 "requestBody": {
                   "required": true,
                   "content": { "multipart/form-data": { "schema": {
@@ -186,7 +186,7 @@ enum OpenAPISpec {
               "post": {
                 "tags": ["Video"],
                 "summary": "Transcribe a video's audio track.",
-                "description": "**Athena-native, NOT OpenAI-compatible** (OpenAI has no video API). Multipart upload of a video container (mp4/mov/…); Athena demuxes the audio track and transcribes it via the same Whisper/Parakeet tenant as `/v1/audio/transcriptions`, returning the identical response shapes (`json` default, `text`, `srt`, `vtt`, `verbose_json`; `timestamp_granularities[]=word`). `model` selects the resident transcription model. A video with no audio track ⇒ 400 video_no_audio_track; sub-0.1 s or undecodable audio ⇒ 400 (shared decode floor). diarization on video is not yet wired ⇒ 501 not_implemented for both `diarize=true` and `response_format=diarized_json` (transcribe, then POST the extracted audio to /v1/audio/diarizations). Max upload size = `max_video_upload_bytes` (default 1 GiB); over it ⇒ 413 payload_too_large.",
+                "description": "**Athena-native, NOT OpenAI-compatible** (OpenAI has no video API). Multipart upload of a video container (mp4/mov/…); Athena demuxes the audio track and transcribes it via the same Whisper/Parakeet tenant as `/v1/audio/transcriptions`, returning the identical response shapes (`json` default, `text`, `srt`, `vtt`, `verbose_json`; `timestamp_granularities[]=word`). `model` selects the resident transcription model. A video with no audio track ⇒ 400 video_no_audio_track; sub-0.1 s or undecodable audio ⇒ 400 (shared decode floor). diarization on video is not yet wired ⇒ 501 not_implemented for both `diarize=true` and `response_format=diarized_json` (transcribe, then POST the extracted audio to /v1/audio/diarizations). Max upload size = `max_video_upload_bytes` (default 1 GiB); over it ⇒ 413 payload_too_large. Requires `inference`.",
                 "requestBody": {
                   "required": true,
                   "content": { "multipart/form-data": { "schema": {
@@ -217,7 +217,7 @@ enum OpenAPISpec {
               "post": {
                 "tags": ["Audio"],
                 "summary": "Diarize audio (who spoke when).",
-                "description": "Multipart upload. Returns speaker-labelled time spans. `method` selects the engine (ADR 018): `sortformer` (default, end-to-end, ≤4 speakers), `cluster` (embedding+clustering, >4, no overlap), `pyannote` (learned segmentation + embedding + global clustering — arbitrary speakers, overlap-aware, file-stable ids; emits overlapping segments). Speaker ids are global across the whole file. Max upload size = `max_audio_upload_bytes` (default 100 MiB); over it ⇒ 413 payload_too_large.",
+                "description": "**Athena-native, NOT OpenAI-compatible** (OpenAI has no diarization API). Multipart upload. Returns speaker-labelled time spans. `method` selects the engine (ADR 018): `sortformer` (default, end-to-end, ≤4 speakers), `cluster` (embedding+clustering, >4, no overlap), `pyannote` (learned segmentation + embedding + global clustering — arbitrary speakers, overlap-aware, file-stable ids; emits overlapping segments). Speaker ids are global across the whole file. Max upload size = `max_audio_upload_bytes` (default 100 MiB); over it ⇒ 413 payload_too_large. Requires `inference`.",
                 "requestBody": {
                   "required": true,
                   "content": { "multipart/form-data": { "schema": {
@@ -249,7 +249,7 @@ enum OpenAPISpec {
               "post": {
                 "tags": ["Audio"],
                 "summary": "Speaker (voice) embeddings.",
-                "description": "Multipart upload. Returns an embedding per requested segment. Max upload size = `max_audio_upload_bytes` (default 100 MiB); over it ⇒ 413 payload_too_large.",
+                "description": "**Athena-native, NOT OpenAI-compatible** (OpenAI has no speaker-embedding API). Multipart upload. Returns an embedding per requested segment. Max upload size = `max_audio_upload_bytes` (default 100 MiB); over it ⇒ 413 payload_too_large. Requires `inference`.",
                 "requestBody": {
                   "required": true,
                   "content": { "multipart/form-data": { "schema": {
@@ -268,25 +268,6 @@ enum OpenAPISpec {
                   "401": { "$ref": "#/components/responses/Unauthorized" },
                   "403": { "$ref": "#/components/responses/Forbidden" },
                   "413": { "$ref": "#/components/responses/PayloadTooLarge" },
-                  "503": { "$ref": "#/components/responses/Overloaded" }
-                }
-              }
-            },
-            "/api/chat": {
-              "post": {
-                "tags": ["Native"],
-                "summary": "Native chat (Athena dialect). DEPRECATED — use POST /v1/chat/completions.",
-                "deprecated": true,
-                "description": "DEPRECATED (ADR 013): the native inference dialect is superseded by the OpenAI surface `POST /v1/chat/completions`; `/api/*` is the daemon control plane, not an inference surface. Still served through the deprecation period. Minimal non-OpenAI shape. `stream:true` returns NDJSON content chunks ending in `{content:\"\",done:true}`.",
-                "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AthenaChatRequest" } } } },
-                "responses": {
-                  "200": { "description": "Chat reply (object or NDJSON stream).", "content": {
-                    "application/json": { "schema": { "$ref": "#/components/schemas/AthenaChatResponse" } },
-                    "application/x-ndjson": { "schema": { "type": "string" } }
-                  } },
-                  "400": { "$ref": "#/components/responses/BadRequest" },
-                  "401": { "$ref": "#/components/responses/Unauthorized" },
-                  "403": { "$ref": "#/components/responses/Forbidden" },
                   "503": { "$ref": "#/components/responses/Overloaded" }
                 }
               }
@@ -871,20 +852,6 @@ enum OpenAPISpec {
                   "dimension": { "type": "integer" }
                 }
               },
-              "AthenaChatRequest": {
-                "type": "object",
-                "required": ["messages"],
-                "properties": {
-                  "model": { "type": "string", "description": "Same semantics as ChatCompletionRequest.model — selects among the store's LLM models (ADR 026)." },
-                  "messages": { "type": "array", "items": { "type": "object", "properties": { "role": { "type": "string" }, "content": { "type": "string" } } } },
-                  "stream": { "type": "boolean" },
-                  "max_tokens": { "type": "integer", "description": "Output-token cap (deprecated alias of max_completion_tokens; max_completion_tokens wins if both are sent)." },
-                  "max_completion_tokens": { "type": "integer", "description": "Output-token cap (OpenAI's current field). Absent ⇒ the daemon default." },
-                  "temperature": { "type": "number" },
-                  "speculative": { "type": "boolean", "description": "Per-request speculative-decoding override (same semantics as on /v1/chat/completions; MTP greedy/sampling on MTP models)." }
-                }
-              },
-              "AthenaChatResponse": { "type": "object", "properties": { "model": { "type": "string" }, "content": { "type": "string" }, "done": { "type": "boolean" } } },
               "AthenaEmbedRequest": {
                 "type": "object",
                 "required": ["input"],

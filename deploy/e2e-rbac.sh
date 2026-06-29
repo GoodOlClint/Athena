@@ -935,6 +935,18 @@ if missing:
     print("UNDOCUMENTED (route has no spec entry): " + "; ".join(missing)); sys.exit(1)
 if stale:
     print("STALE (spec entry has no route): " + "; ".join(stale)); sys.exit(1)
+# /v1 compatibility-tagging rule (binding): every /v1 operation description must
+# mark the route OpenAI-compatible or Athena-native so a consumer can tell a
+# drop-in from an extension without reading code. Guards the prose markers from
+# drift (the route topology check above is blind to descriptions).
+untagged = sorted(
+    m.upper() + " " + p
+    for p, ops in paths.items() if p.startswith("/v1/")
+    for m, op in ops.items() if m in HTTP
+    and "openai-compatible" not in op.get("description", "").lower()
+    and "athena-native" not in op.get("description", "").lower())
+if untagged:
+    print("UNTAGGED (/v1 op missing oai/native marker): " + "; ".join(untagged)); sys.exit(1)
 print("parsed live spec: %d routes ↔ %d documented paths, exact match" % (len(live), len(paths)))
 PY
 then ok "spec ↔ routes exact match (every /v1+/api+operational route documented, no stale entries)"
@@ -949,14 +961,13 @@ code 200 POST /v1/chat/completions "$BOSS_SCOPED" "$CHAT"  # inference ok
 
 echo
 echo "== phase 3.5: native /api inference + admin (M16.1) =="
-code 200 POST /api/chat       "$ALICE_TOK" "$CHAT"  # member: inference
-code 401 POST /api/chat       "" "$CHAT"            # no token
-code 403 POST /api/chat       "$RO_TOK" "$CHAT"     # readonly ∌ infer
+# /api/chat removed (ADR 031/013) — /v1 is the single inference surface.
+code 404 POST /api/chat       "$ALICE_TOK" "$CHAT"  # route gone
 code 200 POST /api/embed      "$ALICE_TOK" '{"input":"hi"}'
 code 403 POST /api/admin/stop "$ALICE_TOK"          # ∌ daemonAdmin
 code 200 POST /api/admin/stop "$ADMIN_TOK"          # admin: daemonAdmin
 # M43.2 — the admin/stop unloaded every module; re-warm before the
-# body-parsed native-chat assertion below.
+# model-selection assertions below.
 warm "$ADMIN_TOK"
 # Ollama is GONE — deleted routes 404 (auth passes; no route).
 code 404 GET  /api/tags       "$ALICE_TOK"
@@ -964,18 +975,6 @@ code 404 GET  /api/version    "$ALICE_TOK"
 code 404 POST /api/generate   "$ALICE_TOK" "$CHAT"
 code 404 POST /api/embeddings "$ALICE_TOK" '{"prompt":"hi"}'
 code 404 POST /api/stop       "$ADMIN_TOK"          # renamed → /admin
-# Native chat shape: has "content", NOT Ollama message/done_reason.
-CB="$(curl -s -X POST "http://127.0.0.1:$PORT/api/chat" \
-  -H "Authorization: Bearer $ALICE_TOK" \
-  -H "Content-Type: application/json" -d "$CHAT")"
-echo "$CB" | grep -q '"content"' \
-  && ok "native chat reply carries content" \
-  || bad "native chat missing content ($CB)"
-if echo "$CB" | grep -q '"done_reason"\|"message"'; then
-  bad "native chat still Ollama-shaped ($CB)"
-else
-  ok "native chat is not Ollama-shaped"
-fi
 
 echo
 echo "== phase 3.6: model store /api/models (M16.2) =="
@@ -1094,7 +1093,7 @@ echo "$AUD2" | grep -q 'model.unload' \
 
 echo
 echo "== phase 3.67: per-request LLM model selection (M41.2) =="
-# body.model on /v1/chat/completions and /api/chat SELECTS among the
+# body.model on /v1/chat/completions SELECTS among the
 # operator-declared LLM allowlist (--llm-model, repeatable). Default
 # daemon was started without --llm-model ⇒ a single-id allowlist
 # ("Qwen3.5-27B-4bit-mtp"). The echo + resident snapshot must reflect
@@ -1117,14 +1116,6 @@ LBAD="$(curl -s -X POST -H "Authorization: Bearer $ALICE_TOK" \
 echo "$LBAD" | grep -q 'model_not_available' \
   && ok "chat unknown model ⇒ model_not_available" \
   || bad "chat unknown model not refused ($LBAD)"
-# Native chat: same per-request gate.
-ABAD="$(curl -s -X POST -H "Authorization: Bearer $ALICE_TOK" \
-  -H 'Content-Type: application/json' \
-  -d '{"model":"nope/not-in-allowlist","messages":[{"role":"user","content":"hi"}]}' \
-  "http://127.0.0.1:$PORT/api/chat")"
-echo "$ABAD" | grep -q 'model_not_available' \
-  && ok "native chat unknown model ⇒ model_not_available" \
-  || bad "native chat unknown model not refused ($ABAD)"
 
 echo
 echo "== phase 3.68: per-request audio model selection (M41.3) =="
