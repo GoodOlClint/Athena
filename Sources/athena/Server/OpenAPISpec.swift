@@ -111,7 +111,7 @@ enum OpenAPISpec {
               "post": {
                 "tags": ["Chat"],
                 "summary": "Anthropic Messages API (chat over the same engine).",
-                "description": "**Athena-native dialect, Anthropic-compatible (NOT OpenAI).** The Anthropic Messages shape over the SAME inference engine as `/v1/chat/completions` (ADR 036): one engine, multiple protocol adapters. Lets an Anthropic-API harness (e.g. Claude Code, `ANTHROPIC_BASE_URL`) point at Athena directly. Supports text + `system` + `tool_use`/`tool_result` + `tools` (mapped to the same model menu) + `tool_choice` (`auto`/`any`/`tool`) + `stop_sequences`. First cut is non-streaming; `image`/`document` content blocks, prompt-caching, and extended thinking are not yet supported (400). Auth: `Authorization: Bearer` now; `x-api-key` alias next slice. Requires `inference`.",
+                "description": "**Athena-native dialect, Anthropic-compatible (NOT OpenAI).** The Anthropic Messages shape over the SAME inference engine as `/v1/chat/completions` (ADR 036): one engine, multiple protocol adapters. Lets an Anthropic-API harness (e.g. Claude Code, `ANTHROPIC_BASE_URL`) point at Athena directly. Supports text + `system` + `tool_use`/`tool_result` + `tools` (mapped to the same model menu) + `tool_choice` (`auto`/`any`/`tool`) + `stop_sequences`, both non-streaming and streaming (`stream:true` ⇒ the Anthropic SSE event sequence: message_start → content_block_start/delta/stop → message_delta → message_stop). `image`/`document` content blocks, prompt-caching, and extended thinking are not yet supported (400). Auth: `Authorization: Bearer` now; `x-api-key` alias next slice. Requires `inference`.",
                 "requestBody": {
                   "required": true,
                   "content": { "application/json": { "schema": {
@@ -127,7 +127,7 @@ enum OpenAPISpec {
                       "stop_sequences": { "type": "array", "items": { "type": "string" } },
                       "temperature": { "type": "number" },
                       "top_p": { "type": "number" },
-                      "stream": { "type": "boolean", "description": "Streaming not yet implemented (400 if true); non-stream only in this slice." }
+                      "stream": { "type": "boolean", "description": "When true, emit the Anthropic SSE event stream (text/event-stream)." }
                     }
                   } } }
                 },

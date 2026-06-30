@@ -166,8 +166,16 @@ struct AnthropicMessagesRequest: Decodable {
         if let tc = tool_choice, let tools, !tools.isEmpty {
             switch tc.type {
             case "any":
-                schemaJSON = StructuredSchema.toolCallUnionSchema(
-                    tools: tools.map { ($0.name, $0.input_schema) })
+                // Force the whole menu. Mirror OpenAI's effectiveSchema: ONE
+                // tool ⇒ the single-tool schema (bakes in the name + terminates);
+                // >1 ⇒ the union. A single-tool union is nameless/non-terminating.
+                schemaJSON =
+                    tools.count == 1
+                    ? StructuredSchema.toolCallSchema(
+                        functionName: tools[0].name,
+                        parameters: tools[0].input_schema)
+                    : StructuredSchema.toolCallUnionSchema(
+                        tools: tools.map { ($0.name, $0.input_schema) })
                 isToolCall = schemaJSON != nil
             case "tool":
                 if let name = tc.name,
@@ -245,6 +253,74 @@ struct AnthropicMessagesRequest: Decodable {
             }
         }
     }
+}
+
+// MARK: - Streaming events (ADR 036 S2)
+
+// The Anthropic SSE event sequence: message_start → (content_block_start →
+// content_block_delta* → content_block_stop)* → message_delta → message_stop.
+// Each is written as `event: <type>\ndata: <json>\n\n`. `message_start` carries
+// input_tokens:0 (prompt tokens aren't known until the terminal usage event);
+// the real input/output counts are restated in the terminal `message_delta`.
+
+struct AnthropicStreamStart: Encodable {
+    struct Msg: Encodable {
+        let id: String
+        let type = "message"
+        let role = "assistant"
+        let model: String
+        let content: [String] = []
+        let stop_reason: String? = nil
+        let stop_sequence: String? = nil
+        let usage: AnthropicUsage
+    }
+    let type = "message_start"
+    let message: Msg
+}
+
+struct AnthropicBlockStart: Encodable {
+    let type = "content_block_start"
+    let index: Int
+    let content_block: AnthropicResponseBlock
+}
+
+struct AnthropicTextDelta: Encodable {
+    struct D: Encodable {
+        let type = "text_delta"
+        let text: String
+    }
+    let type = "content_block_delta"
+    let index: Int
+    let delta: D
+}
+
+struct AnthropicInputJSONDelta: Encodable {
+    struct D: Encodable {
+        let type = "input_json_delta"
+        let partial_json: String
+    }
+    let type = "content_block_delta"
+    let index: Int
+    let delta: D
+}
+
+struct AnthropicBlockStop: Encodable {
+    let type = "content_block_stop"
+    let index: Int
+}
+
+struct AnthropicMessageDelta: Encodable {
+    struct D: Encodable {
+        let stop_reason: String
+        let stop_sequence: String?
+    }
+    let type = "message_delta"
+    let delta: D
+    let usage: AnthropicUsage
+}
+
+struct AnthropicMessageStop: Encodable {
+    let type = "message_stop"
 }
 
 // MARK: - Error

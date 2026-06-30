@@ -1658,17 +1658,12 @@ struct AthenaServer {
             return Self.anthropicError(
                 status: .badRequest, message: "\(error)")
         }
-        if lowered.wantStream {
-            return Self.anthropicError(
-                status: .badRequest,
-                message:
-                    "streaming is not yet implemented for /v1/messages "
-                    + "(use stream:false)")
-        }
         // The shared orchestration seam (ADR 036 S1b) — identical to the OpenAI
-        // path. A pre-commitment fault surfaces Athena's canonical envelope
-        // (accepted honesty boundary, ADR 036); `.deferToStream` is unreachable
-        // for a non-stream request.
+        // path. `wantStream:false` ⇒ block-until-ready (ADR 015) inline, never
+        // `.deferToStream`, so a streamed Anthropic request to a cold model
+        // blocks then streams (the `: loading` keep-alive is deferred for this
+        // dialect). A pre-commitment fault surfaces Athena's canonical envelope
+        // (accepted honesty boundary, ADR 036).
         let model: String
         switch await prepareChat(
             request: request, requestedModel: body.model,
@@ -1681,6 +1676,32 @@ struct AthenaServer {
             return Self.anthropicError(
                 status: .serviceUnavailable, message: "model is loading")
         }
+
+        // Streaming: forward the one GenChunk stream as the Anthropic event
+        // sequence. Mirrors the OpenAI warm-stream cancel/deadline wiring
+        // (A8/E3) so a client disconnect or deadline stops the decode.
+        if lowered.wantStream {
+            let cancelCounter = HeartbeatCounter()
+            let msgID = "msg_\(UUID().uuidString)"
+            return DecodeProgress.$counter.withValue(cancelCounter) {
+                Self.streamAnthropic(
+                    id: msgID, model: model,
+                    events: deadlineBounded(
+                        seconds: requestTimeoutSecs,
+                        llm.generateMetered(lowered.native),
+                        onTimerFired: {
+                            cancelCounter.cancelGeneration()
+                            Self.log.warning(
+                                "streamed request truncated by deadline path=/v1/messages")
+                        }),
+                    isToolCall: lowered.isToolCall, stops: lowered.stops,
+                    onConsumerCancel: { cancelCounter.cancelGeneration() },
+                    record: { usage in
+                        await meter(principal: principal, usage: usage)
+                    })
+            }
+        }
+
         let collected: GenCollected
         do {
             collected = try await collectMetered(seconds: requestTimeoutSecs) {
@@ -5173,6 +5194,191 @@ struct AthenaServer {
                 continuation.yield(done)
                 await record(usage)
                 continuation.finish()
+    }
+
+    /// ADR 036 S2 — the Anthropic streaming counterpart of `streamSSE`: a
+    /// `text/event-stream` Response whose producer is `pumpAnthropic`. Mirrors
+    /// the warm-stream cancel wiring (a client disconnect cancels the decode).
+    private static func streamAnthropic(
+        id: String, model: String,
+        events: AsyncStream<GenChunk>, isToolCall: Bool, stops: [String],
+        onConsumerCancel: (@Sendable () -> Void)? = nil,
+        record: @escaping @Sendable (TokenUsage) async -> Void
+    ) -> Response {
+        let stream = AsyncStream<ByteBuffer> { continuation in
+            let task = Task {
+                await pumpAnthropic(
+                    into: continuation, id: id, model: model, events: events,
+                    isToolCall: isToolCall, stops: stops, record: record)
+            }
+            continuation.onTermination = { _ in
+                task.cancel()
+                onConsumerCancel?()
+            }
+        }
+        var headers = HTTPFields()
+        headers[.contentType] = "text/event-stream"
+        headers[.cacheControl] = "no-cache"
+        return Response(
+            status: .ok, headers: headers,
+            body: ResponseBody(asyncSequence: stream))
+    }
+
+    /// ADR 036 S2 — the Anthropic event-stream pump: consume the SAME
+    /// `GenChunk` stream the OpenAI pump does, emit the Anthropic event
+    /// sequence (message_start → content_block_start/delta/stop → message_delta
+    /// → message_stop). Text streams as `text_delta`; a tool call (free-detected
+    /// or Guide-forced) is one `tool_use` block with a single `input_json_delta`
+    /// carrying the args. Reasoning (ADR 035 `<|channel>`) is peeled and dropped
+    /// (first cut: no `thinking` blocks). Stop-sequence + reasoning filtering
+    /// reuse the exact `StopStreamFilter`/`ReasoningChannelFilter` the OpenAI
+    /// pump uses, so detection can't drift between the two dialects.
+    private static func pumpAnthropic(
+        into continuation: AsyncStream<ByteBuffer>.Continuation,
+        id: String, model: String,
+        events: AsyncStream<GenChunk>, isToolCall: Bool, stops: [String],
+        record: @escaping @Sendable (TokenUsage) async -> Void
+    ) async {
+        func emit<T: Encodable>(_ eventName: String, _ payload: T) {
+            guard let data = try? JSONEncoder().encode(payload) else { return }
+            var buf = ByteBuffer()
+            buf.writeString("event: \(eventName)\ndata: ")
+            buf.writeBytes(data)
+            buf.writeString("\n\n")
+            continuation.yield(buf)
+        }
+        emit(
+            "message_start",
+            AnthropicStreamStart(
+                message: .init(
+                    id: id, model: model,
+                    usage: AnthropicUsage(input_tokens: 0, output_tokens: 0))))
+
+        var usage = TokenUsage.zero
+        var finish: FinishReason = .stop
+        var stopHit: String?
+        var stopFilter = StopStreamFilter(stops: stops)
+        var reasoningFilter = ReasoningChannelFilter()
+        var toolBuffer = ""
+        var freeToolCall: (name: String, argsJSON: String)?
+
+        var index = 0
+        var textOpen = false
+        func openText() {
+            guard !textOpen else { return }
+            emit(
+                "content_block_start",
+                AnthropicBlockStart(
+                    index: index,
+                    content_block: AnthropicResponseBlock(
+                        type: "text", text: "")))
+            textOpen = true
+        }
+        func emitText(_ s: String) {
+            guard !s.isEmpty else { return }
+            openText()
+            emit(
+                "content_block_delta",
+                AnthropicTextDelta(index: index, delta: .init(text: s)))
+        }
+        func closeText() {
+            guard textOpen else { return }
+            emit("content_block_stop", AnthropicBlockStop(index: index))
+            textOpen = false
+            index += 1
+        }
+        func pushContent(_ piece: String) {
+            if stopFilter.isActive {
+                let wasStopped = stopFilter.stopped
+                emitText(stopFilter.push(piece))
+                if stopFilter.stopped && !wasStopped {
+                    finish = .stop
+                    // Best-effort which-sequence (the filter exposes only the
+                    // truncated text); first cut reports the first stop.
+                    stopHit = stops.first
+                }
+            } else {
+                emitText(piece)
+            }
+        }
+
+        for await event in events {
+            switch event {
+            case .text(let piece):
+                if isToolCall {
+                    toolBuffer += piece
+                } else {
+                    let s = reasoningFilter.push(piece)
+                    pushContent(s.content)  // reasoning dropped (first cut)
+                }
+            case .usage(let u): usage = u
+            case .toolCall(let name, let argsJSON):
+                freeToolCall = (name, argsJSON)
+            case .finish(let r):
+                if !stopFilter.stopped { finish = r }
+            case .logprobs: break  // no Anthropic equivalent
+            case .error(let e):
+                emit(
+                    "error",
+                    AnthropicErrorBody(
+                        error: .init(type: "api_error", message: e.message)))
+                finish = .stop
+            }
+        }
+        if !isToolCall {
+            pushContent(reasoningFilter.flush().content)
+        }
+        if stopFilter.isActive && !stopFilter.stopped {
+            emitText(stopFilter.flush())
+        }
+        var toolCall = freeToolCall
+        if isToolCall {
+            if let parsed = parseToolCall(toolBuffer) {
+                toolCall = parsed
+            } else if !toolBuffer.isEmpty {
+                // Guide-forced output didn't parse (e.g. truncated by max_tokens)
+                // — emit it as text rather than silently drop (mirrors the
+                // OpenAI pump's `emitDelta(toolBuffer)` fallback).
+                emitText(toolBuffer)
+            }
+        }
+        closeText()
+        var stopReason = "end_turn"
+        if let call = toolCall {
+            let input: JSONValue =
+                (call.argsJSON.data(using: .utf8).flatMap {
+                    try? JSONDecoder().decode(JSONValue.self, from: $0)
+                }) ?? .object([:])
+            emit(
+                "content_block_start",
+                AnthropicBlockStart(
+                    index: index,
+                    content_block: AnthropicResponseBlock(
+                        type: "tool_use", id: "toolu_\(UUID().uuidString)",
+                        name: call.name, input: .object([:]))))
+            emit(
+                "content_block_delta",
+                AnthropicInputJSONDelta(
+                    index: index,
+                    delta: .init(partial_json: input.jsonString() ?? "{}")))
+            emit("content_block_stop", AnthropicBlockStop(index: index))
+            index += 1
+            stopReason = "tool_use"
+        } else if stopHit != nil {
+            stopReason = "stop_sequence"
+        } else if finish == .length {
+            stopReason = "max_tokens"
+        }
+        emit(
+            "message_delta",
+            AnthropicMessageDelta(
+                delta: .init(stop_reason: stopReason, stop_sequence: stopHit),
+                usage: AnthropicUsage(
+                    input_tokens: usage.promptTokens,
+                    output_tokens: usage.completionTokens)))
+        emit("message_stop", AnthropicMessageStop())
+        await record(usage)
+        continuation.finish()
     }
 
     static func json<T: Encodable>(

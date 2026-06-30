@@ -1,6 +1,6 @@
 # 036 — Multiple protocol adapters over one inference engine (Anthropic Messages; one stream, two terminal ops)
 
-**Status:** Accepted — **S1 (seam) SHIPPED v0.10.233; S2 non-streaming Anthropic `/v1/messages` SHIPPED v0.10.234** (decode + non-stream encoder + route + OpenAPISpec; curl-verified text + forced `tool_use` + `tool_result` round-trip on gemma-4-26b-a4b-it-8bit, reusing `prepareChat`/`collectMetered`/engine with zero duplication). Remaining: Anthropic **streaming** event protocol, `e2e-anthropic-messages.sh`, and the `x-api-key` alias (S3).
+**Status:** Accepted — **S1 (seam) SHIPPED v0.10.233; S2 Anthropic `/v1/messages` SHIPPED v0.10.234 (non-stream) + v0.10.235 (streaming)**. `e2e-anthropic-messages.sh` passes 5/5 on gemma-4-26b-a4b-it-8bit (non-stream + streaming, text + tool_use), reusing `prepareChat`/`collectMetered`/the engine with zero duplication; OpenAI regression-free (e2e-rbac 495/0, e2e-tool-choice-auto). Remaining: the `x-api-key` alias (S3). NOTE: a tool `description` field breaks forced-tool generation on this model for BOTH dialects (pre-existing engine/template quirk, not adapter-specific).
 **Date:** 2026-06-30
 **Milestone:** TBD (protocol-adapter surface)
 **Amends:** ADR 013 (single inference *surface* → single inference *engine*, multiple protocols), ADR 031 (clarifies "no parallel *implementation*" — adapters comply), and the `CLAUDE.md` `/v1` compatibility tagging rule (adds a third notion: third-party-protocol-compatible).
