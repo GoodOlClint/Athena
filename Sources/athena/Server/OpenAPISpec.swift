@@ -107,6 +107,39 @@ enum OpenAPISpec {
                 }
               }
             },
+            "/v1/messages": {
+              "post": {
+                "tags": ["Chat"],
+                "summary": "Anthropic Messages API (chat over the same engine).",
+                "description": "**Athena-native dialect, Anthropic-compatible (NOT OpenAI).** The Anthropic Messages shape over the SAME inference engine as `/v1/chat/completions` (ADR 036): one engine, multiple protocol adapters. Lets an Anthropic-API harness (e.g. Claude Code, `ANTHROPIC_BASE_URL`) point at Athena directly. Supports text + `system` + `tool_use`/`tool_result` + `tools` (mapped to the same model menu) + `tool_choice` (`auto`/`any`/`tool`) + `stop_sequences`. First cut is non-streaming; `image`/`document` content blocks, prompt-caching, and extended thinking are not yet supported (400). Auth: `Authorization: Bearer` now; `x-api-key` alias next slice. Requires `inference`.",
+                "requestBody": {
+                  "required": true,
+                  "content": { "application/json": { "schema": {
+                    "type": "object",
+                    "required": ["model", "max_tokens", "messages"],
+                    "properties": {
+                      "model": { "type": "string", "description": "A resident/store LLM id (same resolution as /v1/chat/completions)." },
+                      "max_tokens": { "type": "integer", "description": "Required by the Anthropic shape; the completion token cap." },
+                      "system": { "description": "System prompt — a string or an array of text blocks." },
+                      "messages": { "type": "array", "items": { "type": "object" }, "description": "Anthropic messages (role + string|block content; tool_use/tool_result blocks)." },
+                      "tools": { "type": "array", "items": { "type": "object" }, "description": "Anthropic tools ({name, description, input_schema})." },
+                      "tool_choice": { "type": "object", "description": "{type: auto|any|tool|none, name?}." },
+                      "stop_sequences": { "type": "array", "items": { "type": "string" } },
+                      "temperature": { "type": "number" },
+                      "top_p": { "type": "number" },
+                      "stream": { "type": "boolean", "description": "Streaming not yet implemented (400 if true); non-stream only in this slice." }
+                    }
+                  } } }
+                },
+                "responses": {
+                  "200": { "description": "Anthropic message response ({id, type:message, role:assistant, content[], stop_reason, usage})." },
+                  "400": { "$ref": "#/components/responses/BadRequest" },
+                  "401": { "$ref": "#/components/responses/Unauthorized" },
+                  "403": { "$ref": "#/components/responses/Forbidden" },
+                  "503": { "$ref": "#/components/responses/Overloaded" }
+                }
+              }
+            },
             "/v1/models": {
               "get": {
                 "tags": ["Models"],

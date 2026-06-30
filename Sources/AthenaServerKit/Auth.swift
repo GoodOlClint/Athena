@@ -354,9 +354,9 @@ public enum AuthPolicy {
             // privileged — tokens.admin for the whole surface.
             return .tokensAdmin
         }
-        // Inference surface (/v1/chat, /v1/embeddings, /v1/audio/*,
-        // /v1/video/* (ADR 022), native /api/chat + /api/embed) and any
-        // unlisted route — all inference-tier, like the audio routes.
+        // Inference surface (/v1/chat, /v1/messages (ADR 036 Anthropic),
+        // /v1/embeddings, /v1/audio/*, /v1/video/* (ADR 022), native
+        // /api/embed) and any unlisted route — all inference-tier.
         return .inference
     }
 }

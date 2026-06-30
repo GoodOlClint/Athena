@@ -1,6 +1,6 @@
 # 036 — Multiple protocol adapters over one inference engine (Anthropic Messages; one stream, two terminal ops)
 
-**Status:** Accepted — **S1 (seam) SHIPPED v0.10.233** (S1a `NativeChatRequest` + S1b `prepareChat`/`ChatPrep`; OpenAI byte-identical, gated `e2e-rbac` 495/0 + `e2e-tool-choice-auto` 4/4 on gemma-4-26b-a4b-it-8bit). S2/S3 (Anthropic adapter) staged per slice below.
+**Status:** Accepted — **S1 (seam) SHIPPED v0.10.233; S2 non-streaming Anthropic `/v1/messages` SHIPPED v0.10.234** (decode + non-stream encoder + route + OpenAPISpec; curl-verified text + forced `tool_use` + `tool_result` round-trip on gemma-4-26b-a4b-it-8bit, reusing `prepareChat`/`collectMetered`/engine with zero duplication). Remaining: Anthropic **streaming** event protocol, `e2e-anthropic-messages.sh`, and the `x-api-key` alias (S3).
 **Date:** 2026-06-30
 **Milestone:** TBD (protocol-adapter surface)
 **Amends:** ADR 013 (single inference *surface* → single inference *engine*, multiple protocols), ADR 031 (clarifies "no parallel *implementation*" — adapters comply), and the `CLAUDE.md` `/v1` compatibility tagging rule (adds a third notion: third-party-protocol-compatible).

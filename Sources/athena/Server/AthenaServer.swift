@@ -390,6 +390,11 @@ struct AthenaServer {
             await handleChatCompletions(request)
         }
 
+        // ADR 036 — Anthropic Messages dialect over the same inference engine.
+        router.post("/v1/messages") { request, _ -> Response in
+            await handleAnthropicMessages(request)
+        }
+
         // OpenAI model discovery (M31.1). Read-only projection of the
         // SAME model store the native `/api/models` serves, in the
         // OpenAI list/retrieve shape so drop-in SDK/LiteLLM clients can
@@ -1612,6 +1617,119 @@ struct AthenaServer {
         }
     }
 
+
+    /// ADR 036 — render an Anthropic-shaped error
+    /// (`{"type":"error","error":{type,message}}`, inner type from the status).
+    static func anthropicError(
+        status: HTTPResponse.Status, message: String
+    ) -> Response {
+        Self.json(
+            AnthropicErrorBody(
+                error: .init(
+                    type: AnthropicErrorBody.errorType(forStatus: status.code),
+                    message: message)),
+            status: status)
+    }
+
+    /// ADR 036 S2 — the Anthropic Messages adapter (`POST /v1/messages`). Decode
+    /// → `NativeChatRequest`, run the shared `prepareChat` seam, drain the one
+    /// `GenChunk` stream, encode the Anthropic response. No orchestration or
+    /// engine logic here — it reuses the exact path the OpenAI adapter does.
+    /// Increment 1: non-streaming. Streaming (the SSE event protocol) lands in
+    /// the next slice; a `stream:true` request is refused with a clean 400 until
+    /// then.
+    private func handleAnthropicMessages(_ request: Request) async -> Response {
+        let body: AnthropicMessagesRequest
+        do {
+            let buffer = try await request.body.collect(upTo: maxRequestBodyBytes)
+            body = try JSONDecoder().decode(
+                AnthropicMessagesRequest.self, from: Data(buffer: buffer))
+        } catch {
+            return Self.anthropicError(
+                status: .badRequest, message: "Invalid request body: \(error)")
+        }
+        let principal = await usagePrincipal(request)
+        let lowered: AnthropicMessagesRequest.Lowered
+        do {
+            lowered = try body.lower(principal: principal)
+        } catch let e as AnthropicDecodeError {
+            return Self.anthropicError(status: .badRequest, message: e.message)
+        } catch {
+            return Self.anthropicError(
+                status: .badRequest, message: "\(error)")
+        }
+        if lowered.wantStream {
+            return Self.anthropicError(
+                status: .badRequest,
+                message:
+                    "streaming is not yet implemented for /v1/messages "
+                    + "(use stream:false)")
+        }
+        // The shared orchestration seam (ADR 036 S1b) — identical to the OpenAI
+        // path. A pre-commitment fault surfaces Athena's canonical envelope
+        // (accepted honesty boundary, ADR 036); `.deferToStream` is unreachable
+        // for a non-stream request.
+        let model: String
+        switch await prepareChat(
+            request: request, requestedModel: body.model,
+            messages: lowered.native.messages, tools: lowered.native.tools,
+            chatTemplateKwargs: nil, wantStream: false)
+        {
+        case .failed(let response): return response
+        case .ready(let resolved): model = resolved
+        case .deferToStream:
+            return Self.anthropicError(
+                status: .serviceUnavailable, message: "model is loading")
+        }
+        let collected: GenCollected
+        do {
+            collected = try await collectMetered(seconds: requestTimeoutSecs) {
+                llm.generateMetered(lowered.native)
+            }
+        } catch let e as AthenaError {
+            return Self.anthropicError(
+                status: HTTPResponse.Status(code: e.httpStatus),
+                message: e.message)
+        } catch {
+            let c = AthenaError.classify(error, module: .llm)
+            return Self.anthropicError(
+                status: HTTPResponse.Status(code: c.httpStatus),
+                message: c.message)
+        }
+        // ADR 035 — strip channel-reasoning so it never leaks into the text.
+        var text = splitReasoningChannel(collected.text).content
+        var stopHit: String?
+        if !lowered.stops.isEmpty {
+            let cut = StopStreamFilter.truncate(text, stops: lowered.stops)
+            if cut.stopped {
+                stopHit = lowered.stops.first { text.contains($0) }
+                text = cut.text
+            }
+        }
+        await meter(principal: principal, usage: collected.usage)
+        // Tool call: a substrate-detected free call (text is real) takes
+        // precedence; else a Guide-forced call parsed out of `text` (which IS
+        // the call JSON, so no text block).
+        let finalText: String
+        let toolCall: (name: String, argsJSON: String)?
+        if let c = collected.toolCall {
+            finalText = text
+            toolCall = c
+        } else if lowered.isToolCall, let c = parseToolCall(text) {
+            finalText = ""
+            toolCall = c
+        } else {
+            finalText = text
+            toolCall = nil
+        }
+        return Self.json(
+            AnthropicMessagesResponse.make(
+                id: "msg_\(UUID().uuidString)", model: model, text: finalText,
+                toolCall: toolCall, promptTokens: collected.usage.promptTokens,
+                completionTokens: collected.usage.completionTokens,
+                finishIsLength: collected.finish == .length,
+                stopSequenceHit: stopHit))
+    }
 
     private func handleEmbeddings(_ request: Request) async -> Response {
         let t0 = Date()
