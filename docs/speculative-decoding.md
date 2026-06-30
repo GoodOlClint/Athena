@@ -59,9 +59,12 @@ loads; `athena ps` / `healthz` account for both models on the one Metal budget.
 - **Lossless** always (target-verify). On the Gemma 4 path, byte-identity to
   non-speculative is bounded to ~the first 64 tokens by an MLX fused-SDPA
   numerical quirk; the speculation-correctness guarantee still holds beyond that.
-- **Speedup is measured, not guaranteed.** At batch-1 single-stream, the 26B-A4B
-  **MoE** drafter may not pay off (verifying drafted tokens can pull in extra
-  expert weights). Dense Gemma 4 is the reliable win. Check the `MTP speculative
-  …` log line (proposed / accepted / accept_rate / passthrough) and tok/s.
+- **Speedup is measured, not guaranteed.** Dense Gemma 4 is the reliable win
+  (31B-8bit measured **~1.5×**). The 26B-A4B **MoE** at batch-1 is **~3% slower
+  with MTP on** (measured 114 vs 118 tok/s; the drafter engages at ~0.56 accept,
+  but verifying a drafted block routes to extra experts and the paging overhead
+  outweighs the accepted drafts) — so **leave `speculative` off for the MoE**.
+  Always check the `MTP speculative …` log line (proposed / accepted /
+  accept_rate / passthrough) and tok/s for your model before trusting a win.
 - Mid-stream KV-cache quantization makes the iterator fall back to single-token
   (`passthrough` set) — correctness kept, speedup dropped.
