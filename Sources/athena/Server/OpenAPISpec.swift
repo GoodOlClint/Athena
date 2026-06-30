@@ -736,6 +736,7 @@ enum OpenAPISpec {
                 "properties": {
                   "role": { "type": "string", "enum": ["system", "user", "assistant", "tool"] },
                   "content": { "description": "Either a plain string, or an OpenAI content-parts array for vision input (M71). Image parts accept ONLY inline data: URLs (base64) — http(s) image URLs are rejected with 400 (passive-oracle: the daemon performs no outbound image fetch). Text parts are concatenated.", "nullable": true, "oneOf": [ { "type": "string" }, { "type": "array", "items": { "$ref": "#/components/schemas/ChatContentPart" } } ] },
+                  "reasoning_content": { "type": "string", "description": "Chain-of-thought extracted from a channel-delimited model's output (e.g. gemma-4 <|channel>thought…<channel|>), surfaced separately so content is clean. Omitted when the model emits no reasoning channel. ADR 035." },
                   "tool_calls": { "type": "array", "items": { "type": "object" } }
                 }
               },

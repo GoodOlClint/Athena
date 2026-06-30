@@ -67,10 +67,13 @@ MT="{\"model\":\"$MODEL\",\"max_tokens\":128,\"tools\":[$TOOL],\"messages\":[\
 {\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"searchWeb\",\"arguments\":\"{\\\"query\\\":\\\"weather\\\"}\"}}]},\
 {\"role\":\"tool\",\"tool_call_id\":\"call_1\",\"content\":\"It is 72F and sunny.\"}]}"
 h=$(post "$MT")
-if [ "$h" = "200" ] && [ "$(has_tc)" = "no" ] && [ -n "$(content)" ]; then
-  echo "  ok: answered in text after the tool result (no re-call)"
+# ADR 035 — content must not leak channel-reasoning markers. Trivially true for
+# non-channel models; the real gate on gemma-4-class channel-format models.
+leak=$(content | grep -c -E '<\|channel>|<channel\|>' || true)
+if [ "$h" = "200" ] && [ "$(has_tc)" = "no" ] && [ -n "$(content)" ] && [ "$leak" = "0" ]; then
+  echo "  ok: answered in text after the tool result (no re-call, no channel leak)"
 else
-  echo "  FAIL http=$h finish=$(fr) tool_calls=$(has_tc) content='$(content)'"; fail=1
+  echo "  FAIL http=$h finish=$(fr) tool_calls=$(has_tc) leak=$leak content='$(content)'"; fail=1
 fi
 
 echo "== 3) required + tools → forced tool_call (regression guard) =="

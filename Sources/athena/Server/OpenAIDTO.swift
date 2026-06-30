@@ -20,6 +20,10 @@ struct ToolCallOut: Codable {
 struct ChatMessage: Codable {
     let role: String
     let content: String?  // null for a tool-call response
+    /// ADR 035 — chain-of-thought extracted from a channel-delimited model
+    /// (`<|channel>thought…<channel|>`), surfaced separately so `content` is
+    /// clean. nil ⇒ omitted from JSON (plain responses unchanged).
+    var reasoning_content: String?
     var tool_calls: [ToolCallOut]?
     /// ADR 034 — on a `role:"tool"` message, the assistant tool-call id this
     /// result answers (OpenAI `tool_call_id`). Carried into the chat template
@@ -32,18 +36,20 @@ struct ChatMessage: Codable {
     var imageURLs: [String]
 
     init(
-        role: String, content: String?, tool_calls: [ToolCallOut]? = nil,
+        role: String, content: String?, reasoning_content: String? = nil,
+        tool_calls: [ToolCallOut]? = nil,
         tool_call_id: String? = nil, imageURLs: [String] = []
     ) {
         self.role = role
         self.content = content
+        self.reasoning_content = reasoning_content
         self.tool_calls = tool_calls
         self.tool_call_id = tool_call_id
         self.imageURLs = imageURLs
     }
 
     private enum CodingKeys: String, CodingKey {
-        case role, content, tool_calls, tool_call_id
+        case role, content, reasoning_content, tool_calls, tool_call_id
     }
 
     /// `content` decodes as EITHER a plain string (unchanged) OR an OpenAI
@@ -55,6 +61,8 @@ struct ChatMessage: Codable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         role = try c.decode(String.self, forKey: .role)
+        reasoning_content = try c.decodeIfPresent(
+            String.self, forKey: .reasoning_content)
         tool_calls = try c.decodeIfPresent([ToolCallOut].self, forKey: .tool_calls)
         tool_call_id = try c.decodeIfPresent(String.self, forKey: .tool_call_id)
         if !c.contains(.content)
@@ -77,6 +85,7 @@ struct ChatMessage: Codable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(role, forKey: .role)
         try c.encodeIfPresent(content, forKey: .content)
+        try c.encodeIfPresent(reasoning_content, forKey: .reasoning_content)
         try c.encodeIfPresent(tool_calls, forKey: .tool_calls)
     }
 }
@@ -486,25 +495,32 @@ struct ToolCallDelta: Codable {
 struct ChatDelta: Codable {
     let role: String?
     let content: String?
+    var reasoning_content: String? = nil
     var tool_calls: [ToolCallDelta]? = nil
 
     init(
-        role: String?, content: String?, tool_calls: [ToolCallDelta]? = nil
+        role: String?, content: String?, reasoning_content: String? = nil,
+        tool_calls: [ToolCallDelta]? = nil
     ) {
         self.role = role
         self.content = content
+        self.reasoning_content = reasoning_content
         self.tool_calls = tool_calls
     }
 
-    enum CodingKeys: String, CodingKey { case role, content, tool_calls }
+    enum CodingKeys: String, CodingKey {
+        case role, content, reasoning_content, tool_calls
+    }
 
     // Preserve the existing wire shape for plain content deltas (role/content
-    // emitted even when null, as OpenAI does); only add `tool_calls` when a
-    // tool call is actually present so non-tool streams are byte-unchanged.
+    // emitted even when null, as OpenAI does); only add reasoning_content /
+    // tool_calls when actually present so non-tool/non-reasoning streams are
+    // byte-unchanged.
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(role, forKey: .role)
         try c.encode(content, forKey: .content)
+        try c.encodeIfPresent(reasoning_content, forKey: .reasoning_content)
         try c.encodeIfPresent(tool_calls, forKey: .tool_calls)
     }
 }

@@ -1059,7 +1059,12 @@ struct AthenaServer {
         } catch {
             return Self.classified(error, module: .llm)
         }
-        var text = collected.text
+        // ADR 035 — pull channel-delimited reasoning (`<|channel>thought…
+        // <channel|>`) out of the content before anything else; surface it as
+        // `reasoning_content`. No-op for models that don't emit the markers.
+        let split = splitReasoningChannel(collected.text)
+        var text = split.content
+        let reasoning = split.reasoning.isEmpty ? nil : split.reasoning
         let usage = collected.usage
         var finish = collected.finish
         // M31.3: truncate at the first stop sequence; a stop hit reports
@@ -1083,6 +1088,7 @@ struct AthenaServer {
         return Self.json(
             Self.chatCompletionResponse(
                 id: id, model: model, created: created, text: text,
+                reasoning: reasoning,
                 isToolCall: effective?.isToolCall == true,
                 detectedToolCall: collected.toolCall, usage: usage,
                 finish: finish, logprobs: collected.logprobs))
@@ -1116,12 +1122,14 @@ struct AthenaServer {
     /// pair. Shared by the Guide-forced parse and the ADR-034 substrate-detected
     /// path so both emit the identical OpenAI shape.
     private static func toolCallChoice(
-        name: String, argsJSON: String, logprobs: [TokenLogprob]?
+        name: String, argsJSON: String, reasoning: String?,
+        logprobs: [TokenLogprob]?
     ) -> ChatChoice {
         ChatChoice(
             index: 0,
             message: ChatMessage(
                 role: "assistant", content: nil,
+                reasoning_content: reasoning,
                 tool_calls: [
                     ToolCallOut(
                         id: "call_\(UUID().uuidString.prefix(8))",
@@ -1134,7 +1142,7 @@ struct AthenaServer {
     }
 
     private static func chatChoice(
-        text: String, isToolCall: Bool,
+        text: String, reasoning: String? = nil, isToolCall: Bool,
         detectedToolCall: (name: String, argsJSON: String)? = nil,
         finish: FinishReason,
         logprobs: [TokenLogprob]? = nil
@@ -1143,16 +1151,20 @@ struct AthenaServer {
         // takes precedence: it's already parsed, no text to re-parse.
         if let call = detectedToolCall {
             return toolCallChoice(
-                name: call.name, argsJSON: call.argsJSON, logprobs: logprobs)
+                name: call.name, argsJSON: call.argsJSON,
+                reasoning: reasoning, logprobs: logprobs)
         }
         // Guide-forced (required/named): the call is the decoded JSON text.
         if isToolCall, let call = parseToolCall(text) {
             return toolCallChoice(
-                name: call.name, argsJSON: call.argsJSON, logprobs: logprobs)
+                name: call.name, argsJSON: call.argsJSON,
+                reasoning: reasoning, logprobs: logprobs)
         }
         return ChatChoice(
             index: 0,
-            message: ChatMessage(role: "assistant", content: text),
+            message: ChatMessage(
+                role: "assistant", content: text,
+                reasoning_content: reasoning),
             finish_reason: finish.rawValue,
             logprobs: Self.chatLogprobs(logprobs))
     }
@@ -1160,6 +1172,7 @@ struct AthenaServer {
     /// Assemble a full OpenAI `ChatCompletionResponse` around one choice.
     private static func chatCompletionResponse(
         id: String, model: String, created: Int, text: String,
+        reasoning: String? = nil,
         isToolCall: Bool,
         detectedToolCall: (name: String, argsJSON: String)? = nil,
         usage: TokenUsage,
@@ -1171,7 +1184,7 @@ struct AthenaServer {
             model: model,
             choices: [
                 chatChoice(
-                    text: text, isToolCall: isToolCall,
+                    text: text, reasoning: reasoning, isToolCall: isToolCall,
                     detectedToolCall: detectedToolCall, finish: finish,
                     logprobs: logprobs)
             ],
@@ -4815,6 +4828,22 @@ struct AthenaServer {
                                     finish_reason: nil)
                             ]))
                 }
+                // ADR 035 — one `delta.reasoning_content` chunk.
+                func emitReasoning(_ piece: String) {
+                    guard !piece.isEmpty else { return }
+                    emit(
+                        ChatCompletionChunk(
+                            id: id, object: "chat.completion.chunk",
+                            created: created, model: model,
+                            choices: [
+                                ChatChunkChoice(
+                                    index: 0,
+                                    delta: ChatDelta(
+                                        role: nil, content: nil,
+                                        reasoning_content: piece),
+                                    finish_reason: nil)
+                            ]))
+                }
                 emit(
                     ChatCompletionChunk(
                         id: id, object: "chat.completion.chunk",
@@ -4841,19 +4870,31 @@ struct AthenaServer {
                 // only the text up to it, and suppress the rest while still
                 // draining the generator for an accurate usage count.
                 var stopFilter = StopStreamFilter(stops: stops)
+                // ADR 035 — split channel-delimited reasoning out of content.
+                var reasoningFilter = ReasoningChannelFilter()
+                // Route a content piece through the stop filter (latching
+                // `stop` on a match) or emit it directly when no stops are set.
+                func pushContent(_ piece: String) {
+                    if stopFilter.isActive {
+                        let wasStopped = stopFilter.stopped
+                        emitDelta(stopFilter.push(piece))
+                        if stopFilter.stopped && !wasStopped {
+                            finish = .stop
+                        }
+                    } else {
+                        emitDelta(piece)
+                    }
+                }
                 for await event in events {
                     switch event {
                     case .text(let piece):
                         if isToolCall {
                             toolBuffer += piece
-                        } else if stopFilter.isActive {
-                            let wasStopped = stopFilter.stopped
-                            emitDelta(stopFilter.push(piece))
-                            if stopFilter.stopped && !wasStopped {
-                                finish = .stop
-                            }
                         } else {
-                            emitDelta(piece)
+                            // ADR 035 — peel reasoning, stream content.
+                            let s = reasoningFilter.push(piece)
+                            emitReasoning(s.reasoning)
+                            pushContent(s.content)
                         }
                     case .usage(let u):
                         usage = u
@@ -4905,6 +4946,13 @@ struct AthenaServer {
                         }
                         finish = .stop
                     }
+                }
+                // ADR 035 — flush any held reasoning/content tail first, then
+                // the stop-filter tail.
+                if !isToolCall {
+                    let s = reasoningFilter.flush()
+                    emitReasoning(s.reasoning)
+                    pushContent(s.content)
                 }
                 if stopFilter.isActive && !stopFilter.stopped {
                     emitDelta(stopFilter.flush())
