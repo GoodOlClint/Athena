@@ -316,6 +316,12 @@ struct Install: AsyncParsableCommand {
         }
 
         try ensureDir(plan.libexecDir, owner: nil)
+        // The launcher's parent (<prefix>/bin) is NOT guaranteed to exist: on
+        // Apple Silicon Homebrew lives in /opt/homebrew, so a clean Mac often
+        // has no /usr/local/bin, and writing the launcher there fails late
+        // ("The file 'athena' doesn't exist") after artifacts are already
+        // copied. Create it like the other root-owned system dirs.
+        try ensureDir(plan.binLauncher.deletingLastPathComponent(), owner: nil)
         try ensureDir(plan.configDir, owner: nil)
         try ensureDir(plan.workingDir, owner: serviceUser)
         try ensureDir(logURL, owner: serviceUser)
