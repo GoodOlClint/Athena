@@ -15,7 +15,20 @@ The drafter auto-paired + loaded from the seeded map in every case; the
 `generate(mtpDrafter:)` drive is target-agnostic. Both passing families are
 `num_kv_shared_layers = 0`.
 
-### E-series blocker — root cause (substrate, well-scoped for an upstream PR)
+### E-series retest (2026-06-30, against substrate `4acd179`)
+
+The KV-sharing target fix landed — **E-series targets now load** (E4B 985 ms). But
+the first speculative decode **aborts the daemon** at a *second* substrate gap: the
+E-series drafter's centroid LM head `Gemma4AssistantMaskedEmbedder.callAsFunction`
+is an unimplemented `fatalError` (both E-series drafters ship
+`use_ordered_embeddings=true`, `num_centroids=2048`; dense/MoE drafters use the
+tied-`lm_head` path, which is why they work). Uncatchable from Athena (it's a
+`fatalError` on the MLX worker), so the asks are upstream: implement the forward
+(port mlx-vlm `masked_embedder.py`) **and** `throw` instead of `fatalError` so
+consumers degrade. Handoff: `~/Source/mlx/research/gemma4-eseries-drafter-centroid-embedder.md`.
+**E-series MTP remains blocked on the substrate; dense + MoE unchanged (working).**
+
+### E-series target-load blocker — root cause (FIXED upstream `4acd179`)
 
 The E-series **target** fails to load — `speculative=false` fails identically, so
 it is upstream of any MTP code (in the target `container.prepare`). Precise cause:
