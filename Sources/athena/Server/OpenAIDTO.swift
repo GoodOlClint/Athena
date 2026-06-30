@@ -435,9 +435,40 @@ struct ChatCompletionResponse: Codable {
     let usage: Usage
 }
 
+/// Streaming tool-call delta element. Same shape as `ToolCallOut` plus the
+/// OpenAI `index` field that correlates fragments across chunks. Athena emits
+/// the whole tool call in one delta, so `index` is always 0 here.
+struct ToolCallDelta: Codable {
+    let index: Int
+    let id: String
+    let type: String  // "function"
+    let function: FunctionCallOut
+}
+
 struct ChatDelta: Codable {
     let role: String?
     let content: String?
+    var tool_calls: [ToolCallDelta]? = nil
+
+    init(
+        role: String?, content: String?, tool_calls: [ToolCallDelta]? = nil
+    ) {
+        self.role = role
+        self.content = content
+        self.tool_calls = tool_calls
+    }
+
+    enum CodingKeys: String, CodingKey { case role, content, tool_calls }
+
+    // Preserve the existing wire shape for plain content deltas (role/content
+    // emitted even when null, as OpenAI does); only add `tool_calls` when a
+    // tool call is actually present so non-tool streams are byte-unchanged.
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(role, forKey: .role)
+        try c.encode(content, forKey: .content)
+        try c.encodeIfPresent(tool_calls, forKey: .tool_calls)
+    }
 }
 
 struct ChatChunkChoice: Codable {

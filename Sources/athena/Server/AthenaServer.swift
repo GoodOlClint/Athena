@@ -987,7 +987,8 @@ struct AthenaServer {
                                         """)
                                 })
                         },
-                        includeUsage: includeUsage, stops: stops,
+                        includeUsage: includeUsage,
+                        isToolCall: effective?.isToolCall == true, stops: stops,
                         onConsumerCancel: { cancelCounter.cancelGeneration() },
                         record: { usage in
                             await meter(principal: principal, usage: usage)
@@ -1021,7 +1022,8 @@ struct AthenaServer {
                                 \(deadlineSecs) model=\(model)
                                 """)
                         }),
-                    includeUsage: includeUsage, stops: stops,
+                    includeUsage: includeUsage,
+                    isToolCall: effective?.isToolCall == true, stops: stops,
                     onConsumerCancel: { cancelCounter.cancelGeneration() },
                     record: { usage in
                         await meter(principal: principal, usage: usage)
@@ -1113,17 +1115,7 @@ struct AthenaServer {
         text: String, isToolCall: Bool, finish: FinishReason,
         logprobs: [TokenLogprob]? = nil
     ) -> ChatChoice {
-        if isToolCall,
-            let data = text.data(using: .utf8),
-            let obj = try? JSONSerialization.jsonObject(with: data)
-                as? [String: Any],
-            let name = obj["name"] as? String
-        {
-            let args = obj["arguments"] ?? [String: Any]()
-            let argsJSON =
-                (try? JSONSerialization.data(
-                    withJSONObject: args, options: [.sortedKeys]))
-                .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        if isToolCall, let call = parseToolCall(text) {
             return ChatChoice(
                 index: 0,
                 message: ChatMessage(
@@ -1133,7 +1125,7 @@ struct AthenaServer {
                             id: "call_\(UUID().uuidString.prefix(8))",
                             type: "function",
                             function: FunctionCallOut(
-                                name: name, arguments: argsJSON))
+                                name: call.name, arguments: call.argsJSON))
                     ]),
                 finish_reason: "tool_calls",
                 logprobs: Self.chatLogprobs(logprobs))
@@ -4591,6 +4583,7 @@ struct AthenaServer {
     private static func streamSSE(
         id: String, model: String, created: Int,
         events: AsyncStream<GenChunk>, includeUsage: Bool,
+        isToolCall: Bool = false,
         stops: [String] = [],
         onConsumerCancel: (@Sendable () -> Void)? = nil,
         record: @escaping @Sendable (TokenUsage) async -> Void
@@ -4600,7 +4593,8 @@ struct AthenaServer {
                 await pumpTokens(
                     into: continuation, id: id, model: model,
                     created: created, events: events,
-                    includeUsage: includeUsage, stops: stops, record: record)
+                    includeUsage: includeUsage, isToolCall: isToolCall,
+                    stops: stops, record: record)
             }
             // A8 (M68.4) — a client disconnect terminates THIS byte stream;
             // bridge it to the generation's cancel flag so the synchronous
@@ -4647,7 +4641,7 @@ struct AthenaServer {
                 message: String, type: String, code: String
             )?,
         eventsBuilder: @escaping @Sendable () -> AsyncStream<GenChunk>,
-        includeUsage: Bool, stops: [String] = [],
+        includeUsage: Bool, isToolCall: Bool = false, stops: [String] = [],
         onConsumerCancel: (@Sendable () -> Void)? = nil,
         record: @escaping @Sendable (TokenUsage) async -> Void
     ) -> Response {
@@ -4713,8 +4707,8 @@ struct AthenaServer {
                     await pumpTokens(
                         into: continuation, id: id, model: model,
                         created: created, events: eventsBuilder(),
-                        includeUsage: includeUsage, stops: stops,
-                        record: record)
+                        includeUsage: includeUsage, isToolCall: isToolCall,
+                        stops: stops, record: record)
                 }
             }
             continuation.onTermination = { _ in
@@ -4738,6 +4732,7 @@ struct AthenaServer {
         into continuation: AsyncStream<ByteBuffer>.Continuation,
         id: String, model: String, created: Int,
         events: AsyncStream<GenChunk>, includeUsage: Bool,
+        isToolCall: Bool = false,
         stops: [String],
         record: @escaping @Sendable (TokenUsage) async -> Void
     ) async {
@@ -4776,6 +4771,15 @@ struct AthenaServer {
                         ]))
                 var usage = TokenUsage.zero
                 var finish: FinishReason = .stop
+                // The server upgrades `stop`→`tool_calls` for a tool turn
+                // (GenChunk.swift); nil ⇒ pass `finish.rawValue` through.
+                var finishOverride: String? = nil
+                // A tool-call turn is Guide-constrained to one complete JSON
+                // object (MLXLLMModule, both paths). We can't stream it as
+                // `content` — OpenAI requires `delta.tool_calls`. Buffer the
+                // pieces and parse once at the end (mirrors the non-streaming
+                // `chatChoice`), so no raw tool JSON leaks into `content`.
+                var toolBuffer = ""
                 // M31.3: filter the streamed deltas through the stop
                 // sequences; once a sequence matches, latch `stop`, emit
                 // only the text up to it, and suppress the rest while still
@@ -4784,7 +4788,9 @@ struct AthenaServer {
                 for await event in events {
                     switch event {
                     case .text(let piece):
-                        if stopFilter.isActive {
+                        if isToolCall {
+                            toolBuffer += piece
+                        } else if stopFilter.isActive {
                             let wasStopped = stopFilter.stopped
                             emitDelta(stopFilter.push(piece))
                             if stopFilter.stopped && !wasStopped {
@@ -4842,6 +4848,41 @@ struct AthenaServer {
                 if stopFilter.isActive && !stopFilter.stopped {
                     emitDelta(stopFilter.flush())
                 }
+                // Tool-call turn: parse the buffered object and emit ONE
+                // `delta.tool_calls` chunk, then force `finish_reason:
+                // "tool_calls"` (matches the non-streaming shape). If parsing
+                // fails — shouldn't, the output is Guide-constrained — fall
+                // back to streaming the buffer as content so output is never
+                // silently dropped.
+                if isToolCall {
+                    if let call = parseToolCall(toolBuffer) {
+                        emit(
+                            ChatCompletionChunk(
+                                id: id, object: "chat.completion.chunk",
+                                created: created, model: model,
+                                choices: [
+                                    ChatChunkChoice(
+                                        index: 0,
+                                        delta: ChatDelta(
+                                            role: nil, content: nil,
+                                            tool_calls: [
+                                                ToolCallDelta(
+                                                    index: 0,
+                                                    id:
+                                                        "call_\(UUID().uuidString.prefix(8))",
+                                                    type: "function",
+                                                    function: FunctionCallOut(
+                                                        name: call.name,
+                                                        arguments: call.argsJSON
+                                                    ))
+                                            ]),
+                                        finish_reason: nil)
+                                ]))
+                        finishOverride = "tool_calls"
+                    } else {
+                        emitDelta(toolBuffer)
+                    }
+                }
                 // M31.2: the terminal chunk carries `length` when the
                 // request hit max_tokens, `stop` otherwise (or on a stop
                 // sequence hit, M31.3).
@@ -4853,7 +4894,7 @@ struct AthenaServer {
                             ChatChunkChoice(
                                 index: 0,
                                 delta: ChatDelta(role: nil, content: nil),
-                                finish_reason: finish.rawValue)
+                                finish_reason: finishOverride ?? finish.rawValue)
                         ]))
                 // OpenAI emits usage in a final chunk with empty choices,
                 // only when the client opted in.
