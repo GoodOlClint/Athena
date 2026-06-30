@@ -3,33 +3,39 @@
 **Status:** APPROVED — **IMPLEMENTED + E2E VERIFIED**. **S1 v0.10.227**, **S2–S5
 v0.10.228**. Full logic suite green (761/0). Pairs with **ADR 032**.
 
-### End-to-end DoD — PASSED (2026-06-30, real 31B pair, Release binary)
+### End-to-end DoD — all 3 Gemma 4 families tested (2026-06-30, Release binary)
 
-Verified pair `gemma-4-31b-it-8bit` ↔ `gemma-4-31B-it-assistant-bf16` (the
-handoff's bit-exact pair), pulled with `athena pull … --with-drafter` (the
-seeded map auto-resolved + fetched the drafter), `speculative=true` on
-`/v1/chat/completions`:
+| Family | Target ↔ drafter | MTP result |
+|---|---|---|
+| **Dense** | `gemma-4-31b-it-8bit` ↔ `…-31B-it-assistant-bf16` | **✓ PASS** — engaged 46/46, passthrough=none, byte-identical-to-greedy in the 64-tok window, **1.52×** speedup |
+| **MoE** | `gemma-4-26b-a4b-it-4bit` ↔ `…-26B-A4B-it-assistant-bf16` | **✓ PASS** — engaged 46/46, passthrough=none, coherent (speedup measure-per-use; NOTES MoE-batch-1 caveat stands) |
+| **Effective (E-series)** | `gemma-4-e4b-it-4bit`, `gemma-4-e2b-it-4bit` | **✗ BLOCKED — substrate, not MTP** (target won't load) |
 
-- **Drafter auto-paired + loaded:** `MTP drafter loaded
-  id=…gemma-4-31B-it-assistant-bf16 target=gemma-4-31b-it-8bit`.
-- **Drafter engaged:** `proposed=46 accepted=46 accept_rate=1.000
-  passthrough=none` (counting prompt); `proposed=123 accepted=76
-  accept_rate=0.618 passthrough=none` (prose).
-- **Lossless:** byte-identical to `speculative=false` greedy within the 64-token
-  window (counting prompt, full 64 tokens identical).
-- **Speedup:** **1.52×** wall-clock on prose (23.5 vs 15.0 tok/s) — in the
-  handoff's 1.6–3× range.
+The drafter auto-paired + loaded from the seeded map in every case; the
+`generate(mtpDrafter:)` drive is target-agnostic. Both passing families are
+`num_kv_shared_layers = 0`.
 
-### Known issue (NOT this change): E4B-4bit target won't load
+### E-series blocker — root cause (substrate, well-scoped for an upstream PR)
 
-`mlx-community/gemma-4-e4b-it-4bit` (vision, 42 layers, 4-bit) fails to load in
-the current substrate build — `keyNotFound language_model.model.layers.24.
-self_attn.k_proj.weight` in the Gemma4 VLM loader — **independent of MTP**
-(`speculative=false` fails identically; the error is in the target
-`container.prepare`, before any drafter code). A substrate/checkpoint
-arch-coverage issue to chase separately; the 31B pair (verified) is the
-recommended E-series-free path meanwhile. E2B likely shares the E-series loader
-risk — untested.
+The E-series **target** fails to load — `speculative=false` fails identically, so
+it is upstream of any MTP code (in the target `container.prepare`). Precise cause:
+
+- E-series checkpoints use **KV-layer-sharing** (`num_kv_shared_layers`): the last
+  N layers reuse an earlier layer's K/V and own no `k_proj`/`v_proj`. The failing
+  layer index **exactly equals `num_layers − num_kv_shared_layers`**: E2B 35−20=**15**,
+  E4B 42−18=**24** (observed `keyNotFound …layers.{15,24}.self_attn.k_proj.weight`).
+- E-series carry `vision_config`, so Athena (correctly, ADR 010/012) routes them
+  through `VLMModelFactory`. The substrate's **text-only** `MLXLLM/Gemma4Text.swift`
+  **does** implement KV-sharing (`Gemma4SharedKVState`), but the **vision**
+  `MLXVLM/Models/Gemma4.swift` backbone's weight loading does **not** — it builds a
+  `k_proj` at the shared layers and demands a weight that the shared-layer model
+  shouldn't have. Dense/MoE (`num_kv_shared_layers = 0`) are unaffected.
+- **Fix is upstream** (the substrate VLM Gemma4 KV-sharing loader; one of the "few
+  remaining PRs"). Athena's MTP wiring needs no change — it loaded the E-series
+  *drafter* fine and will light up for E-series the moment the substrate loads the
+  E-series *target*. A possible Athena-side stopgap (force the E-series down the
+  text-only path that already handles KV-sharing) trades away the vision tower —
+  an operator decision, not done here.
 
 ## Goal
 

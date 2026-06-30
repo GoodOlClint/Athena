@@ -4,12 +4,14 @@
 v0.10.228; see `docs/gemma4-mtp-plan.md`). Drafter classification + pairing map +
 config, drafter load via `MTPDrafterModelFactory`, the `generate(mtpDrafter:)`
 drive behind the `speculative` knob, acceptance-rate log, and surface/docs all
-landed. **End-to-end DoD PASSED** on the real verified 31B pair
-(`gemma-4-31b-it-8bit` ↔ `gemma-4-31B-it-assistant-bf16`): drafter auto-paired +
-engaged (proposed=46/accepted=46, passthrough=none), byte-identical to greedy
-within the 64-token bound, 1.52× wall-clock speedup. Note: the `e4b-it-4bit`
-target fails to load in the current substrate build (independent of MTP — see
-the plan); the 31B pair is the recommended path.
+landed. **End-to-end DoD — dense ✓ + MoE ✓; E-series blocked upstream.** Dense
+(`gemma-4-31b-it-8bit`) and MoE (`gemma-4-26b-a4b-it-4bit`) both engage the
+drafter (46/46, passthrough=none), lossless, dense 1.52× on prose. **E-series
+(E2B/E4B) targets won't load** — a substrate VLM Gemma4 `num_kv_shared_layers`
+(KV-layer-sharing) loader bug, independent of MTP (`speculative=false` fails
+identically; failing layer == `num_layers − num_kv_shared_layers`). Fix is
+upstream; Athena's MTP wiring is target-agnostic and needs no change. See
+`docs/gemma4-mtp-plan.md`.
 **Date:** 2026-06-30
 **Milestone:** M83
 **Relates to:** ADR 011 (governor / never compose at inference), ADR 013 (`/v1`
