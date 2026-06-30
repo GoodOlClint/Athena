@@ -1,10 +1,13 @@
 # Gemma 4 MTP speculative decoding — change plan (M83)
 
-**Status:** APPROVED — building. Substrate precondition **CLEARED**
-(§Precondition). **S1 shipped v0.10.227** (classification + `mtp_drafter` config
-+ seeded pairing map + `pull --with-drafter`/`--check` + unit tests; ADR 032
-formalized). S2–S5 next. Pairs with **ADR 032**
-(`docs/decisions/032-gemma4-mtp-speculative-decoding.md`).
+**Status:** APPROVED — implemented. **S1 shipped v0.10.227** (classification +
+`mtp_drafter` config + seeded pairing map + `pull --with-drafter`/`--check`).
+**S2–S5 shipped v0.10.228** (load+pair drafter via `MTPDrafterModelFactory`;
+drive the substrate `generate(mtpDrafter:)` overload in `beginGeneration` behind
+the `speculative` knob; MTP acceptance-rate log; OpenAPI/`describe`/docs). All
+MLX-free decision logic unit-pinned. **Pending: the heavy end-to-end DoD**
+(real E4B pair, bit-identical + accepted-drafts) under a `xcodebuild` Release on
+the Metal host. Pairs with **ADR 032**.
 
 ## Goal
 

@@ -769,7 +769,7 @@ enum OpenAPISpec {
                   "logprobs": { "description": "Honored on the deterministic decode path (temperature 0 or structured); returns choices[].logprobs.content. A sampling request (temperature>0, no schema) with logprobs ⇒ 400." },
                   "top_logprobs": { "type": "integer", "description": "0–20 top alternatives per token; requires logprobs:true. Out of range ⇒ 400." },
                   "logit_bias": { "type": "object", "description": "Rejected with 400 when non-empty." },
-                  "speculative": { "type": "boolean", "description": "Athena extension. Per-request speculative-decoding override for an MTP-capable model: true opts into the bit-identical-greedy MTP loop at temperature=0 or the Leviathan/Chen sampling loop (distributionally identical to non-speculative sampling at the same temp/top_p/seed) at temperature>0. false forces the standard path. omit ⇒ daemon's --speculative default." }
+                  "speculative": { "type": "boolean", "description": "Athena extension. Per-request speculative-decoding override for an MTP-capable model: true opts into the bit-identical-greedy MTP loop at temperature=0 or the Leviathan/Chen sampling loop (distributionally identical to non-speculative sampling at the same temp/top_p/seed) at temperature>0. false forces the standard path. omit ⇒ daemon's --speculative default. MTP engages on a Qwen3.5 fused-head checkpoint, or (ADR 032) on a Gemma 4 target with a paired gemma4_assistant drafter loaded (pull it with `athena pull <target> --with-drafter`); inert (single-token) on any model without a drafter." }
                 }
               },
               "ChatChoice": {

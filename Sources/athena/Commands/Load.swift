@@ -765,7 +765,13 @@ struct Load: AsyncParsableCommand {
                     temperature: Float(temperature ?? 0.7),
                     speculative: speculative,
                     kvCompression: kvCompression,
-                    maxPromptTokens: maxPromptTokens),
+                    maxPromptTokens: maxPromptTokens,
+                    mtpDrafter: tomlCfg?.mtpDrafter,  // ADR 032
+                    dataDir: dataDir.map {
+                        URL(fileURLWithPath: $0, isDirectory: true)
+                    }
+                        ?? AthenaEnv.userHome().appendingPathComponent(
+                            ".athena", isDirectory: true)),
                 promptCacheCapBytes: config.promptCacheCapBytes,
                 prefixCache: prefixCache)
         }

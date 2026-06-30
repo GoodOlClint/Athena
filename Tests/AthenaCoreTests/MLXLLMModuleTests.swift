@@ -29,6 +29,27 @@ final class SpeculativeGateTests: XCTestCase {
     }
 }
 
+/// ADR 032 S4 — the pure MTP acceptance-rate helper (the substrate `.info`
+/// aggregate → an operability rate). CI-safe.
+final class MTPAcceptanceRateTests: XCTestCase {
+    func testNilWhenDrafterDidNotRun() {
+        // No proposed tokens ⇒ the plain non-speculative path; nothing to report.
+        XCTAssertNil(
+            MLXLLMModule.mtpAcceptanceRate(proposed: nil, accepted: nil))
+        XCTAssertNil(
+            MLXLLMModule.mtpAcceptanceRate(proposed: 0, accepted: 0))
+    }
+    func testRate() {
+        XCTAssertEqual(
+            MLXLLMModule.mtpAcceptanceRate(proposed: 4, accepted: 3) ?? -1,
+            0.75, accuracy: 1e-9)
+        // accepted defaults to 0 when absent.
+        XCTAssertEqual(
+            MLXLLMModule.mtpAcceptanceRate(proposed: 8, accepted: nil) ?? -1,
+            0.0, accuracy: 1e-9)
+    }
+}
+
 /// ModelStore path resolution — pure logic, no MLX, always runs in CI.
 final class ModelStoreTests: XCTestCase {
 

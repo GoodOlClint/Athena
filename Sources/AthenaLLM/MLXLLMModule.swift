@@ -36,12 +36,21 @@ public struct LLMGenerationParameters: Sendable {
     /// crash. The right value is hardware+model specific — it's a calibration
     /// knob, not a derivable constant — so it is operator-set, default-off.
     public var maxPromptTokens: Int?
+    /// ADR 032 — explicit MTP speculative-drafter store id (`mtp_drafter`)
+    /// paired to the resident target; overrides the seeded default-drafter map.
+    /// nil ⇒ the map (loaded from `dataDir`) resolves it, else no drafter.
+    public var mtpDrafter: String?
+    /// The daemon data dir, used only to find an operator override of the
+    /// default-drafter map (`<dataDir>/mtp-drafters.toml`). nil ⇒ bundled seed.
+    public var dataDir: URL?
 
     public init(
         maxTokens: Int = 1024, temperature: Float = 0.7,
         topP: Float = 0.95, speculative: Bool = false,
         kvCompression: KVCompression = .none,
-        maxPromptTokens: Int? = nil
+        maxPromptTokens: Int? = nil,
+        mtpDrafter: String? = nil,
+        dataDir: URL? = nil
     ) {
         self.maxTokens = maxTokens
         self.temperature = temperature
@@ -49,6 +58,8 @@ public struct LLMGenerationParameters: Sendable {
         self.speculative = speculative
         self.kvCompression = kvCompression
         self.maxPromptTokens = maxPromptTokens
+        self.mtpDrafter = mtpDrafter
+        self.dataDir = dataDir
     }
 
     /// Whether THIS request is opted into MTP speculative decoding.
@@ -113,6 +124,21 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     private var container: ModelContainer?
     /// Currently-resident model name (nil ⇒ slot unloaded).
     private var residentName: String?
+    /// ADR 032 — the resident target's paired MTP speculative drafter, loaded
+    /// alongside a Gemma 4 target when `speculative` is on and a drafter pairs.
+    /// Holds no target-derived state (substrate contract) so it is reused across
+    /// requests; nil ⇒ MTP inert (single-token decode). Driven via the
+    /// substrate `generate(… mtpDrafter:)` overload in `beginGeneration`.
+    ///
+    /// Boxed `@unchecked Sendable`: the drafter is a reference type with no
+    /// mutable target-derived state and only ever executes under the serialized
+    /// inference gate (ADR 029), so capturing it across the `container.perform`
+    /// actor boundary is race-free (the substrate contract: "safe to share").
+    private struct DrafterBox: @unchecked Sendable {
+        let model: any MTPDrafterModel
+    }
+    private var mtpDrafterModel: DrafterBox?
+    private var mtpDrafterName: String?
     /// M71.2 — true when the resident container was loaded via the substrate's
     /// `VLMModelFactory` (a vision checkpoint with an image tower). Drives the
     /// `servesVision` capability.
@@ -364,6 +390,8 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         container = nil
         residentName = nil
         residentIsVision = false  // M71.2
+        mtpDrafterModel = nil  // ADR 032 — drafter is paired to the target
+        mtpDrafterName = nil
         resetStructuredCaches()
     }
 
@@ -518,6 +546,72 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         container = loaded
         residentName = name
         residentIsVision = isVision  // M71.2
+        // ADR 032 — pair an MTP speculative drafter for a Gemma 4 target when
+        // speculative is enabled. Best-effort: a missing/failed drafter logs and
+        // leaves MTP inert, never failing the target load.
+        await loadMTPDrafterIfEligible(
+            targetName: name, modelType: info?.modelType)
+    }
+
+    /// ADR 032 — load the Gemma 4 MTP drafter paired to the just-loaded target,
+    /// when `speculative` is on. Resolution: explicit `mtp_drafter` > seeded
+    /// default-drafter map > none. The drafter must already be in the store
+    /// (`athena pull <target> --with-drafter`); a miss leaves MTP inert with a
+    /// pointer, it does not download mid-load (ADR 015 cold-load posture) or
+    /// fail the target. Loaded via the substrate `MTPDrafterModelFactory` after
+    /// a one-time idempotent type registration.
+    private func loadMTPDrafterIfEligible(
+        targetName: String, modelType: String?
+    ) async {
+        mtpDrafterModel = nil
+        mtpDrafterName = nil
+        guard params.speculative else { return }
+        // The substrate drafter (`Gemma4AssistantDraftModel`) only drafts for a
+        // Gemma 4 target; gate on the family so a stray map entry can't mis-pair.
+        guard let mt = modelType?.lowercased(), mt.hasPrefix("gemma4") else {
+            return
+        }
+        guard
+            let drafterId = MTPDrafterPairing.resolve(
+                targetID: targetName, explicit: params.mtpDrafter,
+                defaults: MTPDrafterPairing.defaultMap(dataDir: params.dataDir))
+        else { return }
+        guard let dir = directoryURL(for: drafterId),
+            FileManager.default.fileExists(
+                atPath: dir.appendingPathComponent("config.json").path)
+        else {
+            Self.log.warning(
+                """
+                MTP drafter '\(drafterId)' for target '\(targetName)' is not in \
+                the store — speculative decoding stays inert. Pull it with \
+                `athena pull \(targetName) --with-drafter`.
+                """,
+                metadata: ["function": "loadMTPDrafterIfEligible"])
+            return
+        }
+        do {
+            // Register the `gemma4_assistant` drafter type once (idempotent); the
+            // creator lives in MLXVLM and self-registers on import, but the
+            // registry actor still needs this awaited bootstrap.
+            await Gemma4AssistantRegistration.register()
+            let loader = #huggingFaceTokenizerLoader()
+            let ctx = try await MTPDrafterModelFactory.shared.load(
+                from: dir.resolvingSymlinksInPath(), using: loader)
+            mtpDrafterModel = DrafterBox(model: ctx.model)
+            mtpDrafterName = drafterId
+            Self.log.notice(
+                "MTP drafter loaded id=\(drafterId) target=\(targetName)",
+                metadata: ["function": "loadMTPDrafterIfEligible"])
+        } catch {
+            mtpDrafterModel = nil
+            mtpDrafterName = nil
+            Self.log.warning(
+                """
+                MTP drafter load failed for '\(drafterId)' (\(error)) — \
+                speculative decoding stays inert.
+                """,
+                metadata: ["function": "loadMTPDrafterIfEligible"])
+        }
     }
 
     // M41 / ADR 026 — ModelSelectable over the store-classified selectable set.
@@ -636,7 +730,8 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                                     maxTokens: maxTokens,
                                     temperature: temperature,
                                     topP: topP, seed: seed,
-                                    chatTemplateKwargs: chatTemplateKwargs)
+                                    chatTemplateKwargs: chatTemplateKwargs,
+                                    requestSpeculative: speculative)
                                 for await event in stream {
                                     switch event {
                                     case .chunk(let text):
@@ -648,6 +743,13 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                                             promptTokens: info.promptTokenCount,
                                             completionTokens:
                                                 info.generationTokenCount)
+                                        // ADR 032 S4 — surface MTP acceptance
+                                        // for parity with the Qwen path's rate
+                                        // log. Present only when the drafter ran
+                                        // (the mtpDrafter overload populates it);
+                                        // a non-nil passthroughReason means MTP
+                                        // silently fell back to single-token.
+                                        Self.logMTPStats(info)
                                     default:
                                         break
                                     }
@@ -1041,7 +1143,8 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         messages: [ChatTurn], tools: [[String: any Sendable]]?,
         maxTokens: Int?, temperature: Double?,
         topP: Double?, seed: Int?,
-        chatTemplateKwargs: [String: any Sendable]?
+        chatTemplateKwargs: [String: any Sendable]?,
+        requestSpeculative: Bool? = nil
     ) async throws -> AsyncStream<Generation> {
         guard let container else {
             throw AthenaError.moduleLoadFailed(
@@ -1098,6 +1201,25 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             // ADR 030 — same prefill ceiling as runSpeculative; this is the
             // substrate-stream path the gemma4-MoE long-context abort took.
             try enforcePromptCeiling(tokenCount: lmInput.text.tokens.size)
+            // ADR 032 — Gemma 4 MTP: when speculative resolves on AND a paired
+            // drafter is resident, drive the substrate's MTP overload (target +
+            // drafter, lossless via target-verify) instead of the plain stream.
+            // Unstructured-only by construction (this is the no-schema path) and
+            // already inside the ADR 029 inference gate. `gp` carries the
+            // effective temp/top_p/seed → greedy at temp 0, lossless sampling at
+            // temp>0. blockSize 4 matches the mlx-vlm default.
+            // ponytail: blockSize is the substrate default; expose `mtp_block_size`
+            // only if a measured speedup justifies a tuning knob.
+            if (requestSpeculative ?? params.speculative),
+                let drafterBox = mtpDrafterModel
+            {
+                return try await container.perform(nonSendable: lmInput) {
+                    ctx, lmInput in
+                    try MLXLMCommon.generate(
+                        input: lmInput, parameters: gp, context: ctx,
+                        mtpDrafter: drafterBox.model, blockSize: 4)
+                }
+            }
             return try await container.generate(
                 input: lmInput, parameters: gp)
         }
@@ -1109,6 +1231,37 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     static func effectiveMaxTokens(_ override: Int?, _ fallback: Int) -> Int {
         if let o = override, o > 0 { return o }
         return fallback
+    }
+
+    /// ADR 032 S4 — MTP draft acceptance rate from the substrate completion
+    /// info, or nil when the drafter did not run (no proposed tokens ⇒ the plain
+    /// non-speculative path). Pure decision logic, unit-pinned (ADR 008/009).
+    static func mtpAcceptanceRate(proposed: Int?, accepted: Int?) -> Double? {
+        guard let proposed, proposed > 0 else { return nil }
+        return Double(accepted ?? 0) / Double(proposed)
+    }
+
+    /// Log MTP acceptance for parity with the Qwen path's rate log. No-op unless
+    /// the drafter ran. A non-nil `passthrough` means MTP degraded to
+    /// single-token mid-stream (correctness kept, speedup dropped) — an operator
+    /// signal. ponytail: the substrate exposes AGGREGATE counts via `.info`,
+    /// while `SpeculativeStats`'s observer is per-iteration, so they don't bridge
+    /// cleanly; the log line is the operability surface (add an observer feed
+    /// only if a metrics consumer needs the structured stream).
+    private static func logMTPStats(_ info: GenerateCompletionInfo) {
+        guard
+            let rate = mtpAcceptanceRate(
+                proposed: info.proposedDraftTokens,
+                accepted: info.acceptedDraftTokens)
+        else { return }
+        log.notice(
+            """
+            MTP speculative proposed=\(info.proposedDraftTokens ?? 0) \
+            accepted=\(info.acceptedDraftTokens ?? 0) \
+            accept_rate=\(String(format: "%.3f", rate)) \
+            passthrough=\(info.passthroughReason ?? "none")
+            """,
+            metadata: ["function": "generate"])
     }
 
     /// True iff a `max_prompt_tokens` cap is set (positive) and the prompt

@@ -58,6 +58,16 @@ public enum SupportedModels {
                 "\(t) — Qwen3.5 (vendored): MTP speculative, TriAttention "
                 + "eviction, guided structured output"
         case .validated:
+            // ADR 032 — Gemma 4 gains MTP speculative via a separate paired
+            // drafter (gemma4_assistant), unlike the Qwen fused head. Whether a
+            // drafter is actually resident is runtime state; advertise the
+            // capability.
+            if (t.lowercased()).hasPrefix("gemma4") {
+                return
+                    "\(t) — validated substrate arch: guided structured output; "
+                    + "MTP speculative available with a paired gemma4_assistant "
+                    + "drafter (ADR 032)"
+            }
             return
                 "\(t) — validated substrate arch: guided structured output "
                 + "(no MTP speculative / TriAttention eviction)"
