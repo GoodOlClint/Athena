@@ -758,7 +758,7 @@ enum OpenAPISpec {
                   "stream_options": { "type": "object", "properties": { "include_usage": { "type": "boolean" } } },
                   "response_format": { "type": "object", "description": "OpenAI response_format (text | json_object | json_schema)." },
                   "tools": { "type": "array", "items": { "type": "object" } },
-                  "tool_choice": {},
+                  "tool_choice": { "description": "OpenAI tool_choice. 'auto' (default when tools are present) ⇒ the model decides text-vs-tool each turn — NOT forced. 'required' ⇒ forces some tool call (grammar-constrained). {type:function,function:{name}} ⇒ forces that one. 'none' ⇒ no tool call (menu withheld). Auto tool-call detection is substrate-arch-gated (Gemma 4 supported). ADR 034." },
                   "max_tokens": { "type": "integer", "description": "Output-token cap (deprecated alias of max_completion_tokens; max_completion_tokens wins if both are sent)." },
                   "max_completion_tokens": { "type": "integer", "description": "Output-token cap (OpenAI's current field). Absent ⇒ the daemon default." },
                   "temperature": { "type": "number" },

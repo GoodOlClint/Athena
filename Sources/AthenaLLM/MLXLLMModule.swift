@@ -353,11 +353,42 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             let images: [UserInput.Image] = turn.images.compactMap {
                 CIImage(data: $0.data).map(UserInput.Image.ciImage)
             }
+            // ADR 034 — carry tool history so the template pairs the
+            // assistant's call with its tool result. Assistant `tool_calls` →
+            // `.calls`; a tool-result turn's `tool_call_id` → `.result`.
+            let tool: Chat.Message.Tool? = {
+                if !turn.toolCalls.isEmpty {
+                    return .calls(
+                        turn.toolCalls.map { tc in
+                            ToolCall(
+                                function: .init(
+                                    name: tc.name,
+                                    arguments: Self.toolArgsObject(
+                                        tc.argumentsJSON)),
+                                id: tc.id)
+                        })
+                }
+                if let id = turn.toolCallID { return .result(id: id) }
+                return nil
+            }()
             return Chat.Message(
                 role: Chat.Message.Role(rawValue: turn.role) ?? .user,
-                content: turn.content, images: images)
+                content: turn.content, images: images, tool: tool)
         }
         return mapped.isEmpty ? [.user("")] : mapped
+    }
+
+    /// ADR 034 — parse a tool call's stringified `arguments` back to the
+    /// substrate's `[String: JSONValue]` for `ToolCall.Function`. Malformed /
+    /// non-object ⇒ empty (the template still renders an argument-less call).
+    /// `MLXLMCommon.JSONValue` is qualified to disambiguate from
+    /// `AthenaStructured.JSONValue`.
+    static func toolArgsObject(
+        _ json: String
+    ) -> [String: MLXLMCommon.JSONValue] {
+        (try? JSONDecoder().decode(
+            [String: MLXLMCommon.JSONValue].self,
+            from: Data(json.utf8))) ?? [:]
     }
 
     public var residentBytes: Int {
@@ -736,6 +767,20 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                                     switch event {
                                     case .chunk(let text):
                                         continuation.yield(.text(text))
+                                    case .toolCall(let tc):
+                                        // ADR 034 — a freely-chosen tool call
+                                        // (tool_choice:auto), detected by the
+                                        // substrate's native .gemma4 handler.
+                                        // Serialize args with the SAME
+                                        // sorted-key form as the Guide-forced
+                                        // parse so both surfaces agree.
+                                        continuation.yield(
+                                            .toolCall(
+                                                name: tc.function.name,
+                                                argumentsJSON: toolArgumentsJSON(
+                                                    tc.function.arguments
+                                                        .mapValues { $0.anyValue }
+                                                )))
                                     case .info(let info):
                                         // Substrate's terminal completion
                                         // record carries the token geometry.
@@ -750,7 +795,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                                         // a non-nil passthroughReason means MTP
                                         // silently fell back to single-token.
                                         Self.logMTPStats(info)
-                                    default:
+                                    @unknown default:
                                         break
                                     }
                                 }

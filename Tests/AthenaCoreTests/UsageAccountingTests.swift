@@ -34,6 +34,7 @@ final class UsageAccountingTests: XCTestCase {
             case .usage(let u): usages.append(u)
             case .finish: break
             case .logprobs: break
+            case .toolCall: break
             case .error(let e): XCTFail("stub should not error: \(e)")
             }
         }
@@ -70,6 +71,7 @@ final class UsageAccountingTests: XCTestCase {
                 case .usage(let u): completion = u.completionTokens
                 case .finish(let r): finish = r
                 case .logprobs: break
+                case .toolCall: break
                 case .error(let e): XCTFail("stub should not error: \(e)")
                 }
             }

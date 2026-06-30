@@ -1,3 +1,4 @@
+import AthenaServerKit
 import AthenaStructured
 import Foundation
 
@@ -20,6 +21,10 @@ struct ChatMessage: Codable {
     let role: String
     let content: String?  // null for a tool-call response
     var tool_calls: [ToolCallOut]?
+    /// ADR 034 — on a `role:"tool"` message, the assistant tool-call id this
+    /// result answers (OpenAI `tool_call_id`). Carried into the chat template
+    /// so the model sees a coherent call→result history. nil otherwise.
+    var tool_call_id: String?
     /// M71.1 (vision input): the `image_url.url` strings extracted from an
     /// OpenAI content-parts array. Empty for a plain-string content. Populated
     /// only on DECODE; not part of the response-encoding surface (responses
@@ -28,16 +33,17 @@ struct ChatMessage: Codable {
 
     init(
         role: String, content: String?, tool_calls: [ToolCallOut]? = nil,
-        imageURLs: [String] = []
+        tool_call_id: String? = nil, imageURLs: [String] = []
     ) {
         self.role = role
         self.content = content
         self.tool_calls = tool_calls
+        self.tool_call_id = tool_call_id
         self.imageURLs = imageURLs
     }
 
     private enum CodingKeys: String, CodingKey {
-        case role, content, tool_calls
+        case role, content, tool_calls, tool_call_id
     }
 
     /// `content` decodes as EITHER a plain string (unchanged) OR an OpenAI
@@ -50,6 +56,7 @@ struct ChatMessage: Codable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         role = try c.decode(String.self, forKey: .role)
         tool_calls = try c.decodeIfPresent([ToolCallOut].self, forKey: .tool_calls)
+        tool_call_id = try c.decodeIfPresent(String.self, forKey: .tool_call_id)
         if !c.contains(.content)
             || ((try? c.decodeNil(forKey: .content)) == true)
         {
@@ -291,32 +298,57 @@ struct ChatCompletionRequest: Codable {
         return nil
     }
 
-    /// Tools to constrain to: `tool_choice` forcing one ⇒ `[that]`;
-    /// `"none"` / no tools ⇒ nil; otherwise (auto/absent/"required") ⇒
-    /// all declared tools (the caller compiles a single-fn schema for
-    /// one tool, a `oneOf` union for many — free multi-tool choice). A
-    /// forced name matching nothing ⇒ nil (falls through to
-    /// response_format / unconstrained, preserving prior behavior).
-    private func selectedTools() -> [Tool]? {
-        guard let tools, !tools.isEmpty else { return nil }
-        if case .string(let s)? = tool_choice,
-            s == "none" { return nil }
-        if case .object(let o)? = tool_choice,
-            case .object(let f)? = o["function"],
-            case .string(let name)? = f["name"]
-        {
-            return tools.first { $0.function.name == name }.map { [$0] }
+    /// Map the OpenAI `tool_choice` value to a `ToolChoiceMode`. Absent ⇒
+    /// `.auto` (the OpenAI default). An unrecognized string ⇒ `.auto` too
+    /// (lenient). ADR 034.
+    private func toolChoiceMode() -> ToolChoiceMode {
+        switch tool_choice {
+        case .none, .some(.null): return .auto
+        case .string(let s)?:
+            switch s {
+            case "none": return .none
+            case "required": return .required
+            default: return .auto  // "auto" and anything unrecognized
+            }
+        case .object(let o)?:
+            if case .object(let f)? = o["function"],
+                case .string(let name)? = f["name"]
+            {
+                return .named(name)
+            }
+            return .auto
+        default:
+            return .auto
         }
-        return tools
+    }
+
+    /// ADR 034 — the force/advertise decision for this request, resolved by the
+    /// MLX-free `resolveToolChoice` algebra (unit-pinned in AthenaServerKit).
+    private func toolChoiceResolution() -> ToolChoiceResolution {
+        resolveToolChoice(
+            mode: toolChoiceMode(),
+            toolNames: (tools ?? []).map { $0.function.name })
+    }
+
+    /// Tools the Guide must FORCE this turn (ADR 034): `required` ⇒ all,
+    /// `named` ⇒ that one, `auto`/`none` ⇒ none. A `oneOf` is compiled for
+    /// >1 forced tool. Empty ⇒ no forcing schema (the model decides).
+    private func forcedTools() -> [Tool] {
+        let names = Set(toolChoiceResolution().forcedToolNames)
+        guard !names.isEmpty, let tools else { return [] }
+        return tools.filter { names.contains($0.function.name) }
     }
 
     /// All declared tools, lowered to the substrate `ToolSpec` shape
     /// (`{"type":"function","function":{name,description,parameters}}`),
-    /// for the model's chat template. ALL tools are advertised even when
-    /// the Guide constrains output to one — the model still needs the
-    /// tool-call format and the full menu. nil ⇒ no tools.
+    /// for the model's chat template. ALL tools are advertised even when the
+    /// Guide constrains output to one — the model still needs the format and
+    /// full menu. ADR 034: `tool_choice:"none"` advertises NO menu (the model
+    /// must not call), so the model answers in text. nil ⇒ no menu.
     func toolSpecs() -> [[String: any Sendable]]? {
-        guard let tools, !tools.isEmpty else { return nil }
+        guard let tools, !tools.isEmpty,
+            toolChoiceResolution().advertiseMenu
+        else { return nil }
         return tools.map { t in
             var fn: [String: any Sendable] = ["name": t.function.name]
             if let d = t.function.description { fn["description"] = d }
@@ -332,7 +364,11 @@ struct ChatCompletionRequest: Codable {
     /// whether it is a tool call (tools take precedence over
     /// response_format). nil ⇒ unconstrained.
     func effectiveSchema() -> (json: String, isToolCall: Bool)? {
-        if let ts = selectedTools(), !ts.isEmpty {
+        // ADR 034: only FORCED tool choices (`required`/named) engage the
+        // Guide. `auto`/absent ⇒ no forcing schema; the model decides and the
+        // substrate detects a tool call natively.
+        let ts = forcedTools()
+        if !ts.isEmpty {
             let schema =
                 ts.count == 1
                 ? StructuredSchema.toolCallSchema(
@@ -362,7 +398,9 @@ struct ChatCompletionRequest: Codable {
     /// in-effect tool call is fine.
     func structuredRequestError() -> String? {
         guard response_format?.type == "json_schema" else { return nil }
-        if let ts = selectedTools(), !ts.isEmpty { return nil }
+        // A tool request (menu advertised — auto/required/named) takes
+        // precedence over response_format, so a missing schema is fine here.
+        if toolChoiceResolution().advertiseMenu { return nil }
         if StructuredSchema.schemaJSON(
             responseFormatType: "json_schema",
             jsonSchema: response_format?.json_schema?.schema) == nil

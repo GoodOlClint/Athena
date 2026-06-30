@@ -14,10 +14,36 @@ public struct ChatTurn: Sendable, Equatable {
     /// before. Populated only from OpenAI `image_url` content-parts on the chat
     /// path; consumed by the VLM generate path (M71.2).
     public let images: [ChatImage]
-    public init(role: String, content: String, images: [ChatImage] = []) {
+    /// ADR 034 — tool calls on an ASSISTANT turn (the model's prior request),
+    /// carried so the chat template renders a coherent call→result history.
+    /// Empty for non-tool turns.
+    public let toolCalls: [ChatToolCall]
+    /// ADR 034 — the assistant tool-call id a TOOL-result turn answers
+    /// (OpenAI `tool_call_id`). nil for non-tool turns.
+    public let toolCallID: String?
+    public init(
+        role: String, content: String, images: [ChatImage] = [],
+        toolCalls: [ChatToolCall] = [], toolCallID: String? = nil
+    ) {
         self.role = role
         self.content = content
         self.images = images
+        self.toolCalls = toolCalls
+        self.toolCallID = toolCallID
+    }
+}
+
+/// One tool call on an assistant turn (ADR 034). `argumentsJSON` is the OpenAI
+/// stringified-args form, parsed back to an object when handed to the substrate
+/// chat template.
+public struct ChatToolCall: Sendable, Equatable {
+    public let id: String?
+    public let name: String
+    public let argumentsJSON: String
+    public init(id: String?, name: String, argumentsJSON: String) {
+        self.id = id
+        self.name = name
+        self.argumentsJSON = argumentsJSON
     }
 }
 

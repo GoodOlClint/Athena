@@ -60,4 +60,10 @@ public enum GenChunk: Sendable {
     /// (greedy/structured) decode, emitted once after the text when the request
     /// set `logprobs:true`. One element per emitted completion token, in order.
     case logprobs([TokenLogprob])
+    /// ADR 034 — a tool call the model emitted **freely** (`tool_choice:auto`),
+    /// detected by the substrate's native tool handler rather than the forcing
+    /// Guide. `argumentsJSON` is the OpenAI stringified-args form. The server
+    /// surfaces it as `tool_calls` + `finish_reason:"tool_calls"`. The
+    /// Guide-forced path does not use this (it streams the call as `.text`).
+    case toolCall(name: String, argumentsJSON: String)
 }

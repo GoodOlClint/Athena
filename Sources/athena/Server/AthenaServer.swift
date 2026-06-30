@@ -1083,7 +1083,8 @@ struct AthenaServer {
         return Self.json(
             Self.chatCompletionResponse(
                 id: id, model: model, created: created, text: text,
-                isToolCall: effective?.isToolCall == true, usage: usage,
+                isToolCall: effective?.isToolCall == true,
+                detectedToolCall: collected.toolCall, usage: usage,
                 finish: finish, logprobs: collected.logprobs))
     }
 
@@ -1111,24 +1112,43 @@ struct AthenaServer {
             })
     }
 
+    /// Build a `tool_calls` choice from a resolved (name, stringified-args)
+    /// pair. Shared by the Guide-forced parse and the ADR-034 substrate-detected
+    /// path so both emit the identical OpenAI shape.
+    private static func toolCallChoice(
+        name: String, argsJSON: String, logprobs: [TokenLogprob]?
+    ) -> ChatChoice {
+        ChatChoice(
+            index: 0,
+            message: ChatMessage(
+                role: "assistant", content: nil,
+                tool_calls: [
+                    ToolCallOut(
+                        id: "call_\(UUID().uuidString.prefix(8))",
+                        type: "function",
+                        function: FunctionCallOut(
+                            name: name, arguments: argsJSON))
+                ]),
+            finish_reason: "tool_calls",
+            logprobs: Self.chatLogprobs(logprobs))
+    }
+
     private static func chatChoice(
-        text: String, isToolCall: Bool, finish: FinishReason,
+        text: String, isToolCall: Bool,
+        detectedToolCall: (name: String, argsJSON: String)? = nil,
+        finish: FinishReason,
         logprobs: [TokenLogprob]? = nil
     ) -> ChatChoice {
+        // ADR 034 — a substrate-detected free tool call (tool_choice:auto)
+        // takes precedence: it's already parsed, no text to re-parse.
+        if let call = detectedToolCall {
+            return toolCallChoice(
+                name: call.name, argsJSON: call.argsJSON, logprobs: logprobs)
+        }
+        // Guide-forced (required/named): the call is the decoded JSON text.
         if isToolCall, let call = parseToolCall(text) {
-            return ChatChoice(
-                index: 0,
-                message: ChatMessage(
-                    role: "assistant", content: nil,
-                    tool_calls: [
-                        ToolCallOut(
-                            id: "call_\(UUID().uuidString.prefix(8))",
-                            type: "function",
-                            function: FunctionCallOut(
-                                name: call.name, arguments: call.argsJSON))
-                    ]),
-                finish_reason: "tool_calls",
-                logprobs: Self.chatLogprobs(logprobs))
+            return toolCallChoice(
+                name: call.name, argsJSON: call.argsJSON, logprobs: logprobs)
         }
         return ChatChoice(
             index: 0,
@@ -1140,7 +1160,9 @@ struct AthenaServer {
     /// Assemble a full OpenAI `ChatCompletionResponse` around one choice.
     private static func chatCompletionResponse(
         id: String, model: String, created: Int, text: String,
-        isToolCall: Bool, usage: TokenUsage,
+        isToolCall: Bool,
+        detectedToolCall: (name: String, argsJSON: String)? = nil,
+        usage: TokenUsage,
         finish: FinishReason = .stop,
         logprobs: [TokenLogprob]? = nil
     ) -> ChatCompletionResponse {
@@ -1149,7 +1171,8 @@ struct AthenaServer {
             model: model,
             choices: [
                 chatChoice(
-                    text: text, isToolCall: isToolCall, finish: finish,
+                    text: text, isToolCall: isToolCall,
+                    detectedToolCall: detectedToolCall, finish: finish,
                     logprobs: logprobs)
             ],
             usage: Usage(
@@ -1167,6 +1190,10 @@ struct AthenaServer {
         var finish: FinishReason = .stop
         // C2 — per-token logprobs when the request asked for them.
         var logprobs: [TokenLogprob]?
+        // ADR 034 — a freely-chosen tool call (tool_choice:auto) detected by
+        // the substrate. nil ⇒ plain text completion (or a Guide-forced call,
+        // which arrives as `text` and is parsed via `isToolCall`).
+        var toolCall: (name: String, argsJSON: String)?
     }
 
     /// NSLock-isolated state for the M46.7 heartbeat: the event-drain
@@ -1497,6 +1524,9 @@ struct AthenaServer {
                         case .usage(let u): c.usage = u
                         case .finish(let r): c.finish = r
                         case .logprobs(let l): c.logprobs = l
+                        case .toolCall(let name, let argsJSON):
+                            // ADR 034 — substrate-detected free tool call.
+                            c.toolCall = (name, argsJSON)
                         case .error(let athenaErr):
                             // M49.5.2 — re-throw the classified error so the
                             // HTTP layer's `do { ... } catch let e as AthenaError`
@@ -4759,6 +4789,32 @@ struct AthenaServer {
                                     finish_reason: nil)
                             ]))
                 }
+                // One `delta.tool_calls` chunk (v0.10.230 shape). Used by both
+                // the Guide-forced post-loop parse and the ADR-034 substrate
+                // `.toolCall` event.
+                func emitToolCallDelta(name: String, argsJSON: String) {
+                    emit(
+                        ChatCompletionChunk(
+                            id: id, object: "chat.completion.chunk",
+                            created: created, model: model,
+                            choices: [
+                                ChatChunkChoice(
+                                    index: 0,
+                                    delta: ChatDelta(
+                                        role: nil, content: nil,
+                                        tool_calls: [
+                                            ToolCallDelta(
+                                                index: 0,
+                                                id:
+                                                    "call_\(UUID().uuidString.prefix(8))",
+                                                type: "function",
+                                                function: FunctionCallOut(
+                                                    name: name,
+                                                    arguments: argsJSON))
+                                        ]),
+                                    finish_reason: nil)
+                            ]))
+                }
                 emit(
                     ChatCompletionChunk(
                         id: id, object: "chat.completion.chunk",
@@ -4801,6 +4857,11 @@ struct AthenaServer {
                         }
                     case .usage(let u):
                         usage = u
+                    case .toolCall(let name, let argsJSON):
+                        // ADR 034 — substrate-detected free tool call: emit
+                        // the delta now and upgrade the terminal finish.
+                        emitToolCallDelta(name: name, argsJSON: argsJSON)
+                        finishOverride = "tool_calls"
                     case .finish(let r):
                         // A stop-sequence hit wins over the generator's
                         // own length/stop reason.
@@ -4856,28 +4917,8 @@ struct AthenaServer {
                 // silently dropped.
                 if isToolCall {
                     if let call = parseToolCall(toolBuffer) {
-                        emit(
-                            ChatCompletionChunk(
-                                id: id, object: "chat.completion.chunk",
-                                created: created, model: model,
-                                choices: [
-                                    ChatChunkChoice(
-                                        index: 0,
-                                        delta: ChatDelta(
-                                            role: nil, content: nil,
-                                            tool_calls: [
-                                                ToolCallDelta(
-                                                    index: 0,
-                                                    id:
-                                                        "call_\(UUID().uuidString.prefix(8))",
-                                                    type: "function",
-                                                    function: FunctionCallOut(
-                                                        name: call.name,
-                                                        arguments: call.argsJSON
-                                                    ))
-                                            ]),
-                                        finish_reason: nil)
-                                ]))
+                        emitToolCallDelta(
+                            name: call.name, argsJSON: call.argsJSON)
                         finishOverride = "tool_calls"
                     } else {
                         emitDelta(toolBuffer)
@@ -5018,11 +5059,25 @@ struct AthenaServer {
     static func chatTurns(from messages: [ChatMessage]) throws -> [ChatTurn] {
         try messages.compactMap { m -> ChatTurn? in
             let images = try m.imageURLs.map { try ChatImage.fromImageURL($0) }
-            guard let c = m.content else {
-                return images.isEmpty
-                    ? nil : ChatTurn(role: m.role, content: "", images: images)
+            // ADR 034 — carry assistant tool_calls + tool-result tool_call_id
+            // so the template renders a coherent call→result history.
+            let toolCalls = (m.tool_calls ?? []).map {
+                ChatToolCall(
+                    id: $0.id, name: $0.function.name,
+                    argumentsJSON: $0.function.arguments)
             }
-            return ChatTurn(role: m.role, content: c, images: images)
+            guard let c = m.content else {
+                // An assistant tool-call turn has null content + tool_calls —
+                // keep it (don't drop), so the model sees its own prior call.
+                return images.isEmpty && toolCalls.isEmpty
+                    ? nil
+                    : ChatTurn(
+                        role: m.role, content: "", images: images,
+                        toolCalls: toolCalls, toolCallID: m.tool_call_id)
+            }
+            return ChatTurn(
+                role: m.role, content: c, images: images,
+                toolCalls: toolCalls, toolCallID: m.tool_call_id)
         }
     }
 

@@ -1,7 +1,7 @@
 import Foundation
 import XCTest
 
-@testable import AthenaServerKit
+@testable import AthenaCore
 
 /// Pins the tool-call parse that both the streaming (`pumpTokens`) and
 /// non-streaming (`chatChoice`) chat paths use to surface OpenAI `tool_calls`.
@@ -47,5 +47,22 @@ final class ToolCallParseTests: XCTestCase {
         XCTAssertNil(parseToolCall("hello there"))
         XCTAssertNil(parseToolCall(#"{"arguments":{"query":"x"}}"#))  // no name
         XCTAssertNil(parseToolCall(#"{"name":"#))  // truncated JSON
+    }
+
+    // MARK: - toolArgumentsJSON (ADR 034 — shared by parse + substrate path)
+
+    func testToolArgumentsJSONSortsKeys() {
+        XCTAssertEqual(
+            toolArgumentsJSON(["b": 2, "a": 1] as [String: Any]),
+            #"{"a":1,"b":2}"#)
+    }
+
+    func testToolArgumentsJSONNilAndNonObjectDefaultEmpty() {
+        XCTAssertEqual(toolArgumentsJSON(nil), "{}")
+        XCTAssertEqual(toolArgumentsJSON("not an object"), "{}")
+    }
+
+    func testToolArgumentsJSONEmptyObject() {
+        XCTAssertEqual(toolArgumentsJSON([String: Any]()), "{}")
     }
 }
