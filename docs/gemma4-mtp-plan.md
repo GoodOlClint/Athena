@@ -9,11 +9,20 @@ v0.10.228**. Full logic suite green (761/0). Pairs with **ADR 032**.
 |---|---|---|
 | **Dense** | `gemma-4-31b-it-8bit` ↔ `…-31B-it-assistant-bf16` | **✓ PASS** — engaged 46/46, passthrough=none, byte-identical-to-greedy in the 64-tok window, **1.52×** speedup |
 | **MoE** | `gemma-4-26b-a4b-it-4bit` ↔ `…-26B-A4B-it-assistant-bf16` | **✓ PASS** — engaged 46/46, passthrough=none, coherent (speedup measure-per-use; NOTES MoE-batch-1 caveat stands) |
-| **Effective (E-series)** | `gemma-4-e4b-it-4bit`, `gemma-4-e2b-it-4bit` | **✗ BLOCKED — substrate, not MTP** (target won't load) |
+| **Effective (E-series)** | `gemma-4-e4b-it-4bit`, `gemma-4-e2b-it-4bit` | **✓ PASS** (on substrate `integration`) — E4B engaged 46/46 byte-identical-greedy, E2B engaged 34/34 |
 
-The drafter auto-paired + loaded from the seeded map in every case; the
-`generate(mtpDrafter:)` drive is target-agnostic. Both passing families are
-`num_kv_shared_layers = 0`.
+**All three Gemma 4 families validated.** The drafter auto-paired + loaded from
+the seeded map in every case; the `generate(mtpDrafter:)` drive is
+target-agnostic.
+
+The E-series needed **both** substrate fixes, present together only on
+`integration`: `4acd179` (VLM Gemma4 KV-sharing target load — from Athena's
+handoff) **and** `0bec134` (E-series drafter centroid masked-embedder forward).
+Earlier E-series failures were a **wrong-branch** artifact — Athena's `Package.swift`
+path-dep builds whatever the substrate has checked out, and we'd tested
+`pr/gemma4-vlm-kv-sharing` (KV fix only). Rebuilt against `integration` → all pass.
+Both earlier "E-series blocker" reports
+(`~/Source/mlx/research/gemma4-eseries-*`) are resolved/false-alarm.
 
 ### E-series retest (2026-06-30, against substrate `4acd179`)
 
@@ -25,8 +34,9 @@ is an unimplemented `fatalError` (both E-series drafters ship
 tied-`lm_head` path, which is why they work). Uncatchable from Athena (it's a
 `fatalError` on the MLX worker), so the asks are upstream: implement the forward
 (port mlx-vlm `masked_embedder.py`) **and** `throw` instead of `fatalError` so
-consumers degrade. Handoff: `~/Source/mlx/research/gemma4-eseries-drafter-centroid-embedder.md`.
-**E-series MTP remains blocked on the substrate; dense + MoE unchanged (working).**
+consumers degrade. **UPDATE: this was a wrong-branch artifact** — the centroid
+forward IS implemented on `integration` (`0bec134`); rebuilding Athena against
+`integration` made E-series MTP pass (see the matrix above). Handoff retracted.
 
 ### E-series target-load blocker — root cause (FIXED upstream `4acd179`)
 
