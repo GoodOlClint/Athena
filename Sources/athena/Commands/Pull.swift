@@ -28,6 +28,14 @@ struct Pull: AsyncParsableCommand {
             + "touches no daemon. Exits non-zero if unsupported."))
     var check = false
 
+    @Flag(
+        name: .long,
+        help: ArgumentHelp(
+            "Also pull the model's paired MTP speculative drafter, if one is "
+            + "known (ADR 032). Resolved from the seeded default-drafter map; "
+            + "no-op when the target has no mapped drafter."))
+    var withDrafter = false
+
     @Option(help: "Model store root. Default: ~/.athena/models.")
     var modelStore: String?
 
@@ -79,11 +87,35 @@ struct Pull: AsyncParsableCommand {
                 throw ExitCode.failure
             }
         }
-        print("pulling \(model) …")
-        let bar = ProgressBar("  \(model)")
+        try await pullOne(id: model, into: root)
+
+        // ADR 032 — `--with-drafter`: also fetch the target's paired MTP
+        // speculative drafter if one is mapped. The seed map alone (no data_dir)
+        // covers the published pairs; a miss is a no-op, not an error.
+        if withDrafter {
+            if let drafter = MTPDrafterPairing.resolve(
+                targetID: model, explicit: nil,
+                defaults: MTPDrafterPairing.defaultMap(dataDir: nil))
+            {
+                print("pulling paired MTP drafter \(drafter) …")
+                try await pullOne(id: drafter, into: root)
+            } else {
+                FileHandle.standardError.write(
+                    Data(
+                        ("note: no MTP drafter is mapped for '\(model)'; "
+                            + "nothing more to pull.\n").utf8))
+            }
+        }
+    }
+
+    /// Pull one HF id into `root` with a progress bar + retry reporting. Throws
+    /// `ExitCode.failure` (already messaged) on failure.
+    private func pullOne(id: String, into root: URL) async throws {
+        print("pulling \(id) …")
+        let bar = ProgressBar("  \(id)")
         do {
             let dest = try await ModelPull.pull(
-                id: model, into: root,
+                id: id, into: root,
                 progress: { f in bar.update(f) },
                 onRetry: { attempt, maxAttempts, err in
                     bar.finish()
@@ -94,12 +126,12 @@ struct Pull: AsyncParsableCommand {
                                 .utf8))
                 })
             bar.finish()
-            print("pulled \(model) → \(dest.path)")
+            print("pulled \(id) → \(dest.path)")
         } catch {
             bar.finish()
             print("error: pull failed — \(ModelPull.friendlyError(error))")
             print(
-                "  re-run `athena pull \(model)` to resume "
+                "  re-run `athena pull \(id)` to resume "
                     + "(already-downloaded files are kept).")
             throw ExitCode.failure
         }
@@ -126,6 +158,17 @@ struct Pull: AsyncParsableCommand {
         }
         print(model)
         print("  modality:    \(support.modality.label)")
+        // ADR 032 — for a generative/vision target, note a mapped MTP drafter so
+        // the operator knows `--with-drafter` (and the `speculative` knob) has
+        // something to pair. Seed map only (no data_dir) in this host-independent
+        // dry run.
+        if support.modality == .llm || support.modality == .vision,
+            let drafter = MTPDrafterPairing.resolve(
+                targetID: model, explicit: nil,
+                defaults: MTPDrafterPairing.defaultMap(dataDir: nil))
+        {
+            print("  mtp_drafter: \(drafter) (pull with --with-drafter)")
+        }
         switch support.loadability {
         case .loadable:
             print("  loadability: loadable")

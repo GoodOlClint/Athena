@@ -112,7 +112,12 @@ let package = Package(
                 // AthenaCore stays buildable off Darwin.
                 .product(name: "Crypto", package: "swift-crypto"),
             ],
-            path: "Sources/AthenaCore"),
+            path: "Sources/AthenaCore",
+            // ADR 032 — the seeded MTP target↔drafter default-pairing map ships
+            // as DATA (operator-overridable at <data_dir>/mtp-drafters.toml), not
+            // Swift constants, so a moved/renamed HF repo is fixed without a
+            // recompile (the spirit of ADR 021 D5).
+            resources: [.copy("Resources/mtp-drafters.toml")]),
 
         // C ABI of the Rust outlines-core structured-output staticlib.
         // The module map links `athena_structured_shim`; the search path

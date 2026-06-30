@@ -35,6 +35,7 @@ extension ConfigEditor {
         case "temperature": return cfg.temperature
         case "speculative":
             return cfg.speculative.map { $0 ? "true" : "false" }
+        case "mtp_drafter": return cfg.mtpDrafter
         case "auth_keys_file": return cfg.authKeysFile
         case "tls_cert": return cfg.tlsCert
         case "tls_key": return cfg.tlsKey

@@ -45,6 +45,12 @@ public struct AthenaConfig: Sendable, Equatable {
     public var maxPromptTokens: Int?
     public var temperature: String?
     public var speculative: Bool?
+    /// `mtp_drafter` (ADR 032) — explicit MTP speculative-drafter store id paired
+    /// to the resident LLM target (Gemma 4 `gemma4_assistant`). Overrides the
+    /// seeded default-drafter map; absent ⇒ the map resolves it, else no drafter
+    /// (the `speculative` knob is inert). The drafter loads only when
+    /// `speculative` engages.
+    public var mtpDrafter: String?
     /// KV-cache compression codec: `none` (default) or `triattention`.
     /// Optional — daemon defaults to `none` when absent.
     /// The `ATHENA_KV_COMPRESSION` env var overrides this at startup.
@@ -211,6 +217,7 @@ public struct AthenaConfig: Sendable, Equatable {
         maxTokens: Int? = nil, maxPromptTokens: Int? = nil,
         temperature: String? = nil,
         speculative: Bool? = nil,
+        mtpDrafter: String? = nil,
         kvCompression: String? = nil,
         promptCacheEnabled: Bool? = nil,
         promptCacheMaxEntries: Int? = nil,
@@ -264,6 +271,7 @@ public struct AthenaConfig: Sendable, Equatable {
         self.maxPromptTokens = maxPromptTokens
         self.temperature = temperature
         self.speculative = speculative
+        self.mtpDrafter = mtpDrafter
         self.kvCompression = kvCompression
         self.promptCacheEnabled = promptCacheEnabled
         self.promptCacheMaxEntries = promptCacheMaxEntries
@@ -516,6 +524,7 @@ public struct AthenaConfig: Sendable, Equatable {
             maxPromptTokens: maxPromptTok,
             temperature: scalar("temperature", in: toml),
             speculative: spec,
+            mtpDrafter: scalar("mtp_drafter", in: toml),
             kvCompression: scalar("kv_compression", in: toml),
             promptCacheEnabled: pcEnabled,
             promptCacheMaxEntries: pcMaxEntries,

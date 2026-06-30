@@ -54,6 +54,11 @@ public enum ModelModality: Sendable, Equatable {
     case diarization(DiarizationBackend)
     /// WeSpeaker-style speaker-embedding (voiceprint) model.
     case speakerEmbedding
+    /// A Multi-Token-Prediction speculative **drafter** (e.g. `gemma4_assistant`,
+    /// ADR 032) — paired to a generative target, not independently servable.
+    /// Loaded via the substrate `MTPDrafterModelFactory`, never the LLM/VLM
+    /// factory, and pulled (bf16) rather than converted.
+    case mtpDrafter
     /// No modality Athena serves could be identified from the config.
     case unsupported
 
@@ -68,6 +73,7 @@ public enum ModelModality: Sendable, Equatable {
         case .diarization(let backend):
             return "diarization (\(backend.rawValue))"
         case .speakerEmbedding: return "speaker-embedding"
+        case .mtpDrafter: return "mtp-drafter"
         case .unsupported: return "unsupported"
         }
     }
@@ -102,6 +108,13 @@ extension ModelSupport {
     /// static mirror keeps the detector MLX-free, like the other detectors'
     /// marker sets.
     public static let speakerEmbeddingMarkers: [String] = ["wespeaker"]
+
+    /// Lowercased `model_type` values that mark an MTP speculative drafter
+    /// (ADR 032). Exact-match, not substring — a drafter is a distinct
+    /// substrate-registered type, and `ModelClass` would otherwise file its
+    /// named `model_type` as `.generative`. Add a family's drafter type here
+    /// when the substrate registers it with `MTPDrafterTypeRegistry`.
+    public static let mtpDrafterMarkers: [String] = ["gemma4_assistant"]
 
     /// The MLX-free config fields `classify` decides on. Bundling them in one
     /// struct keeps the decision a pure, trivially unit-testable function with
@@ -180,6 +193,17 @@ extension ModelSupport {
         {
             return ModelSupport(
                 modality: .speakerEmbedding, loadability: .loadable)
+        }
+
+        // 3a. MTP drafter — gemma4_assistant et al. (ADR 032). A speculative
+        // drafter paired to a target, not a servable model. Detected before
+        // ModelClass, which would file its named model_type as `.generative`.
+        // The model_type IS the loader's routing signal and the substrate
+        // implements it → loadable on a positive match.
+        if let type = probe.info.modelType?.lowercased(),
+            mtpDrafterMarkers.contains(type)
+        {
+            return ModelSupport(modality: .mtpDrafter, loadability: .loadable)
         }
 
         // 4. Generative / vision / embedding — delegate to ModelClass.

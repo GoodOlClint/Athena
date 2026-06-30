@@ -141,6 +141,14 @@ final class ModelModalityAcceptorTests: XCTestCase {
         XCTAssertFalse(ModelModality.llm.isEmbeddingSlot)
         XCTAssertFalse(
             ModelModality.embedding.isTranscriptionSlot)
+        // ADR 032 — an MTP drafter is paired to a target, never independently
+        // servable, so it matches no slot (never auto-selected by the ambiguity
+        // rule).
+        XCTAssertFalse(ModelModality.mtpDrafter.isLLMSlot)
+        XCTAssertFalse(ModelModality.mtpDrafter.isEmbeddingSlot)
+        XCTAssertFalse(ModelModality.mtpDrafter.isTranscriptionSlot)
+        XCTAssertFalse(ModelModality.mtpDrafter.isDiarizationSlot)
+        XCTAssertFalse(ModelModality.mtpDrafter.isSpeakerEmbeddingSlot)
     }
 }
 

@@ -62,6 +62,17 @@ final class ConvertRedirectTests: XCTestCase {
         }
     }
 
+    /// ADR 032 — an MTP drafter is pulled (bf16), not converted, so `convert`
+    /// redirects it to `pull` rather than mis-routing it to the quantizer.
+    func testMTPDrafterRedirects() {
+        let e = ModelConvert.convertRedirect(
+            for: support(.mtpDrafter), id: "some/gemma-4-assistant-bf16")
+        XCTAssertEqual(e?.code, "unsupported_convert_class")
+        XCTAssertEqual(e?.httpStatus, 400)
+        XCTAssertTrue(e?.message.contains("athena pull") == true)
+        XCTAssertTrue(e?.message.contains("mtp-drafter") == true, e!.message)
+    }
+
     /// The M76 incident: a Parakeet checkpoint must redirect cleanly, NOT emit
     /// the old misleading "bump the substrate" message from the generative
     /// mis-route.
@@ -93,6 +104,7 @@ final class ConvertRedirectTests: XCTestCase {
             .transcription(.parakeet),
             .diarization(.sortformer),
             .speakerEmbedding,
+            .mtpDrafter,
         ] {
             let e = ModelConvert.convertRedirect(for: support(m), id: "bare-id")
             for repo in knownRepoIds {

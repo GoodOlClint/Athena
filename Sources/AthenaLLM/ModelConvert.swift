@@ -77,6 +77,13 @@ public enum ModelConvert {
                     + "becomes selectable for that module automatically; set it "
                     + "as the default with `athena default --module <m> \(id)`). "
                     + "`convert` quantizes only generative and vision models.")
+        case .mtpDrafter:
+            return .unsupportedConvertClass(
+                model: id, detected: "mtp-drafter",
+                guidance:
+                    "MTP speculative drafters load in source precision (bf16) "
+                    + "paired to a generative target — run `athena pull \(id)`. "
+                    + "`convert` quantizes only generative and vision models.")
         }
     }
 

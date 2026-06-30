@@ -119,6 +119,22 @@ final class ModelSupportTests: XCTestCase {
         XCTAssertEqual(s.loadability, .loadable)
     }
 
+    // MARK: MTP drafter (ADR 032)
+
+    func testGemma4AssistantIsMTPDrafterLoadable() {
+        // The drafter's named model_type would otherwise fall to `.generative`;
+        // it must be claimed as `.mtpDrafter` before the ModelClass delegation.
+        let s = ModelSupport.classify(probe(modelType: "gemma4_assistant"))
+        XCTAssertEqual(s.modality, .mtpDrafter)
+        XCTAssertEqual(s.loadability, .loadable)
+    }
+
+    func testMTPDrafterIsNotClassifiedGenerative() {
+        let s = ModelSupport.classify(probe(modelType: "GEMMA4_ASSISTANT"))
+        XCTAssertNotEqual(s.modality, .llm)
+        XCTAssertEqual(s.modality, .mtpDrafter)
+    }
+
     // MARK: generative / vision / embedding (ModelClass delegation)
 
     func testGenerativeIsBestEffortUnknown() {

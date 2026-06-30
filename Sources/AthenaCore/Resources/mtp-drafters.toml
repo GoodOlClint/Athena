@@ -1,0 +1,28 @@
+# Seeded MTP target↔drafter default-pairing map (ADR 032).
+#
+# Gemma 4 speculative decoding uses a SEPARATE drafter checkpoint
+# (model_type `gemma4_assistant`) that is NOT advertised by the target's
+# config.json and lives in its own Hugging Face repo. This map lets Athena
+# auto-pair a known target with its published drafter so the `speculative`
+# knob "just works" without per-model wiring.
+#
+# Resolution order (first hit wins): the `mtp_drafter` config key (explicit
+# override) > this map > none (knob inert). The KEY (target) matches on store-id
+# BASENAME, case-insensitively (org prefix ignored), so a locally-converted
+# target with the same basename still pairs. The VALUE is the drafter's full HF
+# repo id, so `athena pull --with-drafter` can fetch it and the daemon can
+# resolve its snapshot dir.
+#
+# This file is DATA, not code (ADR 021 D5 spirit): repos move/rename, so the
+# operator can override any pair by copying this file to
+# <data_dir>/mtp-drafters.toml and editing it — no recompile. Pairs are
+# sourced from Google's Gemma MTP docs and the mlx-community uploads; the
+# drafters are bf16-only and must match the target's family/size.
+
+[drafters]
+"gemma-4-31b-it-8bit"      = "mlx-community/gemma-4-31B-it-assistant-bf16"
+"gemma-4-31b-it-bf16"      = "mlx-community/gemma-4-31B-it-assistant-bf16"
+"gemma-4-26b-a4b-it-bf16"  = "mlx-community/gemma-4-26B-A4B-it-assistant-bf16"
+"gemma-4-26b-a4b-it-4bit"  = "mlx-community/gemma-4-26B-A4B-it-assistant-bf16"
+"gemma-4-e4b-it-4bit"      = "mlx-community/gemma-4-E4B-it-assistant-bf16"
+"gemma-4-e2b-it-4bit"      = "mlx-community/gemma-4-E2B-it-assistant-bf16"
