@@ -1,10 +1,15 @@
 # 032 — Gemma 4 MTP speculative decoding (second drafter backend)
 
-**Status:** Accepted — **IMPLEMENTED** (S1 v0.10.227; S2–S5 v0.10.228; see
-`docs/gemma4-mtp-plan.md`). Drafter classification + pairing map + config, drafter
-load via `MTPDrafterModelFactory`, the `generate(mtpDrafter:)` drive behind the
-`speculative` knob, acceptance-rate log, and surface/docs all landed. Pending the
-heavy end-to-end DoD (real E4B pair) on the Metal host.
+**Status:** Accepted — **IMPLEMENTED + E2E VERIFIED** (S1 v0.10.227; S2–S5
+v0.10.228; see `docs/gemma4-mtp-plan.md`). Drafter classification + pairing map +
+config, drafter load via `MTPDrafterModelFactory`, the `generate(mtpDrafter:)`
+drive behind the `speculative` knob, acceptance-rate log, and surface/docs all
+landed. **End-to-end DoD PASSED** on the real verified 31B pair
+(`gemma-4-31b-it-8bit` ↔ `gemma-4-31B-it-assistant-bf16`): drafter auto-paired +
+engaged (proposed=46/accepted=46, passthrough=none), byte-identical to greedy
+within the 64-token bound, 1.52× wall-clock speedup. Note: the `e4b-it-4bit`
+target fails to load in the current substrate build (independent of MTP — see
+the plan); the 31B pair is the recommended path.
 **Date:** 2026-06-30
 **Milestone:** M83
 **Relates to:** ADR 011 (governor / never compose at inference), ADR 013 (`/v1`

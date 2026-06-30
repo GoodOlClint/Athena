@@ -1,13 +1,35 @@
 # Gemma 4 MTP speculative decoding — change plan (M83)
 
-**Status:** APPROVED — implemented. **S1 shipped v0.10.227** (classification +
-`mtp_drafter` config + seeded pairing map + `pull --with-drafter`/`--check`).
-**S2–S5 shipped v0.10.228** (load+pair drafter via `MTPDrafterModelFactory`;
-drive the substrate `generate(mtpDrafter:)` overload in `beginGeneration` behind
-the `speculative` knob; MTP acceptance-rate log; OpenAPI/`describe`/docs). All
-MLX-free decision logic unit-pinned. **Pending: the heavy end-to-end DoD**
-(real E4B pair, bit-identical + accepted-drafts) under a `xcodebuild` Release on
-the Metal host. Pairs with **ADR 032**.
+**Status:** APPROVED — **IMPLEMENTED + E2E VERIFIED**. **S1 v0.10.227**, **S2–S5
+v0.10.228**. Full logic suite green (761/0). Pairs with **ADR 032**.
+
+### End-to-end DoD — PASSED (2026-06-30, real 31B pair, Release binary)
+
+Verified pair `gemma-4-31b-it-8bit` ↔ `gemma-4-31B-it-assistant-bf16` (the
+handoff's bit-exact pair), pulled with `athena pull … --with-drafter` (the
+seeded map auto-resolved + fetched the drafter), `speculative=true` on
+`/v1/chat/completions`:
+
+- **Drafter auto-paired + loaded:** `MTP drafter loaded
+  id=…gemma-4-31B-it-assistant-bf16 target=gemma-4-31b-it-8bit`.
+- **Drafter engaged:** `proposed=46 accepted=46 accept_rate=1.000
+  passthrough=none` (counting prompt); `proposed=123 accepted=76
+  accept_rate=0.618 passthrough=none` (prose).
+- **Lossless:** byte-identical to `speculative=false` greedy within the 64-token
+  window (counting prompt, full 64 tokens identical).
+- **Speedup:** **1.52×** wall-clock on prose (23.5 vs 15.0 tok/s) — in the
+  handoff's 1.6–3× range.
+
+### Known issue (NOT this change): E4B-4bit target won't load
+
+`mlx-community/gemma-4-e4b-it-4bit` (vision, 42 layers, 4-bit) fails to load in
+the current substrate build — `keyNotFound language_model.model.layers.24.
+self_attn.k_proj.weight` in the Gemma4 VLM loader — **independent of MTP**
+(`speculative=false` fails identically; the error is in the target
+`container.prepare`, before any drafter code). A substrate/checkpoint
+arch-coverage issue to chase separately; the 31B pair (verified) is the
+recommended E-series-free path meanwhile. E2B likely shares the E-series loader
+risk — untested.
 
 ## Goal
 
