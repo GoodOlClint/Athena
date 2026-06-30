@@ -729,6 +729,146 @@ struct AthenaServer {
         }
     }
 
+    /// ADR 036 S1b — the protocol-agnostic chat orchestration seam. Runs the
+    /// model admission + cold-load decision (ADR 015) and, for a resident model,
+    /// the model-DEPENDENT checks (vision capability + prompt-cap preflight),
+    /// independent of wire dialect. Every chat adapter (OpenAI
+    /// `/v1/chat/completions`, Anthropic `/v1/messages`) calls this; only the
+    /// decode of `requestedModel`/`messages`/`tools` and the encode of the result
+    /// differ. Error outcomes are carried as a neutral `(message,type,code)` +
+    /// HTTP status so each adapter renders them in its own envelope.
+    ///
+    /// NOTE (ADR 036): the caller decodes `messages` BEFORE invoking this, so a
+    /// decode fault (e.g. a bad image part → 400) now precedes admission for a
+    /// request that trips both — a deliberate, documented precedence change vs
+    /// the pre-seam handler (rejects a malformed request before touching the
+    /// model). Single-fault behaviour is unchanged.
+    enum ChatPrep {
+        /// A terminal PRE-commitment fault (before any SSE 200): the carried
+        /// Response is final. For OpenAI this is the canonical `{"error":…}`
+        /// envelope verbatim (so OpenAI stays byte-identical); a future dialect
+        /// may translate it — admission/server faults using Athena's canonical
+        /// envelope is an accepted honesty boundary (ADR 036), the success and
+        /// in-stream paths are dialect-shaped.
+        case failed(Response)
+        /// Warm: the model is resident and the model-dependent checks passed
+        /// inline. `model` is the served id for the response envelope.
+        case ready(model: String)
+        /// ADR 015 cold-load streaming: the model is not resident; the SSE
+        /// producer must await the load (`load`) then run the model-dependent
+        /// checks (`prepareAfterLoad`). Both closures are dialect-neutral
+        /// `(message,type,code)` so each adapter's streaming consumer renders
+        /// the in-stream error in its own shape.
+        case deferToStream(
+            load: @Sendable () async -> ColdStreamLoad,
+            prepareAfterLoad:
+                @Sendable () async -> (
+                    message: String, type: String, code: String
+                )?)
+    }
+
+    /// Run the orchestration seam (see `ChatPrep`). `requestedModel` is the
+    /// dialect's model field; `messages`/`tools`/`chatTemplateKwargs` are the
+    /// already-decoded native inputs the vision/preflight checks need.
+    func prepareChat(
+        request: Request, requestedModel: String?,
+        messages: [ChatTurn], tools: [[String: any Sendable]]?,
+        chatTemplateKwargs: [String: any Sendable]?, wantStream: Bool
+    ) async -> ChatPrep {
+        var deferLoadIntoStream = false
+        if wantStream {
+            // Validate the requested id up front, then decide: wait inline
+            // (warm) vs stream the wait (cold).
+            do {
+                try await llm.selectColdLoadModel(requestedModel)
+            } catch let e as AthenaError {
+                return .failed(
+                    Self.error(
+                        status: HTTPResponse.Status(code: e.httpStatus),
+                        message: e.message, type: "server_error", code: e.code))
+            } catch {
+                return .failed(Self.classified(error, module: .llm))
+            }
+            switch await governor.peekLoad(.llm) {
+            case .loaded: break
+            case .pulling: return .failed(Self.coldLoadResponse(.llm))
+            case .needsLoad: deferLoadIntoStream = true
+            }
+        }
+        if !deferLoadIntoStream {
+            if let err = await governedLLM(
+                request: request, requestedModel: requestedModel)
+            {
+                return .failed(err)
+            }
+        }
+        let hasImages = messages.contains { !$0.images.isEmpty }
+        if deferLoadIntoStream {
+            // ADR 015 — the model-dependent checks move into the SSE producer.
+            return .deferToStream(
+                load: { [governor, coldLoadWaitSecs] in
+                    do {
+                        switch try await governor.awaitLoad(
+                            .llm, within: coldLoadWaitSecs)
+                        {
+                        case .loaded: return .ready
+                        case .loading: return .timedOut
+                        }
+                    } catch let e as AthenaError {
+                        return .failed(
+                            message: e.message, type: "server_error",
+                            code: e.code)
+                    } catch {
+                        let c = AthenaError.classify(error, module: .llm)
+                        return .failed(
+                            message: c.message, type: "server_error",
+                            code: c.code)
+                    }
+                },
+                prepareAfterLoad: { [llm] in
+                    if hasImages, await llm.servesVision == false {
+                        return (
+                            "image input is not supported by the requested "
+                                + "model", "invalid_request_error",
+                            "vision_not_supported")
+                    }
+                    do {
+                        try await llm.preflightPromptCache(
+                            messages: messages, tools: tools,
+                            chatTemplateKwargs: chatTemplateKwargs)
+                        return nil
+                    } catch let e as AthenaError {
+                        return (e.message, "server_error", e.code)
+                    } catch {
+                        let c = AthenaError.classify(error, module: .llm)
+                        return (c.message, "server_error", c.code)
+                    }
+                })
+        }
+        // Warm/blocking: run the model-dependent checks inline.
+        if hasImages, await llm.servesVision == false {
+            return .failed(
+                Self.error(
+                    status: .badRequest,
+                    message:
+                        "image input is not supported by the requested model",
+                    type: "invalid_request_error", code: "vision_not_supported"))
+        }
+        do {
+            try await llm.preflightPromptCache(
+                messages: messages, tools: tools,
+                chatTemplateKwargs: chatTemplateKwargs)
+        } catch let e as AthenaError {
+            return .failed(
+                Self.error(
+                    status: HTTPResponse.Status(code: e.httpStatus),
+                    message: e.message, type: "server_error", code: e.code))
+        } catch {
+            return .failed(Self.classified(error, module: .llm))
+        }
+        return .ready(model: await servedLLMModel())
+    }
+
     private func handleChatCompletions(_ request: Request) async -> Response {
         let body: ChatCompletionRequest
         do {
@@ -773,81 +913,45 @@ struct AthenaServer {
         // stream, download-in-progress) resolves the load here as a clean HTTP
         // status, exactly as before.
         let wantStream = (body.stream == true)
-        var deferLoadIntoStream = false
-        if wantStream {
-            // Validate the requested id up front — a clean 400 before any SSE
-            // commitment — then decide: wait inline (warm) vs stream the wait.
-            do {
-                try await llm.selectColdLoadModel(body.model)
-            } catch let e as AthenaError {
-                return Self.error(
-                    status: HTTPResponse.Status(code: e.httpStatus),
-                    message: e.message, type: "server_error", code: e.code)
-            } catch {
-                return Self.classified(error, module: .llm)
-            }
-            switch await governor.peekLoad(.llm) {
-            case .loaded: break  // warm: checks stay clean & pre-stream
-            case .pulling: return Self.coldLoadResponse(.llm)  // download ⇒ 503
-            case .needsLoad: deferLoadIntoStream = true
-            }
-        }
-        if !deferLoadIntoStream {
-            if let err = await governedLLM(
-                request: request, requestedModel: body.model)
-            {
-                return err
-            }
-        }
-        // Resolved once the slot is hot; the deferred path resolves it post-load
-        // inside the producer instead (`modelName` closure).
-        let model = deferLoadIntoStream ? "" : await servedLLMModel()
-        // M24.1: carry the FULL conversation (system/user/assistant/tool)
-        // into the model, not a user-only join — system instructions and
-        // prior turns must reach the chat template. A message with no text
-        // content (e.g. an assistant tool-call shell) carries nothing.
-        // M71.1: decode any OpenAI `image_url` content-parts into the turns.
-        // A bad/remote image URL is a 400 here (passive-oracle: no outbound
-        // image fetch).
+        // M24.1/M71.1 — decode the FULL conversation (system/user/assistant/
+        // tool) plus any OpenAI `image_url` content-parts. ADR 036 S1b: decode
+        // runs BEFORE the orchestration seam, so a decode fault (a bad/remote
+        // image URL → 400, passive-oracle: no outbound image fetch) precedes
+        // admission for a request that trips both.
         let turns: [ChatTurn]
         do {
             turns = try Self.chatTurns(from: body.messages)
         } catch {
             return Self.imageContentError(error)
         }
-        // M71.2: image content-parts are served only by a vision-capable
-        // resident model (loaded via the substrate VLM path). These two checks
-        // need a RESIDENT model, so on the deferred streaming path they move
-        // into the SSE producer (`prepareAfterLoad`) and surface as in-stream
-        // errors (ADR 015); on every other path they stay clean pre-response
-        // HTTP statuses exactly as before. The `hasImages` flag itself is
-        // model-independent (pure request parse) and is computed regardless.
-        let hasImages = turns.contains { !$0.images.isEmpty }
-        if !deferLoadIntoStream {
-            if hasImages, await llm.servesVision == false {
-                return Self.error(
-                    status: .badRequest,
-                    message:
-                        "image input is not supported by the requested model",
-                    type: "invalid_request_error", code: "vision_not_supported")
-            }
-            // Brief 4b: refuse an over-cap prompt up front as a governed
-            // 503, before any KV cache is allocated.
-            do {
-                // NC3: preflight the prompt generation will actually render
-                // (tools + chat-template kwargs included), so the cap check
-                // matches the real prefill size.
-                try await llm.preflightPromptCache(
-                    messages: turns, tools: body.toolSpecs(),
-                    chatTemplateKwargs: body.chatTemplateKwargsContext())
-            } catch let e as AthenaError {
-                return Self.error(
-                    status: HTTPResponse.Status(code: e.httpStatus),
-                    message: e.message, type: "server_error", code: e.code)
-            } catch {
-                return Self.classified(error, module: .llm)
-            }
+        let toolSpecs = body.toolSpecs()
+        // ADR 036 S1b — the protocol-agnostic orchestration seam: model
+        // admission + cold-load decision (ADR 015) + resident-model vision /
+        // prompt-cap preflight. `.deferToStream` carries the in-producer
+        // load/check closures (cold-load streaming, ADR 015); `.ready` means the
+        // model is resident and the model-dependent checks passed inline. The
+        // Anthropic `/v1/messages` adapter (ADR 036 S2) calls this same seam.
+        let model: String
+        let deferredLoad: (@Sendable () async -> ColdStreamLoad)?
+        let deferredPrepare:
+            (@Sendable () async -> (message: String, type: String, code: String)?)?
+        switch await prepareChat(
+            request: request, requestedModel: body.model, messages: turns,
+            tools: toolSpecs, chatTemplateKwargs: body.chatTemplateKwargsContext(),
+            wantStream: wantStream)
+        {
+        case .failed(let response):
+            return response
+        case .ready(let resolved):
+            model = resolved
+            deferredLoad = nil
+            deferredPrepare = nil
+        case .deferToStream(let load, let prepare):
+            model = ""
+            deferredLoad = load
+            deferredPrepare = prepare
         }
+        let deferLoadIntoStream = (deferredLoad != nil)
 
         // G4 fail-closed: a `response_format: json_schema` with a
         // missing/unserializable schema is a 400 here, never a silent
@@ -863,7 +967,7 @@ struct AthenaServer {
         let id = "chatcmpl-\(UUID().uuidString)"
         let effective = body.effectiveSchema()
         let schemaJSON = effective?.json
-        let toolSpecs = body.toolSpecs()
+        // `toolSpecs` is computed once above (ADR 036 S1b, before the seam).
 
         // C2 (ADR 013 §4): honor logprobs on the deterministic decode path
         // (greedy temp==0, or structured where temperature is inert); 400 on a
@@ -886,6 +990,20 @@ struct AthenaServer {
         // cache (so reuse never crosses callers) on BOTH the streamed and
         // non-streamed branches, and meters usage.
         let principal = await usagePrincipal(request)
+
+        // ADR 036 S1a — the dialect-agnostic engine request. Built once from the
+        // resolved OpenAI params and consumed identically by all three terminal
+        // paths (deferred-cold-load stream, warm stream, blocking), so the
+        // engine call no longer appears as three hand-kept-in-sync argument
+        // lists. The Anthropic adapter (S2) maps its wire request onto this same
+        // type.
+        let native = NativeChatRequest(
+            messages: turns, schemaJSON: schemaJSON, tools: toolSpecs,
+            maxTokens: body.tokenCap, temperature: body.temperature,
+            topP: body.top_p, seed: body.seed, speculative: body.speculative,
+            chatTemplateKwargs: body.chatTemplateKwargsContext(),
+            promptCacheKey: body.prompt_cache_key, principal: principal,
+            logprobs: logprobsReq)
 
         if body.stream == true {
             // M27.4: meter streamed requests too, and emit a terminal
@@ -917,66 +1035,17 @@ struct AthenaServer {
                     Self.streamSSEAwaitingLoad(
                         id: id, created: created,
                         modelName: { await servedLLMModel() },
-                        load: {
-                            do {
-                                switch try await governor.awaitLoad(
-                                    .llm, within: coldLoadWaitSecs)
-                                {
-                                case .loaded: return .ready
-                                case .loading: return .timedOut
-                                }
-                            } catch let e as AthenaError {
-                                return .failed(
-                                    message: e.message, type: "server_error",
-                                    code: e.code)
-                            } catch {
-                                let c = AthenaError.classify(
-                                    error, module: .llm)
-                                return .failed(
-                                    message: c.message, type: "server_error",
-                                    code: c.code)
-                            }
-                        },
-                        prepareAfterLoad: {
-                            // The cold-load already bound the requested id
-                            // (selectColdLoadModel), so no rebind is needed; run
-                            // only the resident-model checks the warm path runs
-                            // pre-stream.
-                            if hasImages, await llm.servesVision == false {
-                                return (
-                                    "image input is not supported by the "
-                                        + "requested model",
-                                    "invalid_request_error",
-                                    "vision_not_supported")
-                            }
-                            do {
-                                try await llm.preflightPromptCache(
-                                    messages: turns, tools: toolSpecs,
-                                    chatTemplateKwargs:
-                                        body.chatTemplateKwargsContext())
-                                return nil
-                            } catch let e as AthenaError {
-                                return (e.message, "server_error", e.code)
-                            } catch {
-                                let c = AthenaError.classify(
-                                    error, module: .llm)
-                                return (c.message, "server_error", c.code)
-                            }
-                        },
+                        // ADR 036 S1b — the cold-load + model-dependent-check
+                        // closures come from the orchestration seam (`prepareChat`
+                        // → `.deferToStream`), shared with every chat adapter.
+                        // Force-unwrap is safe: this branch is `deferLoadIntoStream`,
+                        // which is exactly `deferredLoad != nil`.
+                        load: deferredLoad!,
+                        prepareAfterLoad: deferredPrepare!,
                         eventsBuilder: {
                             deadlineBounded(
                                 seconds: deadlineSecs,
-                                llm.generateMetered(
-                                    messages: turns, schemaJSON: schemaJSON,
-                                    tools: toolSpecs, maxTokens: body.tokenCap,
-                                    temperature: body.temperature,
-                                    topP: body.top_p, seed: body.seed,
-                                    speculative: body.speculative,
-                                    chatTemplateKwargs:
-                                        body.chatTemplateKwargsContext(),
-                                    promptCacheKey: body.prompt_cache_key,
-                                    principal: principal,
-                                    logprobs: logprobsReq),
+                                llm.generateMetered(native),
                                 onTimerFired: {
                                     cancelCounter.cancelGeneration()
                                     Self.log.warning(
@@ -1000,17 +1069,7 @@ struct AthenaServer {
                     id: id, model: model, created: created,
                     events: deadlineBounded(
                         seconds: deadlineSecs,
-                        llm.generateMetered(
-                            messages: turns, schemaJSON: schemaJSON,
-                            tools: toolSpecs, maxTokens: body.tokenCap,
-                            temperature: body.temperature,
-                            topP: body.top_p, seed: body.seed,
-                            speculative: body.speculative,
-                            chatTemplateKwargs:
-                                body.chatTemplateKwargsContext(),
-                            promptCacheKey: body.prompt_cache_key,
-                            principal: principal,
-                            logprobs: logprobsReq),
+                        llm.generateMetered(native),
                         onTimerFired: {
                             // E3 — a deadline truncation must reach the decode
                             // loop, not just close the wire.
@@ -1039,16 +1098,7 @@ struct AthenaServer {
                 body.timeout.map { $0 > 0 ? $0 : 0 }
                 ?? requestTimeoutSecs
             collected = try await collectMetered(seconds: deadlineSecs) {
-                llm.generateMetered(
-                    messages: turns, schemaJSON: schemaJSON,
-                    tools: toolSpecs, maxTokens: body.tokenCap,
-                    temperature: body.temperature,
-                    topP: body.top_p, seed: body.seed,
-                    speculative: body.speculative,
-                    chatTemplateKwargs:
-                        body.chatTemplateKwargsContext(),
-                    promptCacheKey: body.prompt_cache_key,
-                    principal: principal, logprobs: logprobsReq)
+                llm.generateMetered(native)
             }
         } catch let e as AthenaError {
             // M33.1: the only AthenaError collectMetered raises is the
@@ -4660,7 +4710,9 @@ struct AthenaServer {
     /// ADR 015 — outcome of the in-SSE cold-load wait. `ready` ⇒ proceed to
     /// post-load validation + token streaming; `timedOut`/`failed` ⇒ emit an
     /// in-stream OpenAI-style error event then `[DONE]`.
-    private enum ColdStreamLoad: Sendable {
+    // ADR 036 — internal (not private) so the protocol-agnostic `ChatPrep`
+    // seam can carry it and a future dialect adapter in a sibling file can too.
+    enum ColdStreamLoad: Sendable {
         case ready
         case timedOut
         case failed(message: String, type: String, code: String)

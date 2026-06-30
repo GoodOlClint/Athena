@@ -14,7 +14,7 @@ struct Athena: AsyncParsableCommand {
     /// Single source of the daemon version — also stamped into the
     /// served OpenAPI document (`info.version`) so the spec can never
     /// report a version other than the build that serves it.
-    static let appVersion = "0.10.232"
+    static let appVersion = "0.10.233"
 
     static let configuration = CommandConfiguration(
         commandName: "athena",
