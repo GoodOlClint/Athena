@@ -364,6 +364,7 @@ struct ChatCompletionRequest: Codable {
             fn["parameters"] =
                 (t.function.parameters
                     ?? .object(["type": .string("object")]))
+                .guardingTypelessSchemaNodes()  // ADR 036
                 .foundationValue()
             return ["type": "function", "function": fn]
         }

@@ -59,11 +59,47 @@ public indirect enum JSONValue: Codable, Sendable, Equatable {
         switch self {
         case .null: return NSNull()
         case .bool(let b): return b
-        case .integer(let i): return i
+        // Lower to `Int`, not `Int64`: the substrate's Jinja bridge type-matches
+        // `Int`, and on 64-bit an `Int64` boxed as `Any` fails `as? Int` →
+        // "Cannot convert value of type Optional<Any> to Jinja Value" for any
+        // tool whose schema carries an integer (minimum/maxLength/const/…), e.g.
+        // Claude Code's Read/TodoWrite tools. `Int(Int64)` is lossless on 64-bit;
+        // the `.integer` case keeps Int64 for the JSON round-trip (G7) — only
+        // this Foundation lowering changes.
+        case .integer(let i): return Int(i)
         case .number(let n): return n
         case .string(let s): return s
         case .array(let a): return a.map { $0.foundationValue() }
         case .object(let o): return o.mapValues { $0.foundationValue() }
+        }
+    }
+
+    /// Guard against the ONE tool-schema shape that crashes gemma-4's Jinja
+    /// template — a property whose object is EXACTLY `{"description": <string>}`
+    /// with no `type` (e.g. Claude Code's `Workflow.args`, an "any-type" param)
+    /// → "Cannot convert value of type Optional<Any> to Jinja Value". Such a
+    /// node gets `"type": "string"` so it renders.
+    ///
+    /// Deliberately narrow (single-key, description-only): a node of this exact
+    /// shape crashes in isolation, so any tool that currently loads cannot
+    /// contain one — therefore this transform provably modifies only
+    /// already-broken nodes and cannot regress a working tool. (A broader
+    /// "typeless ⇒ add type" pass DOES regress multi-key typeless nodes that
+    /// render fine, so it is intentionally avoided.) Only affects how a tool is
+    /// DESCRIBED to the model; execution is the client's. Both the OpenAI and
+    /// Anthropic tool-lowering paths apply it (ADR 036).
+    public func guardingTypelessSchemaNodes() -> JSONValue {
+        switch self {
+        case .object(var o):
+            for (k, v) in o { o[k] = v.guardingTypelessSchemaNodes() }
+            if o.count == 1, case .string = o["description"] {
+                o["type"] = .string("string")
+            }
+            return .object(o)
+        case .array(let a):
+            return .array(a.map { $0.guardingTypelessSchemaNodes() })
+        default:
+            return self
         }
     }
 

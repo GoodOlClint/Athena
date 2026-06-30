@@ -153,6 +153,7 @@ struct AnthropicMessagesRequest: Decodable {
                 if let d = t.description { fn["description"] = d }
                 fn["parameters"] =
                     (t.input_schema ?? .object(["type": .string("object")]))
+                    .guardingTypelessSchemaNodes()  // ADR 036
                     .foundationValue()
                 return ["type": "function", "function": fn]
             }
