@@ -119,6 +119,10 @@ struct AnthropicMessagesRequest: Decodable {
     let temperature: Double?
     let top_p: Double?
     let stream: Bool?
+    /// WP7 — a tolerated extension field (ADR 036 §7): the per-request deadline
+    /// override the OpenAI path honors, so timeout handling is uniform across
+    /// dialects. Anthropic clients omit it ⇒ nil ⇒ the daemon default applies.
+    let timeout: Int?
 
     /// The result of lowering an Anthropic request to the engine boundary.
     struct Lowered {
@@ -128,6 +132,8 @@ struct AnthropicMessagesRequest: Decodable {
         /// Whether the forcing Guide is engaged (a `tool_choice` of `any`/`tool`)
         /// — the encoder uses this to parse a Guide-forced tool call out of text.
         let isToolCall: Bool
+        /// Per-request deadline override (seconds); nil ⇒ daemon default. WP7.
+        let timeout: Int?
     }
 
     /// Decode → native (ADR 036). Throws `AnthropicDecodeError` for an
@@ -198,7 +204,8 @@ struct AnthropicMessagesRequest: Decodable {
             promptCacheKey: nil, principal: principal, logprobs: nil)
         return Lowered(
             native: native, stops: stop_sequences ?? [],
-            wantStream: stream == true, isToolCall: isToolCall)
+            wantStream: stream == true, isToolCall: isToolCall,
+            timeout: timeout)
     }
 
     /// Lower one Anthropic message into native `ChatTurn`s. An assistant turn

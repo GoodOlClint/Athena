@@ -1203,26 +1203,24 @@ struct AthenaServer {
         finish: FinishReason,
         logprobs: [TokenLogprob]? = nil
     ) -> ChatChoice {
-        // ADR 034 — a substrate-detected free tool call (tool_choice:auto)
-        // takes precedence: it's already parsed, no text to re-parse.
-        if let call = detectedToolCall {
+        // WP7 — the one shared tool-call precedence algebra (ADR 034): a
+        // substrate-detected free call wins (already parsed); else a Guide-forced
+        // call is the decoded JSON text; else plain content.
+        switch resolveToolCallOutcome(
+            detected: detectedToolCall, text: text, isToolCall: isToolCall)
+        {
+        case .detected(let n, let a), .forced(let n, let a):
             return toolCallChoice(
-                name: call.name, argsJSON: call.argsJSON,
-                reasoning: reasoning, logprobs: logprobs)
+                name: n, argsJSON: a, reasoning: reasoning, logprobs: logprobs)
+        case .none:
+            return ChatChoice(
+                index: 0,
+                message: ChatMessage(
+                    role: "assistant", content: text,
+                    reasoning_content: reasoning),
+                finish_reason: finish.rawValue,
+                logprobs: Self.chatLogprobs(logprobs))
         }
-        // Guide-forced (required/named): the call is the decoded JSON text.
-        if isToolCall, let call = parseToolCall(text) {
-            return toolCallChoice(
-                name: call.name, argsJSON: call.argsJSON,
-                reasoning: reasoning, logprobs: logprobs)
-        }
-        return ChatChoice(
-            index: 0,
-            message: ChatMessage(
-                role: "assistant", content: text,
-                reasoning_content: reasoning),
-            finish_reason: finish.rawValue,
-            logprobs: Self.chatLogprobs(logprobs))
     }
 
     /// Assemble a full OpenAI `ChatCompletionResponse` around one choice.
@@ -1678,6 +1676,12 @@ struct AthenaServer {
                 status: .serviceUnavailable, message: "model is loading")
         }
 
+        // WP7 — resolve the per-request deadline the SAME way the OpenAI path
+        // does (`timeout` override, else the daemon default), so both dialects
+        // honor it uniformly.
+        let deadlineSecs =
+            lowered.timeout.map { $0 > 0 ? $0 : 0 } ?? requestTimeoutSecs
+
         // Streaming: forward the one GenChunk stream as the Anthropic event
         // sequence. Mirrors the OpenAI warm-stream cancel/deadline wiring
         // (A8/E3) so a client disconnect or deadline stops the decode.
@@ -1688,7 +1692,7 @@ struct AthenaServer {
                 Self.streamAnthropic(
                     id: msgID, model: model,
                     events: deadlineBounded(
-                        seconds: requestTimeoutSecs,
+                        seconds: deadlineSecs,
                         llm.generateMetered(lowered.native),
                         onTimerFired: {
                             cancelCounter.cancelGeneration()
@@ -1705,7 +1709,7 @@ struct AthenaServer {
 
         let collected: GenCollected
         do {
-            collected = try await collectMetered(seconds: requestTimeoutSecs) {
+            collected = try await collectMetered(seconds: deadlineSecs) {
                 llm.generateMetered(lowered.native)
             }
         } catch let e as AthenaError {
@@ -1729,18 +1733,22 @@ struct AthenaServer {
             }
         }
         await meter(principal: principal, usage: collected.usage)
-        // Tool call: a substrate-detected free call (text is real) takes
-        // precedence; else a Guide-forced call parsed out of `text` (which IS
-        // the call JSON, so no text block).
+        // WP7 — the one shared tool-call precedence algebra (ADR 034/036): a
+        // substrate-detected free call keeps the text as content; a Guide-forced
+        // call IS the text (drop it); else plain content.
         let finalText: String
         let toolCall: (name: String, argsJSON: String)?
-        if let c = collected.toolCall {
+        switch resolveToolCallOutcome(
+            detected: collected.toolCall, text: text,
+            isToolCall: lowered.isToolCall)
+        {
+        case .detected(let n, let a):
             finalText = text
-            toolCall = c
-        } else if lowered.isToolCall, let c = parseToolCall(text) {
+            toolCall = (n, a)
+        case .forced(let n, let a):
             finalText = ""
-            toolCall = c
-        } else {
+            toolCall = (n, a)
+        case .none:
             finalText = text
             toolCall = nil
         }
@@ -4827,10 +4835,124 @@ struct AthenaServer {
             body: ResponseBody(asyncSequence: stream))
     }
 
+    /// ADR 036 WP7 — the per-dialect sink `foldGenChunks` drives. A dialect
+    /// supplies only how to *encode* a chunk; the fold owns the shared decode
+    /// logic (stop-filter latching, ADR-035 reasoning peel, tool buffering,
+    /// finish-reason + stop-sequence attribution). Collapses the two SSE pumps
+    /// into one traversal so detection can't drift between OpenAI and Anthropic.
+    struct ProtocolEncoder {
+        /// One content delta (already stop-filtered; may be the tool-parse-fail
+        /// fallback text). Empty pieces are the encoder's to drop.
+        var emitText: (String) -> Void
+        /// One reasoning delta (ADR 035). Anthropic passes a no-op — dropping
+        /// reasoning is an *encoder* decision here, not a pump fork.
+        var emitReasoning: (String) -> Void
+        /// The resolved terminal tool call (free-detected or Guide-forced).
+        var emitToolCall: (_ name: String, _ argsJSON: String) -> Void
+        /// C2 terminal logprobs list — OpenAI only (Anthropic passes nil).
+        var emitLogprobs: (([TokenLogprob]) -> Void)?
+        /// In-stream error event (HTTP 200 already sent).
+        var emitError: ((AthenaError) -> Void)?
+        /// Terminal: `reason` = generator/stop-latched finish, `toolCalled` = a
+        /// tool block was emitted, `stopHit` = the stop sequence that actually
+        /// matched (nil if none), `usage` = final counts.
+        var finish:
+            (_ reason: FinishReason, _ toolCalled: Bool, _ stopHit: String?,
+                _ usage: TokenUsage) -> Void
+    }
+
+    /// ADR 036 WP7 — the single `GenChunk` traversal both dialects' streaming
+    /// pumps share. Owns stop-sequence latching, reasoning peel, tool-call
+    /// buffering, and finish/stop attribution; the dialect-specific wire shape
+    /// is the injected `ProtocolEncoder`. The terminal tool precedence goes
+    /// through the shared `resolveToolCallOutcome` (the same algebra the two
+    /// non-streaming encoders switch on). Returns final usage so the caller
+    /// records + closes the transport.
+    @discardableResult
+    static func foldGenChunks(
+        events: AsyncStream<GenChunk>, stops: [String], isToolCall: Bool,
+        into sink: ProtocolEncoder
+    ) async -> TokenUsage {
+        var usage = TokenUsage.zero
+        var finish: FinishReason = .stop
+        var stopHit: String?
+        var toolBuffer = ""
+        var freeToolCall: (name: String, argsJSON: String)?
+        var stopFilter = StopStreamFilter(stops: stops)
+        var reasoningFilter = ReasoningChannelFilter()
+        // Route a content piece through the stop filter (latching `stop` + the
+        // matched sequence) or emit it directly when no stops are set.
+        func pushContent(_ piece: String) {
+            if stopFilter.isActive {
+                let wasStopped = stopFilter.stopped
+                sink.emitText(stopFilter.push(piece))
+                if stopFilter.stopped && !wasStopped {
+                    finish = .stop
+                    stopHit = stopFilter.matchedStop
+                }
+            } else {
+                sink.emitText(piece)
+            }
+        }
+        for await event in events {
+            switch event {
+            case .text(let piece):
+                if isToolCall {
+                    // Guide-constrained to one JSON object — buffer + parse at
+                    // the end so no raw tool JSON leaks into content.
+                    toolBuffer += piece
+                } else {
+                    let s = reasoningFilter.push(piece)
+                    sink.emitReasoning(s.reasoning)
+                    pushContent(s.content)
+                }
+            case .usage(let u):
+                usage = u
+            case .toolCall(let name, let argsJSON):
+                // ADR 034 — free tool call. Buffer it; `resolveToolCallOutcome`
+                // emits it at the terminal (uniform with the non-stream paths).
+                freeToolCall = (name, argsJSON)
+            case .finish(let r):
+                // A stop-sequence hit wins over the generator's own reason.
+                if !stopFilter.stopped { finish = r }
+            case .logprobs(let l):
+                sink.emitLogprobs?(l)
+            case .error(let e):
+                sink.emitError?(e)
+                finish = .stop
+            }
+        }
+        // ADR 035 — flush any held reasoning/content tail, then the stop tail.
+        if !isToolCall {
+            let s = reasoningFilter.flush()
+            sink.emitReasoning(s.reasoning)
+            pushContent(s.content)
+        }
+        if stopFilter.isActive && !stopFilter.stopped {
+            sink.emitText(stopFilter.flush())
+        }
+        var toolCalled = false
+        switch resolveToolCallOutcome(
+            detected: freeToolCall, text: toolBuffer, isToolCall: isToolCall)
+        {
+        case .detected(let n, let a), .forced(let n, let a):
+            sink.emitToolCall(n, a)
+            toolCalled = true
+        case .none:
+            // Guide-forced output that didn't parse (e.g. truncated by
+            // max_tokens): surface the raw buffer as text rather than drop it.
+            if isToolCall && !toolBuffer.isEmpty { sink.emitText(toolBuffer) }
+        }
+        sink.finish(finish, toolCalled, stopHit, usage)
+        return usage
+    }
+
     /// Shared GenChunk→SSE pump: emit the assistant role chunk, stream content
     /// deltas (stop-sequence filtered), then the terminal finish/usage chunks
     /// and `[DONE]`, recording usage. Factored out of `streamSSE` so the
-    /// load-awaiting variant reuses the exact wire shape (ADR 015).
+    /// load-awaiting variant reuses the exact wire shape (ADR 015). The
+    /// OpenAI-shaped encoding is a `ProtocolEncoder` over the shared
+    /// `foldGenChunks` (ADR 036 WP7).
     private static func pumpTokens(
         into continuation: AsyncStream<ByteBuffer>.Continuation,
         id: String, model: String, created: Int,
@@ -4840,201 +4962,79 @@ struct AthenaServer {
         record: @escaping @Sendable (TokenUsage) async -> Void
     ) async {
         func emit(_ chunk: ChatCompletionChunk) {
-                    if let data = try? JSONEncoder().encode(chunk) {
-                        var buf = ByteBuffer()
-                        buf.writeString("data: ")
-                        buf.writeBytes(data)
-                        buf.writeString("\n\n")
-                        continuation.yield(buf)
-                    }
-                }
-                func emitDelta(_ piece: String) {
-                    guard !piece.isEmpty else { return }
-                    emit(
-                        ChatCompletionChunk(
-                            id: id, object: "chat.completion.chunk",
-                            created: created, model: model,
-                            choices: [
-                                ChatChunkChoice(
-                                    index: 0,
-                                    delta: ChatDelta(
-                                        role: nil, content: piece),
-                                    finish_reason: nil)
-                            ]))
-                }
-                // One `delta.tool_calls` chunk (v0.10.230 shape). Used by both
-                // the Guide-forced post-loop parse and the ADR-034 substrate
-                // `.toolCall` event.
-                func emitToolCallDelta(name: String, argsJSON: String) {
-                    emit(
-                        ChatCompletionChunk(
-                            id: id, object: "chat.completion.chunk",
-                            created: created, model: model,
-                            choices: [
-                                ChatChunkChoice(
-                                    index: 0,
-                                    delta: ChatDelta(
-                                        role: nil, content: nil,
-                                        tool_calls: [
-                                            ToolCallDelta(
-                                                index: 0,
-                                                id:
-                                                    "call_\(UUID().uuidString.prefix(8))",
-                                                type: "function",
-                                                function: FunctionCallOut(
-                                                    name: name,
-                                                    arguments: argsJSON))
-                                        ]),
-                                    finish_reason: nil)
-                            ]))
-                }
-                // ADR 035 — one `delta.reasoning_content` chunk.
-                func emitReasoning(_ piece: String) {
-                    guard !piece.isEmpty else { return }
-                    emit(
-                        ChatCompletionChunk(
-                            id: id, object: "chat.completion.chunk",
-                            created: created, model: model,
-                            choices: [
-                                ChatChunkChoice(
-                                    index: 0,
-                                    delta: ChatDelta(
-                                        role: nil, content: nil,
-                                        reasoning_content: piece),
-                                    finish_reason: nil)
-                            ]))
-                }
+            if let data = try? JSONEncoder().encode(chunk) {
+                var buf = ByteBuffer()
+                buf.writeString("data: ")
+                buf.writeBytes(data)
+                buf.writeString("\n\n")
+                continuation.yield(buf)
+            }
+        }
+        func chunk(_ delta: ChatDelta, logprobs: ChatLogprobs? = nil)
+            -> ChatCompletionChunk
+        {
+            ChatCompletionChunk(
+                id: id, object: "chat.completion.chunk", created: created,
+                model: model,
+                choices: [
+                    ChatChunkChoice(
+                        index: 0, delta: delta, finish_reason: nil,
+                        logprobs: logprobs)
+                ])
+        }
+        // Assistant role preamble.
+        emit(chunk(ChatDelta(role: "assistant", content: "")))
+
+        let encoder = ProtocolEncoder(
+            emitText: { piece in
+                guard !piece.isEmpty else { return }
+                emit(chunk(ChatDelta(role: nil, content: piece)))
+            },
+            emitReasoning: { piece in
+                guard !piece.isEmpty else { return }
                 emit(
-                    ChatCompletionChunk(
-                        id: id, object: "chat.completion.chunk",
-                        created: created, model: model,
-                        choices: [
-                            ChatChunkChoice(
-                                index: 0,
-                                delta: ChatDelta(role: "assistant", content: ""),
-                                finish_reason: nil)
-                        ]))
-                var usage = TokenUsage.zero
-                var finish: FinishReason = .stop
-                // The server upgrades `stop`→`tool_calls` for a tool turn
-                // (GenChunk.swift); nil ⇒ pass `finish.rawValue` through.
-                var finishOverride: String? = nil
-                // A tool-call turn is Guide-constrained to one complete JSON
-                // object (MLXLLMModule, both paths). We can't stream it as
-                // `content` — OpenAI requires `delta.tool_calls`. Buffer the
-                // pieces and parse once at the end (mirrors the non-streaming
-                // `chatChoice`), so no raw tool JSON leaks into `content`.
-                var toolBuffer = ""
-                // M31.3: filter the streamed deltas through the stop
-                // sequences; once a sequence matches, latch `stop`, emit
-                // only the text up to it, and suppress the rest while still
-                // draining the generator for an accurate usage count.
-                var stopFilter = StopStreamFilter(stops: stops)
-                // ADR 035 — split channel-delimited reasoning out of content.
-                var reasoningFilter = ReasoningChannelFilter()
-                // Route a content piece through the stop filter (latching
-                // `stop` on a match) or emit it directly when no stops are set.
-                func pushContent(_ piece: String) {
-                    if stopFilter.isActive {
-                        let wasStopped = stopFilter.stopped
-                        emitDelta(stopFilter.push(piece))
-                        if stopFilter.stopped && !wasStopped {
-                            finish = .stop
-                        }
-                    } else {
-                        emitDelta(piece)
-                    }
+                    chunk(
+                        ChatDelta(
+                            role: nil, content: nil, reasoning_content: piece)))
+            },
+            // One `delta.tool_calls` chunk (v0.10.230 shape).
+            emitToolCall: { name, argsJSON in
+                emit(
+                    chunk(
+                        ChatDelta(
+                            role: nil, content: nil,
+                            tool_calls: [
+                                ToolCallDelta(
+                                    index: 0,
+                                    id: "call_\(UUID().uuidString.prefix(8))",
+                                    type: "function",
+                                    function: FunctionCallOut(
+                                        name: name, arguments: argsJSON))
+                            ])))
+            },
+            // C2 — one chunk carrying the OpenAI logprobs object (empty delta).
+            emitLogprobs: { l in
+                emit(
+                    chunk(
+                        ChatDelta(role: nil, content: nil),
+                        logprobs: Self.chatLogprobs(l)))
+            },
+            // M49.5.2 — an in-stream OpenAI-style error event (status already sent).
+            emitError: { athenaErr in
+                let body = APIErrorBody(
+                    error: .init(
+                        message: athenaErr.message, type: "server_error",
+                        code: athenaErr.code))
+                if let data = try? JSONEncoder().encode(body) {
+                    var buf = ByteBuffer()
+                    buf.writeString("data: ")
+                    buf.writeBytes(data)
+                    buf.writeString("\n\n")
+                    continuation.yield(buf)
                 }
-                for await event in events {
-                    switch event {
-                    case .text(let piece):
-                        if isToolCall {
-                            toolBuffer += piece
-                        } else {
-                            // ADR 035 — peel reasoning, stream content.
-                            let s = reasoningFilter.push(piece)
-                            emitReasoning(s.reasoning)
-                            pushContent(s.content)
-                        }
-                    case .usage(let u):
-                        usage = u
-                    case .toolCall(let name, let argsJSON):
-                        // ADR 034 — substrate-detected free tool call: emit
-                        // the delta now and upgrade the terminal finish.
-                        emitToolCallDelta(name: name, argsJSON: argsJSON)
-                        finishOverride = "tool_calls"
-                    case .finish(let r):
-                        // A stop-sequence hit wins over the generator's
-                        // own length/stop reason.
-                        if !stopFilter.stopped { finish = r }
-                    case .logprobs(let l):
-                        // C2 — the deterministic paths emit one terminal
-                        // logprobs list; surface it as a chunk carrying the
-                        // OpenAI logprobs object (empty delta).
-                        emit(
-                            ChatCompletionChunk(
-                                id: id, object: "chat.completion.chunk",
-                                created: created, model: model,
-                                choices: [
-                                    ChatChunkChoice(
-                                        index: 0,
-                                        delta: ChatDelta(
-                                            role: nil, content: nil),
-                                        finish_reason: nil,
-                                        logprobs: Self.chatLogprobs(l))
-                                ]))
-                    case .error(let athenaErr):
-                        // M49.5.2 — streaming-mode error: the HTTP 200
-                        // + headers were already sent, so we can't
-                        // change the status. Emit an OpenAI-style error
-                        // SSE event then break to let the [DONE] tail
-                        // close the stream cleanly. The non-streaming
-                        // path (collectMetered) re-throws and the HTTP
-                        // layer maps to the right status code; only the
-                        // streaming path has to surface it inline.
-                        let body = APIErrorBody(
-                            error: .init(
-                                message: athenaErr.message,
-                                type: "server_error",
-                                code: athenaErr.code))
-                        if let data = try? JSONEncoder().encode(body) {
-                            var buf = ByteBuffer()
-                            buf.writeString("data: ")
-                            buf.writeBytes(data)
-                            buf.writeString("\n\n")
-                            continuation.yield(buf)
-                        }
-                        finish = .stop
-                    }
-                }
-                // ADR 035 — flush any held reasoning/content tail first, then
-                // the stop-filter tail.
-                if !isToolCall {
-                    let s = reasoningFilter.flush()
-                    emitReasoning(s.reasoning)
-                    pushContent(s.content)
-                }
-                if stopFilter.isActive && !stopFilter.stopped {
-                    emitDelta(stopFilter.flush())
-                }
-                // Tool-call turn: parse the buffered object and emit ONE
-                // `delta.tool_calls` chunk, then force `finish_reason:
-                // "tool_calls"` (matches the non-streaming shape). If parsing
-                // fails — shouldn't, the output is Guide-constrained — fall
-                // back to streaming the buffer as content so output is never
-                // silently dropped.
-                if isToolCall {
-                    if let call = parseToolCall(toolBuffer) {
-                        emitToolCallDelta(
-                            name: call.name, argsJSON: call.argsJSON)
-                        finishOverride = "tool_calls"
-                    } else {
-                        emitDelta(toolBuffer)
-                    }
-                }
-                // M31.2: the terminal chunk carries `length` when the
-                // request hit max_tokens, `stop` otherwise (or on a stop
-                // sequence hit, M31.3).
+            },
+            finish: { reason, toolCalled, _, usage in
+                // M31.2 — `length` at max_tokens, `stop`/`tool_calls` otherwise.
                 emit(
                     ChatCompletionChunk(
                         id: id, object: "chat.completion.chunk",
@@ -5043,10 +5043,10 @@ struct AthenaServer {
                             ChatChunkChoice(
                                 index: 0,
                                 delta: ChatDelta(role: nil, content: nil),
-                                finish_reason: finishOverride ?? finish.rawValue)
+                                finish_reason: toolCalled
+                                    ? "tool_calls" : reason.rawValue)
                         ]))
-                // OpenAI emits usage in a final chunk with empty choices,
-                // only when the client opted in.
+                // OpenAI emits usage in a final empty-choices chunk, opt-in only.
                 if includeUsage {
                     emit(
                         ChatCompletionChunk(
@@ -5061,8 +5061,12 @@ struct AthenaServer {
                 var done = ByteBuffer()
                 done.writeString("data: [DONE]\n\n")
                 continuation.yield(done)
-                await record(usage)
-                continuation.finish()
+            })
+
+        let usage = await foldGenChunks(
+            events: events, stops: stops, isToolCall: isToolCall, into: encoder)
+        await record(usage)
+        continuation.finish()
     }
 
     /// ADR 036 S2 — the Anthropic streaming counterpart of `streamSSE`: a
@@ -5123,14 +5127,9 @@ struct AthenaServer {
                     id: id, model: model,
                     usage: AnthropicUsage(input_tokens: 0, output_tokens: 0))))
 
-        var usage = TokenUsage.zero
-        var finish: FinishReason = .stop
-        var stopHit: String?
-        var stopFilter = StopStreamFilter(stops: stops)
-        var reasoningFilter = ReasoningChannelFilter()
-        var toolBuffer = ""
-        var freeToolCall: (name: String, argsJSON: String)?
-
+        // Content-block bookkeeping — the one piece of dialect state the encoder
+        // closures share (text block opened lazily on first delta, closed before
+        // a tool_use block or the terminal).
         var index = 0
         var textOpen = false
         func openText() {
@@ -5143,110 +5142,77 @@ struct AthenaServer {
                         type: "text", text: "")))
             textOpen = true
         }
-        func emitText(_ s: String) {
-            guard !s.isEmpty else { return }
-            openText()
-            emit(
-                "content_block_delta",
-                AnthropicTextDelta(index: index, delta: .init(text: s)))
-        }
         func closeText() {
             guard textOpen else { return }
             emit("content_block_stop", AnthropicBlockStop(index: index))
             textOpen = false
             index += 1
         }
-        func pushContent(_ piece: String) {
-            if stopFilter.isActive {
-                let wasStopped = stopFilter.stopped
-                emitText(stopFilter.push(piece))
-                if stopFilter.stopped && !wasStopped {
-                    finish = .stop
-                    // WP7 — report the sequence that ACTUALLY matched (the
-                    // earliest-position one the filter latched), not a guess of
-                    // `stops.first`.
-                    stopHit = stopFilter.matchedStop
-                }
-            } else {
-                emitText(piece)
-            }
-        }
 
-        for await event in events {
-            switch event {
-            case .text(let piece):
-                if isToolCall {
-                    toolBuffer += piece
-                } else {
-                    let s = reasoningFilter.push(piece)
-                    pushContent(s.content)  // reasoning dropped (first cut)
-                }
-            case .usage(let u): usage = u
-            case .toolCall(let name, let argsJSON):
-                freeToolCall = (name, argsJSON)
-            case .finish(let r):
-                if !stopFilter.stopped { finish = r }
-            case .logprobs: break  // no Anthropic equivalent
-            case .error(let e):
+        let encoder = ProtocolEncoder(
+            emitText: { s in
+                guard !s.isEmpty else { return }
+                openText()
+                emit(
+                    "content_block_delta",
+                    AnthropicTextDelta(index: index, delta: .init(text: s)))
+            },
+            // ADR 036 first cut: reasoning is dropped — an ENCODER decision, not
+            // a pump fork (surface as thinking-blocks here if a consumer asks).
+            emitReasoning: { _ in },
+            emitToolCall: { name, argsJSON in
+                closeText()
+                let input: JSONValue =
+                    (argsJSON.data(using: .utf8).flatMap {
+                        try? JSONDecoder().decode(JSONValue.self, from: $0)
+                    }) ?? .object([:])
+                emit(
+                    "content_block_start",
+                    AnthropicBlockStart(
+                        index: index,
+                        content_block: AnthropicResponseBlock(
+                            type: "tool_use", id: "toolu_\(UUID().uuidString)",
+                            name: name, input: .object([:]))))
+                emit(
+                    "content_block_delta",
+                    AnthropicInputJSONDelta(
+                        index: index,
+                        delta: .init(partial_json: input.jsonString() ?? "{}")))
+                emit("content_block_stop", AnthropicBlockStop(index: index))
+                index += 1
+            },
+            emitLogprobs: nil,  // no Anthropic equivalent
+            emitError: { e in
                 emit(
                     "error",
                     AnthropicErrorBody(
                         error: .init(type: "api_error", message: e.message)))
-                finish = .stop
-            }
-        }
-        if !isToolCall {
-            pushContent(reasoningFilter.flush().content)
-        }
-        if stopFilter.isActive && !stopFilter.stopped {
-            emitText(stopFilter.flush())
-        }
-        var toolCall = freeToolCall
-        if isToolCall {
-            if let parsed = parseToolCall(toolBuffer) {
-                toolCall = parsed
-            } else if !toolBuffer.isEmpty {
-                // Guide-forced output didn't parse (e.g. truncated by max_tokens)
-                // — emit it as text rather than silently drop (mirrors the
-                // OpenAI pump's `emitDelta(toolBuffer)` fallback).
-                emitText(toolBuffer)
-            }
-        }
-        closeText()
-        var stopReason = "end_turn"
-        if let call = toolCall {
-            let input: JSONValue =
-                (call.argsJSON.data(using: .utf8).flatMap {
-                    try? JSONDecoder().decode(JSONValue.self, from: $0)
-                }) ?? .object([:])
-            emit(
-                "content_block_start",
-                AnthropicBlockStart(
-                    index: index,
-                    content_block: AnthropicResponseBlock(
-                        type: "tool_use", id: "toolu_\(UUID().uuidString)",
-                        name: call.name, input: .object([:]))))
-            emit(
-                "content_block_delta",
-                AnthropicInputJSONDelta(
-                    index: index,
-                    delta: .init(partial_json: input.jsonString() ?? "{}")))
-            emit("content_block_stop", AnthropicBlockStop(index: index))
-            index += 1
-            stopReason = "tool_use"
-        } else if stopHit != nil {
-            stopReason = "stop_sequence"
-        } else if finish == .length {
-            stopReason = "max_tokens"
-        }
-        emit(
-            "message_delta",
-            AnthropicMessageDelta(
-                delta: .init(stop_reason: stopReason, stop_sequence: stopHit),
-                usage: AnthropicUsage(
-                    input_tokens: usage.promptTokens,
-                    output_tokens: usage.completionTokens)))
-        emit("message_stop", AnthropicMessageStop())
+            },
+            finish: { reason, toolCalled, stopHit, usage in
+                closeText()
+                let stopReason: String
+                if toolCalled {
+                    stopReason = "tool_use"
+                } else if stopHit != nil {
+                    stopReason = "stop_sequence"
+                } else if reason == .length {
+                    stopReason = "max_tokens"
+                } else {
+                    stopReason = "end_turn"
+                }
+                emit(
+                    "message_delta",
+                    AnthropicMessageDelta(
+                        delta: .init(
+                            stop_reason: stopReason, stop_sequence: stopHit),
+                        usage: AnthropicUsage(
+                            input_tokens: usage.promptTokens,
+                            output_tokens: usage.completionTokens)))
+                emit("message_stop", AnthropicMessageStop())
+            })
+
+        let usage = await foldGenChunks(
+            events: events, stops: stops, isToolCall: isToolCall, into: encoder)
         await record(usage)
         continuation.finish()
     }

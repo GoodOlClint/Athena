@@ -65,4 +65,55 @@ final class ToolCallParseTests: XCTestCase {
     func testToolArgumentsJSONEmptyObject() {
         XCTAssertEqual(toolArgumentsJSON([String: Any]()), "{}")
     }
+
+    // MARK: - resolveToolCallOutcome (WP7 — the one precedence algebra all four
+    // OpenAI/Anthropic × streaming/non-streaming encode sites switch on)
+
+    /// A substrate-detected free call (ADR 034) wins over everything and the
+    /// assistant text is kept as content — even when the Guide is engaged.
+    func testDetectedWins() {
+        XCTAssertEqual(
+            resolveToolCallOutcome(
+                detected: (name: "f", argsJSON: #"{"a":1}"#),
+                text: "some reasoning", isToolCall: true),
+            .detected(name: "f", argsJSON: #"{"a":1}"#))
+    }
+
+    /// Guide-forced (required/named) with no free call: the text IS the call.
+    func testForcedParsesText() {
+        XCTAssertEqual(
+            resolveToolCallOutcome(
+                detected: nil,
+                text: #"{"name":"web_search","arguments":{"q":"x"}}"#,
+                isToolCall: true),
+            .forced(name: "web_search", argsJSON: #"{"q":"x"}"#))
+    }
+
+    /// Guide-forced but the buffer didn't parse (e.g. truncated) ⇒ `.none` so
+    /// the caller surfaces the raw text rather than silently dropping it.
+    func testForcedUnparseableFallsThroughToNone() {
+        XCTAssertEqual(
+            resolveToolCallOutcome(
+                detected: nil, text: #"{"name":"#, isToolCall: true),
+            .none)
+    }
+
+    /// Plain assistant turn (no forcing, no free call) ⇒ `.none`.
+    func testPlainTextIsNone() {
+        XCTAssertEqual(
+            resolveToolCallOutcome(
+                detected: nil, text: "hello there", isToolCall: false),
+            .none)
+    }
+
+    /// Well-formed tool JSON but NOT a forced turn and NOT detected ⇒ still
+    /// `.none` (auto mode surfaces a free call via the substrate event, not by
+    /// re-parsing ordinary content).
+    func testUnforcedNeverParsesText() {
+        XCTAssertEqual(
+            resolveToolCallOutcome(
+                detected: nil, text: #"{"name":"f","arguments":{}}"#,
+                isToolCall: false),
+            .none)
+    }
 }

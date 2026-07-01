@@ -20,6 +20,37 @@ public func parseToolCall(
     return (name, toolArgumentsJSON(obj["arguments"]))
 }
 
+/// The tool-call precedence one of the four chat encode sites (OpenAI /
+/// Anthropic × streaming / non-streaming) resolves to. ADR 034/036: a
+/// substrate-`detected` free call (`tool_choice:auto`) wins and leaves the
+/// assistant text intact as content/reasoning; otherwise a Guide-`forced`
+/// call is the decoded JSON text itself (so the text IS the call, not
+/// content); otherwise plain text.
+public enum ToolCallOutcome: Equatable {
+    case detected(name: String, argsJSON: String)
+    case forced(name: String, argsJSON: String)
+    case none
+}
+
+/// The single tool-call precedence algebra all four chat encode sites switch
+/// on (WP7). Was copy-pasted at each of `chatChoice`, the Anthropic
+/// non-stream encoder, and both SSE pumps' terminals; drift between the copies
+/// is exactly the class ADR 036 promised to close. MLX-free + unit-pinned
+/// (ADR 008/009).
+public func resolveToolCallOutcome(
+    detected: (name: String, argsJSON: String)?,
+    text: String,
+    isToolCall: Bool
+) -> ToolCallOutcome {
+    if let d = detected {
+        return .detected(name: d.name, argsJSON: d.argsJSON)
+    }
+    if isToolCall, let p = parseToolCall(text) {
+        return .forced(name: p.name, argsJSON: p.argsJSON)
+    }
+    return .none
+}
+
 /// Serialize a tool call's `arguments` object to the OpenAI stringified-JSON
 /// form with stable (sorted) keys. nil / non-object ⇒ `"{}"`. Shared by
 /// `parseToolCall` (Guide-forced text) and the substrate `.toolCall` mapping
