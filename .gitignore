@@ -36,3 +36,6 @@ graphify-out/
 
 # ChunkHound local semantic index / daemon log
 .chunkhound/
+
+# Local scratch: repro logs, quant sweeps, throwaway experiments
+scratch/

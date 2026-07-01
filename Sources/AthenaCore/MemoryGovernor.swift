@@ -153,7 +153,12 @@ public actor MemoryGovernor {
     /// cache is headroom, not pinned memory, so reclaiming it may let the load
     /// fit without disrupting a resident module. Injected. `nil` ⇒ skip the
     /// reclaim rung (the reservation-only path).
-    public typealias ReclaimCacheHook = @Sendable () -> Void
+    /// ADR 029 WP1 — `async` because the serve-side hook runs its MLX free
+    /// (`clearCache`) inside the process-global `InferenceGate`, so it can never
+    /// tear down the buffer pool while a decode holds the device. The governor
+    /// `await`s it, so the reclaim's effect is still observed synchronously by
+    /// the re-gate that follows — it just waits for any in-flight forward first.
+    public typealias ReclaimCacheHook = @Sendable () async -> Void
     /// Model-lifecycle observer (loading/loaded/evicted/unloaded/load
     /// failed), keyed by module. Injected so AthenaCore needs no
     /// logging dependency; the `athena` target maps it to a per-module
@@ -166,9 +171,11 @@ public actor MemoryGovernor {
     /// `snapshot()`). nil ⇒ pool disabled / not wired.
     public typealias PromptCachePoolProbe = @Sendable () -> (bytes: Int, entries: Int)
     /// M59.2 — shed the prompt-prefix KV pool (drop entries not in use) as a
-    /// cheap reclaim BEFORE evicting a module or refusing a load. Injected,
-    /// sync. nil ⇒ nothing to shed.
-    public typealias PromptCacheReliefHook = @Sendable () -> Void
+    /// cheap reclaim BEFORE evicting a module or refusing a load. Injected.
+    /// nil ⇒ nothing to shed. ADR 029 WP1 — `async` for the same reason as
+    /// `ReclaimCacheHook`: `flushIdle`/`clearCache` are Metal-touching, so the
+    /// serve-side hook runs them inside the `InferenceGate`; the governor awaits.
+    public typealias PromptCacheReliefHook = @Sendable () async -> Void
 
     public let totalBudgetBytes: Int
     /// Governor-owned global prompt-cache byte cap (brief 4b). The LLM
@@ -324,11 +331,11 @@ public actor MemoryGovernor {
     /// joinable by any concurrent `ensureLoaded` (which keeps blocking
     /// semantics — used by the queue worker and the preload-on-start
     /// path, both legitimately off the request thread).
-    public func beginLoadIfNeeded(_ id: ModuleID) throws -> LoadStatus {
+    public func beginLoadIfNeeded(_ id: ModuleID) async throws -> LoadStatus {
         guard entries[id] != nil else {
             throw AthenaError.moduleNotRegistered(id)
         }
-        relievePressure(except: id)
+        await relievePressure(except: id)
         // E1 — read the slot's CURRENT state, not a value-copy captured
         // before `relievePressure` (which can mutate this actor's state).
         if entries[id]?.state == .loaded {
@@ -386,7 +393,7 @@ public actor MemoryGovernor {
         guard entries[id] != nil else {
             throw AthenaError.moduleNotRegistered(id)
         }
-        relievePressure(except: id)
+        await relievePressure(except: id)
         // E1 — decide on the slot's CURRENT state, re-read after the
         // (synchronous, but state-mutating) `relievePressure` above rather
         // than a value-copy taken before it.
@@ -436,7 +443,7 @@ public actor MemoryGovernor {
         guard entries[id] != nil else {
             throw AthenaError.moduleNotRegistered(id)
         }
-        relievePressure(except: id)
+        await relievePressure(except: id)
         // E1 — read CURRENT state after the (state-mutating) relief above.
         if entries[id]?.state == .loaded {
             entries[id]?.lastUsed = Date()
@@ -521,7 +528,7 @@ public actor MemoryGovernor {
     /// requested) — its `unload` + the clear-cache hook reclaim the
     /// pool. Best-effort and progressive: sustained pressure across
     /// requests sheds further victims one at a time.
-    private func relievePressure(except keep: ModuleID) {
+    private func relievePressure(except keep: ModuleID) async {
         guard let memoryProbe else { return }
         let highWater = totalBudgetBytes / 10 * 9  // 90%
         guard memoryProbe() > highWater else { return }
@@ -530,7 +537,10 @@ public actor MemoryGovernor {
         // prefill), so dropping it is a cheaper, less disruptive reclaim than
         // evicting a loaded module. Best-effort; the freed MLX buffers return
         // to the budget on the next clearCache (the unload hook).
-        promptCacheRelief?()
+        // ADR 029 WP1 — awaited: the hook runs its MLX free under the
+        // InferenceGate, so it can't race an in-flight decode. The re-read
+        // below sees its effect once it lands.
+        await promptCacheRelief?()
         if memoryProbe() <= highWater { return }
         let victim =
             entries
@@ -553,11 +563,13 @@ public actor MemoryGovernor {
     /// Deliberately uses **phys_footprint**, not the RSS `memoryProbe`: the
     /// retained KV pool lives in Metal/GPU buffers that RSS under-counts (M55),
     /// so an RSS check would miss the very memory we need to shed.
-    public func relievePromptCachePressureIfNeeded() {
+    public func relievePromptCachePressureIfNeeded() async {
         guard promptCacheRelief != nil else { return }
         let highWater = totalBudgetBytes / 10 * 9  // 90%
         guard ProcessMemory.sample().physFootprint > highWater else { return }
-        promptCacheRelief?()
+        // ADR 029 WP1 — gated hook (awaited): shed the pool without racing a
+        // concurrent tenant's decode.
+        await promptCacheRelief?()
     }
 
     private func performLoad(_ id: ModuleID) async throws {
@@ -593,7 +605,7 @@ public actor MemoryGovernor {
         // another doomed background load and 503-ing `module_loading` forever
         // (the detached cleanup swallows this throw via `try?`).
         do {
-            try makeRoom(for: estimate, requestedBy: id)
+            try await makeRoom(for: estimate, requestedBy: id)
         } catch {
             let classified = AthenaError.classify(error, module: id)
             lastLoadError[id] = classified
@@ -746,7 +758,7 @@ public actor MemoryGovernor {
 
     /// Free budget for `estimate` bytes, evicting evictable loaded modules
     /// LRU-first. Throws if it still cannot fit after exhausting eviction.
-    private func makeRoom(for estimate: Int, requestedBy id: ModuleID) throws {
+    private func makeRoom(for estimate: Int, requestedBy id: ModuleID) async throws {
         // ADR 023 G2 — front-door gate on the LIVE footprint, not the
         // reservation sum alone, so the genuinely-pinned resident footprint the
         // estimates were blind to can't be overcommitted.
@@ -766,8 +778,12 @@ public actor MemoryGovernor {
         // was the bloat, the load now fits without disrupting a resident module.
         // No-ops on the pure path (both hooks nil), so the re-gate just repeats
         // the front-door verdict there.
-        promptCacheRelief?()
-        reclaimCache?()
+        // ADR 029 WP1 — both hooks are awaited: they run their MLX frees under
+        // the InferenceGate, so this rung waits for any in-flight decode rather
+        // than tearing down the buffer pool beneath it. The re-gate below still
+        // sees the reclaim's effect (the hook completes before we return).
+        await promptCacheRelief?()
+        await reclaimCache?()
         if GovernorMemory.fits(
             request: estimate, denominator: admissionDenominator(),
             budget: totalBudgetBytes)
@@ -832,8 +848,14 @@ public actor MemoryGovernor {
         // slot (`performLoad`) awaits `module.unload()` before calling
         // `module.load()`, instead of racing it on the module actor.
         teardown[id] = Task { [weak self] in
-            await module.unload()
-            hook?()
+            // ADR 029 WP1 — `module.unload()` frees weights on the Metal pool and
+            // `hook` trims the buffer cache; both must not run while a decode
+            // holds the device. Gate the whole teardown span (the hook stays a
+            // plain sync closure — it's serialized here, not self-gated).
+            try? await InferenceGate.shared.withExclusiveExecution {
+                await module.unload()
+                hook?()
+            }
             await self?.markUnloaded(id)
         }
     }
@@ -894,8 +916,11 @@ public actor MemoryGovernor {
         let module = entry.module
         let hook = onUnloaded
         let task = Task { [weak self] in
-            await module.unload()
-            hook?()
+            // ADR 029 WP1 — gate the teardown span (see `evictSync`).
+            try? await InferenceGate.shared.withExclusiveExecution {
+                await module.unload()
+                hook?()
+            }
             await self?.markUnloaded(id)
         }
         teardown[id] = task

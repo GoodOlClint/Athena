@@ -14,6 +14,22 @@ co-execution). Cold-load `awaitLoad`/`performLoad` stays UNgated (rule 1). Rever
 knob wired from `inference_gate_enabled` (TOML) / `ATHENA_INFERENCE_GATE` (env),
 default ON.
 
+**WP1 (v0.10.237) — governor-initiated Metal frees now gated too.** The 2026-07-01
+audit found the gate serialized tenant *forwards* but the `MemoryGovernor` still
+freed Metal memory OUTSIDE it: `evictSync`/`unload` teardown (`module.unload()` +
+the `clearCache` unload hook), the `makeRoom` rung-1 reclaim
+(`promptCacheRelief` + `reclaimCache`), and `relievePressure` /
+`relievePromptCachePressureIfNeeded` all ran `clearCache`/`flushIdle` concurrently
+with a gated decode — request B's admission near the high-water mark could tear
+down the shared buffer pool under request A's in-flight kernels (the strongest
+candidate yet for the 2026-06-05 GPU wedge). Fix: the two eviction teardown Tasks
+wrap their `module.unload()` + hook span in `withExclusiveExecution`; the
+`ReclaimCacheHook`/`PromptCacheReliefHook` are now `async` and run their MLX frees
+under the gate at the serve seam (`Load.swift`), with the governor **awaiting**
+them so the admission re-gate still sees the reclaim's effect — it just waits for
+any in-flight forward first. The admission *math* stays ungated (correct per
+rule 1). MLX-free + unit-pinned (`testReclaimRunsUnderInferenceGateWP1`).
+
 **Residual (follow-up):** the narrow concurrent-DIFFERENT-model wrong-MODEL
 *selection* window (A requests X, B requests Y at the same instant; A may decode
 Y because the server-side rebind and the gated decode are two separate gate

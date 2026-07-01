@@ -723,6 +723,90 @@ final class MemoryGovernorTests: XCTestCase {
             reliefCalled.phys, 1, "the relief rung must have fired")
     }
 
+    /// ADR 029 WP1 — the governor's admission reclaim must run its Metal-touching
+    /// body *through* the InferenceGate, so it can never tear down the buffer
+    /// pool while a decode (a gate-holding forward) is live. Pins the ordering
+    /// with a fresh gate instance: a fake forward holds it; the reclaim hook
+    /// (mirroring the serve-side wiring in Load.swift, which gates its
+    /// `clearCache`) must not complete until the forward releases.
+    func testReclaimRunsUnderInferenceGateWP1() async throws {
+        let gate = InferenceGate()
+        let log = OrderLog()
+        let fp = FakeFootprint(phys: 950, cache: 0)
+
+        // A fake in-flight forward acquires the gate and holds it until told to
+        // release, so the reclaim provably has to wait behind it.
+        let acquired = Signal()
+        let mayRelease = Signal()
+        let forward = Task {
+            try await gate.withExclusiveExecution {
+                await log.append("forward-start")
+                await acquired.fire()
+                await mayRelease.wait()
+                await log.append("forward-end")
+            }
+        }
+        await acquired.wait()  // forward is now holding the gate
+
+        let gov = MemoryGovernor(
+            totalBudgetBytes: 1_000,
+            promptCacheRelief: {
+                // Mirror Load.swift: run the reclaim under the gate.
+                try? await gate.withExclusiveExecution {
+                    fp.phys = 300
+                    await log.append("reclaim")
+                }
+            },
+            footprintProbe: { fp.sample() },
+            admissionMode: .footprint)
+        await gov.register(StubLLMModule(reserveBytes: 400), evictable: false)
+
+        // Admission trips the reclaim rung, whose gated hook blocks behind the
+        // forward. Run it concurrently so we can observe it is stuck.
+        let admit = Task { try await gov.ensureLoaded(.llm) }
+
+        // Give the admission time to reach (and block on) the gate.
+        try await Task.sleep(nanoseconds: 100_000_000)
+        let mid = await log.events
+        XCTAssertFalse(
+            mid.contains("reclaim"),
+            "reclaim must not run while the forward holds the gate")
+
+        await mayRelease.fire()
+        try await forward.value
+        try await admit.value
+
+        let events = await log.events
+        XCTAssertEqual(
+            events, ["forward-start", "forward-end", "reclaim"],
+            "reclaim must be serialized strictly after the forward releases")
+        let s = await gov.snapshot()
+        XCTAssertEqual(
+            s.modules.first { $0.id == .llm }?.state, .loaded,
+            "the load still succeeds once the pool is reclaimed under the gate")
+    }
+
+    /// Ordered event log for the WP1 gate-serialization test.
+    private actor OrderLog {
+        private(set) var events: [String] = []
+        func append(_ e: String) { events.append(e) }
+    }
+
+    /// One-shot async signal (a resumable continuation gate) for test handshakes.
+    private actor Signal {
+        private var fired = false
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+        func fire() {
+            fired = true
+            for w in waiters { w.resume() }
+            waiters.removeAll()
+        }
+        func wait() async {
+            if fired { return }
+            await withCheckedContinuation { waiters.append($0) }
+        }
+    }
+
     /// Honesty surfacing: `snapshot().freeBytes` reports `budget − max(committed,
     /// reserved)` in footprint mode, so `/healthz` reflects what the box can
     /// actually fit — not `budget − estimates`.

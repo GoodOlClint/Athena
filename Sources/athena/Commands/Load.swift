@@ -585,7 +585,17 @@ struct Load: AsyncParsableCommand {
         var prefixPoolRelief: MemoryGovernor.PromptCacheReliefHook?
         if let c = prefixCache {
             prefixPoolProbe = { c.poolBytesAndEntries() }
-            prefixPoolRelief = { _ = c.flushIdle(); MLX.Memory.clearCache() }
+            // ADR 029 WP1 — run the pool flush + cache trim under the
+            // InferenceGate so a governor-initiated reclaim can't tear down
+            // Metal buffers while a decode holds the device. The governor
+            // awaits this hook, so the reclaim's effect is still seen by the
+            // admission re-gate — it just waits for any in-flight forward.
+            prefixPoolRelief = {
+                try? await InferenceGate.shared.withExclusiveExecution {
+                    _ = c.flushIdle()
+                    MLX.Memory.clearCache()
+                }
+            }
             if c.encryptsIdleEntries {
                 Logger(label: AthenaLogLabel.daemon).notice(
                     "hardening: prompt-cache idle entries encrypted at rest (AES-256-GCM, ADR 024 T3)")
@@ -636,7 +646,12 @@ struct Load: AsyncParsableCommand {
                     cacheBytes: MLX.Memory.cacheMemory
                 )
             },
-            reclaimCache: { MLX.Memory.clearCache() },
+            // ADR 029 WP1 — gated reclaim (see `prefixPoolRelief`).
+            reclaimCache: {
+                try? await InferenceGate.shared.withExclusiveExecution {
+                    MLX.Memory.clearCache()
+                }
+            },
             admissionMode: admissionMode)
 
         let store = ModelStore(
