@@ -1836,51 +1836,59 @@ struct AthenaServer {
         return Self.json(response)
     }
 
-    private func handleTranscriptions(_ request: Request) async -> Response
-    {
-        let t0 = Date()
+    /// WP9 — the shared multipart upload preamble for the media routes
+    /// (transcription, video, diarization, speaker-embedding): content-type +
+    /// boundary → ADR-017 cap fast-fail (declared `Content-Length`) →
+    /// `collect(upTo:cap)` with a streamed 413 backstop → parse → the required
+    /// non-empty `file` part. `cap` is the modality's byte ceiling (audio vs
+    /// video), so one helper closes the drift between the four hand-copied
+    /// blocks (the audio/video cap had already diverged).
+    private func extractUploadFile(
+        _ request: Request, cap: Int
+    ) async -> Outcome<(form: MultipartForm, file: MultipartForm.Part)> {
         guard
             let ct = request.headers[.contentType],
             let boundary = MultipartForm.boundary(fromContentType: ct)
         else {
-            return Self.error(
-                status: .badRequest,
-                message: "expected multipart/form-data with a boundary",
-                type: "invalid_request_error", code: "invalid_content_type")
+            return .fail(
+                Self.error(
+                    status: .badRequest,
+                    message: "expected multipart/form-data with a boundary",
+                    type: "invalid_request_error", code: "invalid_content_type"))
         }
-
-        // ADR 017: fast-fail an over-cap upload from its declared
-        // Content-Length, before reading the body.
-        if let tooLarge = Self.payloadTooLarge(
-            request, cap: maxAudioUploadBytes)
-        {
-            return tooLarge
+        if let tooLarge = Self.payloadTooLarge(request, cap: cap) {
+            return .fail(tooLarge)
         }
-
         let body: Data
         do {
-            let buffer = try await request.body.collect(
-                upTo: maxAudioUploadBytes)  // ADR 017: configurable, 100 MiB default
+            let buffer = try await request.body.collect(upTo: cap)
             body = Data(buffer: buffer)
         } catch is NIOTooManyBytesError {
-            // ADR 017: streamed body crossed the cap ⇒ clean 413.
-            return Self.tooLargeResponse(cap: maxAudioUploadBytes)
+            return .fail(Self.tooLargeResponse(cap: cap))
         } catch {
-            return Self.error(
-                status: .badRequest,
-                message: "invalid request body",
-                type: "invalid_request_error", code: "invalid_body")
+            return .fail(
+                Self.error(
+                    status: .badRequest, message: "invalid request body",
+                    type: "invalid_request_error", code: "invalid_body"))
         }
-
         guard
             let form = MultipartForm(body: body, boundary: boundary),
             let file = form.first("file"), !file.data.isEmpty
         else {
-            return Self.error(
-                status: .badRequest,
-                message: "missing required 'file' part",
-                type: "invalid_request_error", code: "missing_file")
+            return .fail(
+                Self.error(
+                    status: .badRequest,
+                    message: "missing required 'file' part",
+                    type: "invalid_request_error", code: "missing_file"))
         }
+        return .ok((form, file))
+    }
+
+    private func handleTranscriptions(_ request: Request) async -> Response
+    {
+        let t0 = Date()
+        let upload = await extractUploadFile(request, cap: maxAudioUploadBytes)
+        guard case .ok(let (form, file)) = upload else { return upload.orFail }
 
         do {
             // M43.2: non-blocking cold-load (see /v1/embeddings).
@@ -2086,39 +2094,8 @@ struct AthenaServer {
     private func handleVideoTranscriptions(_ request: Request) async -> Response
     {
         let t0 = Date()
-        guard
-            let ct = request.headers[.contentType],
-            let boundary = MultipartForm.boundary(fromContentType: ct)
-        else {
-            return Self.error(
-                status: .badRequest,
-                message: "expected multipart/form-data with a boundary",
-                type: "invalid_request_error", code: "invalid_content_type")
-        }
-        if let tooLarge = Self.payloadTooLarge(
-            request, cap: maxVideoUploadBytes)
-        {
-            return tooLarge
-        }
-        let body: Data
-        do {
-            let buffer = try await request.body.collect(upTo: maxVideoUploadBytes)
-            body = Data(buffer: buffer)
-        } catch is NIOTooManyBytesError {
-            return Self.tooLargeResponse(cap: maxVideoUploadBytes)
-        } catch {
-            return Self.error(
-                status: .badRequest, message: "invalid request body",
-                type: "invalid_request_error", code: "invalid_body")
-        }
-        guard
-            let form = MultipartForm(body: body, boundary: boundary),
-            let file = form.first("file"), !file.data.isEmpty
-        else {
-            return Self.error(
-                status: .badRequest, message: "missing required 'file' part",
-                type: "invalid_request_error", code: "missing_file")
-        }
+        let upload = await extractUploadFile(request, cap: maxVideoUploadBytes)
+        guard case .ok(let (form, file)) = upload else { return upload.orFail }
 
         // diarization on video is a 501 (not yet wired) — fail fast before any
         // load/decode so the caller gets the clear answer immediately. Both the
@@ -2228,43 +2205,8 @@ struct AthenaServer {
     private func handleDiarizations(_ request: Request) async -> Response
     {
         let t0 = Date()
-        guard
-            let ct = request.headers[.contentType],
-            let boundary = MultipartForm.boundary(fromContentType: ct)
-        else {
-            return Self.error(
-                status: .badRequest,
-                message: "expected multipart/form-data with a boundary",
-                type: "invalid_request_error",
-                code: "invalid_content_type")
-        }
-        if let tooLarge = Self.payloadTooLarge(
-            request, cap: maxAudioUploadBytes)
-        {
-            return tooLarge
-        }
-        let body: Data
-        do {
-            let buffer = try await request.body.collect(
-                upTo: maxAudioUploadBytes)
-            body = Data(buffer: buffer)
-        } catch is NIOTooManyBytesError {
-            return Self.tooLargeResponse(cap: maxAudioUploadBytes)
-        } catch {
-            return Self.error(
-                status: .badRequest,
-                message: "invalid request body",
-                type: "invalid_request_error", code: "invalid_body")
-        }
-        guard
-            let form = MultipartForm(body: body, boundary: boundary),
-            let file = form.first("file"), !file.data.isEmpty
-        else {
-            return Self.error(
-                status: .badRequest,
-                message: "missing required 'file' part",
-                type: "invalid_request_error", code: "missing_file")
-        }
+        let upload = await extractUploadFile(request, cap: maxAudioUploadBytes)
+        guard case .ok(let (form, file)) = upload else { return upload.orFail }
 
         // Method select (ADR 018). Default `sortformer` (fast, end-to-end,
         // ≤4 speakers); `cluster` = naive-window embedding cluster (M25.3,
@@ -2555,43 +2497,8 @@ struct AthenaServer {
         -> Response
     {
         let t0 = Date()
-        guard
-            let ct = request.headers[.contentType],
-            let boundary = MultipartForm.boundary(fromContentType: ct)
-        else {
-            return Self.error(
-                status: .badRequest,
-                message: "expected multipart/form-data with a boundary",
-                type: "invalid_request_error",
-                code: "invalid_content_type")
-        }
-        if let tooLarge = Self.payloadTooLarge(
-            request, cap: maxAudioUploadBytes)
-        {
-            return tooLarge
-        }
-        let body: Data
-        do {
-            let buffer = try await request.body.collect(
-                upTo: maxAudioUploadBytes)
-            body = Data(buffer: buffer)
-        } catch is NIOTooManyBytesError {
-            return Self.tooLargeResponse(cap: maxAudioUploadBytes)
-        } catch {
-            return Self.error(
-                status: .badRequest,
-                message: "invalid request body",
-                type: "invalid_request_error", code: "invalid_body")
-        }
-        guard
-            let form = MultipartForm(body: body, boundary: boundary),
-            let file = form.first("file"), !file.data.isEmpty
-        else {
-            return Self.error(
-                status: .badRequest,
-                message: "missing required 'file' part",
-                type: "invalid_request_error", code: "missing_file")
-        }
+        let upload = await extractUploadFile(request, cap: maxAudioUploadBytes)
+        guard case .ok(let (form, file)) = upload else { return upload.orFail }
 
         // Optional `segments` JSON; absent ⇒ embed the whole clip.
         var segments: [SpeakerSegmentRequest] = []
@@ -3457,8 +3364,14 @@ struct AthenaServer {
 
     // MARK: - Model store (M16.2)
 
+    /// WP9 — one shared formatter instead of allocating an
+    /// `ISO8601DateFormatter` per call on request paths (they're expensive to
+    /// construct). `nonisolated(unsafe)`: `Foundation` date formatters are
+    /// documented thread-safe for read-only formatting (`.string(from:)`), which
+    /// is the only use here, so the shared instance is safe across request tasks.
+    private nonisolated(unsafe) static let isoFormatter = ISO8601DateFormatter()
     private static func iso(_ d: Date) -> String {
-        ISO8601DateFormatter().string(from: d)
+        isoFormatter.string(from: d)
     }
 
     /// Conservative model-name guard for NETWORK input: a bare store
