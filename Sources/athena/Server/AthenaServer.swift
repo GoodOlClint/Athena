@@ -5162,9 +5162,10 @@ struct AthenaServer {
                 emitText(stopFilter.push(piece))
                 if stopFilter.stopped && !wasStopped {
                     finish = .stop
-                    // Best-effort which-sequence (the filter exposes only the
-                    // truncated text); first cut reports the first stop.
-                    stopHit = stops.first
+                    // WP7 — report the sequence that ACTUALLY matched (the
+                    // earliest-position one the filter latched), not a guess of
+                    // `stops.first`.
+                    stopHit = stopFilter.matchedStop
                 }
             } else {
                 emitText(piece)

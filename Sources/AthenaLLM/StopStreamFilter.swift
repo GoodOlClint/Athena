@@ -10,6 +10,11 @@ public struct StopStreamFilter: Sendable {
     private let maxLen: Int
     private var buffer = ""
     public private(set) var stopped = false
+    /// WP7 — the stop sequence that actually latched `stopped` (the
+    /// earliest-position match), so a caller reporting *which* sequence hit
+    /// (Anthropic `stop_sequence`) names the real one instead of guessing
+    /// `stops.first`. nil until a stop matches.
+    public private(set) var matchedStop: String?
 
     public init(stops: [String]) {
         self.stops = stops.filter { !$0.isEmpty }
@@ -29,8 +34,9 @@ public struct StopStreamFilter: Sendable {
         if stopped || !isActive { return stopped ? "" : piece }
         buffer += piece
         if let r = earliestStop(in: buffer) {
-            let out = String(buffer[buffer.startIndex..<r.lowerBound])
+            let out = String(buffer[buffer.startIndex..<r.range.lowerBound])
             stopped = true
+            matchedStop = r.stop
             buffer = ""
             return out
         }
@@ -55,13 +61,15 @@ public struct StopStreamFilter: Sendable {
         return out
     }
 
-    /// Earliest range of any stop sequence within `text`.
-    private func earliestStop(in text: String) -> Range<String.Index>? {
-        var best: Range<String.Index>?
+    /// Earliest range of any stop sequence within `text`, and which stop it was.
+    private func earliestStop(in text: String)
+        -> (range: Range<String.Index>, stop: String)?
+    {
+        var best: (range: Range<String.Index>, stop: String)?
         for s in stops {
             if let r = text.range(of: s) {
-                if best == nil || r.lowerBound < best!.lowerBound {
-                    best = r
+                if best == nil || r.lowerBound < best!.range.lowerBound {
+                    best = (r, s)
                 }
             }
         }

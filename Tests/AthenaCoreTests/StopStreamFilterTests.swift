@@ -112,6 +112,20 @@ final class StopStreamFilterTests: XCTestCase {
         XCTAssertEqual(out, "aabb ", "cut at the earliest stop (X), not END")
     }
 
+    /// WP7 — `matchedStop` names the sequence that actually latched (the
+    /// earliest-position one), so Anthropic `stop_sequence` reporting is truthful
+    /// rather than a `stops.first` guess.
+    func testMatchedStopReportsTheActualSequence() {
+        var f = StopStreamFilter(stops: ["END", "X"])
+        XCTAssertNil(f.matchedStop, "no match yet")
+        _ = f.push("aa")
+        _ = f.push("bb X cc END")  // X matches first by position
+        XCTAssertTrue(f.stopped)
+        XCTAssertEqual(
+            f.matchedStop, "X",
+            "must report the matched sequence, not stops.first (END)")
+    }
+
     /// Fed one character at a time, a multi-char stop straddling many pushes is
     /// still caught and the prefix before it surfaces exactly once.
     func testStreamingOneCharAtATime() {
