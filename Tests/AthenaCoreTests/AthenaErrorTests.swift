@@ -32,6 +32,20 @@ final class AthenaErrorTests: XCTestCase {
         }
     }
 
+    /// ADR 030 Part 2 (WP2) — the message-string needle check the global error
+    /// handler uses (it gets a raw C string, not a Swift `Error`) must agree with
+    /// `isMetalOOM` so the handler's degrade decision can't drift from the 503
+    /// classification.
+    func testMetalOOMMessageMatchesErrorPredicateWP2() {
+        let cap =
+            "[metal::malloc] Attempting to allocate 111 GB which is greater "
+            + "than the maximum allowed buffer size of 80 GB"
+        XCTAssertTrue(AthenaError.isMetalOOMMessage(cap))
+        XCTAssertTrue(AthenaError.isMetalOOM(Fake(description: cap)))
+        XCTAssertFalse(
+            AthenaError.isMetalOOMMessage("tokenizer file not found"))
+    }
+
     /// Regression: the canonical `[metal::malloc] … maximum allowed buffer
     /// size` fault must classify to a governed 503, not a bare 500.
     func testClassifyRoutesMetalMallocCapTo503() {

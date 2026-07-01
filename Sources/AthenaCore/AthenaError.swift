@@ -328,7 +328,16 @@ public enum AthenaError: Error, Sendable, Equatable {
     /// focused to avoid matching incidental "metal" text.
     public static func isMetalOOM(_ error: any Error) -> Bool {
         if error is AthenaError { return false }
-        let s = String(describing: error).lowercased()
+        return isMetalOOMMessage(String(describing: error))
+    }
+
+    /// ADR 030 Part 2 (WP2) — the same needle match against a **raw message
+    /// string**, for the global `MLX.setErrorHandler` (which receives a C string
+    /// on MLX's worker thread, not a Swift `Error`). Keeping one needle set here
+    /// means the handler's degrade decision can't drift from `classify`'s 503
+    /// routing.
+    public static func isMetalOOMMessage(_ message: String) -> Bool {
+        let s = message.lowercased()
         let needles = [
             "out of memory", "insufficient memory",
             "failed to allocate", "cannot allocate",

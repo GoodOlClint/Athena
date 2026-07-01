@@ -5,10 +5,42 @@
 at both `container.prepare` chokepoints in `MLXLLMModule` (`runSpeculative` AND
 `beginGeneration` — the substrate-stream path the gemma4-MoE abort took, which
 previously bypassed the guard). **Part 2 (degrade recognized MLX faults to 503)
-staged as follow-up** per the staging note below (ship once Part 1's logs confirm
-the safe fault strings). The H2 `isMetalOOM` needle fix it depends on already
-shipped.
+IMPLEMENTED (WP2, v0.10.238).** The H2 `isMetalOOM` needle fix it depends on
+already shipped.
 **Date:** 2026-06-26
+
+**Part 2 implementation note (WP2, 2026-07-01).** The global `MLX.setErrorHandler`
+(`Load.swift`) now, for a **recognized** allocation/buffer-size fault (matched by
+the new `AthenaError.isMetalOOMMessage` — the same needle set as the 503
+classification), **records** it into a process-global `MetalFaultLatch` and
+**returns** instead of `fatalError`ing — keeping the daemon alive. Returning from
+the handler is not experimental: it is the exact mechanism mlx-swift's own
+`withError`/`withErrorHandler` use to convert MLX faults into Swift throws, and a
+rejected device-cap `malloc` leaves the allocator intact (nothing was
+half-written). The offending tenant's gated span
+(`InferenceGate.withExclusiveExecution`, which ADR 029 guarantees is
+single-tenant) clears the latch on entry and, on exit, converts a set latch into
+a classified `metalOutOfMemory` → **503 `metal_oom`**; the decode loops break on
+the latch (`DecodeLoopControl`) first so they never touch the faulted arrays. Any
+**unrecognized** fault still re-`fatalError`s. Behind a default-on revert knob
+`metal_fault_degrade` (`ATHENA_METAL_FAULT_DEGRADE`) — and, because the degrade
+needs the gate to attribute+consume the fault, it no-ops (falls back to
+`fatalError`) if either that knob or `inference_gate_enabled` is off.
+
+MLX-free decision logic unit-pinned (latch algebra, needle match, gate→503
+conversion, latch-preferred-over-raw-throw, no-fault-no-degrade). A **gated heavy
+test** (`MetalFaultDegradeE2ETests`, `ATHENA_RUN_MODEL_TESTS=1`) triggers a real
+`[metal::malloc]` device-cap fault (a single ~93 GiB fp16 buffer > the 80.64 GiB
+M5-Max cap) through the actual handler→latch→gate path and asserts 503 + a
+correct post-fault eval; it needs a metallib-bundled Metal test host (the
+`swift test` tier has none — ADR 009). **Empirical finding on the M5-Max host:**
+the *prompt-driven* O(seq²) score-buffer abort the ADR originally observed is now
+**additionally mitigated by 512-token chunked prefill** — a 114,918-token prompt
+(`max_prompt_tokens=0`, KV cap raised past its own guard) prefilled to a clean
+`200`, and a 600k-token prompt returned a clean `503 prompt_cache_cap_exceeded`,
+in both cases **with the daemon surviving**. So Part 2 is confirmed as the
+*safety net* for residual single-buffer faults (a wide vision tensor, a future
+non-chunked path) rather than a frequently-hit path.
 **Milestone:** TBD (daemon-resilience follow-up)
 **Related:** ADR 011 (governor), the H2 `isMetalOOM` needle fix (shipped this
 batch), the `max_prompt_tokens` guard (v0.10.219).

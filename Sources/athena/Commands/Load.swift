@@ -455,12 +455,29 @@ struct Load: AsyncParsableCommand {
         // `setErrorHandler` is deprecated upstream, but its replacements
         // (`withError`/`withErrorHandler`) are TaskLocal-scoped and provably
         // can't see cross-thread async-eval faults — this is the only lever.
-        // Re-fatals after logging on purpose: MLX state is undefined after an
-        // eval error, so we want the message + a clean launchd restart, NOT
-        // (yet) recovery. Upgrade path: degrade recoverable errors to a
-        // request 500 once the captured messages show which are safe.
+        // ADR 030 Part 2 (WP2) — degrade a RECOGNIZED allocation/buffer-size
+        // fault (`[metal::malloc]` / "maximum allowed buffer size" — a
+        // pre-submission device-cap rejection that leaves the allocator intact)
+        // to a classified 503 instead of aborting: record it in the process-
+        // global latch and RETURN, keeping the daemon alive. The offending
+        // tenant's gated span (`InferenceGate.withExclusiveExecution`, ADR 029
+        // guarantees single-tenant execution) consumes the latch on exit and
+        // throws `metalOutOfMemory` → 503; the decode loop breaks on the latch
+        // first so it never touches the invalid arrays. Any UNrecognized fault
+        // still re-`fatalError`s (MLX state undefined ⇒ clean launchd restart
+        // with a logged message, as before). Gated on BOTH default-on revert
+        // knobs: the degrade needs the InferenceGate to attribute+consume the
+        // fault, so if either is off we fall back to the safe fatalError.
         MLX.setErrorHandler({ message, _ in
             let m = message.map { String(cString: $0) } ?? "(no message)"
+            if MetalFaultDegrade.enabled, InferenceGate.enabled,
+                AthenaError.isMetalOOMMessage(m)
+            {
+                MetalFaultLatch.shared.record(m)
+                Logging.Logger(label: "athena.mlx").critical(
+                    "MLX allocation fault degraded to 503 (daemon kept alive): \(m)")
+                return
+            }
             Logging.Logger(label: "athena.mlx").critical(
                 "MLX eval error: \(m)")
             fatalError("MLX eval error: \(m)")
@@ -499,6 +516,21 @@ struct Load: AsyncParsableCommand {
         if !InferenceGate.enabled {
             Logging.Logger(label: AthenaLog.daemonLabel).notice(
                 "inference execution gate DISABLED (ADR 029 revert knob)")
+        }
+
+        // ADR 030 Part 2 (WP2) — degrade recognized MLX allocation faults to a
+        // 503 instead of aborting the daemon. Default ON; env > TOML > true.
+        if let degradeEnv = ProcessInfo.processInfo
+            .environment["ATHENA_METAL_FAULT_DEGRADE"]?.lowercased()
+        {
+            MetalFaultDegrade.enabled =
+                !["0", "false", "no", "off"].contains(degradeEnv)
+        } else {
+            MetalFaultDegrade.enabled = tomlCfg?.metalFaultDegrade ?? true
+        }
+        if !MetalFaultDegrade.enabled {
+            Logging.Logger(label: AthenaLog.daemonLabel).notice(
+                "MLX allocation-fault degrade DISABLED (ADR 030 P2 revert knob — recognized OOM will re-fatal, as pre-WP2)")
         }
 
         // M59.2 — build the ONE shared pool instance now (when enabled), so

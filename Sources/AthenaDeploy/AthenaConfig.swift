@@ -178,6 +178,12 @@ public struct AthenaConfig: Sendable, Equatable {
     /// every module's execution and warm rebind runs unserialized (pre-029
     /// behavior). Env `ATHENA_INFERENCE_GATE=0` overrides this to off.
     public var inferenceGateEnabled: Bool?
+    /// ADR 030 Part 2 (WP2) — degrade a recognized MLX allocation/buffer-size
+    /// fault to a classified 503 instead of aborting the whole daemon. Absent /
+    /// true ⇒ ON (the default). `false` reverts to the pre-WP2 behavior
+    /// (recognized OOM re-`fatalError`s). Env `ATHENA_METAL_FAULT_DEGRADE=0`
+    /// overrides this to off.
+    public var metalFaultDegrade: Bool?
     /// Preload (warm) the LLM at startup instead of lazily on first
     /// request (M33.3). Optional — absent / false ⇒ lazy load (default).
     /// Opt-in: the operator trades a slower start for a warm first
@@ -248,6 +254,7 @@ public struct AthenaConfig: Sendable, Equatable {
         mlxCacheLimitBytes: Int? = nil,
         governorAdmissionMode: String? = nil,
         inferenceGateEnabled: Bool? = nil,
+        metalFaultDegrade: Bool? = nil,
         preload: Bool? = nil,
         encryptStore: Bool? = nil,
         persistStore: Bool? = nil,
@@ -304,6 +311,7 @@ public struct AthenaConfig: Sendable, Equatable {
         self.mlxCacheLimitBytes = mlxCacheLimitBytes
         self.governorAdmissionMode = governorAdmissionMode
         self.inferenceGateEnabled = inferenceGateEnabled
+        self.metalFaultDegrade = metalFaultDegrade
         self.preload = preload
         self.encryptStore = encryptStore
         self.persistStore = persistStore
@@ -502,6 +510,7 @@ public struct AthenaConfig: Sendable, Equatable {
         let pcPersistEager = try bool("prompt_cache_persist_eager")
         let denyDebuggerAttach = try bool("deny_debugger_attach")
         let inferenceGateEnabled = try bool("inference_gate_enabled")
+        let metalFaultDegrade = try bool("metal_fault_degrade")
         let preload = try bool("preload")
         let encStore = try bool("encrypt_store")
         let persistStore = try bool("persist_store")
@@ -557,6 +566,7 @@ public struct AthenaConfig: Sendable, Equatable {
             mlxCacheLimitBytes: mlxCacheLimit,
             governorAdmissionMode: scalar("governor_admission_mode", in: toml),
             inferenceGateEnabled: inferenceGateEnabled,
+            metalFaultDegrade: metalFaultDegrade,
             preload: preload,
             encryptStore: encStore,
             persistStore: persistStore,

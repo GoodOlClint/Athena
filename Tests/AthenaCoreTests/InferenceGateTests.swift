@@ -6,8 +6,14 @@ import XCTest
 /// FIFO / cancellation / revert-knob invariants run in CI (ADR 009).
 final class InferenceGateTests: XCTestCase {
 
-    override func setUp() { InferenceGate.enabled = true }
-    override func tearDown() { InferenceGate.enabled = true }
+    override func setUp() {
+        InferenceGate.enabled = true
+        MetalFaultLatch.shared.clear()
+    }
+    override func tearDown() {
+        InferenceGate.enabled = true
+        MetalFaultLatch.shared.clear()
+    }
 
     private actor Concurrency {
         private(set) var maxActive = 0
@@ -107,5 +113,71 @@ final class InferenceGateTests: XCTestCase {
         let waiters = await gate.waiterCount
         XCTAssertFalse(held)
         XCTAssertEqual(waiters, 0)
+    }
+
+    // MARK: - ADR 030 Part 2 (WP2) — degrade latched Metal faults
+
+    /// A recognized allocation fault recorded during a gated span (as the global
+    /// error handler does, off the worker thread) is converted to a classified
+    /// `metalOutOfMemory` (503) on span exit — the daemon-abort path is gone.
+    func testLatchedMetalFaultDegradesTo503WP2() async throws {
+        let gate = InferenceGate()
+        do {
+            _ = try await gate.withExclusiveExecution {
+                // Simulate the worker-thread handler recording a device-cap OOM.
+                MetalFaultLatch.shared.record(
+                    "[metal::malloc] Attempting to allocate 111 GB which is "
+                        + "greater than the maximum allowed buffer size")
+                return 0
+            }
+            XCTFail("a latched Metal fault must surface as an error")
+        } catch let e as AthenaError {
+            XCTAssertEqual(e.httpStatus, 503)
+            XCTAssertEqual(e.code, "metal_oom")
+        }
+        // Latch consumed: a subsequent clean span succeeds (no stale fault).
+        let r = try await gate.withExclusiveExecution { 5 }
+        XCTAssertEqual(r, 5, "latch must not leak into the next span")
+        let held = await gate.isHeld
+        XCTAssertFalse(held, "gate left held after a degraded fault")
+    }
+
+    /// The recorded fault wins even when the span ALSO throws (the raw throw is
+    /// usually a cascade artifact of touching the invalid arrays).
+    func testLatchedFaultPreferredOverRawThrowWP2() async throws {
+        struct Boom: Error {}
+        let gate = InferenceGate()
+        do {
+            _ = try await gate.withExclusiveExecution {
+                MetalFaultLatch.shared.record("metal::malloc device cap")
+                throw Boom()
+            }
+            XCTFail("expected the classified Metal OOM")
+        } catch let e as AthenaError {
+            XCTAssertEqual(e.code, "metal_oom")
+        } catch { XCTFail("raw throw leaked past the latch: \(error)") }
+    }
+
+    /// No fault ⇒ no throw: the happy path is byte-unchanged.
+    func testNoFaultNoDegradeWP2() async throws {
+        let gate = InferenceGate()
+        let r = try await gate.withExclusiveExecution { 99 }
+        XCTAssertEqual(r, 99)
+    }
+
+    // MARK: - MetalFaultLatch algebra
+
+    func testMetalFaultLatchRecordTakeClear() {
+        let latch = MetalFaultLatch()
+        XCTAssertFalse(latch.isSet)
+        latch.record("first")
+        latch.record("second")  // first-writer-wins: keep the root cause
+        XCTAssertTrue(latch.isSet)
+        XCTAssertEqual(latch.take(), "first")
+        XCTAssertNil(latch.take(), "take clears the slot")
+        XCTAssertFalse(latch.isSet)
+        latch.record("again")
+        latch.clear()
+        XCTAssertNil(latch.take())
     }
 }

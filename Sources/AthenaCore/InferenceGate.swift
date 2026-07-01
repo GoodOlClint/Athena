@@ -43,6 +43,9 @@ public actor InferenceGate {
     ) async throws -> T {
         guard Self.enabled else { return try await work() }
         try await acquire()
+        // ADR 030 Part 2 (WP2) — fresh slate: a fault recorded during THIS span
+        // is unambiguously ours (the gate guarantees single-tenant execution).
+        MetalFaultLatch.shared.clear()
         // Release inline (awaited) on BOTH exits so the gate is provably free
         // before we return — a `defer` can't await, and a fire-and-forget
         // `Task` would leave the gate transiently "held" after we return. A
@@ -52,10 +55,28 @@ public actor InferenceGate {
         do {
             let result = try await work()
             await release()
+            // ADR 030 Part 2 — an async allocation fault fired on MLX's worker
+            // thread during this span (the handler recorded it instead of
+            // aborting the daemon). The eval barrier inside `work` has completed,
+            // so the latch is set by now; convert it to a classified 503 so the
+            // request degrades and the process stays up.
+            try throwIfMetalFaulted()
             return result
         } catch {
             await release()
+            // Prefer the recorded allocation fault over the raw thrown error: a
+            // throw here is often a cascade artifact of the decode loop touching
+            // the invalid arrays before it broke on the latch.
+            try throwIfMetalFaulted()
             throw error
+        }
+    }
+
+    /// ADR 030 Part 2 (WP2) — if a recognized MLX allocation fault was latched
+    /// during the just-finished span, consume it and throw a classified 503.
+    private nonisolated func throwIfMetalFaulted() throws {
+        if let fault = MetalFaultLatch.shared.take() {
+            throw AthenaError.metalOutOfMemory(module: nil, detail: fault)
         }
     }
 

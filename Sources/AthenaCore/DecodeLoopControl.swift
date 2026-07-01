@@ -32,5 +32,11 @@ public enum DecodeLoopControl {
         // frees the inference slot) even if a future refactor moves the Task
         // out of the scope or the metered context is absent.
         DecodeProgress.counter?.isCancelled == true || Task.isCancelled
+            // ADR 030 Part 2 (WP2) — a recognized MLX allocation fault fired on
+            // the worker thread during this decode. The arrays are now invalid;
+            // stop the loop immediately so it doesn't spin re-triggering the
+            // handler on the faulted state. The gated span converts the latched
+            // fault into a 503 once the loop returns.
+            || MetalFaultLatch.shared.isSet
     }
 }
