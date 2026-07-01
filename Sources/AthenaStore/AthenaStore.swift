@@ -168,6 +168,32 @@ public actor AthenaStore {
         }
         try Self.exec(db, "PRAGMA journal_mode=WAL;")
         try Self.createSchema(db)
+        // WP5 (audit P2) — the store holds token SHA-256 + PBKDF2 password
+        // hashes, usernames/roles, audit + usage. It was created world-readable
+        // (no posixPermissions), so any co-resident non-root user could read
+        // credentials offline (squarely inside the ADR-024 threat model).
+        // Restrict to the owner.
+        Self.restrictPermissions(dbPath: path)
+    }
+
+    /// WP5 (audit P2) — lock the store + its sidecars to the owner: 0600 on the
+    /// db / `-wal` / `-shm` / `.migrate-bak`, 0700 on its directory. Mirrors the
+    /// KVSnapshotStore pattern. Best-effort (`try?`): a filesystem that can't
+    /// chmod must not fail the open. The model-store dir is a separate concern
+    /// (weights aren't secret) and is left untouched here.
+    private static func restrictPermissions(dbPath: URL) {
+        let fm = FileManager.default
+        try? fm.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: dbPath.deletingLastPathComponent().path)
+        let files = [
+            dbPath.path, dbPath.path + "-wal", dbPath.path + "-shm",
+            dbPath.appendingPathExtension("migrate-bak").path,
+        ]
+        for p in files where fm.fileExists(atPath: p) {
+            try? fm.setAttributes(
+                [.posixPermissions: 0o600], ofItemAtPath: p)
+        }
     }
 
     /// Open an **ephemeral** in-memory store (ADR 025 S4 — stateless
@@ -321,6 +347,10 @@ public actor AthenaStore {
             throw StoreError.encryption("migration swap: \(error)")
         }
         try? fm.removeItem(at: bak)  // success — drop the plaintext backup
+        // WP5 (audit P2) — the freshly-swapped-in db is created by the
+        // migration copy with default perms; re-restrict it (and drop any
+        // lingering world-readable backup that a `try?` above missed).
+        Self.restrictPermissions(dbPath: path)
     }
 
     /// NH1 (M66.1) — finish or roll back a `migrateToEncrypted` that a

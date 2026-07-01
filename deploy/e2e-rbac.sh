@@ -187,6 +187,18 @@ for v in ADMIN_TOK ALICE_TOK BOB_TOK RO_TOK BOSS_SCOPED; do
   [ -n "${!v}" ] && ok "minted $v" || bad "minted $v (empty!)"
 done
 
+# WP5 (audit P2) — the credential DB (token/password hashes, roles, audit,
+# usage) must NOT be world-readable. The store restricts itself to the owner on
+# open: 0600 on athena.sqlite, 0700 on its directory.
+DBPERM="$(stat -f "%Lp" "$D/athena.sqlite" 2>/dev/null)"
+[ "$DBPERM" = "600" ] \
+  && ok "athena.sqlite is 0600 (not world-readable)" \
+  || bad "athena.sqlite perms=$DBPERM (expected 600)"
+DIRPERM="$(stat -f "%Lp" "$D" 2>/dev/null)"
+[ "$DIRPERM" = "700" ] \
+  && ok "data dir is 0700" \
+  || bad "data dir perms=$DIRPERM (expected 700)"
+
 echo
 echo "== phase 1: CLI escalation / validation guards =="
 "$ATHENA" auth role grant alice notarole --data-dir "$D" \

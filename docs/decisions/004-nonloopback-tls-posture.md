@@ -56,3 +56,26 @@ operator who needs per-client login throttling should rate-limit at the proxy.
   (peer address plumbing) — modest structural change shared by any future per-IP
   control.
 - A2/K1/K8 remain open (downgraded to warn); tracked, not closed.
+
+## Amendment (WP5, 2026-07-01) — `/healthz` + `/openapi.json` unauth is accepted posture
+
+The 2026-07-01 audit flagged that `/healthz` and `/openapi.json` are reachable
+**without auth on a non-loopback bind** (`Auth.swift`), and `/healthz` exposes
+model ids, memory footprint, GPU clock, and thermal state.
+
+**Decision: accepted, not gated** (same warn-only spirit as the TLS ruling above).
+
+- `/openapi.json` unauth is a **deliberate, documented contract** — the daemon is
+  self-describing (`CLAUDE.md` "Self-describing: always reachable, no auth
+  required"); a consumer must be able to read the surface without a token.
+- `/healthz` carries **operational telemetry** (liveness + resident model ids +
+  memory/GPU/thermal), not secrets. Unauthenticated liveness is the standard
+  contract for a health endpoint; gating it would break trivial LAN monitoring of
+  the passive-oracle appliance, whose threat model is a **trusted LAN** (the
+  studio deployment). The bytes it exposes are reconnaissance-grade at worst.
+- **Tripwire:** if the appliance is ever exposed to an untrusted network, gate the
+  `/healthz` *detail* behind `.metricsRead` (keep a bare `200` liveness open) —
+  the same "revisit on untrusted-network exposure" trigger as the TLS posture.
+
+No code change: this records the standing posture so it is explicit rather than
+implicit.

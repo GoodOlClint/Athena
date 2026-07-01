@@ -4303,9 +4303,7 @@ struct AthenaServer {
             try await store.grantRole(
                 username: username, role: role)
         } catch {
-            return Self.error(
-                status: .internalServerError, message: "\(error)",
-                type: "server_error", code: "store_error")
+            return Self.storeError(error)
         }
         await audit(
             request, action: "user.create", target: username,
@@ -4410,9 +4408,7 @@ struct AthenaServer {
             try await store.grantRole(
                 username: username, role: role)
         } catch {
-            return Self.error(
-                status: .internalServerError, message: "\(error)",
-                type: "server_error", code: "store_error")
+            return Self.storeError(error)
         }
         await audit(
             request, action: "role.grant",
@@ -4544,9 +4540,7 @@ struct AthenaServer {
                 hash: hash, username: user, scopedRoles: scoped,
                 label: body.label, expires: expires)
         } catch {
-            return Self.error(
-                status: .internalServerError, message: "\(error)",
-                type: "server_error", code: "store_error")
+            return Self.storeError(error)
         }
         let hashPrefix = String(
             AuthConfig.hex(Array(hash)).prefix(12))
@@ -4684,9 +4678,7 @@ struct AthenaServer {
                 hash: hash, username: m.username, scopedRoles: m.scoped,
                 label: m.label, expires: expires)
         } catch {
-            return Self.error(
-                status: .internalServerError, message: "\(error)",
-                type: "server_error", code: "store_error")
+            return Self.storeError(error)
         }
         _ = await store.deleteToken(hash: oldHash)
         let newPrefix = String(AuthConfig.hex(Array(hash)).prefix(12))
@@ -5570,6 +5562,19 @@ struct AthenaServer {
     /// abort (brief item 4a). Existing `AthenaError`s pass through.
     private static let log = Logger(label: AthenaLog.daemonLabel)
     private static let auditLog = Logger(label: AthenaLogLabel.audit)
+
+    /// WP5 (audit P3) — an RBAC-admin store operation (putUser / grantRole /
+    /// putToken) failed. Log the raw detail (SQLite message / constraint) to
+    /// os_log but return only a stable, detail-free message to the client,
+    /// mirroring the `classified` suppression boundary the inference paths use.
+    /// The four admin sites previously returned `"\(error)"` verbatim.
+    private static func storeError(_ err: any Error) -> Response {
+        log.warning("admin store operation failed: \(err)")
+        return error(
+            status: .internalServerError,
+            message: "internal store error",
+            type: "server_error", code: "store_error")
+    }
 
     private static func classified(
         _ err: any Error, module: ModuleID
