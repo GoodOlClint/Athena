@@ -408,9 +408,13 @@ struct ChatCompletionRequest: Codable {
     /// in-effect tool call is fine.
     func structuredRequestError() -> String? {
         guard response_format?.type == "json_schema" else { return nil }
-        // A tool request (menu advertised — auto/required/named) takes
-        // precedence over response_format, so a missing schema is fine here.
-        if toolChoiceResolution().advertiseMenu { return nil }
+        // WP4 — only a FORCED tool (`required`/named) carries its own schema and
+        // takes precedence over response_format. `tool_choice:"auto"` merely
+        // ADVERTISES the menu (nothing forced), so `effectiveSchema()` does NOT
+        // engage a tool schema for it — response_format is still the constraint,
+        // and a broken one must 400 rather than silently streaming unconstrained
+        // output. Gating on `advertiseMenu` (true for auto) was the breach.
+        if !forcedTools().isEmpty { return nil }
         if StructuredSchema.schemaJSON(
             responseFormatType: "json_schema",
             jsonSchema: response_format?.json_schema?.schema) == nil

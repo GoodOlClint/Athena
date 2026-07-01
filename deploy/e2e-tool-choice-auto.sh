@@ -94,5 +94,17 @@ else
   echo "  FAIL http=$h finish=$(fr) content='$(content)'"; fail=1
 fi
 
+echo "== 5) auto + tools + broken response_format → 400 (WP4 contract guard) =="
+# tool_choice:auto ADVERTISES the menu but forces nothing, so response_format is
+# still the constraint. A json_schema with no valid 'schema' must 400, not
+# silently stream unconstrained text with a 200 (the G4 breach).
+err_type() { python3 -c "import json;print(json.load(open('$WORK/out')).get('error',{}).get('type',''))" 2>/dev/null; }
+h=$(post "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":32,\"tools\":[$TOOL],\"response_format\":{\"type\":\"json_schema\",\"json_schema\":{}}}")
+if [ "$h" = "400" ] && [ "$(err_type)" = "invalid_request_error" ]; then
+  echo "  ok: 400 invalid_request_error (no silent unconstrained generation)"
+else
+  echo "  FAIL http=$h err_type='$(err_type)' (expected 400 invalid_request_error)"; fail=1
+fi
+
 if [ "$fail" = "0" ]; then echo "PASS"; else echo "FAIL ($fail check(s))"; fi
 exit $fail
