@@ -3353,6 +3353,24 @@ struct AthenaServer {
     private enum Outcome<T> {
         case ok(T)
         case fail(Response)
+
+        /// The carried error `Response` — for the decode sites'
+        /// `guard case .ok(let body) = decoded else { return decoded.orFail }`.
+        /// Total (the enum is binary); the `.ok` arm is unreachable by
+        /// construction (callers read this only in the `else` of a `case .ok`
+        /// match) and returns a safe 500 rather than trapping, so a future
+        /// misuse degrades instead of aborting the daemon. Replaces the 9×
+        /// `if case .fail(let r) = decoded { return r }; fatalError()` boilerplate.
+        var orFail: Response {
+            switch self {
+            case .fail(let r): return r
+            case .ok:
+                return AthenaServer.error(
+                    status: .internalServerError,
+                    message: "internal error", type: "server_error",
+                    code: "internal_error")
+            }
+        }
     }
 
     private func decodeJSON<T: Decodable>(
@@ -3369,68 +3387,6 @@ struct AthenaServer {
                     message: "Invalid request body: \(error)",
                     type: "invalid_request_error", code: "invalid_body"))
         }
-    }
-
-    /// Governed gate for `/api/chat`: ensureLoaded(.llm) + (M41.2)
-    /// optional per-request rebind to `requestedModel` + the 4b
-    /// prompt-cache preflight, all classified. Returns an error
-    /// `Response` to send, or nil when the request may proceed.
-    private func governedPreflight(
-        messages: [ChatTurn], requestedModel: String? = nil,
-        request: Request? = nil
-    ) async -> Response? {
-        if let err = await governedLLM(
-            request: request, requestedModel: requestedModel)
-        {
-            return err
-        }
-        do {
-            // Native /api/chat carries no tools / chat-template kwargs.
-            try await llm.preflightPromptCache(
-                messages: messages, tools: nil, chatTemplateKwargs: nil)
-            return nil
-        } catch let e as AthenaError {
-            return Self.error(
-                status: HTTPResponse.Status(code: e.httpStatus),
-                message: e.message, type: "server_error", code: e.code)
-        } catch {
-            return Self.classified(error, module: .llm)
-        }
-    }
-
-    /// Newline-delimited JSON streamer. Each generated piece → one
-    /// JSON line; a final `done` line closes the stream.
-    private static func streamNDJSON(
-        tokens: AsyncStream<String>,
-        onConsumerCancel: (@Sendable () -> Void)? = nil,
-        line: @escaping @Sendable (_ content: String, _ done: Bool)
-            -> Data?
-    ) -> Response {
-        let stream = AsyncStream<ByteBuffer> { continuation in
-            let task = Task {
-                func emit(_ d: Data?) {
-                    guard let d else { return }
-                    var b = ByteBuffer()
-                    b.writeBytes(d)
-                    b.writeString("\n")
-                    continuation.yield(b)
-                }
-                for await piece in tokens { emit(line(piece, false)) }
-                emit(line("", true))
-                continuation.finish()
-            }
-            // A8 — bridge a client disconnect to the generation's cancel flag
-            // (the decode loop polls the counter, not `Task.isCancelled`).
-            continuation.onTermination = { _ in
-                task.cancel()
-                onConsumerCancel?()
-            }
-        }
-        var headers = HTTPFields()
-        headers[.contentType] = "application/x-ndjson"
-        return Response(
-            status: .ok, headers: headers,
-            body: ResponseBody(asyncSequence: stream))
     }
 
     /// Governed embedding helper shared by `/api/embed` and `/v1/embeddings`.
@@ -3470,8 +3426,7 @@ struct AthenaServer {
     private func handleNativeEmbed(_ request: Request) async -> Response {
         let decoded = await decodeJSON(request, AthenaEmbedRequest.self)
         guard case .ok(let body) = decoded else {
-            if case .fail(let r) = decoded { return r }
-            fatalError()
+            return decoded.orFail
         }
         guard !body.input.isEmpty else {
             return Self.error(
@@ -3621,8 +3576,7 @@ struct AthenaServer {
     private func handleModelCopy(_ request: Request) async -> Response {
         let decoded = await decodeJSON(request, ModelCopyRequest.self)
         guard case .ok(let body) = decoded else {
-            if case .fail(let r) = decoded { return r }
-            fatalError()
+            return decoded.orFail
         }
         // Network copies are store-name → store-name only (no
         // absolute path / traversal source).
@@ -3679,8 +3633,7 @@ struct AthenaServer {
         let decoded = await decodeJSON(
             request, SetDefaultModelRequest.self)
         guard case .ok(let body) = decoded else {
-            if case .fail(let r) = decoded { return r }
-            fatalError()
+            return decoded.orFail
         }
         guard let name = Self.safeModelName(body.name) else {
             return Self.error(
@@ -3848,8 +3801,7 @@ struct AthenaServer {
     private func handleModelsLoad(_ request: Request) async -> Response {
         let decoded = await decodeJSON(request, ModelLoadRequest.self)
         guard case .ok(let body) = decoded else {
-            if case .fail(let r) = decoded { return r }
-            fatalError()
+            return decoded.orFail
         }
         guard
             let moduleId = ModuleID(rawValue: body.module)
@@ -3929,8 +3881,7 @@ struct AthenaServer {
     {
         let decoded = await decodeJSON(request, ModelUnloadRequest.self)
         guard case .ok(let body) = decoded else {
-            if case .fail(let r) = decoded { return r }
-            fatalError()
+            return decoded.orFail
         }
         let targets: [ModuleID]
         if let raw = body.module, raw != "all", !raw.isEmpty {
@@ -4032,8 +3983,7 @@ struct AthenaServer {
             let decoded = await self.decodeJSON(
                 req, SetDefaultModelRequest.self)
             guard case .ok(let body) = decoded else {
-                if case .fail(let f) = decoded { return f }
-                fatalError()
+                return decoded.orFail
             }
             return await self.handleModelRemove(body.name, req)
         }
@@ -4243,8 +4193,7 @@ struct AthenaServer {
     {
         let decoded = await decodeJSON(request, CreateUserRequest.self)
         guard case .ok(let body) = decoded else {
-            if case .fail(let r) = decoded { return r }
-            fatalError()
+            return decoded.orFail
         }
         guard let username = Self.safeIdent(body.username) else {
             return Self.error(
@@ -4485,8 +4434,7 @@ struct AthenaServer {
         let decoded = await decodeJSON(
             request, CreateTokenRequest.self)
         guard case .ok(let body) = decoded else {
-            if case .fail(let r) = decoded { return r }
-            fatalError()
+            return decoded.orFail
         }
         guard let user = Self.safeIdent(body.user) else {
             return Self.error(
@@ -4625,8 +4573,7 @@ struct AthenaServer {
         }
         let decoded = await decodeJSON(request, RotateTokenRequest.self)
         guard case .ok(let body) = decoded else {
-            if case .fail(let r) = decoded { return r }
-            fatalError()
+            return decoded.orFail
         }
         let matches = await store.tokensMatchingHashPrefix(prefix)
         guard matches.count == 1, let m = matches.first,

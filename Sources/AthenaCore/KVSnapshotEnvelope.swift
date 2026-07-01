@@ -98,18 +98,10 @@ public struct KeyfileKEK: KEKProvider {
     }
 }
 
-/// SEP-backed KEK — the S6 follow-up (Secure Enclave P-256, ECIES wrap),
-/// **gated on the headless-launchd SEP operability spike** (ADR 027 plan). The
-/// seam conforms now so `kekType == .sep` round-trips through the header and the
-/// store dispatches on it; the wrap/unwrap bodies arrive in S6.
-public struct SepKEK: KEKProvider {
-    public let kekType: KEKType = .sep
-    public init() {}
-    public func wrap(_ dek: SymmetricKey) throws -> (params: Data, wrapped: Data) {
-        throw KVSnapshotCryptoError.sepNotYetImplemented
-    }
-    public func unwrap(params: Data, wrapped: Data) -> SymmetricKey? { nil }
-}
+// SepKEK (Secure Enclave P-256 ECIES wrap) was a throws-only stub for the S6
+// follow-up; deleted as dead (WP8). The `KEKType.sep` raw value + the
+// `sepNotYetImplemented` error stay reserved so a future S6 provider slots in
+// without a header-format change (ADR 027).
 
 /// The envelope operation: seal `plaintext` (the `KVFrame` body bytes) under a
 /// fresh per-blob DEK, wrapping that DEK with `kek`; and the inverse. `aad` binds

@@ -54,17 +54,6 @@ final class KVSnapshotEnvelopeTests: XCTestCase {
         _ = params
     }
 
-    // MARK: - SepKEK stub (S6 seam)
-
-    func testSepKEKStubThrowsAndUnwrapsNil() {
-        let sep = SepKEK()
-        XCTAssertEqual(sep.kekType, .sep)
-        XCTAssertThrowsError(try sep.wrap(SymmetricKey(size: .bits256))) {
-            XCTAssertEqual($0 as? KVSnapshotCryptoError, .sepNotYetImplemented)
-        }
-        XCTAssertNil(sep.unwrap(params: Data(), wrapped: Data()))
-    }
-
     // MARK: - Envelope seal/open
 
     func testEnvelopeSealOpenRoundTrip() throws {

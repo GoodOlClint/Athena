@@ -43,16 +43,6 @@ extension String {
 }
 
 extension Array where Element == String {
-    /// Returns the canonical (stored) id from `self` that matches
-    /// `requested` case-insensitively, or nil if none match. Use this
-    /// at every model-resolution boundary instead of the raw
-    /// `contains(_:)` check — callers should use the RETURNED
-    /// canonical id for downstream lookups so storage stays
-    /// case-consistent.
-    public func canonicalCaseInsensitive(_ requested: String) -> String? {
-        first { $0.caseInsensitiveCompare(requested) == .orderedSame }
-    }
-
     /// Match `requested` against `self` by STORE-DIR IDENTITY
     /// (`modelStoreIdentity`, case-insensitive), returning the canonical
     /// stored id. This lets a request name a model by either its full
