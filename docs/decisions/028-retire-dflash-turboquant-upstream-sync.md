@@ -86,3 +86,24 @@ than silently falling back. The `e2e-rbac.sh` phase-12 gate asserts this.
 Decision logic is mechanical deletion; the surviving MLX-free decision seams
 (`KVCompression.resolve`, `servesArch`, MTP `SpeculativeStats`) stay unit-pinned
 (ADR 008/009).
+
+## TriAttention retire-tripwire (WP12, 2026-07-01)
+
+TriAttention was deliberately **retained** above, but the 2026-07-01 audit noted
+it is now dead weight in practice: default-off, **Qwen3.5-only** (`Load.swift`
+warns it is inert on any other target), ~700 vendored lines, zero e2e coverage,
+and the fleet serves Gemma4. So it carries the same park-upstream tripwire the
+rest of this ADR applies to DFlash/TurboQuant:
+
+> **Tripwire:** if no Qwen3.5 target is served by **~Dec 2026**, park TriAttention
+> upstream (its home is a core `mlx` KV-eviction mode) rather than carrying the
+> vendored delta. **Superseded if ADR 033 lands** — the Qwen3.5-MTP→substrate
+> cutover plan drops TriAttention as part of that collapse, which retires it
+> sooner and for a stronger reason (the operator decision recorded in
+> `docs/qwen35-mtp-substrate-cutover-plan.md`).
+
+Related standing calendar items (tracked, not actioned now): the three default-on
+revert knobs — `cold_load_wait_secs=0` (ADR 015), `governor_admission_mode`
+(ADR 023 G2), `inference_gate_enabled` / `ATHENA_INFERENCE_GATE` (ADR 029), plus
+the WP2 `metal_fault_degrade` (ADR 030 P2) — are all <6 months old; revisit for
+removal ~Sep 2026 if unexercised.
