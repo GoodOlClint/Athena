@@ -62,7 +62,8 @@ public protocol LLMModule: InferenceModule {
         chatTemplateKwargs: [String: any Sendable]?,
         promptCacheKey: String?,
         principal: String?,
-        logprobs: LogprobsRequest?
+        logprobs: LogprobsRequest?,
+        requestedModel: String?
     ) -> AsyncStream<GenChunk>
 
     /// Override-aware String variant (M24.3). `maxTokens`/`temperature`,
@@ -179,7 +180,8 @@ extension LLMModule {
         chatTemplateKwargs: [String: any Sendable]?,
         promptCacheKey: String? = nil,
         principal: String? = nil,
-        logprobs: LogprobsRequest? = nil
+        logprobs: LogprobsRequest? = nil,
+        requestedModel: String? = nil  // WP6 — no slot to rebind in the stub
     ) -> AsyncStream<GenChunk> {
         // The model-free stub has no sampler, so topP/seed/speculative
         // are accepted and ignored; the e2e gate exercises the sampling

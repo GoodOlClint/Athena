@@ -1003,6 +1003,7 @@ struct AthenaServer {
         // lists. The Anthropic adapter (S2) maps its wire request onto this same
         // type.
         let native = NativeChatRequest(
+            model: body.model,  // WP6 — bind this model inside the decode gate
             messages: turns, schemaJSON: schemaJSON, tools: toolSpecs,
             maxTokens: body.tokenCap, temperature: body.temperature,
             topP: body.top_p, seed: body.seed, speculative: body.speculative,

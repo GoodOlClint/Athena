@@ -191,6 +191,7 @@ struct AnthropicMessagesRequest: Decodable {
         }
 
         let native = NativeChatRequest(
+            model: model,  // WP6 — bind this model inside the decode gate
             messages: turns, schemaJSON: schemaJSON, tools: toolSpecs,
             maxTokens: max_tokens, temperature: temperature, topP: top_p,
             seed: nil, speculative: nil, chatTemplateKwargs: nil,

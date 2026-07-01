@@ -42,13 +42,16 @@ a convert holds the gate for the whole quantize (minutes), so an operator conver
 the safe choice for an explicit admin op (ADR 011's "never compose at inference"
 outweighs convert/serve concurrency, which operators rarely need simultaneously).
 
-**Residual (follow-up):** the narrow concurrent-DIFFERENT-model wrong-MODEL
-*selection* window (A requests X, B requests Y at the same instant; A may decode
-Y because the server-side rebind and the gated decode are two separate gate
-acquisitions). This is a pre-existing logical mis-selection — NOT worsened by the
-gate, and with NO crash/co-execution/double-residency (those are closed). Closing
-it fully needs the rebind folded into the gated decode Task (or a pinned-container
-hand-off through `runSpeculative`); deferred as a small slice.
+**Residual — CLOSED (WP6, v0.10.242).** The narrow concurrent-DIFFERENT-model
+wrong-MODEL *selection* window (A requests X, B requests Y at the same instant; A
+may decode Y because the server-side rebind and the gated decode were two separate
+gate acquisitions) is now closed: the requested model rides on `NativeChatRequest`
+(the ADR 036 engine boundary) into `generateMetered`, which re-binds the slot
+**inside** its gated decode span (`rebind` is a no-op when already bound, so the
+single-model path is byte-unchanged; it corrects a drift only under actual
+cross-model contention). Rebind + decode now share ONE gate acquisition, mirroring
+the embedding module's `embedInFlight` atomic rebind. Both dialects
+(`/v1/chat/completions`, `/v1/messages`) set `NativeChatRequest.model`.
 
 Earlier (v0.10.223): the
 `InferenceGate` actor (`Sources/AthenaCore/InferenceGate.swift`) — a FIFO,

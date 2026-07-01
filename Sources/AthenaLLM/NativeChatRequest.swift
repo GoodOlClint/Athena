@@ -9,6 +9,13 @@ import Foundation
 /// (`speculative`, `chatTemplateKwargs`, …) have a single home each adapter
 /// surfaces in its own idiom (ADR 036 §7, three-rung rule).
 public struct NativeChatRequest: Sendable {
+    /// WP6 (ADR 029 residual) — the requested model, so the engine can bind the
+    /// slot INSIDE its gated decode span. Rebind and decode were two separate
+    /// gate acquisitions, leaving a wrong-model window: A rebinds→X, releases; B
+    /// rebinds→Y; A decodes against Y. Carrying the id here lets `generateMetered`
+    /// re-bind atomically under the same gate (a no-op when already bound). nil ⇒
+    /// use whatever is resident (the server preflight already resolved it).
+    public var model: String?
     public var messages: [ChatTurn]
     public var schemaJSON: String?
     public var tools: [[String: any Sendable]]?
@@ -23,6 +30,7 @@ public struct NativeChatRequest: Sendable {
     public var logprobs: LogprobsRequest?
 
     public init(
+        model: String? = nil,
         messages: [ChatTurn], schemaJSON: String? = nil,
         tools: [[String: any Sendable]]? = nil,
         maxTokens: Int? = nil, temperature: Double? = nil,
@@ -32,6 +40,7 @@ public struct NativeChatRequest: Sendable {
         promptCacheKey: String? = nil, principal: String? = nil,
         logprobs: LogprobsRequest? = nil
     ) {
+        self.model = model
         self.messages = messages
         self.schemaJSON = schemaJSON
         self.tools = tools
@@ -63,6 +72,6 @@ extension LLMModule {
             speculative: req.speculative,
             chatTemplateKwargs: req.chatTemplateKwargs,
             promptCacheKey: req.promptCacheKey, principal: req.principal,
-            logprobs: req.logprobs)
+            logprobs: req.logprobs, requestedModel: req.model)
     }
 }

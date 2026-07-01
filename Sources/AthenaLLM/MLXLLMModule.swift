@@ -711,7 +711,8 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         chatTemplateKwargs: [String: any Sendable]?,
         promptCacheKey: String? = nil,
         principal: String? = nil,
-        logprobs: LogprobsRequest? = nil
+        logprobs: LogprobsRequest? = nil,
+        requestedModel: String? = nil
     ) -> AsyncStream<GenChunk> {
         // `messages` ([ChatTurn]) is Sendable and crosses into the actor;
         // the non-Sendable `Chat.Message` mapping happens INSIDE the actor
@@ -734,6 +735,17 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                     // @Sendable closure (not captured as a mutable var).
                     let usage = try await InferenceGate.shared
                         .withExclusiveExecution { () async throws -> TokenUsage in
+                            // WP6 (ADR 029 residual) — bind the requested model
+                            // INSIDE the gate so a concurrent different-model
+                            // rebind can't swap the shared slot between the
+                            // server's preflight rebind and this decode (the H3
+                            // wrong-model window). No-op when already bound (the
+                            // common single-model case); corrects a drift only
+                            // under actual cross-model contention. Mirrors the
+                            // embedding module's `embedInFlight` atomic rebind.
+                            if let m = requestedModel, !m.isEmpty {
+                                try await self.rebind(to: m)
+                            }
                             var u = TokenUsage.zero
                             if let speculative = try await self.runSpeculative(
                                 messages: messages, schemaJSON: schemaJSON,
