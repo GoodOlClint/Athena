@@ -3118,11 +3118,19 @@ struct AthenaServer {
             do {
                 // M-conv: `bits` is opt-in (mlx_lm-style). Omit ⇒ no
                 // quantization; explicit N ⇒ quantize to N-bit.
-                let r = try await ModelConvert.convert(
-                    id: req.id, revision: req.revision, bits: req.bits,
-                    groupSize: req.group_size ?? 64,
-                    into: modelStoreRoot, name: req.name,
-                    progress: progress)
+                // ADR 029 WP3 — convert loads weights + runs quantize kernels on
+                // the shared Metal pool; gate it so it can't co-execute with a
+                // decode (the "two uncoordinated allocators on one pool" hazard
+                // ADR 011/029 forbid). A convert holds the gate for the whole
+                // quantize (minutes) — deliberate: an operator convert blocks
+                // inference for its duration rather than racing it on the device.
+                let r = try await InferenceGate.shared.withExclusiveExecution {
+                    try await ModelConvert.convert(
+                        id: req.id, revision: req.revision, bits: req.bits,
+                        groupSize: req.group_size ?? 64,
+                        into: modelStoreRoot, name: req.name,
+                        progress: progress)
+                }
                 return (
                     try? JSONEncoder().encode(
                         ModelConvertResult(path: r.path.path, bytes: r.bytes)),
@@ -3878,7 +3886,15 @@ struct AthenaServer {
         }
         do {
             try await governor.ensureLoaded(moduleId)
-            try await sel.rebind(to: target)
+            // ADR 029 WP3 — gate the rebind exactly as the request-path
+            // `auditedRebind` (:3761) does: a warm swap drops+loads weights on
+            // the Metal pool and must not run while a decode holds the slot
+            // (transient double-residency → OOM) or another tenant executes.
+            // This control-plane path previously rebound off-gate (the H3
+            // hazard reachable via /api/models/load).
+            try await InferenceGate.shared.withExclusiveExecution {
+                try await sel.rebind(to: target)
+            }
         } catch let e as AthenaError {
             await audit(
                 request, action: "model.load",

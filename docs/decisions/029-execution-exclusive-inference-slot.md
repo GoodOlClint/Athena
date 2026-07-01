@@ -30,6 +30,18 @@ them so the admission re-gate still sees the reclaim's effect — it just waits 
 any in-flight forward first. The admission *math* stays ungated (correct per
 rule 1). MLX-free + unit-pinned (`testReclaimRunsUnderInferenceGateWP1`).
 
+**WP3 (v0.10.239) — the two remaining ungated operator paths closed.**
+`POST /api/models/load` (`handleModelsLoad`) rebound off-gate — it now wraps
+`sel.rebind(to:)` in `withExclusiveExecution`, matching the request-path
+`auditedRebind` (closes the H3 double-residency hazard reachable via the control
+plane). In-daemon `POST /api/models/convert` ran weight-load + quantize kernels
+on the shared Metal pool with no gate; the `ModelConvert.convert(...)` call is now
+wrapped in `withExclusiveExecution`. **Convert carve-out (decided, not implicit):**
+a convert holds the gate for the whole quantize (minutes), so an operator convert
+**blocks inference for its duration** rather than co-executing on the device —
+the safe choice for an explicit admin op (ADR 011's "never compose at inference"
+outweighs convert/serve concurrency, which operators rarely need simultaneously).
+
 **Residual (follow-up):** the narrow concurrent-DIFFERENT-model wrong-MODEL
 *selection* window (A requests X, B requests Y at the same instant; A may decode
 Y because the server-side rebind and the gated decode are two separate gate
