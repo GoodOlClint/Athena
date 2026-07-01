@@ -925,13 +925,15 @@ echo "== phase 2.14: OpenAPI drift-guard — every route documented (M32.3) =="
 # console is intentionally out of the spec's scope and excluded.
 SPECF="$D/openapi.json"
 curl -s "http://127.0.0.1:$PORT/openapi.json" > "$SPECF"
-if python3 - "$SPECF" Sources/athena/Server/AthenaServer.swift <<'PY'
+if python3 - "$SPECF" Sources/athena/Server/AthenaServer*.swift <<'PY'
 import json, re, sys
 spec = json.load(open(sys.argv[1]))               # fetch + parse
 if spec.get("openapi") != "3.0.3":
     print("not an openapi 3.0.3 document"); sys.exit(1)
 paths = spec.get("paths", {})
-src = open(sys.argv[2]).read()
+# WP10 — route registrations live across AthenaServer.swift + its
+# AthenaServer+*.swift extension files (per-surface split); scan them all.
+src = "".join(open(f).read() for f in sys.argv[2:])
 routes = re.findall(r'router\.(get|post|put|delete|patch)\("([^"]+)"', src)
 operational = {"/healthz", "/metrics", "/openapi.json"}
 HTTP = {"get", "post", "put", "delete", "patch"}
