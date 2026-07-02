@@ -106,5 +106,74 @@ else
   echo "  FAIL http=$h err_type='$(err_type)' (expected 400 invalid_request_error)"; fail=1
 fi
 
+# --- streaming tool-call checks (2026-07-01 audit tail) ---
+# The streaming pump must emit tool calls too (ADR 036 collapsed both pumps):
+# an SSE `tool_calls` delta + a terminal `finish_reason:"tool_calls"`. Guards
+# the 2026-06-30 streaming-`tool_calls` fix on BOTH the forced (required) and
+# the free (auto) path.
+sse_post() {
+  curl -s -N -X POST "$URL" -H 'Content-Type: application/json' \
+    -H 'Accept: text/event-stream' -d "$1" >"$WORK/sse" 2>/dev/null
+}
+# yes/no: did any streamed delta carry a tool_calls fragment?
+sse_has_tc() {
+  python3 - "$WORK/sse" <<'PY'
+import sys, json
+for line in open(sys.argv[1]):
+    line = line.strip()
+    if not line.startswith("data:"):
+        continue
+    p = line[5:].strip()
+    if p == "[DONE]":
+        break
+    try:
+        d = json.loads(p)["choices"][0].get("delta", {})
+    except Exception:
+        continue
+    if d.get("tool_calls"):
+        print("yes"); sys.exit(0)
+print("no")
+PY
+}
+# the last non-empty finish_reason before [DONE]
+sse_finish() {
+  python3 - "$WORK/sse" <<'PY'
+import sys, json
+fr = ""
+for line in open(sys.argv[1]):
+    line = line.strip()
+    if not line.startswith("data:"):
+        continue
+    p = line[5:].strip()
+    if p == "[DONE]":
+        break
+    try:
+        f = json.loads(p)["choices"][0].get("finish_reason")
+    except Exception:
+        continue
+    if f:
+        fr = f
+print(fr)
+PY
+}
+
+echo "== 6) stream + required → SSE tool_calls delta + finish=tool_calls =="
+sse_post "{\"model\":\"$MODEL\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"weather in paris\"}],\"max_tokens\":256,\"tools\":[$TOOL],\"tool_choice\":\"required\"}"
+if [ "$(sse_has_tc)" = "yes" ] && [ "$(sse_finish)" = "tool_calls" ]; then
+  echo "  ok: streamed a tool_calls delta, finish=tool_calls"
+else
+  echo "  FAIL tool_calls_delta=$(sse_has_tc) finish=$(sse_finish)"; fail=1
+fi
+
+echo "== 7) stream + auto (tool-relevant prompt) → free tool_calls streamed =="
+# auto forces nothing (ADR 034) — but an explicit tool-use instruction should
+# make the model CHOOSE to call, and that free call must stream as tool_calls.
+sse_post "{\"model\":\"$MODEL\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"Use the searchWeb tool to look up the current weather in Paris.\"}],\"max_tokens\":256,\"tools\":[$TOOL]}"
+if [ "$(sse_has_tc)" = "yes" ] && [ "$(sse_finish)" = "tool_calls" ]; then
+  echo "  ok: free auto call streamed as tool_calls, finish=tool_calls"
+else
+  echo "  FAIL tool_calls_delta=$(sse_has_tc) finish=$(sse_finish)"; fail=1
+fi
+
 if [ "$fail" = "0" ]; then echo "PASS"; else echo "FAIL ($fail check(s))"; fi
 exit $fail

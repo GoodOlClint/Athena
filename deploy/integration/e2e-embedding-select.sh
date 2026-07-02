@@ -8,10 +8,9 @@
 # being echoed back unused.
 #
 # It brings up a loopback, auth-disabled daemon with TWO embedding
-# models declared and asserts, across all three embedding paths:
+# models declared and asserts, on the sole embedding surface:
 #   • /v1/embeddings  (OpenAI)      — M39.1
-#   • /api/embed      (native)      — M39.2
-#   • queued "embed"  (submit→poll) — M39.2
+# (native /api/embed + queued embeddings removed — ADR 031/013 + ADR 025)
 # that the requested model selects the right dimension AND the response
 # reports the model ACTUALLY served (truthful), and that an unknown
 # model is a 400 `model_not_available` — never a silent wrong-dim
@@ -107,7 +106,7 @@ curl -fsS -o /dev/null "$base/healthz" 2>/dev/null || {
   echo; echo "daemon did not become healthy:"; tail -30 "$DATA_DIR/daemon.log"
   exit 1; }
 
-# dim <json> — length of data[0].embedding (.embedding for /api/embed)
+# dim <json> — length of data[0].embedding
 v1dim()  { python3 -c 'import sys,json;d=json.load(sys.stdin);print(len(d["data"][0]["embedding"]))'; }
 v1model(){ python3 -c 'import sys,json;print(json.load(sys.stdin)["model"])'; }
 
@@ -147,41 +146,9 @@ grep -q 'model_not_available' "$DATA_DIR/nope.json" \
   && ok "unknown ⇒ code model_not_available" \
   || bad "missing model_not_available ($(cat "$DATA_DIR/nope.json"))"
 
-if [ "$PHASE" -ge 2 ]; then
-  echo "== /api/embed — native selection + truthful echo (M39.2) =="
-  R="$(curl -fsS -H 'content-type: application/json' \
-    -d "{\"model\":\"$LARGE\",\"input\":\"hello\"}" "$base/api/embed")"
-  ND="$(printf '%s' "$R" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)["embeddings"][0]))')"
-  NM="$(printf '%s' "$R" | v1model)"
-  [ "$ND" = 1024 ] && ok "native large ⇒ 1024-dim" || bad "native dim != 1024 ($R)"
-  [ "$NM" = "$LARGE" ] && ok "native ⇒ truthful model=$LARGE" || bad "native model not truthful ($R)"
-
-  CODE="$(curl -s -o "$DATA_DIR/nnope.json" -w '%{http_code}' \
-    -H 'content-type: application/json' \
-    -d '{"model":"nope/not-loaded","input":"hello"}' "$base/api/embed")"
-  [ "$CODE" = 400 ] && ok "native unknown ⇒ HTTP 400" || bad "native unknown not 400 ($CODE)"
-
-  echo "== queued embeddings — submit→poll selection + echo (M39.2) =="
-  JID="$(curl -fsS -H 'content-type: application/json' \
-    -d "{\"model\":\"$LARGE\",\"input\":\"hello\"}" \
-    "$base/v1/queue/embeddings" \
-    | python3 -c 'import sys,json;print(json.load(sys.stdin).get("id",""))' 2>/dev/null || true)"
-  if [ -n "$JID" ]; then
-    # Long-poll the status route (?wait clamps to <=120s) for terminal.
-    P="$(curl -fsS "$base/v1/queue/$JID?wait=120")"
-    ST="$(printf '%s' "$P" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("status",""))')"
-    if [ "$ST" = done ]; then
-      QD="$(printf '%s' "$P" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)["result"]["embeddings"][0]))' 2>/dev/null || echo "?")"
-      QM="$(printf '%s' "$P" | python3 -c 'import sys,json;print(json.load(sys.stdin)["result"].get("model",""))' 2>/dev/null || echo "")"
-      [ "$QD" = 1024 ] && ok "queued large ⇒ 1024-dim" || bad "queued dim != 1024 ($P)"
-      [ "$QM" = "$LARGE" ] && ok "queued ⇒ truthful model=$LARGE" || bad "queued model not truthful ($P)"
-    else
-      bad "queued job not done (status=$ST): $P"
-    fi
-  else
-    bad "could not submit a queued embeddings job (check route)"
-  fi
-fi
+# /api/embed (native) + /v1/queue/embeddings blocks removed — both routes
+# are gone (ADR 031/013 native-embed removal; ADR 025 queue removal). /v1
+# is the single inference surface, exercised above.
 
 echo "════════════════════════════════════════════════════════════"
 echo " M39 e2e: $pass passed, $fail failed"

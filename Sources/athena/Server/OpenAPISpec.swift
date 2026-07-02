@@ -111,7 +111,7 @@ enum OpenAPISpec {
               "post": {
                 "tags": ["Chat"],
                 "summary": "Anthropic Messages API (chat over the same engine).",
-                "description": "**Athena-native dialect, Anthropic-compatible (NOT OpenAI).** The Anthropic Messages shape over the SAME inference engine as `/v1/chat/completions` (ADR 036): one engine, multiple protocol adapters. Lets an Anthropic-API harness (e.g. Claude Code, `ANTHROPIC_BASE_URL`) point at Athena directly. Supports text + `system` + `tool_use`/`tool_result` + `tools` (mapped to the same model menu) + `tool_choice` (`auto`/`any`/`tool`) + `stop_sequences`, both non-streaming and streaming (`stream:true` ⇒ the Anthropic SSE event sequence: message_start → content_block_start/delta/stop → message_delta → message_stop). `image`/`document` content blocks, prompt-caching, and extended thinking are not yet supported (400). Auth: `Authorization: Bearer` now; `x-api-key` alias next slice. Requires `inference`.",
+                "description": "**Athena-native dialect, Anthropic-compatible (NOT OpenAI).** The Anthropic Messages shape over the SAME inference engine as `/v1/chat/completions` (ADR 036): one engine, multiple protocol adapters. Lets an Anthropic-API harness (e.g. Claude Code, `ANTHROPIC_BASE_URL`) point at Athena directly. Supports text + `system` + `tool_use`/`tool_result` + `tools` (mapped to the same model menu) + `tool_choice` (`auto`/`any`/`tool`) + `stop_sequences`, both non-streaming and streaming (`stream:true` ⇒ the Anthropic SSE event sequence: message_start → content_block_start/delta/stop → message_delta → message_stop). `image`/`document` content blocks are refused with a cause-naming 400 (`unsupported_content_block`). Unknown top-level fields — `cache_control` (prompt-caching) and extended `thinking` — are **silently ignored** (OpenAI-adapter convention), not rejected, so a Claude Code client that sends them still works. Auth: `Authorization: Bearer` (Claude Code authenticates via bearer; there is no separate `x-api-key` handling). Requires `inference`.",
                 "requestBody": {
                   "required": true,
                   "content": { "application/json": { "schema": {
@@ -301,22 +301,6 @@ enum OpenAPISpec {
                   "401": { "$ref": "#/components/responses/Unauthorized" },
                   "403": { "$ref": "#/components/responses/Forbidden" },
                   "413": { "$ref": "#/components/responses/PayloadTooLarge" },
-                  "503": { "$ref": "#/components/responses/Overloaded" }
-                }
-              }
-            },
-            "/api/embed": {
-              "post": {
-                "tags": ["Native"],
-                "summary": "Native embeddings (Athena dialect). DEPRECATED — use POST /v1/embeddings.",
-                "deprecated": true,
-                "description": "DEPRECATED (ADR 013): superseded by the OpenAI surface `POST /v1/embeddings`; `/api/*` is the daemon control plane, not an inference surface. Still served through the deprecation period.",
-                "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AthenaEmbedRequest" } } } },
-                "responses": {
-                  "200": { "description": "Embeddings.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AthenaEmbedResponse" } } } },
-                  "400": { "$ref": "#/components/responses/BadRequest" },
-                  "401": { "$ref": "#/components/responses/Unauthorized" },
-                  "403": { "$ref": "#/components/responses/Forbidden" },
                   "503": { "$ref": "#/components/responses/Overloaded" }
                 }
               }
@@ -886,12 +870,6 @@ enum OpenAPISpec {
                   "dimension": { "type": "integer" }
                 }
               },
-              "AthenaEmbedRequest": {
-                "type": "object",
-                "required": ["input"],
-                "properties": { "model": { "type": "string", "description": "Selects among the configured embedding set (see EmbeddingRequest.model). Omit ⇒ default; unknown id ⇒ 400 model_not_available. The response `model` is the model actually served." }, "input": { "oneOf": [ { "type": "string" }, { "type": "array", "items": { "type": "string" } } ] } }
-              },
-              "AthenaEmbedResponse": { "type": "object", "properties": { "model": { "type": "string" }, "embeddings": { "type": "array", "items": { "type": "array", "items": { "type": "number" } } } } },
               "AthenaStopResponse": { "type": "object", "properties": { "status": { "type": "string" }, "model": { "type": "string" } } },
               "AdminStatusResponse": {
                 "type": "object",

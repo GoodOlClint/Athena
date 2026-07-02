@@ -688,20 +688,10 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         }
     }
 
-    public nonisolated func generate(prompt: String) -> AsyncStream<String> {
-        generate(prompt: prompt, schemaJSON: nil, tools: nil)
-    }
-
-    public nonisolated func generate(
-        prompt: String, schemaJSON: String?,
-        tools: [[String: any Sendable]]?
-    ) -> AsyncStream<String> {
-        generate(
-            messages: [ChatTurn(role: "user", content: prompt)],
-            schemaJSON: schemaJSON, tools: tools,
-            maxTokens: nil, temperature: nil, speculative: nil)
-    }
-
+    // The String `generate(prompt:)` overload comes from the LLMModule
+    // extension default (filters `generateMetered` → `.text`); the real
+    // engine below is `generateMetered`. (Test-only convenience overloads
+    // removed — the audit tail.)
     public nonisolated func generateMetered(
         messages: [ChatTurn], schemaJSON: String?,
         tools: [[String: any Sendable]]?,

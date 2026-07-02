@@ -820,19 +820,6 @@ NROWS="$(sqlite3 "$DB" 'SELECT COUNT(*) FROM usage_counters;')"
 [ "$NROWS" -ge 2 ] \
   && ok "usage_counters holds ≥2 principal rows ($NROWS)" \
   || bad "usage_counters has <2 rows ($NROWS)"
-# D1 (ADR 007 #8): native /api/embed must meter like /v1/embeddings — the
-# embed twin previously dropped usage entirely. Prove alice's prompt_tokens
-# grow after a native /api/embed call (the embedding model is warm from 2.9).
-AEP0="$(usagecol 'u:alice' prompt_tokens)"
-curl -s -o /dev/null -X POST -H "Authorization: Bearer $ALICE_TOK" \
-  -H 'Content-Type: application/json' \
-  -d '{"input":["native embed metering check"]}' \
-  "http://127.0.0.1:$PORT/api/embed"
-AEP1="$(usagecol 'u:alice' prompt_tokens)"
-[ "$AEP1" -gt "$AEP0" ] \
-  && ok "native /api/embed meters alice prompt_tokens ($AEP0 → $AEP1)" \
-  || bad "native /api/embed did not meter ($AEP0 → $AEP1)"
-
 echo
 echo "== phase 2.11: GET /api/usage owner-scoping + CLI (M27.3) =="
 # A member sees only its OWN principal row; an admin sees all;
@@ -975,9 +962,10 @@ code 200 POST /v1/chat/completions "$BOSS_SCOPED" "$CHAT"  # inference ok
 
 echo
 echo "== phase 3.5: native /api inference + admin (M16.1) =="
-# /api/chat removed (ADR 031/013) — /v1 is the single inference surface.
+# /api/chat + /api/embed removed (ADR 031/013) — /v1 is the single
+# inference surface; /api/* is control-plane only.
 code 404 POST /api/chat       "$ALICE_TOK" "$CHAT"  # route gone
-code 200 POST /api/embed      "$ALICE_TOK" '{"input":"hi"}'
+code 404 POST /api/embed      "$ALICE_TOK" '{"input":"hi"}'  # route gone
 code 403 POST /api/admin/stop "$ALICE_TOK"          # ∌ daemonAdmin
 code 200 POST /api/admin/stop "$ADMIN_TOK"          # admin: daemonAdmin
 # M43.2 — the admin/stop unloaded every module; re-warm before the

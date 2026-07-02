@@ -10,32 +10,13 @@ public protocol LLMModule: InferenceModule {
     /// conformers, the stub).
     var servesVision: Bool { get async }
 
-    /// Stream generated text chunks. M0 is a canned stub; M1 replaces the
-    /// body with native `TokenIterator` generation.
+    /// Stream generated text chunks (test-only convenience — the serve path
+    /// consumes `generateMetered`). M0 is a canned stub; the MLX module gets
+    /// this via a default that filters `generateMetered` down to `.text`.
     nonisolated func generate(prompt: String) -> AsyncStream<String>
-    /// Structured + tool-aware variant. `schemaJSON` (when non-nil)
-    /// constrains output to the JSON schema; `tools` (OpenAI function
-    /// specs, already lowered to plain Foundation containers) are rendered
-    /// into the model's chat template so it knows the tool-call format.
-    /// Default ignores both (no structured/tool support).
-    nonisolated func generate(
-        prompt: String, schemaJSON: String?,
-        tools: [[String: any Sendable]]?
-    ) -> AsyncStream<String>
-
-    /// Role-aware variant (M24.1). `messages` carries the FULL
-    /// conversation (system/user/assistant/tool) so the model's chat
-    /// template sees system instructions and prior turns — not just a
-    /// user-only join. `schemaJSON`/`tools` behave as in the prompt
-    /// variant. Default bridges to the override-aware variant with no
-    /// per-request overrides.
-    nonisolated func generate(
-        messages: [ChatTurn], schemaJSON: String?,
-        tools: [[String: any Sendable]]?
-    ) -> AsyncStream<String>
 
     /// Metered generation (M27.1) — the canonical entry point. Yields
-    /// `.text` chunks exactly like the String `generate` overloads, then
+    /// `.text` chunks exactly like the String `generate(prompt:)` overload, then
     /// a single terminal `.usage(TokenUsage)` carrying the true
     /// prompt/completion token counts for THIS request, then a terminal
     /// `.finish(FinishReason)` (M31.2). Every other `generate` overload is
@@ -65,19 +46,6 @@ public protocol LLMModule: InferenceModule {
         logprobs: LogprobsRequest?,
         requestedModel: String?
     ) -> AsyncStream<GenChunk>
-
-    /// Override-aware String variant (M24.3). `maxTokens`/`temperature`,
-    /// when non-nil and valid, override the daemon-load defaults for THIS
-    /// request (e.g. OpenAI `max_tokens`/`temperature`). nil ⇒ the loaded
-    /// `LLMGenerationParameters`. A filter over `generateMetered` that
-    /// drops the terminal usage; callers that need usage consume
-    /// `generateMetered` directly.
-    nonisolated func generate(
-        messages: [ChatTurn], schemaJSON: String?,
-        tools: [[String: any Sendable]]?,
-        maxTokens: Int?, temperature: Double?,
-        speculative: Bool?
-    ) -> AsyncStream<String>
 
     /// Reject — before any generation — a prompt whose KV/prompt-cache
     /// would exceed the governor-owned cap (brief 4b). Default: no cap
@@ -128,30 +96,18 @@ extension LLMModule {
         try await preflightPromptCache(prompt: messages.flattenedPrompt())
     }
 
-    public nonisolated func generate(
-        messages: [ChatTurn], schemaJSON: String?,
-        tools: [[String: any Sendable]]?
-    ) -> AsyncStream<String> {
-        generate(
-            messages: messages, schemaJSON: schemaJSON, tools: tools,
-            maxTokens: nil, temperature: nil, speculative: nil)
-    }
-
-    public nonisolated func generate(
-        messages: [ChatTurn], schemaJSON: String?,
-        tools: [[String: any Sendable]]?,
-        maxTokens: Int?, temperature: Double?,
-        speculative: Bool?
-    ) -> AsyncStream<String> {
-        // Single source of truth: stream the metered events and forward
-        // only the text chunks (drop the terminal usage). M46.3b's
-        // chat-template-kwargs default to nil here — the String variant
-        // is convenience-only; if a caller needs template kwargs they
-        // use generateMetered directly.
+    /// Default `generate(prompt:)`: stream the metered events and forward
+    /// only the `.text` chunks (drop the terminal usage/finish). The MLX
+    /// module uses this — `generateMetered` is its real engine. The stub
+    /// OVERRIDES this with its canned stream and builds `generateMetered` on
+    /// top of THAT (so this default never recurses on the stub). Test-only
+    /// convenience; the serve path consumes `generateMetered` directly.
+    public nonisolated func generate(prompt: String) -> AsyncStream<String> {
         let events = generateMetered(
-            messages: messages, schemaJSON: schemaJSON, tools: tools,
-            maxTokens: maxTokens, temperature: temperature,
-            topP: nil, seed: nil, speculative: speculative,
+            messages: [ChatTurn(role: "user", content: prompt)],
+            schemaJSON: nil, tools: nil,
+            maxTokens: nil, temperature: nil,
+            topP: nil, seed: nil, speculative: nil,
             chatTemplateKwargs: nil, promptCacheKey: nil, principal: nil,
             logprobs: nil)
         return AsyncStream { continuation in
@@ -193,8 +149,9 @@ extension LLMModule {
         // end-to-end against the real MLX module + a real tokenizer
         // on the manual host-bound tier.
         let prompt = messages.flattenedPrompt()
-        let chunks = generate(
-            prompt: prompt, schemaJSON: schemaJSON, tools: tools)
+        // The stub ignores schemaJSON/tools (no tokenizer/template) — stream
+        // its canned `generate(prompt:)` override and synthesize usage on top.
+        let chunks = generate(prompt: prompt)
         // M31.2: honor a positive `max_tokens` so the synthetic stream
         // truncates and reports `.finish(.length)` — gives the stub
         // engine a deterministic truncation signal for the e2e gate. A
@@ -254,19 +211,6 @@ extension LLMModule {
         return s.isEmpty ? 0 : max(1, n)
     }
 
-    public nonisolated func generate(
-        prompt: String, schemaJSON: String?,
-        tools: [[String: any Sendable]]?
-    ) -> AsyncStream<String> {
-        generate(prompt: prompt)
-    }
-
-    /// Source-compat overload for callers that don't pass tools.
-    public nonisolated func generate(
-        prompt: String, schemaJSON: String?
-    ) -> AsyncStream<String> {
-        generate(prompt: prompt, schemaJSON: schemaJSON, tools: nil)
-    }
 }
 
 /// M0 governed stub. It holds no model — it exists to prove the thesis path

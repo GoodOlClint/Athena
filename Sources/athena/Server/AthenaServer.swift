@@ -234,13 +234,10 @@ struct AthenaServer {
         // (`AthenaServer+Anthropic.swift`).
         registerAnthropicRoutes(router)
 
-        // OpenAI embeddings + the native `/api/embed` alias (ADR 013 deprecated,
-        // 0 callers; shared governed embed path). Both use base handlers.
+        // OpenAI embeddings. The native `/api/embed` alias was removed (ADR
+        // 013/031 — `/api/*` is control-plane only, and it had 0 callers).
         router.post("/v1/embeddings") { request, _ -> Response in
             await handleEmbeddings(request)
-        }
-        router.post("/api/embed") { request, _ -> Response in
-            await handleNativeEmbed(request)
         }
 
         // The media surface — `/v1/audio/*` + `/v1/video/*`
@@ -574,37 +571,15 @@ struct AthenaServer {
                 type: "invalid_request_error", code: "invalid_input")
         }
 
-        do {
-            // M43.2: never block the request thread on a multi-GB
-            // cold-load. `.loading` ⇒ 503+Retry-After so the client
-            // paces its retries instead of hitting its own timeout.
-            switch try await governor.awaitLoad(.textEmbedding, within: coldLoadWaitSecs) {
-            case .loaded: break
-            case .loading: return Self.coldLoadResponse(.textEmbedding)
-            }
-            // M41.4: a real resident-id change from per-request `model`
-            // is audited (the embedder also self-rebinds inside embed(),
-            // which becomes a no-op once the slot already matches).
-            if let m = body.model, !m.isEmpty {
-                try await auditedRebind(
-                    request, module: .textEmbedding, target: m)
-            }
-        } catch {
-            // issue #6: route every failure through the classification seam
-            // (correct 4xx + `type`, OOM→503, no substrate-detail leak to the
-            // client body) instead of a catch-all 500 `internal_error`.
-            return Self.classified(error, module: .textEmbedding)
-        }
-
-        // M39: `body.model` selects among the configured set. The module
-        // rebinds its slot (or 400s on an unknown id) and reports the id
-        // actually served, which we echo back — no longer the unused
-        // request string.
+        // M39: `body.model` selects among the configured set. governedEmbed
+        // gates the cold-load, audits a real per-request rebind (M41.4), and
+        // reports the id actually served, which we echo back.
         let batch: EmbeddingBatch
-        do {
-            batch = try await embedding.embed(body.input, model: body.model)
-        } catch {
-            return Self.classified(error, module: .textEmbedding)
+        switch await governedEmbed(
+            request, body.input, module: .textEmbedding, model: body.model)
+        {
+        case .fail(let r): return r
+        case .ok(let b): batch = b
         }
         // M27.1/.2: embeddings have no completion — prompt == total.
         await meter(
@@ -728,69 +703,40 @@ struct AthenaServer {
         }
     }
 
-    /// Governed embedding helper shared by `/api/embed` and `/v1/embeddings`.
-    /// Returns the
-    /// whole batch so callers can echo the model ACTUALLY served (M39).
-    /// `model` selects among the configured set (nil ⇒ default); an
-    /// unknown id surfaces as a classified 400 `model_not_available`.
+    /// Governed embedding path for `/v1/embeddings`: cold-load gate →
+    /// per-request model rebind (audited on a real resident-id change,
+    /// M41.4) → embed. Returns the whole batch so the caller echoes the
+    /// model ACTUALLY served (M39). `model` selects among the configured
+    /// set (nil ⇒ default); an unknown id surfaces as a classified 400
+    /// `model_not_available`.
     private func governedEmbed(
-        _ inputs: [String], module: ModuleID, model: String? = nil
+        _ request: Request, _ inputs: [String],
+        module: ModuleID, model: String? = nil
     ) async -> Outcome<EmbeddingBatch> {
         do {
-            // M43.2: non-blocking cold-load — surfaces as
-            // `503 module_loading` to the native /api/embed caller too.
+            // M43.2: never block the request thread on a multi-GB cold-load.
+            // `.loading` ⇒ 503+Retry-After so the client paces its retries.
             switch try await governor.awaitLoad(.textEmbedding, within: coldLoadWaitSecs) {
             case .loaded: break
             case .loading:
                 return .fail(Self.coldLoadResponse(.textEmbedding))
             }
-        } catch let e as AthenaError {
-            return .fail(
-                Self.error(
-                    status: HTTPResponse.Status(code: e.httpStatus),
-                    message: e.message, type: "server_error",
-                    code: e.code))
+            // M41.4: a real resident-id change from per-request `model` is
+            // audited (the embedder also self-rebinds inside embed(), which
+            // becomes a no-op once the slot already matches).
+            if let m = model, !m.isEmpty {
+                try await auditedRebind(
+                    request, module: .textEmbedding, target: m)
+            }
         } catch {
+            // issue #6: classify (correct 4xx + type, OOM→503, no leak)
+            // instead of a catch-all 500.
             return .fail(Self.classified(error, module: module))
         }
         do {
             return .ok(try await embedding.embed(inputs, model: model))
         } catch {
             return .fail(Self.classified(error, module: module))
-        }
-    }
-
-    /// `POST /api/embed` — Athena-native embeddings. `input` is a
-    /// string or `[string]`; reply is `{model, embeddings:[[Float]]}`.
-    private func handleNativeEmbed(_ request: Request) async -> Response {
-        let decoded = await decodeJSON(request, AthenaEmbedRequest.self)
-        guard case .ok(let body) = decoded else {
-            return decoded.orFail
-        }
-        guard !body.input.isEmpty else {
-            return Self.error(
-                status: .badRequest, message: "'input' is required",
-                type: "invalid_request_error", code: "invalid_input")
-        }
-        // M39: `body.model` selects among the configured embedding set;
-        // the response reports the model actually served (not the request
-        // echo). An unknown id ⇒ 400 model_not_available via governedEmbed.
-        switch await governedEmbed(
-            body.input, module: .textEmbedding, model: body.model)
-        {
-        case .fail(let r): return r
-        case .ok(let batch):
-            // Native /api metering (ADR 007 #8): mirror /v1/embeddings —
-            // embeddings have no completion, so prompt == total. Closes the
-            // gap where `handleNativeChat` metered but the embed twin dropped
-            // usage, so `/api/embed` traffic was invisible to usage_counters.
-            await meter(
-                principal: usagePrincipal(request),
-                usage: TokenUsage(
-                    promptTokens: batch.promptTokens, completionTokens: 0))
-            return Self.json(
-                AthenaEmbedResponse(
-                    model: batch.model, embeddings: batch.vectors))
         }
     }
 

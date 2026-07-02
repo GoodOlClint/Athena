@@ -89,26 +89,24 @@ final class UsageAccountingTests: XCTestCase {
             "uncapped emits more than the truncated run")
     }
 
-    /// The String `generate` filter drops the usage event but preserves
-    /// the same text as the metered stream (single source of truth).
+    /// The String `generate(prompt:)` filter drops the usage event but
+    /// preserves the same text as the metered stream (single source of
+    /// truth): for the stub, `generate(prompt:)` IS the canned source and
+    /// `generateMetered` wraps it.
     func testStringGenerateMatchesMeteredText() async {
         let llm = StubLLMModule(reserveBytes: 1)
-        let turns = [ChatTurn(role: "user", content: "hi")]
+        let prompt = "hi"
         var metered = ""
         for await e in llm.generateMetered(
-            messages: turns, schemaJSON: nil, tools: nil,
+            messages: [ChatTurn(role: "user", content: prompt)],
+            schemaJSON: nil, tools: nil,
             maxTokens: nil, temperature: nil, topP: nil, seed: nil,
             speculative: nil, chatTemplateKwargs: nil)
         {
             if case .text(let t) = e { metered += t }
         }
         var plain = ""
-        for await t in llm.generate(
-            messages: turns, schemaJSON: nil, tools: nil,
-            maxTokens: nil, temperature: nil, speculative: nil)
-        {
-            plain += t
-        }
+        for await t in llm.generate(prompt: prompt) { plain += t }
         XCTAssertEqual(metered, plain)
     }
 

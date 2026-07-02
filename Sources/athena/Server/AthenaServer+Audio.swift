@@ -142,6 +142,41 @@ extension AthenaServer {
             elapsed_ms=\(Self.elapsedMs(t0))
             """)
 
+        // Resolve diarization turns for the speaker-labeled formats: opt-in
+        // `diarize=true` on verbose_json (M4.3c), or diarized_json — which
+        // IMPLIES diarization (ADR 013 #3/#4a) and reuses the verbose envelope
+        // (`speaker` is Athena's Int id, not OpenAI's string label; the
+        // standalone /v1/audio/diarizations route stays canonical). Every
+        // other format needs none.
+        let fmt = form.text("response_format")
+        var turns: [DiarizationTurn] = []
+        if (fmt == "verbose_json" && form.text("diarize") == "true")
+            || fmt == "diarized_json"
+        {
+            switch await diarizeTurns(
+                audio: file.data, filename: file.filename)
+            {
+            case .fail(let r): return r
+            case .ok(let t): turns = t
+            }
+        }
+        // diarized_json normalizes to the verbose encoder with mandatory turns
+        // (empty turns ⇒ speaker nil, same as pre-refactor Self.speaker([])).
+        return Self.encodeTranscription(
+            result, format: fmt == "diarized_json" ? "verbose_json" : fmt,
+            wantWords: wantWords, turns: turns)
+    }
+
+    /// Serialize a `TranscriptionResult` into the requested `response_format`
+    /// (text/srt/vtt/verbose_json/json) — shared by `/v1/audio/transcriptions`
+    /// and `/v1/video/transcriptions` (video passes `turns: []`; audio's
+    /// diarized_json normalizes to verbose_json with mandatory `turns`).
+    /// `turns` empty ⇒ no speaker labels; per-segment/word timings are only
+    /// present when `wantWords` drove the transcribe pass.
+    static func encodeTranscription(
+        _ result: TranscriptionResult, format: String?, wantWords: Bool,
+        turns: [DiarizationTurn]
+    ) -> Response {
         func plain(_ s: String, _ type: String) -> Response {
             var headers = HTTPFields()
             headers[.contentType] = type
@@ -151,8 +186,16 @@ extension AthenaServer {
                 status: .ok, headers: headers,
                 body: ResponseBody(byteBuffer: buf))
         }
-
-        switch form.text("response_format") {
+        func words(_ ws: [WordTiming]?) -> [WordTimestamp]? {
+            ws.map {
+                $0.map {
+                    WordTimestamp(
+                        word: $0.word, start: $0.start, end: $0.end,
+                        probability: $0.probability)
+                }
+            }
+        }
+        switch format {
         case "text":
             return plain(result.text, "text/plain; charset=utf-8")
         case "srt":
@@ -164,25 +207,6 @@ extension AthenaServer {
                 TranscriptionFormat.vtt(result.segments),
                 "text/vtt; charset=utf-8")
         case "verbose_json":
-            // Opt-in diarization: tag each Whisper segment with the
-            // best-overlapping Sortformer speaker turn (M4.3c).
-            var turns: [DiarizationTurn] = []
-            if form.text("diarize") == "true" {
-                switch await diarizeTurns(
-                    audio: file.data, filename: file.filename)
-                {
-                case .fail(let r): return r
-                case .ok(let t): turns = t
-                }
-            }
-            func words(_ ws: [WordTiming]?) -> [WordTimestamp]? {
-                guard let ws else { return nil }
-                return ws.map {
-                    WordTimestamp(
-                        word: $0.word, start: $0.start, end: $0.end,
-                        probability: $0.probability)
-                }
-            }
             return Self.json(
                 VerboseTranscriptionResponse(
                     task: "transcribe", language: result.language,
@@ -200,37 +224,6 @@ extension AthenaServer {
                             words: words($0.element.words))
                     },
                     words: wantWords ? words(result.words) : nil))
-        case "diarized_json":
-            // ADR 013 #3 (#4a): OpenAI's diarized transcription format. Unlike
-            // verbose_json's opt-in `diarize=true`, diarized_json IMPLIES
-            // diarization — always run it and label every segment. Marked
-            // **native-flavored** per the `/v1` compatibility rule: it reuses
-            // the verbose envelope for consumer convenience, but `speaker` is
-            // Athena's Int id (not OpenAI's string label) and word timings are
-            // not emitted. The standalone /v1/audio/diarizations route stays
-            // the canonical diarization surface.
-            let dturns: [DiarizationTurn]
-            switch await diarizeTurns(
-                audio: file.data, filename: file.filename)
-            {
-            case .fail(let r): return r
-            case .ok(let t): dturns = t
-            }
-            return Self.json(
-                VerboseTranscriptionResponse(
-                    task: "transcribe", language: result.language,
-                    duration: result.duration, text: result.text,
-                    segments: result.segments.enumerated().map {
-                        VerboseSegment(
-                            id: $0.offset, start: $0.element.start,
-                            end: $0.element.end, text: $0.element.text,
-                            avg_logprob: $0.element.avgLogprob,
-                            speaker: Self.speaker(
-                                start: $0.element.start,
-                                end: $0.element.end, turns: dturns),
-                            words: nil)
-                    },
-                    words: nil))
         default:  // "json" / nil
             return Self.json(TranscriptionResponse(text: result.text))
         }
@@ -362,51 +355,11 @@ extension AthenaServer {
             elapsed_ms=\(Self.elapsedMs(t0))
             """)
 
-        func plain(_ s: String, _ type: String) -> Response {
-            var headers = HTTPFields()
-            headers[.contentType] = type
-            var buf = ByteBuffer()
-            buf.writeString(s)
-            return Response(
-                status: .ok, headers: headers,
-                body: ResponseBody(byteBuffer: buf))
-        }
-        func words(_ ws: [WordTiming]?) -> [WordTimestamp]? {
-            ws.map {
-                $0.map {
-                    WordTimestamp(
-                        word: $0.word, start: $0.start, end: $0.end,
-                        probability: $0.probability)
-                }
-            }
-        }
-        switch form.text("response_format") {
-        case "text":
-            return plain(result.text, "text/plain; charset=utf-8")
-        case "srt":
-            return plain(
-                TranscriptionFormat.srt(result.segments),
-                "text/plain; charset=utf-8")
-        case "vtt":
-            return plain(
-                TranscriptionFormat.vtt(result.segments),
-                "text/vtt; charset=utf-8")
-        case "verbose_json":
-            return Self.json(
-                VerboseTranscriptionResponse(
-                    task: "transcribe", language: result.language,
-                    duration: result.duration, text: result.text,
-                    segments: result.segments.enumerated().map {
-                        VerboseSegment(
-                            id: $0.offset, start: $0.element.start,
-                            end: $0.element.end, text: $0.element.text,
-                            avg_logprob: $0.element.avgLogprob,
-                            speaker: nil, words: words($0.element.words))
-                    },
-                    words: wantWords ? words(result.words) : nil))
-        default:  // "json" / nil
-            return Self.json(TranscriptionResponse(text: result.text))
-        }
+        // Video is a strict subset — no diarization (rejected above), so no
+        // speaker turns. Same encoder as /v1/audio/transcriptions.
+        return Self.encodeTranscription(
+            result, format: form.text("response_format"),
+            wantWords: wantWords, turns: [])
     }
 
     private func handleDiarizations(_ request: Request) async -> Response

@@ -355,8 +355,8 @@ public enum AuthPolicy {
             return .tokensAdmin
         }
         // Inference surface (/v1/chat, /v1/messages (ADR 036 Anthropic),
-        // /v1/embeddings, /v1/audio/*, /v1/video/* (ADR 022), native
-        // /api/embed) and any unlisted route — all inference-tier.
+        // /v1/embeddings, /v1/audio/*, /v1/video/* (ADR 022)) and any
+        // unlisted route — all inference-tier.
         return .inference
     }
 }
@@ -466,7 +466,7 @@ public struct AuthMiddleware<Context: RequestContext>: RouterMiddleware {
                     + "<user> <role>`.")
         }
         // A5: publish the single resolved caller (bearer path). Downstream
-        // helpers (queuePrincipal, callerPermissions, audit) read this
+        // helpers (callerPermissions, audit) read this
         // instead of calling config.resolve(bearer:) a second time.
         let caller = ResolvedCaller(
             principal: subject.principal,

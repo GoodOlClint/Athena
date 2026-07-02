@@ -34,32 +34,6 @@ struct PromptCacheFlushResponse: Codable {
     let bytes: Int
 }
 
-/// `/api/embed` — `input` is a string or an array of strings.
-struct AthenaEmbedRequest: Codable {
-    let model: String?
-    let input: [String]
-
-    private enum CodingKeys: String, CodingKey { case model, input }
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        model = try c.decodeIfPresent(String.self, forKey: .model)
-        if let one = try? c.decode(String.self, forKey: .input) {
-            input = [one]
-        } else {
-            input = try c.decode([String].self, forKey: .input)
-        }
-    }
-    init(model: String?, input: [String]) {
-        self.model = model
-        self.input = input
-    }
-}
-
-struct AthenaEmbedResponse: Codable {
-    let model: String
-    let embeddings: [[Float]]
-}
-
 /// `/api/admin/stop` — model unloaded; daemon keeps running.
 struct AthenaStopResponse: Codable {
     let status: String  // "unloaded"

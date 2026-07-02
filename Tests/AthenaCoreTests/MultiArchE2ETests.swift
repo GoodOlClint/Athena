@@ -88,13 +88,8 @@ final class MultiArchE2ETests: XCTestCase {
             {"type":"object","properties":{"answer":{"type":"integer"}},
              "required":["answer"],"additionalProperties":false}
             """
-        var out = ""
-        for await chunk in llm.generate(
-            prompt: "What is 2 + 2? Reply as JSON.",
-            schemaJSON: schema, tools: nil)
-        {
-            out += chunk
-        }
+        let out = await llm.generatedText(
+            prompt: "What is 2 + 2? Reply as JSON.", schemaJSON: schema)
         let text = out.trimmingCharacters(in: .whitespacesAndNewlines)
         XCTAssertFalse(text.isEmpty, "structured: empty output")
         guard let data = text.data(using: .utf8),
