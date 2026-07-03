@@ -23,7 +23,8 @@ public struct AthenaConfig: Sendable, Equatable {
     /// built-in default (`~/.athena/models`) when absent. Set this to
     /// relocate the store (e.g. onto an external SSD).
     public var modelStore: String?
-    /// Where the daemon keeps its SQLite store (vectors + queue + jobs).
+    /// Where the daemon keeps its SQLite store (auth/audit/usage; the vector,
+    /// queue, and jobs tenants were removed in ADR 025).
     /// Optional — the daemon defaults to `~/.athena` when absent.
     public var dataDir: String?
     /// Foreground terminal verbosity floor (trace|debug|info|notice|

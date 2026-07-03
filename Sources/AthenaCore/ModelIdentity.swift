@@ -1,35 +1,22 @@
 import Foundation
 
-/// M46.4 — case-insensitive model-id resolution helpers.
+/// Model-id identity + case-insensitive resolution helpers.
 ///
-/// Background: the persisted `model_allowlist` table has a
-/// case-sensitive `PRIMARY KEY(module, id)`, and every module's
-/// per-request lookup historically used `allowedIds.contains(target)`
-/// (case-sensitive). Two foot-guns followed:
+/// (Formerly `ModelAllowlist.swift`. The `model_allowlist` SQLite table it was
+/// named for was **retired** in ADR 026 — availability is now "what's pulled into
+/// the model store," classified by `ModelSupport`. These helpers survived the
+/// retirement because they answer a still-live question: given the set of stored
+/// model ids, which stored spelling does a request's model field refer to?)
 ///
-/// 1. A request asking for `Qwen/Qwen3-Embedding-4b` against an
-///    allowlist that stores `Qwen/Qwen3-Embedding-4B` returns a 400
-///    `model_not_available`, even though the operator clearly meant
-///    the same model. HuggingFace ids are technically case-sensitive
-///    (the repo URL is), but in practice operators routinely
-///    miscase, and the error message that comes back is unhelpful.
+/// Resolution is case-insensitive by **store-dir identity**, so a request can name
+/// a model by its full HuggingFace id (`Qwen/Qwen3-Embedding-4B`) or its bare
+/// store-dir name (`Qwen3-Embedding-4B`, the form `athena pull` creates), in
+/// either casing, and resolve to the same stored spelling — which then drives the
+/// served-model echo + local-dir load. HuggingFace ids are ASCII in practice, so
+/// ASCII `lowercased()` is sufficient and avoids Unicode-normalization surprises.
 ///
-/// 2. The two casings can BOTH end up in the allowlist as separate
-///    rows (added at different times via different code paths). The
-///    400 response then lists both as "Configured models" and the
-///    operator has no way to tell them apart.
-///
-/// M46.4 swaps the lookup to case-insensitive (ASCII `lowercased()`
-/// — HuggingFace ids are ASCII in practice, so simple lowercasing is
-/// sufficient and avoids Unicode-normalization surprises). The
-/// canonical id is whatever's in storage; the request's spelling
-/// passes through to the served-model field only when it matches an
-/// allowlist row case-insensitively. Historical duplicate rows in
-/// the SQLite table aren't deduped here — they're now cosmetic
-/// because either casing resolves to the same module load — and
-/// the error-response builder deduplicates the displayed
-/// "Configured models" list at the wire so an operator sees a clean
-/// allowlist.
+/// Live helpers: `String.modelStoreIdentity`, `[String].canonicalByStoreIdentity`,
+/// `[String].dedupedCaseInsensitive`.
 extension String {
     /// The store-dir identity of a model id: the basename after the last
     /// `/` (an HF `org/name` id → `name`; an absolute path → its last

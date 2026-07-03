@@ -412,7 +412,15 @@ public final class PrefixKVCache: @unchecked Sendable {
             guard
                 let bodyData = disk.store.load(
                     prefixHash: key, requireModel: disk.modelID,
-                    requireQuant: disk.quantTag, kek: disk.kek),
+                    requireQuant: disk.quantTag, kek: disk.kek,
+                    // WP11 — a present-but-unrestorable snapshot is corruption /
+                    // tamper / key-skew the operator should see, distinct from a
+                    // normal cache miss (no file) or an expected model/quant skew.
+                    onUnrestorable: { reason in
+                        Self.log.notice(
+                            "prefix-cache DISK snapshot present but unrestorable: \(reason)",
+                            metadata: ["function": "PrefixKVCache.restoreFromDisk"])
+                    }),
                 let body = try? KVEntryBody.decode(bodyData),
                 let working = rebuildWorkingFromDisk(body: body, b: b, model: model)
             else { continue }

@@ -102,10 +102,11 @@ The MLX-free format/envelope/store/probe logic is unit-pinned (ADR 008/009).
 
 ## Limitations
 
-- **SEP keys are a follow-up (S6).** Today the KEK is a keyfile (or passphrase);
-  SEP-bound wrapping is gated on the headless-launchd SEP operability spike. The
-  blob format already reserves the `kek_type`, so SEP is a drop-in swap with no
-  reformat.
+- **SEP keys are a follow-up (S6).** Today the KEK is a **keyfile** only
+  (`prompt_cache_persist_kek=keyfile:PATH` / `ATHENA_PROMPT_CACHE_PERSIST_KEYFILE`);
+  a passphrase KEK is reserved in the format but **not yet parsed**, and SEP-bound
+  wrapping is gated on the headless-launchd SEP operability spike. The blob format
+  already reserves the `kek_type`, so both are a drop-in swap with no reformat.
 - **Encrypt-idle + persist don't compose yet.** When `prompt_cache_encrypt_idle`
   (RAM cipher) is on, idle entries are sealed in RAM and are **not** spilled to
   disk. Use one at-rest strategy at a time.

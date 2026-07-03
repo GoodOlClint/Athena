@@ -88,23 +88,42 @@ public struct KVSnapshotStore {
     /// signal: missing file, bad magic / unknown version / bad enum / truncation
     /// (`decode` throws), a model/quant mismatch (skip-on-skew), a `prefixHash`
     /// integrity mismatch, or a failed decrypt (wrong/rotated KEK, tamper, AAD).
+    /// WP11 — `onUnrestorable` distinguishes a **present-but-unrestorable**
+    /// snapshot (corrupt header, integrity/tamper, or a failed decrypt — the
+    /// operator should see snapshot-dir corruption) from the silent, EXPECTED
+    /// go-cold cases (no file at all; a model/quant skew that skip-on-skew is
+    /// designed to ignore). AthenaCore stays dependency-free — the AthenaLLM
+    /// caller wires the closure to a `notice` log.
     public func load(
-        prefixHash: Data, requireModel: String, requireQuant: String, kek: KEKProvider
+        prefixHash: Data, requireModel: String, requireQuant: String,
+        kek: KEKProvider,
+        onUnrestorable: (@Sendable (String) -> Void)? = nil
     ) -> Data? {
         let url = fileURL(forPrefixHash: prefixHash)
-        guard let file = try? Data(contentsOf: url),
-            let (header, bodyOffset) = try? KVSnapshotHeader.decode(file)
+        guard let file = try? Data(contentsOf: url) else { return nil }  // absent: normal
+        guard let (header, bodyOffset) = try? KVSnapshotHeader.decode(file) else {
+            onUnrestorable?("corrupt/unreadable header")
+            return nil
+        }
+        // A model/quant mismatch is skip-on-skew (expected after a model change),
+        // NOT corruption — go cold silently.
+        guard header.isRestorable(forModel: requireModel, quant: requireQuant)
         else { return nil }
-        guard header.isRestorable(forModel: requireModel, quant: requireQuant),
-            header.prefixHash == prefixHash
-        else { return nil }
+        guard header.prefixHash == prefixHash else {
+            onUnrestorable?("prefix-hash integrity mismatch")
+            return nil
+        }
         let sealed = KVSnapshotEnvelope.Sealed(
             body: Data(file[bodyOffset...]),
             kekParams: header.kekParams,
             wrappedDEK: header.wrappedDEK)
         let aad = Self.aad(
             modelID: header.modelID, quantTag: header.quantTag, prefixHash: prefixHash)
-        return KVSnapshotEnvelope.open(sealed, aad: aad, kek: kek)
+        guard let body = KVSnapshotEnvelope.open(sealed, aad: aad, kek: kek) else {
+            onUnrestorable?("decrypt/auth failed (wrong or rotated KEK, tamper, or AAD mismatch)")
+            return nil
+        }
+        return body
     }
 
     // MARK: - Index + retention

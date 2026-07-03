@@ -101,7 +101,7 @@ public enum DefaultConfig {
 
 
         # ── Storage ──────────────────────────────────────────────────
-        # Embedded SQLite store (auth/audit/usage + queue). Commented ⇒
+        # Embedded SQLite store (auth/audit/usage). Commented ⇒
         # "~/.athena" of the daemon's user.
         # data_dir = "/usr/local/var/athena/data"
 

@@ -16,7 +16,7 @@ import NIOCore
 //     without an enforced trusted proxy).
 //   * `AuthMiddleware` resolves the caller ONCE and publishes the result
 //     via `ResolvedCaller` (below), so the downstream helpers
-//     (`callerPermissions`, `uiCaller`, `auditPrincipal`, `queuePrincipal`)
+//     (`callerPermissions`, `uiCaller`, `auditPrincipal`)
 //     read a single authoritative resolution instead of each re-deriving
 //     it from the headers (the A5 drift: bearer-vs-cookie order, sentinels,
 //     loopback-trust all diverged across the copies).

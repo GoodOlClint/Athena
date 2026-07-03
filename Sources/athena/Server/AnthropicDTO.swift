@@ -8,9 +8,12 @@ import Foundation
 // back into the Anthropic response shape. No orchestration and no engine logic
 // live here — the handler runs the shared `prepareChat` seam and drains/forwards
 // the one `GenChunk` stream, exactly as the OpenAI adapter does. First cut =
-// what Claude Code drives: text + system + tool_use/tool_result + tools; image /
-// document content blocks and prompt-caching are refused with a cause-naming
-// 400 (deferred, ADR 036).
+// what Claude Code drives: text + system + tool_use/tool_result + tools. Image /
+// document CONTENT BLOCKS are refused with a cause-naming 400
+// (`unsupported_content_block`). Unknown top-level fields — `cache_control`
+// (prompt-caching) and extended `thinking` — are silently ignored by Codable
+// (OpenAI-adapter convention), NOT rejected, so a client that sends them still
+// works (deferred, ADR 036).
 
 // MARK: - Request
 
