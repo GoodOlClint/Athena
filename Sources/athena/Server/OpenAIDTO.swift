@@ -399,28 +399,52 @@ struct ChatCompletionRequest: Codable {
         return nil
     }
 
-    /// G4: validate a structured request up front. A `response_format` of
-    /// `json_schema` whose `schema` is missing or unserializable must 400
-    /// — never fall through to `effectiveSchema() == nil` and stream
-    /// unconstrained output (a silent breach of the structured-output
-    /// contract). Returns a problem description for the malformed case,
-    /// else nil. Tools take precedence and carry their own schema, so an
-    /// in-effect tool call is fine.
-    func structuredRequestError() -> String? {
+    /// G4: validate a structured request up front — never fall through to
+    /// `effectiveSchema() == nil` and stream unconstrained output (a silent
+    /// breach of the structured-output contract). Returns a problem
+    /// description for the malformed case, else nil. Two constraint sources,
+    /// checked in precedence order:
+    /// 1. A FORCED tool (`required`/named) engages the Guide with the tool's
+    ///    own schema — if that schema can't be compiled (unserializable
+    ///    `parameters`), 400 (the WP4 sibling from the 2026-07-02
+    ///    verification pass: `tool_choice:"required"` + a broken tool schema
+    ///    silently generated unconstrained).
+    /// 2. Otherwise a `response_format` of `json_schema` whose `schema` is
+    ///    missing or unserializable must 400 (WP4 — `tool_choice:"auto"`
+    ///    merely ADVERTISES the menu, so response_format is still the
+    ///    constraint; gating on `advertiseMenu` was the original breach).
+    func structuredRequestError() -> (message: String, code: String)? {
+        let ts = forcedTools()
+        if !ts.isEmpty {
+            let schema =
+                ts.count == 1
+                ? StructuredSchema.toolCallSchema(
+                    functionName: ts[0].function.name,
+                    parameters: ts[0].function.parameters)
+                : StructuredSchema.toolCallUnionSchema(
+                    tools: ts.map {
+                        ($0.function.name, $0.function.parameters)
+                    })
+            if schema == nil {
+                return (
+                    "tool_choice forces a tool whose 'parameters' is "
+                        + "not a valid, serializable JSON-Schema object",
+                    "invalid_tool_parameters"
+                )
+            }
+            // A compilable forced tool takes precedence over response_format.
+            return nil
+        }
         guard response_format?.type == "json_schema" else { return nil }
-        // WP4 — only a FORCED tool (`required`/named) carries its own schema and
-        // takes precedence over response_format. `tool_choice:"auto"` merely
-        // ADVERTISES the menu (nothing forced), so `effectiveSchema()` does NOT
-        // engage a tool schema for it — response_format is still the constraint,
-        // and a broken one must 400 rather than silently streaming unconstrained
-        // output. Gating on `advertiseMenu` (true for auto) was the breach.
-        if !forcedTools().isEmpty { return nil }
         if StructuredSchema.schemaJSON(
             responseFormatType: "json_schema",
             jsonSchema: response_format?.json_schema?.schema) == nil
         {
-            return "response_format.json_schema requires a valid, "
-                + "serializable 'schema' object"
+            return (
+                "response_format.json_schema requires a valid, "
+                    + "serializable 'schema' object",
+                "invalid_response_format"
+            )
         }
         return nil
     }

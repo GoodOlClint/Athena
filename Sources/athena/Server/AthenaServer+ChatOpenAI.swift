@@ -113,14 +113,15 @@ extension AthenaServer {
         }
         let deferLoadIntoStream = (deferredLoad != nil)
 
-        // G4 fail-closed: a `response_format: json_schema` with a
-        // missing/unserializable schema is a 400 here, never a silent
-        // fall-through to unconstrained output.
+        // G4 fail-closed: a broken constraint source (a forced tool whose
+        // `parameters` won't compile, or a `response_format: json_schema`
+        // with a missing/unserializable schema) is a 400 here, never a
+        // silent fall-through to unconstrained output.
         if let problem = body.structuredRequestError() {
             return Self.error(
-                status: .badRequest, message: problem,
+                status: .badRequest, message: problem.message,
                 type: "invalid_request_error",
-                code: "invalid_response_format")
+                code: problem.code)
         }
 
         let created = Int(Date().timeIntervalSince1970)
