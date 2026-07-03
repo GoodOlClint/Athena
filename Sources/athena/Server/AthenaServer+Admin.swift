@@ -283,7 +283,21 @@ extension AthenaServer {
                 result: "ok", detail: "disabled")
             return Self.json(PromptCacheFlushResponse(flushed: 0, entries: 0, bytes: 0))
         }
-        let freed = prefixCache.flushIdle()
+        // ADR 029 (2026-07-02 audit residual) — with the disk tier on,
+        // `flushIdle` demotes victims via MLX `eval`/encode, so this operator
+        // flush must not run concurrently with a gated decode on the one
+        // Metal pool. Same wrap as the governor relief hook (WP1).
+        let freed: Int
+        do {
+            freed = try await InferenceGate.shared.withExclusiveExecution {
+                prefixCache.flushIdle()
+            }
+        } catch {
+            await audit(
+                request, action: "prompt_cache.flush", target: nil,
+                result: "error", detail: "\(type(of: error))")
+            return Self.classified(error, module: .llm)
+        }
         let s = prefixCache.stats()
         await audit(
             request, action: "prompt_cache.flush", target: nil,

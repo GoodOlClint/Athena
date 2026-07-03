@@ -63,14 +63,16 @@ public struct SpeakerActivityRegion: Sendable, Equatable {
 public protocol DiarizationModule: InferenceModule {
     /// "Who spoke when" over `audio` (raw uploaded file bytes;
     /// `filename` hints the container). End-to-end backends (Sortformer) only.
+    /// `requestedModel` (ADR 029 residual) is re-bound INSIDE the gated
+    /// execution span — see `TranscriptionModule.transcribe`.
     func diarize(
-        audio: Data, filename: String?
+        audio: Data, filename: String?, requestedModel: String?
     ) async throws -> DiarizationResult
 
     /// Per-window locally-active speaker regions from a learned segmentation
     /// model (pyannote pipeline). Segmentation backends only.
     func segment(
-        audio: Data, filename: String?
+        audio: Data, filename: String?, requestedModel: String?
     ) async throws -> [SpeakerActivityRegion]
 
     /// Backend family of the currently-resident model (ADR 018), so the serve
@@ -139,9 +141,11 @@ public actor StubDiarizationModule: DiarizationModule, ModelSelectable {
     }
 
     public func diarize(
-        audio: Data, filename: String?
+        audio: Data, filename: String?, requestedModel: String? = nil
     ) async throws -> DiarizationResult {
-        DiarizationResult(
+        // Same atomic rebind-then-serve as the MLX module (ADR 009).
+        if let m = requestedModel, !m.isEmpty { try await rebind(to: m) }
+        return DiarizationResult(
             turns: [DiarizationTurn(start: 0, end: 0, speaker: 0)],
             numSpeakers: 1)
     }
@@ -153,7 +157,7 @@ public actor StubDiarizationModule: DiarizationModule, ModelSelectable {
     /// has no `segment` path — `method=pyannote` against `--engine stub` is a
     /// method/model mismatch.
     public func segment(
-        audio: Data, filename: String?
+        audio: Data, filename: String?, requestedModel: String? = nil
     ) async throws -> [SpeakerActivityRegion] {
         throw AthenaError.diarizationMethodInvalid(
             method: "pyannote",

@@ -128,7 +128,8 @@ extension AthenaServer {
             result = try await transcription.transcribe(
                 audio: file.data, filename: file.filename,
                 language: form.text("language"),
-                wordTimestamps: wantWords)
+                wordTimestamps: wantWords,
+                requestedModel: form.text("model"))
         } catch {
             return Self.classified(error, module: .transcription)
         }
@@ -262,7 +263,7 @@ extension AthenaServer {
             }
             return .ok(
                 try await diarization.diarize(
-                    audio: audio, filename: filename
+                    audio: audio, filename: filename, requestedModel: nil
                 ).turns)
         } catch {
             return .fail(Self.classified(error, module: .diarization))
@@ -343,7 +344,8 @@ extension AthenaServer {
             defer { ProcessHardening.secureZero(&pcm) }  // ADR 024 T2
             result = try await transcription.transcribePCM(
                 pcm, language: form.text("language"),
-                wordTimestamps: wantWords)
+                wordTimestamps: wantWords,
+                requestedModel: form.text("model"))
         } catch {
             return Self.classified(error, module: .transcription)
         }
@@ -410,7 +412,8 @@ extension AthenaServer {
         let r: DiarizationResult
         do {
             r = try await diarization.diarize(
-                audio: file.data, filename: file.filename)
+                audio: file.data, filename: file.filename,
+                requestedModel: form.text("model"))
         } catch {
             return Self.classified(error, module: .diarization)
         }
@@ -489,7 +492,8 @@ extension AthenaServer {
         let regions: [SpeakerActivityRegion]
         do {
             regions = try await diarization.segment(
-                audio: file.data, filename: file.filename)
+                audio: file.data, filename: file.filename,
+                requestedModel: form.text("model"))
         } catch {
             return Self.classified(error, module: .diarization)
         }
@@ -505,7 +509,7 @@ extension AthenaServer {
                 audio: file.data, filename: file.filename,
                 segments: regions.map {
                     SpeakerSegmentRequest(start: $0.start, end: $0.end)
-                })
+                }, requestedModel: nil)
         } catch {
             return Self.classified(error, module: .speakerEmbedding)
         }
@@ -700,7 +704,8 @@ extension AthenaServer {
         do {
             result = try await speakerEmbedding.embed(
                 audio: file.data, filename: file.filename,
-                segments: segments)
+                segments: segments,
+                requestedModel: form.text("model"))
         } catch {
             return Self.classified(error, module: .speakerEmbedding)
         }

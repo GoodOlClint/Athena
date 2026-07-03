@@ -210,7 +210,7 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
 
     public func transcribe(
         audio: Data, filename: String?, language: String?,
-        wordTimestamps: Bool
+        wordTimestamps: Bool, requestedModel: String? = nil
     ) async throws -> TranscriptionResult {
         // Option D (ADR 025 S5): decode from the in-memory upload bytes — no
         // temp file. `filename` carries the container hint for the decoder.
@@ -219,7 +219,8 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
         // ADR 024 T2: best-effort zeroize the decoded speech PCM on the way out.
         defer { ProcessHardening.secureZero(&pcm) }
         return try await transcribePCM(
-            pcm, language: language, wordTimestamps: wordTimestamps)
+            pcm, language: language, wordTimestamps: wordTimestamps,
+            requestedModel: requestedModel)
     }
 
     /// Transcribe already-decoded 16 kHz mono PCM — the shared engine entry
@@ -228,13 +229,21 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
     /// the identical Whisper/Parakeet dispatch, chunking, and timestamping with
     /// no re-encode. Actor-isolated (reads `engine`); callers `await` it.
     public func transcribePCM(
-        _ pcm: [Float], language: String?, wordTimestamps: Bool
+        _ pcm: [Float], language: String?, wordTimestamps: Bool,
+        requestedModel: String? = nil
     ) async throws -> TranscriptionResult {
         // ADR 029 — gate the Metal forward against other tenants on the one
         // Metal pool. The actor-isolated worker runs inside the gate via a
         // self-hop so the @Sendable closure never captures actor state.
         try await InferenceGate.shared.withExclusiveExecution {
-            try await self.decodePCM(
+            // ADR 029 residual (audio) — bind the requested model INSIDE the
+            // gate so a concurrent different-model rebind can't swap the slot
+            // between the server's preflight rebind and this forward. No-op
+            // when already bound; `decodePCM` reads `engine` after this.
+            if let m = requestedModel, !m.isEmpty {
+                try await self.rebind(to: m)
+            }
+            return try await self.decodePCM(
                 pcm, language: language, wordTimestamps: wordTimestamps)
         }
     }

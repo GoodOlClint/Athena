@@ -53,6 +53,22 @@ cross-model contention). Rebind + decode now share ONE gate acquisition, mirrori
 the embedding module's `embedInFlight` atomic rebind. Both dialects
 (`/v1/chat/completions`, `/v1/messages`) set `NativeChatRequest.model`.
 
+**Audio residual — CLOSED (v0.10.252, from the 2026-07-02 verification pass).**
+The same window existed on the three audio modules (server `auditedRebind` and
+the module's gated forward were two acquisitions). Now `requestedModel` rides
+into each gated entrypoint — `transcribe`/`transcribePCM`, `diarize`/`segment`,
+speaker `embed` — and the module re-binds **inside** the gate; the diarization
+module additionally moved its backend/model/config read into an in-gate worker
+(it previously boxed the model *before* the gate, so an in-gate rebind alone
+would not have helped). `windowEmbeddings` carries no model parameter because no
+route selects a model for it (cluster diarization uses the resident WeSpeaker).
+Same slice: `DELETE /api/cache/prompt` (`handlePromptCacheFlush`) wraps its
+`flushIdle()` in the gate — with the disk tier on, demote-to-disk runs MLX
+`eval`/encode, the last ungated Metal path found by the verification sweep.
+Accepted nit (both LLM and audio): the in-gate *corrective* rebind emits no
+`model.rebind` audit record — the server's preflight `auditedRebind` audits the
+common case; the corrective path only fires under cross-model contention races.
+
 Earlier (v0.10.223): the
 `InferenceGate` actor (`Sources/AthenaCore/InferenceGate.swift`) — a FIFO,
 cancellation-aware async semaphore with `withExclusiveExecution`, default-on

@@ -8,9 +8,13 @@ public protocol TranscriptionModule: InferenceModule {
     /// container). `language` is an ISO code (nil/"auto" ⇒ detect).
     /// `wordTimestamps` adds cross-attention DTW word alignment (M26.2)
     /// — only requested for the `verbose_json` response.
+    /// `requestedModel` (ADR 029 residual) is re-bound INSIDE the gated
+    /// execution span so a concurrent different-model rebind can't swap the
+    /// shared slot between the server's preflight rebind and this forward —
+    /// the same H3 wrong-model window WP6 closed for the LLM path.
     func transcribe(
         audio: Data, filename: String?, language: String?,
-        wordTimestamps: Bool
+        wordTimestamps: Bool, requestedModel: String?
     ) async throws -> TranscriptionResult
 
     /// Transcribe already-decoded 16 kHz mono PCM — the shared engine entry
@@ -18,7 +22,8 @@ public protocol TranscriptionModule: InferenceModule {
     /// video route after `VideoAudioTrack.extractPCM`; both share one dispatch
     /// with no re-encode.
     func transcribePCM(
-        _ pcm: [Float], language: String?, wordTimestamps: Bool
+        _ pcm: [Float], language: String?, wordTimestamps: Bool,
+        requestedModel: String?
     ) async throws -> TranscriptionResult
 }
 
@@ -84,15 +89,20 @@ public actor StubTranscriptionModule: TranscriptionModule, ModelSelectable {
 
     public func transcribe(
         audio: Data, filename: String?, language: String?,
-        wordTimestamps: Bool
+        wordTimestamps: Bool, requestedModel: String? = nil
     ) async throws -> TranscriptionResult {
         try await transcribePCM(
-            [], language: language, wordTimestamps: wordTimestamps)
+            [], language: language, wordTimestamps: wordTimestamps,
+            requestedModel: requestedModel)
     }
 
     public func transcribePCM(
-        _ pcm: [Float], language: String?, wordTimestamps: Bool
+        _ pcm: [Float], language: String?, wordTimestamps: Bool,
+        requestedModel: String? = nil
     ) async throws -> TranscriptionResult {
+        // Same atomic rebind-then-serve as the MLX module, so the stub tier
+        // exercises the decision behavior (ADR 009).
+        if let m = requestedModel, !m.isEmpty { try await rebind(to: m) }
         let words =
             wordTimestamps
             ? [

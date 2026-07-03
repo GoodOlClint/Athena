@@ -47,8 +47,11 @@ public protocol SpeakerEmbeddingModule: InferenceModule {
     /// Embed each `segment` of `audio` (raw uploaded file bytes;
     /// `filename` hints the container). An empty `segments` list embeds
     /// the whole clip as one segment.
+    /// `requestedModel` (ADR 029 residual) is re-bound INSIDE the gated
+    /// execution span — see `TranscriptionModule.transcribe`.
     func embed(
-        audio: Data, filename: String?, segments: [SpeakerSegmentRequest]
+        audio: Data, filename: String?, segments: [SpeakerSegmentRequest],
+        requestedModel: String?
     ) async throws -> SpeakerEmbeddingResult
 
     /// Slide a `windowSeconds` window with `hopSeconds` hop across the
@@ -124,8 +127,11 @@ public actor StubSpeakerEmbeddingModule: SpeakerEmbeddingModule,
     }
 
     public func embed(
-        audio: Data, filename: String?, segments: [SpeakerSegmentRequest]
+        audio: Data, filename: String?, segments: [SpeakerSegmentRequest],
+        requestedModel: String? = nil
     ) async throws -> SpeakerEmbeddingResult {
+        // Same atomic rebind-then-serve as the MLX module (ADR 009).
+        if let m = requestedModel, !m.isEmpty { try await rebind(to: m) }
         let reqs =
             segments.isEmpty
             ? [SpeakerSegmentRequest(start: 0, end: 0)] : segments

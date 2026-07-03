@@ -24,7 +24,30 @@ final class TranscriptionPCMSeamTests: XCTestCase {
     func testReachableViaProtocol() async throws {
         let m: any TranscriptionModule = StubTranscriptionModule()
         let r = try await m.transcribePCM(
-            [], language: nil, wordTimestamps: true)
+            [], language: nil, wordTimestamps: true, requestedModel: nil)
         XCTAssertFalse(r.words.isEmpty)
+    }
+
+    /// ADR 029 audio residual (v0.10.252) — `requestedModel` is re-bound
+    /// atomically with the forward, so a concurrent different-model rebind
+    /// can't produce a wrong-model transcription. Pins the rebind-then-serve
+    /// decision on the stub tier (ADR 009); nil/empty leaves the slot alone.
+    func testRequestedModelRebindsAtomically() async throws {
+        let m = StubTranscriptionModule(
+            modelIds: ["whisper-a", "parakeet-b"],
+            configuredDefault: "whisper-a")
+        try await m.rebind(to: "whisper-a")
+        _ = try await m.transcribePCM(
+            [], language: nil, wordTimestamps: false,
+            requestedModel: "parakeet-b")
+        let bound = await m.residentModelId()
+        XCTAssertEqual(bound, "parakeet-b")
+        // nil / empty requestedModel must NOT touch the slot.
+        _ = try await m.transcribePCM(
+            [], language: nil, wordTimestamps: false, requestedModel: nil)
+        _ = try await m.transcribePCM(
+            [], language: nil, wordTimestamps: false, requestedModel: "")
+        let still = await m.residentModelId()
+        XCTAssertEqual(still, "parakeet-b")
     }
 }

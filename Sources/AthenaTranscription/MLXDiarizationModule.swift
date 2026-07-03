@@ -188,7 +188,47 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
     public func residentBackend() -> DiarizationBackend { backend }
 
     public func diarize(
-        audio: Data, filename: String?
+        audio: Data, filename: String?, requestedModel: String? = nil
+    ) async throws -> DiarizationResult {
+        // Option D (ADR 025 S5): decode from the in-memory upload bytes.
+        var pcm = try await AudioDecode.pcm16kMono(
+            from: audio, filename: filename, module: .diarization)
+        defer { ProcessHardening.secureZero(&pcm) }  // ADR 024 T2
+        let samples = pcm  // Sendable copy for the gated worker
+
+        // D1 — serialize: chain this generate after any in-flight one so two
+        // never run concurrent forwards on the shared model (racing the global
+        // clearCache). Record it so rebind/unload can drain it (D2).
+        let prior = generateInFlight
+        generateSeq &+= 1
+        let mySeq = generateSeq
+        let task = Task { () async throws -> DiarizationResult in
+            _ = try? await prior?.value
+            // ADR 029 — one Metal-executing tenant at a time. The
+            // generateInFlight chain serializes diarizations within this
+            // module; the gate serializes this forward against the LLM/audio
+            // tenants on the one Metal pool.
+            return try await InferenceGate.shared.withExclusiveExecution {
+                // ADR 029 residual (audio) — bind the requested model INSIDE
+                // the gate, and read backend/model AFTER it (in the worker),
+                // so a concurrent different-model rebind can't swap the slot
+                // between the server's preflight rebind and this forward.
+                if let m = requestedModel, !m.isEmpty {
+                    try await self.rebind(to: m)
+                }
+                return try await self.diarizeWorker(samples)
+            }
+        }
+        generateInFlight = task
+        generateGateSeq = mySeq
+        defer { if generateGateSeq == mySeq { generateInFlight = nil } }
+        return try await task.value
+    }
+
+    /// Gated worker: backend/model are read HERE (inside the gate) so the
+    /// forward always runs against the model the request resolved to.
+    private func diarizeWorker(
+        _ pcm: [Float]
     ) async throws -> DiarizationResult {
         // ADR 018 — end-to-end `diarize` is Sortformer-only. A segmentation
         // model answers `segment`, not `diarize`.
@@ -202,10 +242,6 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
             throw AthenaError.moduleLoadFailed(
                 .diarization, reason: "diarize called before load")
         }
-        // Option D (ADR 025 S5): decode from the in-memory upload bytes.
-        var pcm = try await AudioDecode.pcm16kMono(
-            from: audio, filename: filename, module: .diarization)
-        defer { ProcessHardening.secureZero(&pcm) }  // ADR 024 T2
         let audio = MLXArray(pcm).asType(.float32)
 
         // M24.4b: the offline single-pass path is capped by the
@@ -227,36 +263,39 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
 
         let streaming = durationSeconds > offlineMaxSeconds * 0.95
         // Box the non-Sendable model+audio once (the actor already serialises
-        // access) so the serialization Task below can capture it.
+        // access) so the nonisolated static runners can take it.
         let send = Send((model, audio))
-
-        // D1 — serialize: chain this generate after any in-flight one so two
-        // never run concurrent forwards on the shared model (racing the global
-        // clearCache). Record it so rebind/unload can drain it (D2).
-        let prior = generateInFlight
-        generateSeq &+= 1
-        let mySeq = generateSeq
-        let task = Task { () async throws -> DiarizationResult in
-            _ = try? await prior?.value
-            // ADR 029 — one Metal-executing tenant at a time. The
-            // generateInFlight chain serializes diarizations within this
-            // module; the gate serializes this forward against the LLM/audio
-            // tenants on the one Metal pool.
-            return try await InferenceGate.shared.withExclusiveExecution {
-                streaming
-                    ? try await Self.runStreaming(send)
-                    : try await Self.runOffline(send)
-            }
-        }
-        generateInFlight = task
-        generateGateSeq = mySeq
-        defer { if generateGateSeq == mySeq { generateInFlight = nil } }
-        return try await task.value
+        return streaming
+            ? try await Self.runStreaming(send)
+            : try await Self.runOffline(send)
     }
 
     public func segment(
-        audio: Data, filename: String?
+        audio: Data, filename: String?, requestedModel: String? = nil
     ) async throws -> [SpeakerActivityRegion] {
+        // Option D (ADR 025 S5): decode from the in-memory upload bytes.
+        var pcm = try await AudioDecode.pcm16kMono(
+            from: audio, filename: filename, module: .diarization)
+        defer { ProcessHardening.secureZero(&pcm) }  // ADR 024 T2
+        let samples = pcm  // Sendable copy for the gated worker
+        let task = Task { () async throws -> [SpeakerActivityRegion] in
+            // ADR 029 — gate the segmentation forward against other tenants.
+            try await InferenceGate.shared.withExclusiveExecution {
+                // ADR 029 residual (audio) — in-gate rebind; backend/model
+                // read after it, in the worker.
+                if let m = requestedModel, !m.isEmpty {
+                    try await self.rebind(to: m)
+                }
+                return try await self.segmentWorker(samples)
+            }
+        }
+        return try await task.value
+    }
+
+    /// Gated worker: backend/model are read HERE (inside the gate).
+    private func segmentWorker(
+        _ pcm: [Float]
+    ) throws -> [SpeakerActivityRegion] {
         // ADR 018 — segmentation is the pyannote backend only.
         guard backend == .pyannoteSegmentation, let segmentationModel else {
             throw AthenaError.diarizationMethodInvalid(
@@ -264,22 +303,9 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
                 reason: "the loaded model is a \(backend.rawValue) model, "
                     + "which has no segmentation backend; use method=sortformer")
         }
-        // Option D (ADR 025 S5): decode from the in-memory upload bytes.
-        var pcm = try await AudioDecode.pcm16kMono(
-            from: audio, filename: filename, module: .diarization)
-        defer { ProcessHardening.secureZero(&pcm) }  // ADR 024 T2
         // PyanNet is length-agnostic and stream-windowed (no positional cap),
-        // so the whole file is segmented in one pass; box the non-Sendable
-        // model+pcm so the detached run can capture it (the actor serialises).
-        let send = Send((segmentationModel, pcm))
-        let task = Task { () async throws -> [SpeakerActivityRegion] in
-            // ADR 029 — gate the segmentation forward against other tenants.
-            try await InferenceGate.shared.withExclusiveExecution {
-                let (m, samples) = send.v
-                return m.segment(samples)
-            }
-        }
-        return try await task.value
+        // so the whole file is segmented in one pass.
+        return segmentationModel.segment(pcm)
     }
 
     /// nonisolated: the model/audio arrive boxed-Sendable and the

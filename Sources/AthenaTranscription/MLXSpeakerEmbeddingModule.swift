@@ -124,13 +124,19 @@ public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule,
     }
 
     public func embed(
-        audio: Data, filename: String?, segments: [SpeakerSegmentRequest]
+        audio: Data, filename: String?, segments: [SpeakerSegmentRequest],
+        requestedModel: String? = nil
     ) async throws -> SpeakerEmbeddingResult {
         // ADR 029 — gate the per-segment model.embed Metal forwards against
         // other tenants via an actor self-hop (the @Sendable closure never
         // captures the non-Sendable model).
         try await InferenceGate.shared.withExclusiveExecution {
-            try await self.embedWorker(
+            // ADR 029 residual (audio) — in-gate rebind; `embedWorker` reads
+            // `model` after it.
+            if let m = requestedModel, !m.isEmpty {
+                try await self.rebind(to: m)
+            }
+            return try await self.embedWorker(
                 audio: audio, filename: filename, segments: segments)
         }
     }
