@@ -127,7 +127,8 @@ enum OpenAPISpec {
                       "stop_sequences": { "type": "array", "items": { "type": "string" } },
                       "temperature": { "type": "number" },
                       "top_p": { "type": "number" },
-                      "stream": { "type": "boolean", "description": "When true, emit the Anthropic SSE event stream (text/event-stream)." }
+                      "stream": { "type": "boolean", "description": "When true, emit the Anthropic SSE event stream (text/event-stream)." },
+                      "timeout": { "type": "number", "description": "Athena extension (tolerated field, ADR 036 section 7 rung 2 - not part of the Anthropic wire shape): per-request deadline override in seconds, same semantics as the /v1/chat/completions `timeout`. Omitted => the daemon default." }
                     }
                   } } }
                 },

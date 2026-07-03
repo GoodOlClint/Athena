@@ -77,22 +77,27 @@ public struct StopStreamFilter: Sendable {
     }
 
     /// One-shot truncation for a complete string (the sync path): the text
-    /// up to the first stop sequence, and whether a stop was found.
+    /// up to the first stop sequence, whether a stop was found, and WHICH
+    /// stop matched (earliest position — same attribution the streaming
+    /// `matchedStop` reports, so both paths name the real sequence).
     public static func truncate(_ text: String, stops: [String])
-        -> (text: String, stopped: Bool)
+        -> (text: String, stopped: Bool, matched: String?)
     {
         let active = stops.filter { !$0.isEmpty }
-        var best: Range<String.Index>?
+        var best: (range: Range<String.Index>, stop: String)?
         for s in active {
             if let r = text.range(of: s),
-                best == nil || r.lowerBound < best!.lowerBound
+                best == nil || r.lowerBound < best!.range.lowerBound
             {
-                best = r
+                best = (r, s)
             }
         }
         if let best {
-            return (String(text[text.startIndex..<best.lowerBound]), true)
+            return (
+                String(text[text.startIndex..<best.range.lowerBound]),
+                true, best.stop
+            )
         }
-        return (text, false)
+        return (text, false, nil)
     }
 }

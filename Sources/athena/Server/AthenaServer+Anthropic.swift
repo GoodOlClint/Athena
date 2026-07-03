@@ -29,12 +29,12 @@ extension AthenaServer {
 
 
     /// ADR 036 S2 — the Anthropic Messages adapter (`POST /v1/messages`). Decode
-    /// → `NativeChatRequest`, run the shared `prepareChat` seam, drain the one
-    /// `GenChunk` stream, encode the Anthropic response. No orchestration or
-    /// engine logic here — it reuses the exact path the OpenAI adapter does.
-    /// Increment 1: non-streaming. Streaming (the SSE event protocol) lands in
-    /// the next slice; a `stream:true` request is refused with a clean 400 until
-    /// then.
+    /// → `NativeChatRequest`, run the shared `prepareChat` seam, drain or
+    /// forward the one `GenChunk` stream, encode the Anthropic response. No
+    /// orchestration or engine logic here — it reuses the exact path the
+    /// OpenAI adapter does. Both modes ship: non-streaming (v0.10.234) and
+    /// the SSE event-sequence streaming (v0.10.235, via the shared
+    /// `foldGenChunks` pump).
     func handleAnthropicMessages(_ request: Request) async -> Response {
         let body: AnthropicMessagesRequest
         do {
@@ -126,11 +126,17 @@ extension AthenaServer {
         if !lowered.stops.isEmpty {
             let cut = StopStreamFilter.truncate(text, stops: lowered.stops)
             if cut.stopped {
-                stopHit = lowered.stops.first { text.contains($0) }
+                // Earliest-position attribution from the shared filter — the
+                // streaming path reports the same via `matchedStop` (WP7).
+                stopHit = cut.matched
                 text = cut.text
             }
         }
         await meter(principal: principal, usage: collected.usage)
+        // M60.6 parity with the OpenAI collect path — shed the prompt-prefix
+        // KV pool if this request pushed the footprint over the high-water
+        // mark. No-op (a cheap phys probe) when there's headroom.
+        await governor.relievePromptCachePressureIfNeeded()
         // WP7 — the one shared tool-call precedence algebra (ADR 034/036): a
         // substrate-detected free call keeps the text as content; a Guide-forced
         // call IS the text (drop it); else plain content.
