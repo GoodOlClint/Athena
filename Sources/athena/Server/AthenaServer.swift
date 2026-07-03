@@ -619,7 +619,7 @@ struct AthenaServer {
     /// managed token, `t:<hash>` for a bootstrap key). `isAdmin` = the
     /// caller holds the full permission set (the `admin` role). Used for
     /// per-principal usage metering + the `/api/usage` admin/own scoping.
-    func queuePrincipal(_ request: Request) async -> (
+    func bearerPrincipal(_ request: Request) async -> (
         principal: String?, isAdmin: Bool, enforced: Bool
     ) {
         // M65.6 (A5): read the single resolution AuthMiddleware published
@@ -640,13 +640,13 @@ struct AthenaServer {
     /// prefixes used for authenticated subjects (M27.2).
     static let xenos = "xenos"
 
-    /// The principal a (non-queue) request should be metered against:
+    /// The principal a request should be metered against:
     /// the authenticated subject, or nil when auth is off (mapped to
     /// `xenos` by `meter`). Inference handlers only run after the auth
     /// middleware admits the request, so an enabled-auth request always
     /// resolves a real principal here.
     func usagePrincipal(_ request: Request) async -> String? {
-        await queuePrincipal(request).principal
+        await bearerPrincipal(request).principal
     }
 
     /// Record one request's token usage (M27): bump the global metrics
@@ -775,7 +775,7 @@ struct AthenaServer {
             // ADR 015: block-until-ready — wait up to `coldLoadWaitSecs` for an
             // on-disk cold-load, then serve (peer-runner behavior); only a
             // timeout or an in-flight download (pull) still 503s. Covers
-            // /v1/chat/completions AND /api/chat. (The streaming path layers
+            // /v1/chat/completions and /v1/messages. (The streaming path layers
             // SSE keep-alives over this wait — see handleChatCompletions.)
             switch try await governor.awaitLoad(.llm, within: coldLoadWaitSecs) {
             case .loaded: break

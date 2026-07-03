@@ -47,6 +47,37 @@ writes plaintext.
 | `prompt_cache_persist_max_age_secs` | `…_MAX_AGE_SECS` | `0` (no expiry) | retention: max blob age |
 | `prompt_cache_persist_eager` | `…_EAGER` | `false` | spill a new entry at the store seam (crash survival) — see *Triggers* |
 
+### The full prompt-cache knob surface (RAM tier + disk tier)
+
+The disk keys above extend the M59 RAM tier. All thirteen keys in one place:
+
+| TOML key | default | tier | meaning |
+|---|---|---|---|
+| `prompt_cache_enabled` | `false` | — | master switch — off ⇒ every other key below is inert |
+| `prompt_cache_max_entries` | `4` | RAM | LRU pool: max resident entries |
+| `prompt_cache_max_bytes` | `0` (⇒ the governor's `promptCacheCapBytes`) | RAM | LRU pool: max resident bytes |
+| `prompt_cache_idle_ttl_secs` | `600` | RAM | idle eviction age (with the disk tier on, eviction demotes to disk instead of dropping) |
+| `prompt_cache_scope` | `principal` | RAM | reuse boundary (`principal` / `global`) — also part of the disk blob key |
+| `prompt_cache_encrypt_idle` | `false` | RAM | ADR 024 T3 — seal idle entries in RAM (AES-256-GCM) |
+| `prompt_cache_persist_*` (7 keys) | see above | disk | ADR 027 — the encrypted disk tier |
+
+Interactions that aren't obvious from any single key:
+
+- **`prompt_cache_enabled=false` wins over everything** — no pool, no disk tier,
+  no keys read.
+- **`encrypt_idle` and `persist_to_disk` don't compose** (see *Limitations*):
+  an idle entry sealed in RAM is **not** spilled to disk. Pick one at-rest
+  strategy.
+- **Idle eviction is the demote trigger**: with the disk tier on,
+  `idle_ttl_secs` controls *when* entries move from RAM to disk, so the
+  RAM-tier TTL is effectively the disk tier's ingest schedule (plus SIGTERM
+  flush, frontier-interval saves, and opt-in `persist_eager`).
+- **Retention is per-tier**: `max_entries`/`max_bytes` bound the RAM pool;
+  `persist_max_*` bound the blob dir independently (both LRU). Disk bytes are
+  NOT Metal bytes — they never count against the governor budget.
+- **`scope` must match for a disk hit**: a blob saved under `principal` scope
+  can only restore for the same principal (the scope is hashed into the key).
+
 ## How it works
 
 - **Content-addressed, no tokens on disk.** Each blob is keyed by

@@ -1,5 +1,34 @@
 # Athena code audit + remediation blueprint — 2026-07-01
 
+> **VERIFICATION ADDENDUM (2026-07-02, at v0.10.250 / `72faf7c`):** remediation shipped as
+> 14 commits (v0.10.237–250) and was re-verified by three adversarial passes + the unit
+> suite (**795 pass / 0 fail / 40 heavy-skipped**, up from 783 at baseline).
+>
+> | WP | Verdict |
+> |---|---|
+> | WP1 governor Metal frees gated | **CONFIRMED** — eviction/unload gated in `MemoryGovernor.swift:850–860/918–925`, relief/reclaim hooks gated at `Load.swift:625–630/682–686`, governor awaits hooks so admission re-check sees the reclaim; MLX-free + admission math off-gate; `testReclaimRunsUnderInferenceGateWP1` pins order; ADR 029 amended. No re-entrancy deadlock found. |
+> | WP2 Metal-OOM degrade | **CONFIRMED** — recognized needles latch (`MetalFaultLatch`) → 503 `metal_oom` at gate exit; unrecognized still fatal; 5 unit tests + a gated heavy e2e; ADR 030 P2 marked implemented. |
+> | WP3 operator paths gated | **CONFIRMED** — `handleModelsLoad` gated (`+Admin.swift:1048–1056`); convert gated with an explicit ADR 029 carve-out; all 3 `rebind(to:)` sites in-gate. |
+> | WP4 G4 contract fix | **CONFIRMED** — `!forcedTools().isEmpty` short-circuit; adversarial matrix clean; pinned by e2e-tool-choice-auto check 5 (unit-pin impossible, executable target). |
+> | WP5 security hygiene | **CONFIRMED** — `restrictPermissions` 0600/0700 incl. sidecars + migration, e2e stat assertion; `Self.storeError` classifier at all RBAC store ops; healthz posture recorded in ADR 004. |
+> | WP6 rebind-in-decode-span | **CONFIRMED for LLM (both dialects)** — `NativeChatRequest.model` re-bound inside the gated decode (`MLXLLMModule.swift:726–738`); ADR 029 residual closed. **Audio modules still have the window** (see residuals). |
+> | WP7 pump seam fold | **CONFIRMED** — one `foldGenChunks` (`+SSE.swift:210–286`), encoder structs, shared `resolveToolCallOutcome` at all 4 sites, exact streaming stop attribution, timeout drift fixed via tolerated `timeout` extension field. |
+> | WP8 dead code | **CONFIRMED** — all symbols gone (zero refs); `KEKType.sep` raw value retained; `/api/embed` **removed** (option a) with spec + drift-guard + `governedEmbed` unification. |
+> | WP9 dedupe | **PARTIAL** — `extractUploadFile` (4/4 handlers) + `encodeTranscription` + static `iso` done; `uiQuery`→`queryParameters` not done (no recorded skip); extracted upload helper e2e-pinned only (DoD asked unit-pin). |
+> | WP10 god-file split | **CONFIRMED** — `AthenaServer.swift` 5,574→1,312 lines + 6 surface extensions; drift-guard widened to `AthenaServer*.swift`; 76-route parity. |
+> | WP11 doc/spec honesty | **PARTIAL** — spec + rename + ADR 033 tracking done, but 6 files of the tail exist **only uncommitted** in the working tree, and ~6 stale-comment sites remain (list below). Note: commit `da6c304`'s message over-claims — its described work landed partly in `72faf7c` and partly in the uncommitted tail. |
+> | WP12 ledger | **PARTIAL** — TriAttention tripwire + knob review dates in the ADR 028 addendum; `prompt_cache_*` interaction table not added. |
+>
+> **Residual punch list — ALL CLOSED 2026-07-02 (v0.10.251–255):**
+> 1. ~~`DELETE /api/cache/prompt` ungated `flushIdle`~~ — **DONE v0.10.252** (gated, classified error on a latched fault).
+> 2. ~~Forced tool with uncompilable `parameters` → silent unconstrained 200~~ — **DONE v0.10.253** (`structuredRequestError` validates the forced-tool schema first; per-case `invalid_tool_parameters` code; unreachable from wire JSON today — belt-and-braces).
+> 3. ~~Audio wrong-model window~~ — **DONE v0.10.252** (`requestedModel` re-bound inside each audio module's gated span; diarization's backend/model read moved into an in-gate worker; stub-tier pin test; ADR 029 amended).
+> 4. ~~Uncommitted WP11 tail~~ — **committed v0.10.251**.
+> 5. ~~Small tails~~ — **DONE v0.10.254–255**: Anthropic non-stream stop attribution (truncate returns the matched stop), `timeout` in the `/v1/messages` spec, Anthropic cache-relief parity, stale-comment batch (AthenaError/RemoteModels//api/chat/StubLLMModule/Qwen35MTP/SpeculativeStats), `queuePrincipal`→`bearerPrincipal`, `tool-call-streaming-handoff.md` deleted (bug verified fixed), `prompt_cache_*` full-surface + interaction table in `docs/kv-cache-disk-snapshots.md`. Recorded-as-decided rather than changed: `uiQuery` keeps its raw no-percent-decode parser (comment records why vs `queryParameters`), `extractUploadFile` stays e2e-pinned (executable target; the cap algebra is already unit-pinned in ServerKit), in-gate corrective rebind emits no audit record (ADR 029 accepted nit).
+> 6. **Accepted limitations, on record (unchanged):** substrate-stream path has no `MetalFaultLatch` polling mid-loop (request still 503s at gate exit; unrecognized cascade faults still abort); latch attribution is temporal, not causal (bounded misattribution, no crash).
+>
+> Everything below this line is the original 2026-07-01 blueprint, retained for reference. Line numbers predate the WP10 split.
+
 **Baseline:** v0.10.236, commit `a603e0a`, branch `main`. All line numbers reference this commit.
 **Method:** six parallel specialized review passes (correctness, security, concurrency, AI-slop, code-smell/over-engineering, half-implemented-features), each verified against source — no grep-only findings. Unit suite at baseline: **783 pass / 39 skipped (heavy, model-gated)**.
 **Audience:** this document is a work blueprint for follow-up agents. Each work package (WP) is self-contained: files, exact change, definition of done. Execute WPs in phase order; WPs within a phase are independent unless noted.

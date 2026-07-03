@@ -547,8 +547,8 @@ extension AthenaServer {
     /// unbounded. On overrun it throws `AthenaError.requestTimedOut`
     /// (the caller maps it to a 504) and the generation is cancelled
     /// so it stops consuming the worker/budget. Shared by the sync
-    /// `/v1/chat/completions`, native `/api/chat`, and queued
-    /// `conversation` paths so all three honor the same timeout.
+    /// `/v1/chat/completions` and `/v1/messages` collect paths so both
+    /// dialects honor the same timeout.
     ///
     /// M46.1 / M46.7 — long-generation heartbeat. A sync decode that
     /// runs past `heartbeatAfter` emits a `.notice`-level progress log

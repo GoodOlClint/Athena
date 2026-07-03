@@ -122,11 +122,10 @@ extension LLMModule {
     }
 
     /// Default metered generation for conformers without native token
-    /// counts (the stub): stream chunks from the String `generate(prompt:
-    /// schemaJSON:tools:)` path and synthesize whitespace-delimited token
-    /// counts so `usage` and the metrics counter are non-zero end-to-end
-    /// under `--engine stub`. The MLX module overrides this with real
-    /// tokenizer counts.
+    /// counts (the stub): stream chunks from the canned `generate(prompt:)`
+    /// seam and synthesize whitespace-delimited token counts so `usage` and
+    /// the metrics counter are non-zero end-to-end under `--engine stub`.
+    /// The MLX module overrides this with real tokenizer counts.
     public nonisolated func generateMetered(
         messages: [ChatTurn], schemaJSON: String?,
         tools: [[String: any Sendable]]?,

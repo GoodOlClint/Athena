@@ -4,8 +4,8 @@ import Foundation
 ///
 /// Plays the same role for speculative perf observability that
 /// `DecodeProgress` plays for token-emission progress: an opt-in
-/// `@TaskLocal` the decode loop publishes to and observers (tests,
-/// future metrics surfaces) read from. Lives in AthenaCore so the
+/// `@TaskLocal` the decode loop publishes to and observers (the test
+/// tallies) read from. Lives in AthenaCore so the
 /// AthenaLLM decode path can publish without acquiring a dependency
 /// on any concrete observer.
 ///

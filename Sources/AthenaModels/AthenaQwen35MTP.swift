@@ -8,10 +8,10 @@ import MLXNN
 // ported from the GoodOlClint/mlx-lm `the consuming application-patches` fork
 // (mlx_lm/models/qwen3_5.py MTPModule 292–352) — technique only.
 //
-// M2.2a scope: structure + weight binding only. The head loads from the
-// checkpoint's `mtp.*` tensors and its forward is implemented faithfully,
-// but it is NOT yet wired into the generation path — plain generation is
-// unchanged. The draft/verify/accept loop is M2.2c.
+// M2.2a built structure + weight binding; the draft/verify/accept loop
+// (M2.2c) has long since wired this head into `SpeculativeGeneration`.
+// ADR 033 (Proposed) plans to retire this file onto the substrate's
+// `Qwen35MTPDraftModel` once the equivalence gate passes.
 
 /// `mtp.fc`: a 2H→H fused projection. Deliberately NOT `nn.Linear`: the
 /// checkpoint stores `mtp.fc.weight` in **full precision** (no

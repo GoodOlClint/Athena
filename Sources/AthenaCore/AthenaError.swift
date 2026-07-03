@@ -113,7 +113,7 @@ public enum AthenaError: Error, Sendable, Equatable {
     /// Whisper nor a Parakeet family model, or one of those families whose
     /// PACKAGING the loader requires is absent (a non-large-v3 Whisper vocab; a
     /// transformers-format Parakeet with no `joint.vocabulary`). A client/config
-    /// fault (400) — the id is allowlisted but unloadable — surfaced via the
+    /// fault (400) — the id is in the model store but unloadable — surfaced via the
     /// shared `ModelSupport` predicate as a cause-naming error instead of a deep
     /// loader 500 (ADR 020/021). `detail` names the structural requirement and
     /// is free of any model id / HF repo (ADR 021 D5). `model`/`detail` are

@@ -170,7 +170,7 @@ public enum RemoteModels {
     private struct ResidentResp: Decodable { let slots: [SlotResp] }
 
     /// Rebind a module's slot to `id` (nil ⇒ the module's default).
-    /// Server-side `model.write` gate, allowlist check, governor load
+    /// Server-side `model.write` gate, store-presence check, governor load
     /// + in-place rebind. Prints the daemon's reply and exits non-zero
     /// on `>= 400` (faithful surfacing of the server's outcome).
     public static func load(
@@ -212,7 +212,7 @@ public enum RemoteModels {
         print("unloaded \(r.modules.joined(separator: ", "))")
     }
 
-    /// `GET /api/models/resident` — every module's allowlist + default
+    /// `GET /api/models/resident` — every module's available models + default
     /// + resident-id. Prints a compact table.
     public static func resident(_ d: DaemonOptions) async throws {
         let (code, data): (Int, Data)
@@ -537,7 +537,7 @@ public struct LoadCmd: AsyncParsableCommand {
     }
 }
 
-/// `athena resident` — every module's allowlist + default + resident
+/// `athena resident` — every module's available models + default + resident
 /// id (M41.1). Read-only model-store projection (`model.read`).
 public struct ResidentCmd: AsyncParsableCommand {
     public static let configuration = CommandConfiguration(

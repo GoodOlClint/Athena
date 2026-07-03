@@ -236,9 +236,12 @@ extension AthenaServer {
             type: "auth_error", code: "forbidden")
     }
 
-    /// First raw value of `key` in the query string. Our model
-    /// names are `[A-Za-z0-9._-]` (validated downstream by
-    /// `safeModelName`) so no percent-decode is needed.
+    /// First RAW (not percent-decoded) value of `key` in the query string.
+    /// Deliberately NOT `r.uri.queryParameters` (2026-07-02 audit WP9,
+    /// decided): Hummingbird's accessor percent-decodes, so `%2F` etc. would
+    /// re-materialize characters the raw form can't contain — this keeps the
+    /// no-decode invariant that `safeModelName`'s `[A-Za-z0-9._-]` validation
+    /// downstream relies on seeing the wire bytes.
     private static func uiQuery(
         _ r: Request, _ key: String
     ) -> String? {

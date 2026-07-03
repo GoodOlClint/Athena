@@ -50,6 +50,10 @@ extension AthenaServer {
     /// non-empty `file` part. `cap` is the modality's byte ceiling (audio vs
     /// video), so one helper closes the drift between the four hand-copied
     /// blocks (the audio/video cap had already diverged).
+    /// Test coverage (2026-07-02 audit WP9, decided): the cap/413 decision
+    /// algebra is unit-pinned in `AthenaServerKit/UploadLimit` (ADR 008); this
+    /// helper is HTTP plumbing in the executable target (un-importable under
+    /// `swift test`) and is pinned by the four routes' e2e coverage instead.
     private func extractUploadFile(
         _ request: Request, cap: Int
     ) async -> Outcome<(form: MultipartForm, file: MultipartForm.Part)> {

@@ -189,7 +189,7 @@ extension AthenaServer {
     /// loopback operator when auth is off) sees every principal's
     /// counters; any other authenticated caller sees only its own row.
     private func handleUsage(_ request: Request) async -> Response {
-        let who = await queuePrincipal(request)
+        let who = await bearerPrincipal(request)
         let rows: [UsageRow]
         if !who.enforced || who.isAdmin {
             rows = await store.allUsage()
