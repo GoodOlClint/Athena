@@ -352,9 +352,11 @@ extension AthenaServer {
             "--predicate", predicate,
         ]
         if debug { args += ["--info", "--debug"] }
-        let entries = (try? await Self.collectLogEntries(
-            args: args, limit: limit)) ?? []
-        return Self.json(LogsReportResponse(logs: entries))
+        let collected = (try? await Self.collectLogEntries(
+            args: args, limit: limit)) ?? (entries: [], truncated: false)
+        return Self.json(LogsReportResponse(
+            logs: collected.entries,
+            truncated: collected.truncated ? true : nil))
     }
 
     /// `GET /api/logs/stream` (M45.5). Admin-only SSE following
@@ -472,12 +474,17 @@ extension AthenaServer {
     }
 
     /// Run `/usr/bin/log` with the supplied args, parse each ndjson
-    /// line into a LogEntryDTO, return up to `limit` entries. The
-    /// process is killed on timeout (5s) so a hung `log` invocation
-    /// can't pin a request thread.
+    /// line into a LogEntryDTO, and return the **newest** `limit`
+    /// entries (usability audit 2026-07-02 §1). `log show` emits
+    /// oldest-first, so we drain the whole window into a fixed-capacity
+    /// `LogTail` ring buffer and keep the tail — the old code stopped at
+    /// the *oldest* `limit` and dropped everything after, leaving the
+    /// operator ~30 min stale. `truncated` is true when the window held
+    /// more than `limit` entries. The process is killed on a ~30s
+    /// deadline so a hung `log` invocation can't pin a request thread.
     private static func collectLogEntries(
         args: [String], limit: Int
-    ) async throws -> [LogEntryDTO] {
+    ) async throws -> (entries: [LogEntryDTO], truncated: Bool) {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/log")
         proc.arguments = args
@@ -485,12 +492,20 @@ extension AthenaServer {
         proc.standardOutput = pipe
         proc.standardError = FileHandle.nullDevice
         try proc.run()
-        let deadline = Date().addingTimeInterval(5)
-        // Read all available data; bound by deadline + limit.
+        let deadline = Date().addingTimeInterval(30)
+        // Drain the WHOLE window (not just the first `limit` lines);
+        // LogTail retains the newest `limit`. Deadline-bounded so a
+        // stuck `log` can't hang the request — a hit there sets
+        // `truncated` too (we couldn't prove we read the tail).
         var buffer = Data()
-        var entries: [LogEntryDTO] = []
+        var tail = LogTail<LogEntryDTO>(limit: limit)
+        var deadlineHit = false
         let h = pipe.fileHandleForReading
-        while Date() < deadline && entries.count < limit {
+        while true {
+            if Date() >= deadline {
+                deadlineHit = true
+                break
+            }
             let chunk = h.availableData
             if chunk.isEmpty {
                 if !proc.isRunning { break }
@@ -498,20 +513,18 @@ extension AthenaServer {
                 continue
             }
             buffer.append(chunk)
-            while let nl = buffer.firstIndex(of: 0x0A),
-                entries.count < limit
-            {
+            while let nl = buffer.firstIndex(of: 0x0A) {
                 let line = buffer.subdata(
                     in: buffer.startIndex..<nl)
                 buffer = buffer.subdata(
                     in: (nl + 1)..<buffer.endIndex)
                 if let entry = parseNDJSONLogLine(line) {
-                    entries.append(entry)
+                    tail.append(entry)
                 }
             }
         }
         if proc.isRunning { proc.terminate() }
-        return entries
+        return (tail.entries, tail.truncated || deadlineHit)
     }
 
     /// Decode one `log show --style ndjson` line into our compact

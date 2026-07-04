@@ -312,11 +312,18 @@ struct LogEntryDTO: Codable {
     let message: String
 }
 
-/// `GET /api/logs` — admin-only daemon-log oversight, oldest-first
-/// (matches `log show` default order; client sorts/reverses as
-/// needed). Pull only — the streaming sibling at
-/// `/api/logs/stream` is SSE.
-struct LogsReportResponse: Codable { let logs: [LogEntryDTO] }
+/// `GET /api/logs` — admin-only daemon-log oversight. Entries are the
+/// **newest** `limit` of the requested window, in `log show`'s native
+/// oldest-first order (the client prints verbatim, no sort). `truncated`
+/// is present-and-true only when the window held more than `limit`
+/// entries (or the read deadline was hit) and older entries were dropped
+/// — a signal to narrow `--since`/raise `--limit` or use `--follow`;
+/// omitted when nothing was dropped (backward-compatible). Pull only —
+/// the streaming sibling at `/api/logs/stream` is SSE.
+struct LogsReportResponse: Codable {
+    let logs: [LogEntryDTO]
+    let truncated: Bool?
+}
 
 /// Generic mutation acknowledgements.
 struct OkResponse: Codable { let ok: Bool }

@@ -364,7 +364,7 @@ enum OpenAPISpec {
               "get": {
                 "tags": ["Logs"],
                 "summary": "Daemon unified-log entries (one-shot).",
-                "description": "Admin-only projection of `subsystem == \"athena\"` from the macOS unified log, oldest-first. Mirrors `/usr/bin/log show --style ndjson` filtered to the daemon's subsystem. Requires `daemon.admin`.",
+                "description": "Admin-only projection of `subsystem == \"athena\"` from the macOS unified log. Returns the NEWEST `limit` entries of the window, in `log show`'s native oldest-first order (the daemon drains the whole window and keeps the tail — see `truncated`). Mirrors `/usr/bin/log show --style ndjson` filtered to the daemon's subsystem. Requires `daemon.admin`.",
                 "parameters": [
                   { "name": "since", "in": "query", "required": false, "schema": { "type": "string", "default": "1h" }, "description": "How far back to look, e.g. `5m`, `1h`, `1d` (passed to `log show --last`)." },
                   { "name": "category", "in": "query", "required": false, "schema": { "type": "array", "items": { "type": "string" } }, "style": "form", "explode": true, "description": "Category filter, repeatable. e.g. `daemon`, `audit`, `model.llm`." },
@@ -890,7 +890,7 @@ enum OpenAPISpec {
                 "type": "object",
                 "properties": { "ts": { "type": "string", "description": "ISO 8601 timestamp (unified-log native format)." }, "level": { "type": "string", "description": "OSLogType name: debug | info | default | error | fault." }, "category": { "type": "string", "description": "swift-log label minus the `athena.` prefix (e.g. `daemon`, `audit`, `model.llm`)." }, "message": { "type": "string", "description": "Daemon-emitted message body; includes `req=`/`principal=`/`function=` fields when the line was emitted inside a request task hierarchy (M45.3)." } }
               },
-              "LogsReportResponse": { "type": "object", "properties": { "logs": { "type": "array", "items": { "$ref": "#/components/schemas/LogEntry" } } } },
+              "LogsReportResponse": { "type": "object", "properties": { "logs": { "type": "array", "items": { "$ref": "#/components/schemas/LogEntry" } }, "truncated": { "type": "boolean", "description": "Present and true only when older entries were dropped (window held more than `limit`, or the read deadline was hit). Omitted when nothing was dropped." } } },
               "ModelEntry": { "type": "object", "properties": { "name": { "type": "string" }, "bytes": { "type": "integer" }, "modified": { "type": "string" } } },
               "ModelListResponse": { "type": "object", "properties": { "models": { "type": "array", "items": { "$ref": "#/components/schemas/ModelEntry" } } } },
               "ModelDetailResponse": { "type": "object", "properties": { "name": { "type": "string" }, "path": { "type": "string" }, "bytes": { "type": "integer" }, "config": {} } },

@@ -27,7 +27,10 @@ public enum RemoteLogs {
             self.message = message
         }
     }
-    private struct Report: Decodable { let logs: [Entry] }
+    private struct Report: Decodable {
+        let logs: [Entry]
+        let truncated: Bool?
+    }
 
     /// `/api/logs` query string from the filters (categories are
     /// repeatable so each appears as a separate `category=` pair).
@@ -69,6 +72,11 @@ public enum RemoteLogs {
             return
         }
         render(r.logs)
+        if r.truncated == true {
+            FileHandle.standardError.write(Data(
+                "(truncated — older entries dropped; narrow --since, raise --limit, or use --follow)\n"
+                    .utf8))
+        }
     }
 
     /// Stream `/api/logs/stream` SSE indefinitely (until Ctrl-C or
