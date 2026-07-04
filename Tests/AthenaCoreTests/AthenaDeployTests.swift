@@ -540,7 +540,9 @@ final class LaunchdPlistTests: XCTestCase {
             logDir: "/var/log/athena")
     }
 
-    func testDefaultProgramArguments() {
+    // ADR 037 slice 1 — the plist is STATIC: only the invariant exec line, no
+    // config flags. The daemon reads the full TOML at boot via ATHENA_CONFIG.
+    func testStaticProgramArguments() {
         let d = LaunchdPlist.dictionary(
             label: "me.goodolclint.athena",
             executablePath: "/usr/local/libexec/athena/athenad",
@@ -552,10 +554,9 @@ final class LaunchdPlistTests: XCTestCase {
                 "/usr/local/libexec/athena/athenad",
                 "load",
                 "--background",
-                "--host", "127.0.0.1", "--port", "7447",
-                "--engine", "mlx",
             ])
         XCTAssertEqual(d["RunAtLoad"] as? Bool, true)
+        XCTAssertEqual(d["KeepAlive"] as? Bool, true)
         XCTAssertEqual(d["Label"] as? String, "me.goodolclint.athena")
         // NJ2: no configPath ⇒ no EnvironmentVariables key.
         XCTAssertNil(d["EnvironmentVariables"])
@@ -573,7 +574,11 @@ final class LaunchdPlistTests: XCTestCase {
             env?["ATHENA_CONFIG"], "/opt/athena/etc/athena/athena.toml")
     }
 
-    func testFullProgramArgumentsOrder() {
+    // ADR 037 slice 1 — even a fully-populated config produces the SAME static
+    // args: no config value is frozen into the plist anymore (that was the
+    // sudo-requiring freeze). Every one of these values reaches the daemon via
+    // the TOML at boot, not the plist.
+    func testFullConfigStillYieldsStaticArgs() {
         let d = LaunchdPlist.dictionary(
             label: "l", executablePath: "/bin/athena", user: "svc",
             workingDirectory: "/w",
@@ -596,50 +601,16 @@ final class LaunchdPlistTests: XCTestCase {
                 encryptStore: true))
         XCTAssertEqual(
             d["ProgramArguments"] as? [String],
-            [
-                "/bin/athena", "load", "--background",
-                "--host", "127.0.0.1",
-                "--port", "7447", "--budget-bytes", "36000000000",
-                "--engine", "mlx", "--model", "M",
-                "--model-store", "/srv/models",
-                "--data-dir", "/srv/a", "--log-level", "debug",
-                "--max-tokens", "2048", "--temperature", "0.2",
-                "--speculative",
-                "--auth-keys-file", "/etc/athena/auth.keys",
-                "--tls-cert", "/etc/athena/tls/fullchain.pem",
-                "--tls-key", "/etc/athena/tls/privkey.pem",
-                "--rate-limit", "10", "--rate-burst", "20",
-                "--max-concurrency", "8",
-                "--max-concurrency-per-principal", "2",
-                "--audit-retention-days", "365",
-                "--token-max-age-days", "90",
-                "--request-timeout-secs", "120",
-                "--preload",
-                "--encrypt-store",
-            ])
-    }
-
-    // ADR 015 — a set cold-load wait is forwarded as a plist arg pair; unset
-    // omits it (so the CLI default applies).
-    func testColdLoadWaitForwardedToPlistArgs() {
-        let d = LaunchdPlist.dictionary(
-            label: "l", executablePath: "/bin/athena", user: "svc",
-            workingDirectory: "/w", config: cfg(coldLoadWaitSecs: 90))
+            ["/bin/athena", "load", "--background"])
+        // None of the frozen flags leak into the plist.
         let args = d["ProgramArguments"] as? [String] ?? []
-        guard let i = args.firstIndex(of: "--cold-load-wait-secs") else {
-            return XCTFail("expected --cold-load-wait-secs in \(args)")
+        for flag in [
+            "--budget-bytes", "--model", "--max-tokens", "--auth-keys-file",
+            "--tls-cert", "--rate-limit", "--encrypt-store", "--speculative",
+            "--cold-load-wait-secs", "--host", "--port", "--engine",
+        ] {
+            XCTAssertFalse(args.contains(flag), "frozen flag leaked: \(flag)")
         }
-        XCTAssertEqual(args[i + 1], "90")
-    }
-
-    func testColdLoadWaitAbsentOmitsPlistArg() {
-        let d = LaunchdPlist.dictionary(
-            label: "l", executablePath: "/bin/athena", user: "svc",
-            workingDirectory: "/w", config: cfg())
-        let args = d["ProgramArguments"] as? [String] ?? []
-        XCTAssertFalse(
-            args.contains("--cold-load-wait-secs"),
-            "an unset cold-load wait must not emit a plist arg")
     }
 
     func testXmlDataRoundTripsAsValidPlist() throws {
@@ -649,9 +620,10 @@ final class LaunchdPlistTests: XCTestCase {
         let back = try PropertyListSerialization.propertyList(
             from: data, options: [], format: nil) as? [String: Any]
         XCTAssertEqual(back?["Label"] as? String, "l")
+        // Static args survive the XML round-trip; no --budget-bytes freeze.
         XCTAssertEqual(
-            (back?["ProgramArguments"] as? [String])?.contains("--budget-bytes"),
-            true)
+            back?["ProgramArguments"] as? [String],
+            ["/bin/athena", "load", "--background"])
     }
 }
 

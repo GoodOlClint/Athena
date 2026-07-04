@@ -402,6 +402,78 @@ struct Load: AsyncParsableCommand {
         // (fail-closed — never a silent fallback). M20.2.
         let tomlCfg = try? AthenaConfig.parse(
             file: ConfigEditor.resolvePath(nil))
+        // ADR 037 slice 1 — static plist: the launchd plist no longer freezes
+        // config into `ProgramArguments`, so the daemon reads the FULL TOML at
+        // boot here. Precedence per key: an explicit CLI flag wins; else the
+        // TOML value; else the built-in default. (Ceiling: for the four
+        // built-in-defaulted knobs — host/port/max-tokens/engine — an explicit
+        // flag set to the exact built-in default cannot override a differing
+        // TOML value; edit the TOML for those. Flags only turn ON.)
+        if let t = tomlCfg {
+            budgetBytes = budgetBytes ?? t.budgetBytes
+            model = model ?? t.model
+            // Per-module default model ids (ADR 026): the TOML value replaces
+            // the seed default only when the operator didn't pass the flag
+            // (array still equals its seed) — mirrors the old plist, which set
+            // the flag to a single TOML value.
+            if embeddingModels == [Load.defaultEmbeddingModel],
+                let m = t.embeddingModel
+            {
+                embeddingModels = [m]
+            }
+            if transcriptionModels == [
+                Load.defaultTranscriptionModel,
+                Load.defaultParakeetTranscriptionModel,
+            ], let m = t.transcriptionModel {
+                transcriptionModels = [m]
+            }
+            if diarizationModels == [
+                Load.defaultDiarizationModel,
+                Load.defaultPyannoteSegmentationModel,
+            ], let m = t.diarizationModel {
+                diarizationModels = [m]
+            }
+            if speakerEmbeddingModels == [Load.defaultSpeakerEmbeddingModel],
+                let m = t.speakerEmbeddingModel
+            {
+                speakerEmbeddingModels = [m]
+            }
+            modelStore = modelStore ?? t.modelStore
+            dataDir = dataDir ?? t.dataDir
+            logLevel = logLevel ?? t.logLevel
+            maxPromptTokens = maxPromptTokens ?? t.maxPromptTokens
+            temperature = temperature ?? t.temperature.flatMap(Double.init)
+            authKeysFile = authKeysFile ?? t.authKeysFile
+            tlsCert = tlsCert ?? t.tlsCert
+            tlsKey = tlsKey ?? t.tlsKey
+            rateLimit = rateLimit ?? t.rateLimit.flatMap(Double.init)
+            rateBurst = rateBurst ?? t.rateBurst
+            maxConcurrency = maxConcurrency ?? t.maxConcurrency
+            maxConcurrencyPerPrincipal =
+                maxConcurrencyPerPrincipal ?? t.maxConcurrencyPerPrincipal
+            auditRetentionDays = auditRetentionDays ?? t.auditRetentionDays
+            tokenMaxAgeDays = tokenMaxAgeDays ?? t.tokenMaxAgeDays
+            requestTimeoutSecs = requestTimeoutSecs ?? t.requestTimeoutSecs
+            coldLoadWaitSecs = coldLoadWaitSecs ?? t.coldLoadWaitSecs
+            maxAudioUploadBytes = maxAudioUploadBytes ?? t.maxAudioUploadBytes
+            maxVideoUploadBytes = maxVideoUploadBytes ?? t.maxVideoUploadBytes
+            maxRequestBodyBytes = maxRequestBodyBytes ?? t.maxRequestBodyBytes
+            mlxCacheLimitBytes = mlxCacheLimitBytes ?? t.mlxCacheLimitBytes
+            governorAdmissionMode =
+                governorAdmissionMode ?? t.governorAdmissionMode
+            if host == "127.0.0.1" { host = t.listenHost }
+            if port == GovernorConfig.defaultPort { port = t.listenPort }
+            if maxTokens == 1024, let m = t.maxTokens { maxTokens = m }
+            if engine == .mlx, let e = t.engine,
+                let ee = Engine(rawValue: e)
+            {
+                engine = ee
+            }
+            speculative = speculative || (t.speculative ?? false)
+            preload = preload || (t.preload ?? false)
+            encryptStore = encryptStore || (t.encryptStore ?? false)
+            persistStore = persistStore || (t.persistStore ?? false)
+        }
         let kvCompression = try KVCompression.resolve(
             config: tomlCfg?.kvCompression)
         // M59.1/.2 — cross-request prompt-prefix KV cache (`[prompt_cache]`),
