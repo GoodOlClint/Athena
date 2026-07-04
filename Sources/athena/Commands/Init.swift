@@ -120,24 +120,34 @@ struct Init: AsyncParsableCommand {
                 continue
             }
             print("• \(role): pulling \(id) …")
-            let bar = ProgressBar("  \(name)")
+            let r = ModelOpRenderer(label: name)
             do {
                 let d = try await ModelPull.pull(
                     id: id, into: root,
-                    progress: { f in bar.update(f) },
+                    progress: { p in
+                        switch p {
+                        case let .download(f, b, t):
+                            r.download(fraction: f, bytes: b, total: t)
+                        case let .file(name, i, c, b, t, d):
+                            r.file(
+                                name: name, index: i, count: c, bytes: b,
+                                total: t, done: d)
+                        case let .phase(n): r.phase(n)
+                        case let .quantize(i, n): r.quantize(index: i, count: n)
+                        }
+                    },
                     onRetry: { attempt, maxAttempts, err in
-                        bar.finish()
                         FileHandle.standardError.write(
                             Data(
                                 ("  \(ModelPull.friendlyError(err)) — "
                                     + "retrying (\(attempt)/\(maxAttempts - 1))…\n")
                                     .utf8))
                     })
-                bar.finish()
+                r.finish()
                 print("  pulled → \(d.path)")
                 pulled += 1
             } catch {
-                bar.finish()
+                r.finish()
                 print("  error: pull failed — \(ModelPull.friendlyError(error))")
                 failed += 1
             }

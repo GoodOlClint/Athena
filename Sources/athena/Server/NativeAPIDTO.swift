@@ -172,16 +172,26 @@ struct ModelPruneRequest: Codable { let dry_run: Bool? }
 
 // ADR 025 S2 — model lifecycle ops (`/api/models/{pull,convert,prune}`)
 // run **synchronously** and stream progress over Server-Sent Events; the
-// async queue (and its job ids / persistence) is gone. Each SSE `data:`
-// frame is one event:
-//   - {"event":"progress","fraction":0…1}  (download phase; pull/convert)
+// async queue (and its job ids / persistence) is gone. The frames are built
+// by the pinned `ModelOpProgressFrame` (AthenaServerKit) from the MLX-free
+// `ModelOpProgress` enum (AthenaCore) — additive over the legacy
+// `progress`-only shape, so an older client that only reads `progress`/`done`
+// still works (usability audit 2026-07-02 §2/§3). Each SSE `data:` frame is
+// one event:
+//   - {"event":"progress","fraction":0…1,"bytes":B,"total":T}  (aggregate)
+//   - {"event":"file","name","index","count","bytes","total","done"}  (pull:
+//       one per shard, throttled ~500ms/1% per file)
+//   - {"event":"phase","phase":"download|load|quantize|write"}  (convert)
+//   - {"event":"quantize","index":i,"count":N}  (convert materialize loop)
 //   - {"event":"done","result":{…op-specific…}}  (terminal success)
 //   - {"event":"error","error":{message,type,code}}  (terminal failure)
-// followed by the SSE `[DONE]` sentinel. Long silent tails (e.g. the
-// convert quantization phase, which has no HF progress) are kept alive
-// with `: keep-alive` comment frames.
+// followed by the SSE `[DONE]` sentinel. `: keep-alive` comment frames still
+// bridge any residual silent tail.
 
-/// SSE `progress` event — the 0…1 download fraction.
+/// SSE `progress` event — the 0…1 download fraction. (Legacy shape; the live
+/// encoder is `ModelOpProgressFrame.json`, which also carries `bytes`/`total`
+/// and emits the additive `file`/`phase`/`quantize` events. Retained for the
+/// documented wire contract.)
 struct ModelOpProgressEvent: Codable {
     let event: String  // "progress"
     let fraction: Double

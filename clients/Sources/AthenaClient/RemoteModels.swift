@@ -304,6 +304,9 @@ public enum ModelOpStream {
     ) async throws {
         let url = d.base + "/api/models/\(op)"
         var sawError = false
+        // Ollama-style renderer for `--follow` (audit §2/§3): one row per shard
+        // + phase/quantize. Nil when not following (progress:false).
+        let renderer = progress ? ModelOpRenderer(label: op) : nil
         #if canImport(Darwin)
             var req = URLRequest(url: URL(string: url)!)
             req.httpMethod = "POST"
@@ -331,13 +334,18 @@ public enum ModelOpStream {
                 where line.hasPrefix("data: ") {
                     if handleFrame(
                         String(line.dropFirst(6)), op: op,
-                        progress: progress, sawError: &sawError)
+                        renderer: renderer, sawError: &sawError)
                     { break }
                 }
             } catch let e as ExitCode {
                 throw e
             } catch { HTTPClient.noDaemon(d, error) }
         #else
+            // KNOWN LIMITATION (audit §2, recorded not fixed): FoundationNetworking
+            // has no `URLSession.bytes`, so the portable Linux/Windows client
+            // buffers the ENTIRE SSE body before parsing — the multi-row progress
+            // replays all at once at the end instead of live. Fixing it needs a
+            // streaming HTTP client on non-Darwin; separate follow-up.
             let (code, data): (Int, Data)
             do {
                 (code, data) = try await HTTPClient.send(
@@ -352,17 +360,21 @@ public enum ModelOpStream {
             where line.hasPrefix("data: ") {
                 if handleFrame(
                     String(line.dropFirst(6)), op: op,
-                    progress: progress, sawError: &sawError)
+                    renderer: renderer, sawError: &sawError)
                 { break }
             }
         #endif
+        renderer?.finish()
         if sawError { throw ExitCode.failure }
     }
 
     /// Render one `data:` frame. Returns true on the terminal `[DONE]`
-    /// sentinel. Sets `sawError` if the frame is an `error` event.
+    /// sentinel. Sets `sawError` if the frame is an `error` event. New
+    /// `file`/`phase`/`quantize` events feed the multi-row renderer; a daemon
+    /// that only sends `progress` still drives the aggregate row (compat).
     private static func handleFrame(
-        _ json: String, op: String, progress: Bool, sawError: inout Bool
+        _ json: String, op: String, renderer: ModelOpRenderer?,
+        sawError: inout Bool
     ) -> Bool {
         if json == "[DONE]" { return true }
         guard let data = json.data(using: .utf8),
@@ -370,15 +382,27 @@ public enum ModelOpStream {
                 as? [String: Any],
             let event = obj["event"] as? String
         else { return false }
+        func i64(_ k: String) -> Int64 {
+            (obj[k] as? NSNumber)?.int64Value ?? 0
+        }
+        func int(_ k: String) -> Int { (obj[k] as? NSNumber)?.intValue ?? 0 }
         switch event {
         case "progress":
-            if progress, let f = obj["fraction"] as? Double {
-                FileHandle.standardError.write(
-                    Data(
-                        String(format: "  %@ %.0f%%\r", op, f * 100).utf8))
-            }
+            renderer?.download(
+                fraction: obj["fraction"] as? Double ?? 0,
+                bytes: i64("bytes"), total: i64("total"))
+        case "file":
+            renderer?.file(
+                name: obj["name"] as? String ?? "?", index: int("index"),
+                count: int("count"), bytes: i64("bytes"), total: i64("total"),
+                done: obj["done"] as? Bool ?? false)
+        case "phase":
+            renderer?.phase(obj["phase"] as? String ?? "?")
+        case "quantize":
+            renderer?.quantize(index: int("index"), count: int("count"))
         case "done":
-            if progress {
+            renderer?.finish()
+            if renderer != nil {
                 FileHandle.standardError.write(Data("\n".utf8))
             }
             if let result = obj["result"],

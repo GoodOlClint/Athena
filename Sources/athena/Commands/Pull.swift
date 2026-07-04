@@ -112,23 +112,35 @@ struct Pull: AsyncParsableCommand {
     /// `ExitCode.failure` (already messaged) on failure.
     private func pullOne(id: String, into root: URL) async throws {
         print("pulling \(id) …")
-        let bar = ProgressBar("  \(id)")
+        // Ollama-style multi-row renderer (audit §2): one row per shard on a
+        // TTY, plain summary off-TTY. Fed by the ModelOpProgress enum.
+        let r = ModelOpRenderer(label: id)
         do {
             let dest = try await ModelPull.pull(
                 id: id, into: root,
-                progress: { f in bar.update(f) },
+                progress: { p in
+                    switch p {
+                    case let .download(f, b, t):
+                        r.download(fraction: f, bytes: b, total: t)
+                    case let .file(name, i, c, b, t, d):
+                        r.file(
+                            name: name, index: i, count: c, bytes: b, total: t,
+                            done: d)
+                    case let .phase(n): r.phase(n)
+                    case let .quantize(i, n): r.quantize(index: i, count: n)
+                    }
+                },
                 onRetry: { attempt, maxAttempts, err in
-                    bar.finish()
                     FileHandle.standardError.write(
                         Data(
                             ("  \(ModelPull.friendlyError(err)) — "
                                 + "retrying (\(attempt)/\(maxAttempts - 1))…\n")
                                 .utf8))
                 })
-            bar.finish()
+            r.finish()
             print("pulled \(id) → \(dest.path)")
         } catch {
-            bar.finish()
+            r.finish()
             print("error: pull failed — \(ModelPull.friendlyError(error))")
             print(
                 "  re-run `athena pull \(id)` to resume "

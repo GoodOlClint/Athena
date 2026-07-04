@@ -100,8 +100,9 @@ public enum ModelConvert {
         id: String, revision: String? = nil,
         bits: Int? = nil, groupSize: Int = 64,
         into storeRoot: URL, name: String? = nil,
-        progress: (@Sendable (Double) -> Void)? = nil
+        progress: (@Sendable (ModelOpProgress) -> Void)? = nil
     ) async throws -> Result {
+        progress?(.phase("download"))
         let downloader = #hubDownloader(
             HuggingFace.HubClient(
                 session: AthenaProxy.proxiedURLSession()))
@@ -139,8 +140,12 @@ public enum ModelConvert {
             ],
             useLatest: false,
             progressHandler: { p in
-                progress?(p.fractionCompleted)
+                progress?(
+                    .download(
+                        fraction: p.fractionCompleted,
+                        bytes: p.completedUnitCount, total: p.totalUnitCount))
             })
+        progress?(.phase("load"))
 
         // Same vendored-model route `serve` uses, so the converted
         // checkpoint loads back through the identical path. NC1: bind the
@@ -255,10 +260,17 @@ public enum ModelConvert {
             let priorCacheLimit = MLX.Memory.cacheLimit
             MLX.Memory.cacheLimit = 256 * 1024 * 1024
             defer { MLX.Memory.cacheLimit = priorCacheLimit }
-            for (_, value) in weights {
-                value.eval()
+            // Audit §3 — the minutes-long materialize was silent; emit i/N so a
+            // ≥26B convert never sits >~5s without a visible state change. The
+            // loop count is known up front; the SSE/CLI side throttles frames.
+            progress?(.phase("quantize"))
+            let n = weights.count
+            for (i, kv) in weights.enumerated() {
+                kv.value.eval()
+                progress?(.quantize(index: i + 1, count: n))
             }
             MLX.Memory.clearCache()
+            progress?(.phase("write"))
             try MLX.save(arrays: weights, url: safetensors)
             // The quantized modules are exactly those that gained `.scales`
             // (an encoder tower, skipped by the rule, has none). `writeConfig`

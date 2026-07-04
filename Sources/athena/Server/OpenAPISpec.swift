@@ -470,7 +470,7 @@ enum OpenAPISpec {
               "post": {
                 "tags": ["Model store"],
                 "summary": "Pull a model from Hugging Face (synchronous, SSE progress).",
-                "description": "Athena-native (ADR 025 S2): runs synchronously and streams Server-Sent Events directly — no async queue, no job id. Each `data:` frame is `{\"event\":\"progress\",\"fraction\":F}`, then a terminal `{\"event\":\"done\",\"result\":{…}}` or `{\"event\":\"error\",\"error\":{message,type,code}}`, ending with `[DONE]`. Requires `model.write`.",
+                "description": "Athena-native (ADR 025 S2): runs synchronously and streams Server-Sent Events directly — no async queue, no job id. Frames (all additive; unknown `event`s are ignored by older clients): aggregate `{\"event\":\"progress\",\"fraction\":F,\"bytes\":B,\"total\":T}`, per-shard `{\"event\":\"file\",\"name\",\"index\",\"count\",\"bytes\",\"total\",\"done\"}` (throttled ~500ms/1% per file), then a terminal `{\"event\":\"done\",\"result\":{…}}` or `{\"event\":\"error\",\"error\":{message,type,code}}`, ending with `[DONE]`. Requires `model.write`.",
                 "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ModelPullRequest" } } } },
                 "responses": {
                   "200": { "description": "SSE stream of progress + terminal event.", "content": { "text/event-stream": { "schema": { "type": "string" } } } },
@@ -484,7 +484,7 @@ enum OpenAPISpec {
               "post": {
                 "tags": ["Model store"],
                 "summary": "Convert/quantize a model (synchronous, SSE progress).",
-                "description": "Athena-native (ADR 025 S2): synchronous, streams SSE progress + a terminal done/error event (see POST /api/models/pull). Requires `model.write`.",
+                "description": "Athena-native (ADR 025 S2): synchronous, streams SSE progress + a terminal done/error event (see POST /api/models/pull). Beyond download `progress`/`file` frames it emits `{\"event\":\"phase\",\"phase\":\"download|load|quantize|write\"}` and, during the minutes-long quantize materialize, `{\"event\":\"quantize\",\"index\":i,\"count\":N}` (audit §3) so the op is never silent. Requires `model.write`.",
                 "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ModelConvertRequest" } } } },
                 "responses": {
                   "200": { "description": "SSE stream of progress + terminal event.", "content": { "text/event-stream": { "schema": { "type": "string" } } } },

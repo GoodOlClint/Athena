@@ -71,13 +71,26 @@ struct Convert: AsyncParsableCommand {
             qBits.map { "\($0)-bit" } ?? "MLX format (no quantization)"
         let tail = qBits == nil ? "save" : "quantize"
         print("converting \(model) → \(target) (download, then \(tail)) …")
-        let bar = ProgressBar("  \(model)")
+        // Multi-phase renderer (audit §3): download → load → quantize i/N →
+        // write, so a long convert never sits silent.
+        let rr = ModelOpRenderer(label: model)
         do {
             let r = try await ModelConvert.convert(
                 id: model, bits: qBits, groupSize: qGroupSize,
                 into: root, name: name,
-                progress: { f in bar.update(f) })
-            bar.finish()
+                progress: { p in
+                    switch p {
+                    case let .download(f, b, t):
+                        rr.download(fraction: f, bytes: b, total: t)
+                    case let .file(name, i, c, b, t, d):
+                        rr.file(
+                            name: name, index: i, count: c, bytes: b, total: t,
+                            done: d)
+                    case let .phase(n): rr.phase(n)
+                    case let .quantize(i, n): rr.quantize(index: i, count: n)
+                    }
+                })
+            rr.finish()
             let mb = Double(r.bytes) / 1_048_576
             print(
                 "converted \(model) → \(r.path.path) "
@@ -86,11 +99,11 @@ struct Convert: AsyncParsableCommand {
             // Cause-naming convert errors (e.g. an embedding-model redirect or
             // an unsupported architecture, ADR 016) carry an actionable
             // message — surface it instead of a raw substrate dump.
-            bar.finish()
+            rr.finish()
             print("error: \(e.message)")
             throw ExitCode.failure
         } catch {
-            bar.finish()
+            rr.finish()
             print("error: convert failed — \(error)")
             throw ExitCode.failure
         }

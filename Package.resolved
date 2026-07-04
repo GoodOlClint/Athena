@@ -1,5 +1,5 @@
 {
-  "originHash" : "7126c272f4589e671b3035774beb338e76934523bef6f1993bb20040b36d674f",
+  "originHash" : "e94bf8125af068a9bb9d9ba30758bfde975cb12ebb4039047542e6f7369e391e",
   "pins" : [
     {
       "identity" : "applesiliconmetrics",
@@ -167,7 +167,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/GoodOlClint/swift-huggingface.git",
       "state" : {
-        "revision" : "3092f5ae78f75185f51c57fe20a9f6e2ec0c3555"
+        "revision" : "727df097cfeceab6378b0ff6b3ce6791a50b5a05"
       }
     },
     {

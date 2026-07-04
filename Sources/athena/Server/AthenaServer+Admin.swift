@@ -550,6 +550,27 @@ extension AthenaServer {
 
     // MARK: - Model lifecycle ops (ADR 025 S2 — synchronous + SSE)
 
+    /// Per-key emit-throttle state for the model-op SSE stream. Holds the
+    /// `(lastMs, lastFraction)` per key and defers the decision to the pinned
+    /// `ModelOpProgressFrame.shouldEmit`. The progress closure may fire from the
+    /// main actor (download) then a background task (quantize) but never
+    /// concurrently; the lock is belt-and-suspenders.
+    final class ModelOpThrottleState: @unchecked Sendable {
+        private let lock = NSLock()
+        private var last: [String: (ms: Int, frac: Double)] = [:]
+        func shouldEmit(key: String, fraction: Double, done: Bool) -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            let now = Int(DispatchTime.now().uptimeNanoseconds / 1_000_000)
+            let prev = last[key]
+            let ok = ModelOpProgressFrame.shouldEmit(
+                nowMs: now, lastMs: prev?.ms, fraction: fraction,
+                lastFraction: prev?.frac, done: done)
+            if ok { last[key] = (now, fraction) }
+            return ok
+        }
+    }
+
     /// One SSE `data:` frame around an encoded JSON payload.
     private static func sseFrame(_ bytes: Data) -> ByteBuffer {
         var b = ByteBuffer()
@@ -567,7 +588,7 @@ extension AthenaServer {
     /// by the SSE CLI handlers and the blocking `/ui` console.
     func performModelOp(
         kind: String, body: Data,
-        progress: @escaping @Sendable (Double) -> Void = { _ in }
+        progress: @escaping @Sendable (ModelOpProgress) -> Void = { _ in }
     ) async -> (result: Data?, error: APIErrorBody.ErrorDetail?) {
         switch kind {
         case "model_pull":
@@ -695,12 +716,28 @@ extension AthenaServer {
                 }
             }
             let work = Task {
-                let progress: @Sendable (Double) -> Void = { f in
-                    if let d = try? JSONEncoder().encode(
-                        ModelOpProgressEvent(event: "progress", fraction: f))
-                    {
-                        continuation.yield(Self.sseFrame(d))
+                // Per-key emit throttle (audit §2/§3): ~500ms or 1% per file /
+                // per aggregate / per quantize; phase frames always pass. The
+                // decision is the pinned ModelOpProgressFrame.shouldEmit.
+                let throttle = ModelOpThrottleState()
+                let progress: @Sendable (ModelOpProgress) -> Void = { p in
+                    let key: String
+                    let frac: Double
+                    let done: Bool
+                    switch p {
+                    case let .download(f, _, _): (key, frac, done) = ("agg", f, false)
+                    case let .file(name, _, _, b, t, d):
+                        (key, frac, done) = (
+                            "file:\(name)", t > 0 ? Double(b) / Double(t) : 0, d)
+                    case .phase: (key, frac, done) = ("phase", -1, true)
+                    case let .quantize(i, n):
+                        (key, frac, done) = (
+                            "quant", n > 0 ? Double(i) / Double(n) : 0, i >= n)
                     }
+                    guard throttle.shouldEmit(key: key, fraction: frac, done: done)
+                    else { return }
+                    continuation.yield(
+                        Self.sseFrame(ModelOpProgressFrame.json(p)))
                 }
                 let (result, error) = await performModelOp(
                     kind: kind, body: body, progress: progress)

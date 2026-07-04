@@ -22,27 +22,50 @@ public enum ModelPull {
     /// surface the wait; the daemon/queue path passes nil.
     public static func pull(
         id: String, revision: String? = nil, into storeRoot: URL,
-        progress: (@Sendable (Double) -> Void)? = nil,
+        progress: (@Sendable (ModelOpProgress) -> Void)? = nil,
         maxAttempts: Int = 5,
         onRetry: (@Sendable (_ attempt: Int, _ maxAttempts: Int,
             _ error: any Error) -> Void)? = nil
     ) async throws -> URL {
         var attempt = 1
         let snapshot: URL
+        // Bypass the `#hubDownloader` macro (its MLXLMCommon.Downloader protocol
+        // pins the single-`Progress` shape) and call HubClient.downloadSnapshot
+        // directly so the fork's optional per-file handler surfaces one row per
+        // shard (audit §2). No substrate edit — the client is ours to construct.
+        let client = HuggingFace.HubClient(
+            session: AthenaProxy.proxiedURLSession())
+        guard let repo = HuggingFace.Repo.ID(rawValue: id) else {
+            throw ModelStoreOps.OpError.invalidName(id)
+        }
         while true {
             do {
-                snapshot = try await #hubDownloader(
-                    HuggingFace.HubClient(
-                        session: AthenaProxy.proxiedURLSession())
-                ).download(
-                    id: id, revision: revision,
+                snapshot = try await client.downloadSnapshot(
+                    of: repo, kind: .model,
+                    revision: revision ?? "main",
                     matching: [
                         "*.json", "*.safetensors", "*.txt", "*.jinja",
                         "tokenizer*", "*.model",
                     ],
-                    useLatest: false,
                     progressHandler: { p in
-                        progress?(p.fractionCompleted)
+                        progress?(
+                            .download(
+                                fraction: p.fractionCompleted,
+                                bytes: p.completedUnitCount,
+                                total: p.totalUnitCount))
+                    },
+                    perFileHandler: { files in
+                        let n = files.count
+                        for (i, f) in files.enumerated() {
+                            progress?(
+                                .file(
+                                    name: (f.path as NSString).lastPathComponent,
+                                    index: i + 1, count: n,
+                                    bytes: f.completedUnitCount,
+                                    total: f.totalUnitCount,
+                                    done: f.totalUnitCount > 0
+                                        && f.completedUnitCount >= f.totalUnitCount))
+                        }
                     })
                 break
             } catch {

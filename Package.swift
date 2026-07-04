@@ -30,7 +30,7 @@ let hubDep: Package.Dependency =
     ? .package(path: "../swift-huggingface")
     : .package(
         url: "https://github.com/GoodOlClint/swift-huggingface.git",
-        revision: "3092f5ae78f75185f51c57fe20a9f6e2ec0c3555")  // athena/pr-50-download-progress
+        revision: "727df097cfeceab6378b0ff6b3ce6791a50b5a05")  // athena/pr-50-download-progress (+per-file progress, audit §2)
 
 let package = Package(
     name: "athena",
