@@ -832,7 +832,11 @@ extension AthenaServer {
                     .map {
                         ModelEntryDTO(
                             name: $0.name, bytes: $0.bytes,
-                            modified: Self.iso($0.modified))
+                            modified: Self.iso($0.modified),
+                            modality: $0.modality, engine: $0.engine,
+                            loadability: $0.loadability,
+                            draft: $0.draft ? true : nil,
+                            fused_mtp: $0.fusedMTP ? true : nil)
                     }))
     }
 

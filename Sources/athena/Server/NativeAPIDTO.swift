@@ -109,6 +109,16 @@ struct ModelEntryDTO: Codable {
     let name: String
     let bytes: Int
     let modified: String  // ISO-8601
+    // Typed listing (usability audit §4) — additive, classified by
+    // `ModelSupport` (ADR 021) per entry. `modality`/`loadability` always
+    // present; `engine`/`draft`/`fused_mtp` omitted when absent (Swift
+    // synthesizes `encodeIfPresent` for optionals), so old clients + the
+    // OpenAI `/v1/models` surface are unaffected.
+    let modality: String?
+    let engine: String?
+    let loadability: String?
+    let draft: Bool?
+    let fused_mtp: Bool?
 }
 struct ModelListResponse: Codable { let models: [ModelEntryDTO] }
 

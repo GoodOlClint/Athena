@@ -27,6 +27,12 @@ public enum RemoteModels {
         let name: String
         let bytes: Int
         let modified: String
+        // Typed listing (audit §4) — omitted by pre-typing daemons ⇒ nil.
+        let modality: String?
+        let engine: String?
+        let loadability: String?
+        let draft: Bool?
+        let fused_mtp: Bool?
     }
     private struct ListResp: Decodable { let models: [Entry] }
     private struct DetailResp: Decodable {
@@ -43,7 +49,9 @@ public enum RemoteModels {
         if code >= 400 { throw ExitCode.failure }
     }
 
-    public static func list(_ d: DaemonOptions) async throws {
+    public static func list(_ d: DaemonOptions, type: String? = nil)
+        async throws
+    {
         let (code, data): (Int, Data)
         do {
             (code, data) = try await HTTPClient.send(
@@ -52,19 +60,33 @@ public enum RemoteModels {
         guard code < 400,
             let r = try? JSONDecoder().decode(ListResp.self, from: data)
         else { return try fail(code, data) }
-        guard !r.models.isEmpty else {
-            print("no models")
+        var models = r.models
+        if let type {
+            models = models.filter {
+                ModelTypeFormat.matches(
+                    filter: type, modality: $0.modality, engine: $0.engine,
+                    draft: $0.draft ?? false, fusedMTP: $0.fused_mtp ?? false)
+            }
+        }
+        guard !models.isEmpty else {
+            print(type == nil ? "no models" : "no models of type '\(type!)'")
             return
         }
         print(
             "NAME".padding(toLength: 40, withPad: " ", startingAt: 0)
+                + "TYPE".padding(toLength: 14, withPad: " ", startingAt: 0)
                 + "SIZE".padding(
                     toLength: 12, withPad: " ", startingAt: 0)
                 + "MODIFIED")
-        for m in r.models {
+        for m in models {
+            let typeCol = ModelTypeFormat.column(
+                modality: m.modality, engine: m.engine,
+                draft: m.draft ?? false, fusedMTP: m.fused_mtp ?? false)
             print(
                 m.name.padding(
                     toLength: 40, withPad: " ", startingAt: 0)
+                    + typeCol.padding(
+                        toLength: 14, withPad: " ", startingAt: 0)
                     + humanBytes(m.bytes).padding(
                         toLength: 12, withPad: " ", startingAt: 0)
                     + m.modified)
@@ -556,8 +578,13 @@ public struct ListCmd: AsyncParsableCommand {
         abstract: "List models in the daemon's store.",
         aliases: ["ls"])
     @OptionGroup public var daemon: DaemonOptions
+    @Option(
+        help:
+            "Filter by TYPE, e.g. llm, draft, vision, embed, asr, diar, speaker, unsupported."
+    )
+    public var type: String?
     public init() {}
     public func run() async throws {
-        try await RemoteModels.list(daemon)
+        try await RemoteModels.list(daemon, type: type)
     }
 }

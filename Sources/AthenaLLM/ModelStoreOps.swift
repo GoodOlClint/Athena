@@ -1,3 +1,4 @@
+import AthenaCore
 import Foundation
 
 /// Pure model-store filesystem operations (M16.2), shared by the
@@ -10,6 +11,31 @@ public enum ModelStoreOps {
         public let name: String
         public let bytes: Int
         public let modified: Date
+        // Typed listing (audit §4) — the ModelSupport verdict projected to the
+        // wire, plus the fused-MTP attribute bit. Classification is config-only
+        // (+ a weight-index peek for fused MTP), so this is strictly cheaper
+        // than one model resolution (ModelSupport already runs store-wide there).
+        public let modality: String
+        public let engine: String?
+        public let loadability: String
+        public let draft: Bool
+        public let fusedMTP: Bool
+
+        public init(
+            name: String, bytes: Int, modified: Date,
+            modality: String = "unsupported", engine: String? = nil,
+            loadability: String = "unsupported", draft: Bool = false,
+            fusedMTP: Bool = false
+        ) {
+            self.name = name
+            self.bytes = bytes
+            self.modified = modified
+            self.modality = modality
+            self.engine = engine
+            self.loadability = loadability
+            self.draft = draft
+            self.fusedMTP = fusedMTP
+        }
     }
 
     public struct Detail: Sendable {
@@ -93,10 +119,18 @@ public enum ModelStoreOps {
                 (try? dir.resourceValues(forKeys: [
                     .contentModificationDateKey
                 ]))?.contentModificationDate ?? .distantPast
+            let support = ModelSupport.detect(in: dir)
+            let fused =
+                support.modality == .llm
+                && MTPCheckpoint.hasFusedMTP(in: dir)
             rows.append(
                 Entry(
                     name: dir.lastPathComponent,
-                    bytes: safetensorsSize(dir), modified: mod))
+                    bytes: safetensorsSize(dir), modified: mod,
+                    modality: support.wireModality,
+                    engine: support.wireEngine,
+                    loadability: support.wireLoadability,
+                    draft: support.isDraft, fusedMTP: fused))
         }
         return rows.sorted { $0.name < $1.name }
     }

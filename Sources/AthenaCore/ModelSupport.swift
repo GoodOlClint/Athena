@@ -109,12 +109,21 @@ extension ModelSupport {
     /// marker sets.
     public static let speakerEmbeddingMarkers: [String] = ["wespeaker"]
 
-    /// Lowercased `model_type` values that mark an MTP speculative drafter
-    /// (ADR 032). Exact-match, not substring — a drafter is a distinct
-    /// substrate-registered type, and `ModelClass` would otherwise file its
-    /// named `model_type` as `.generative`. Add a family's drafter type here
-    /// when the substrate registers it with `MTPDrafterTypeRegistry`.
-    public static let mtpDrafterMarkers: [String] = ["gemma4_assistant"]
+    /// An MTP speculative drafter (ADR 032) is a distinct substrate-registered
+    /// `model_type` that `ModelClass` would otherwise file as `.generative`.
+    /// The convention is a `<family>_assistant` suffix — real converts use
+    /// both `gemma4_assistant` and `gemma4_unified_assistant`, and no servable
+    /// model_type ends in `_assistant`, so a suffix match is the robust rule
+    /// (`isMTPDrafterType`). The list is retained for documentation/exact hits.
+    public static let mtpDrafterMarkers: [String] = [
+        "gemma4_assistant", "gemma4_unified_assistant",
+    ]
+
+    /// True iff `type` (lowercased) names an MTP drafter: a known marker or the
+    /// `_assistant` suffix convention.
+    public static func isMTPDrafterType(_ type: String) -> Bool {
+        mtpDrafterMarkers.contains(type) || type.hasSuffix("_assistant")
+    }
 
     /// The MLX-free config fields `classify` decides on. Bundling them in one
     /// struct keeps the decision a pure, trivially unit-testable function with
@@ -201,7 +210,7 @@ extension ModelSupport {
         // The model_type IS the loader's routing signal and the substrate
         // implements it → loadable on a positive match.
         if let type = probe.info.modelType?.lowercased(),
-            mtpDrafterMarkers.contains(type)
+            isMTPDrafterType(type)
         {
             return ModelSupport(modality: .mtpDrafter, loadability: .loadable)
         }
