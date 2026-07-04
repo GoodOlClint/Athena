@@ -79,10 +79,33 @@ struct ConfigSet: AsyncParsableCommand {
             for staging changes before a manual restart).
             """)
     var noApply: Bool = false
+    @OptionGroup var daemon: DaemonOptions
     @Argument(help: "Key to set.") var key: String
     @Argument(help: "Value.") var value: String
 
     func run() async throws {
+        // ADR 037 — prefer the daemon-mediated path: a reachable daemon owns
+        // its TOML (chowned to the service user at install) and writes it via
+        // `PUT /api/config`, so `athena config set` needs no sudo. Fall back to
+        // the direct/sudo path only when no daemon answers. `--no-apply` keeps
+        // the old local-write-only staging behavior.
+        if !noApply {
+            switch await RemoteConfig.set(daemon, key: key, value: value) {
+            case .ok:
+                print("\(key) = \(value)  (via daemon at \(daemon.base))")
+                print(
+                    "note: run `athena restart` to apply (no sudo needed on an "
+                        + "installed daemon).")
+                return
+            case .rejected(let code, let data):
+                // The daemon validated it and said no (unknown/denied/bad value)
+                // — surface verbatim, don't silently fall back to a local write.
+                HTTPClient.printJSON(data)
+                throw ExitCode(Int32(code >= 400 ? 1 : 0))
+            case .unreachable:
+                break  // no daemon — fall through to the local/sudo path
+            }
+        }
         let url = ConfigEditor.resolvePath(config)
         ConfigEditor.setScalar(key: key, value: value, in: url)
         print("\(key) = \(value)  (\(url.path))")

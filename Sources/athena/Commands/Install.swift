@@ -414,6 +414,19 @@ struct Install: AsyncParsableCommand {
         }
 
         try configData.write(to: plan.installedConfig)
+        // ADR 037 — the daemon (running as the service user) must be able to
+        // REWRITE its own TOML for `PUT /api/config` / `athena config set` /
+        // the WebUI editor. Install runs as root, so the file is root-owned and
+        // those daemon-mediated writes would fail `writeFailed`; chown it to the
+        // service user (same O_NOFOLLOW-fd pattern as the DB above). This is
+        // what removes `sudo` from config changes.
+        if let ids = FsOwn.ids(of: serviceUser),
+            fm.fileExists(atPath: plan.installedConfig.path)
+        {
+            FsOwn.chown(
+                plan.installedConfig.path, uid: ids.uid, gid: ids.gid,
+                isDir: false)
+        }
         // Record the installed version so the NEXT install can classify
         // the transition (M38). Best-effort — a failure here must not
         // abort an otherwise-good install.

@@ -78,6 +78,20 @@ extension AthenaServer {
             await handlePromptCacheFlush(request)
         }
 
+        // ADR 037 — daemon-mediated config + sudoless restart (control plane,
+        // AuthPolicy → daemon.admin, audited). GET projects the current TOML;
+        // PUT sets a scalar via the hardened ConfigEditor (deny-list enforced);
+        // POST /api/admin/restart drains + exit(0), KeepAlive relaunches.
+        router.get("/api/config") { _, _ -> Response in
+            handleConfigGet()
+        }
+        router.put("/api/config") { request, _ -> Response in
+            await handleConfigPut(request)
+        }
+        router.post("/api/admin/restart") { request, _ -> Response in
+            await handleAdminRestart(request)
+        }
+
         // Model store (M16.2). Literal sub-paths are registered
         // BEFORE `:name` so Hummingbird's trie (sibling match in
         // registration order) resolves them first; `default`/`copy`
@@ -305,6 +319,120 @@ extension AthenaServer {
         return Self.json(
             PromptCacheFlushResponse(
                 flushed: freed, entries: s.entries, bytes: s.bytes))
+    }
+
+    // MARK: - ADR 037 — daemon-mediated config + sudoless restart
+
+    /// `GET /api/config` — the current config projected from the TOML the
+    /// daemon actually reads (`ATHENA_CONFIG`). daemon.admin (AuthPolicy).
+    func handleConfigGet() -> Response {
+        let url = ConfigEditor.resolvePath(nil)
+        var values: [String: String] = [:]
+        if let cfg = try? AthenaConfig.parse(file: url) {
+            for k in ConfigEditor.knownKeys {
+                values[k] = ConfigEditor.value(k, in: cfg) ?? ""
+            }
+        } else {
+            for k in ConfigEditor.knownKeys { values[k] = "" }
+        }
+        return Self.json(
+            ConfigGetResponse(
+                path: url.path, keys: ConfigEditor.knownKeys.sorted(),
+                values: values,
+                readonly_keys: ConfigApiPolicy.deniedKeys.sorted()))
+    }
+
+    /// `PUT /api/config` — set one scalar in place via the hardened
+    /// `ConfigEditor` (never exits the daemon). Body: `{"key","value"}`.
+    /// daemon.admin + the ADR 037 deny-list (a denied key ⇒ 400, never a
+    /// silent write). Takes effect after a restart.
+    func handleConfigPut(_ request: Request) async -> Response {
+        struct Body: Codable {
+            let key: String
+            let value: String
+        }
+        let body: Body
+        do {
+            let buf = try await request.body.collect(upTo: 64 * 1024)
+            guard
+                let b = try? JSONDecoder().decode(
+                    Body.self, from: Data(buffer: buf))
+            else {
+                return Self.error(
+                    status: .badRequest,
+                    message: "body must be {\"key\":…,\"value\":…}",
+                    type: "invalid_request_error", code: "invalid_body")
+            }
+            body = b
+        } catch {
+            return Self.error(
+                status: .badRequest, message: "invalid body",
+                type: "invalid_request_error", code: "invalid_body")
+        }
+        guard ConfigEditor.knownKeys.contains(body.key) else {
+            await audit(
+                request, action: "config.set", target: body.key,
+                result: "error", detail: "unknown_key")
+            return Self.error(
+                status: .badRequest,
+                message: "unknown config key '\(body.key)'",
+                type: "invalid_request_error", code: "unknown_key")
+        }
+        guard ConfigApiPolicy.isSettable(body.key) else {
+            await audit(
+                request, action: "config.set", target: body.key,
+                result: "denied", detail: "readonly_via_api")
+            return Self.error(
+                status: .badRequest,
+                message: ConfigApiPolicy.deniedMessage(body.key),
+                type: "invalid_request_error", code: "config_key_readonly")
+        }
+        let url = ConfigEditor.resolvePath(nil)
+        do {
+            try ConfigEditor.setScalarThrowing(
+                key: body.key, value: body.value, in: url)
+        } catch {
+            await audit(
+                request, action: "config.set", target: body.key,
+                result: "error", detail: "\(error)")
+            return Self.error(
+                status: .badRequest, message: "\(error)",
+                type: "invalid_request_error", code: "invalid_value")
+        }
+        await audit(
+            request, action: "config.set", target: body.key,
+            result: "ok", detail: "value=\(body.value)")
+        return Self.json(
+            ConfigSetResponse(
+                ok: true, key: body.key, value: body.value,
+                note:
+                    "saved — restart the daemon to apply "
+                    + "(POST /api/admin/restart or `athena restart`)"))
+    }
+
+    /// `POST /api/admin/restart` — drain in-flight inference (compose with the
+    /// ADR 029 execution gate) then `exit(0)`; launchd `KeepAlive` relaunches.
+    /// daemon.admin + audited. Responds 200 first, then exits on a detached
+    /// task so the acknowledgement flushes.
+    func handleAdminRestart(_ request: Request) async -> Response {
+        await audit(
+            request, action: "daemon.restart", target: nil,
+            result: "ok", detail: "drain+exit(0); launchd KeepAlive relaunch")
+        // ponytail: inference-gate drain + a short grace flush the response and
+        // let any live decode finish (no mid-kernel GPU wedge). A full NIO
+        // graceful-shutdown drain of non-inference requests is a follow-up if
+        // an operator restart ever clips a long upload.
+        Task.detached {
+            try? await Task.sleep(nanoseconds: 300_000_000)  // flush the 200
+            _ = try? await InferenceGate.shared.withExclusiveExecution {}
+            exit(0)
+        }
+        return Self.json(
+            RestartResponse(
+                restarting: true,
+                note:
+                    "draining in-flight inference, then exiting; launchd will "
+                    + "relaunch (~10s throttle)"))
     }
 
     /// `GET /api/logs` (M45.5). Admin-only daemon-log oversight,

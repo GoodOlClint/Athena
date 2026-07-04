@@ -292,12 +292,28 @@ struct Restart: AsyncParsableCommand {
     )
     @Option(help: "launchd label for a system (boot) daemon.")
     var label: String = "me.goodolclint.athena"
+    @OptionGroup var daemon: DaemonOptions
+    @Flag(
+        name: .customLong("sudo"),
+        help: "Force the root bootout/bootstrap path, skipping the daemon API.")
+    var forceSudo: Bool = false
 
     func run() async throws {
         guard isValidLabel(label) else {
             FailableExit.die(
                 "error: invalid --label '\(label)' (expected reverse-DNS: "
                     + "letters, digits, '.', '-', '_')")
+        }
+        // ADR 037 — prefer the daemon-mediated restart: a reachable daemon
+        // drains + exit(0)s and launchd's KeepAlive relaunches it, so no sudo
+        // is needed. Fall back to root bootout/bootstrap when unreachable (or
+        // `--sudo`).
+        if !forceSudo, await RemoteConfig.restart(daemon) {
+            print(
+                "restart requested via daemon at \(daemon.base) — draining, "
+                    + "then launchd relaunches (~10s). Poll "
+                    + "`curl \(daemon.base)/healthz`.")
+            return
         }
         let plist = InstallPlan.plistPath(label: label)
         guard FileManager.default.fileExists(atPath: plist.path) else {

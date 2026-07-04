@@ -416,6 +416,42 @@ enum OpenAPISpec {
                 }
               }
             },
+            "/api/config": {
+              "get": {
+                "tags": ["Daemon config"],
+                "summary": "Current daemon configuration (ADR 037).",
+                "description": "Admin-only projection of the TOML the daemon reads. `values` carries every known scalar (empty when unset); `readonly_keys` are the deny-listed keys `PUT` refuses (auth/TLS/encryption/data-dir/debugger — edit the file + sudo-restart). Requires `daemon.admin`.",
+                "responses": {
+                  "200": { "description": "Config projection.", "content": { "application/json": { "schema": { "type": "object", "properties": { "path": { "type": "string" }, "keys": { "type": "array", "items": { "type": "string" } }, "values": { "type": "object", "additionalProperties": { "type": "string" } }, "readonly_keys": { "type": "array", "items": { "type": "string" } } } } } } },
+                  "401": { "$ref": "#/components/responses/Unauthorized" },
+                  "403": { "$ref": "#/components/responses/Forbidden" }
+                }
+              },
+              "put": {
+                "tags": ["Daemon config"],
+                "summary": "Set one config scalar (ADR 037; sudoless).",
+                "description": "Admin-only. Sets one `{key,value}` scalar in place via the hardened config editor, then takes effect after a restart (see POST /api/admin/restart). A deny-listed key (`auth_keys_file`/`tls_cert`/`tls_key`/`encrypt_store`/`data_dir`/`deny_debugger_attach`) returns 400 `config_key_readonly` — config takeover would be daemon takeover. Audited. Requires `daemon.admin`.",
+                "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["key", "value"], "properties": { "key": { "type": "string" }, "value": { "type": "string" } } } } } },
+                "responses": {
+                  "200": { "description": "Saved.", "content": { "application/json": { "schema": { "type": "object", "properties": { "ok": { "type": "boolean" }, "key": { "type": "string" }, "value": { "type": "string" }, "note": { "type": "string" } } } } } },
+                  "400": { "$ref": "#/components/responses/BadRequest" },
+                  "401": { "$ref": "#/components/responses/Unauthorized" },
+                  "403": { "$ref": "#/components/responses/Forbidden" }
+                }
+              }
+            },
+            "/api/admin/restart": {
+              "post": {
+                "tags": ["Daemon config"],
+                "summary": "Restart the daemon (ADR 037; sudoless).",
+                "description": "Admin-only. Drains in-flight inference (ADR 029 execution gate) then `exit(0)`s; launchd `KeepAlive` relaunches (~10s throttle). Responds 200 before exiting. Lets `athena restart` run without sudo. Audited. Requires `daemon.admin`.",
+                "responses": {
+                  "200": { "description": "Restart acknowledged.", "content": { "application/json": { "schema": { "type": "object", "properties": { "restarting": { "type": "boolean" }, "note": { "type": "string" } } } } } },
+                  "401": { "$ref": "#/components/responses/Unauthorized" },
+                  "403": { "$ref": "#/components/responses/Forbidden" }
+                }
+              }
+            },
             "/api/models": {
               "get": {
                 "tags": ["Model store"],

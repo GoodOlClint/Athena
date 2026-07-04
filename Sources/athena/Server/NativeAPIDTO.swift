@@ -345,6 +345,33 @@ struct LogsReportResponse: Codable {
     let truncated: Bool?
 }
 
+// MARK: - ADR 037 — daemon-mediated config + restart
+
+/// `GET /api/config` — the current config projected from the TOML. `values`
+/// carries every known scalar (empty string when unset); `readonly_keys` are
+/// the deny-listed keys that `PUT /api/config` refuses (edit the TOML + restart
+/// with sudo instead).
+struct ConfigGetResponse: Codable {
+    let path: String
+    let keys: [String]
+    let values: [String: String]
+    let readonly_keys: [String]
+}
+
+/// `PUT /api/config` — one scalar set/validated in place.
+struct ConfigSetResponse: Codable {
+    let ok: Bool
+    let key: String
+    let value: String
+    let note: String
+}
+
+/// `POST /api/admin/restart` — acknowledgement before the daemon drains + exits.
+struct RestartResponse: Codable {
+    let restarting: Bool
+    let note: String
+}
+
 /// Generic mutation acknowledgements.
 struct OkResponse: Codable { let ok: Bool }
 struct UserRemovedResponse: Codable {

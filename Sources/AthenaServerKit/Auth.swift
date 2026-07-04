@@ -336,6 +336,11 @@ public enum AuthPolicy {
         // privileged management view over a process-global pool; admin-only
         // (daemon.admin), matching /api/audit's sensitivity profile.
         if path == "/api/cache/prompt" { return .daemonAdmin }
+        // ADR 037 — daemon-mediated config (GET current, PUT a scalar). A
+        // privileged control-plane surface; admin-only (daemon.admin). The
+        // security deny-list (auth/TLS/encryption/data-dir/debugger keys) is
+        // enforced in the handler on top of this gate.
+        if path == "/api/config" { return .daemonAdmin }
         // Usage is inference-tier: any authenticated caller sees its OWN
         // counters (handler owner-scopes); an admin sees all. Billing-
         // sensitive, so NOT exposed to the read-only role (M27.3).
