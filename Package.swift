@@ -7,6 +7,31 @@ import PackageDescription
 // of the local mlx-swift-lm substrate clone (a SwiftPM path dependency); the
 // Rust structured-output shim is still introduced later (M3).
 
+// Usability audit 2026-07-02 §7 — substrate pinning vs cross-repo dev.
+// The path deps below build whatever branch the neighbor working trees happen
+// to have checked out, and nothing records it (v0.10.251–256 silently shipped
+// against `pr/pin-swift-format`, not the intended `integration`). Mirror the
+// substrate's own MLX_LOCAL_DEV precedent: DEFAULT to reproducible SCM pins on
+// the GoodOlClint forks (Package.resolved-recorded, deterministic releases);
+// `ATHENA_LOCAL_DEV=1` swaps back to the sibling path deps for cross-repo dev
+// loops (WP-D edits swift-huggingface in place). The SwiftPM package identity
+// is the last URL/path component either way ("mlx-swift-lm" / "swift-huggingface"),
+// so every `.product(package:)` reference below is unchanged.
+// deploy/build.sh Release asserts the local-dev branches + records both HEADs.
+let athenaLocalDev = Context.environment["ATHENA_LOCAL_DEV"] == "1"
+let substrateDep: Package.Dependency =
+    athenaLocalDev
+    ? .package(path: "../mlx/mlx-swift-lm")
+    : .package(
+        url: "https://github.com/GoodOlClint/mlx-swift-lm.git",
+        revision: "5f17df48b2ec0c6c983c1cab3ef2a8baa6f1c29f")  // integration
+let hubDep: Package.Dependency =
+    athenaLocalDev
+    ? .package(path: "../swift-huggingface")
+    : .package(
+        url: "https://github.com/GoodOlClint/swift-huggingface.git",
+        revision: "3092f5ae78f75185f51c57fe20a9f6e2ec0c3555")  // athena/pr-50-download-progress
+
 let package = Package(
     name: "athena",
     platforms: [
@@ -65,10 +90,10 @@ let package = Package(
         .package(
             url: "https://github.com/swift-server/swift-service-lifecycle",
             from: "2.11.0"),
-        // The MLX substrate. Local clone per the the platform environment
-        // (~/Source/mlx/mlx-swift-lm); a path dependency keeps M1 buildable
-        // against the exact reusable Qwen3.5/TokenIterator code.
-        .package(path: "../mlx/mlx-swift-lm"),
+        // The MLX substrate (reusable Qwen3.5/Gemma4/TokenIterator code).
+        // SCM pin on GoodOlClint/mlx-swift-lm @ integration by default;
+        // ATHENA_LOCAL_DEV=1 swaps to ../mlx/mlx-swift-lm — see `substrateDep`.
+        substrateDep,
         // Direct mlx-swift dep: the vendored AthenaModels Qwen3.5 needs the
         // MLX/MLXNN modules (products of mlx-swift, not mlx-swift-lm).
         // Same range mlx-swift-lm pins, so SwiftPM unifies the version.
@@ -82,18 +107,18 @@ let package = Package(
         .package(
             url: "https://github.com/huggingface/swift-transformers",
             from: "1.3.0"),
-        // swift-huggingface (Hub client) — TEMPORARY local fork (sibling
-        // clone, like mlx-swift-lm above). Pinned at 0.9.0 (b721959) plus
-        // the unmerged upstream fix from PR #50 (tracking issue #48): the
-        // stock async `session.download(for:delegate:)` never delivered
-        // `didWriteData`, so model-pull progress sat at 0% then jumped,
-        // and a stalled transfer (e.g. the box napping) couldn't resume —
-        // it restarted multi-GB shards from zero. The fork's
-        // continuation-based download bridge restores real per-byte
-        // progress + resume for EVERY download site (pull/init/convert and
-        // the on-demand whisper/embedding/diarization fetches). Revert to
-        // the upstream `url:` dep + a version bump once PR #50 merges.
-        .package(path: "../swift-huggingface"),
+        // swift-huggingface (Hub client) — fork carrying the unmerged
+        // upstream fix from PR #50 (tracking issue #48): the stock async
+        // `session.download(for:delegate:)` never delivered `didWriteData`,
+        // so model-pull progress sat at 0% then jumped, and a stalled
+        // transfer couldn't resume (restarted multi-GB shards from zero).
+        // The fork's continuation-based download bridge restores real
+        // per-byte progress + resume for EVERY download site. SCM pin on
+        // GoodOlClint/swift-huggingface @ athena/pr-50-download-progress by
+        // default; ATHENA_LOCAL_DEV=1 swaps to ../swift-huggingface — see
+        // `hubDep`. Revert to the upstream `url:` dep + a version bump once
+        // PR #50 merges.
+        hubDep,
         // M60.3 — sudoless Apple Silicon GPU clock via IOReport (the
         // in-process replacement for a root `powermetrics` subprocess).
         .package(

@@ -18,6 +18,54 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 CONFIG="${1:-Release}"
+
+# ── Substrate-pin guard (usability audit 2026-07-02 §7) ──────────────────────
+# Path deps build whatever branch the neighbor trees have checked out, and
+# nothing records it — v0.10.251–256 silently shipped against
+# `pr/pin-swift-format` instead of the intended `integration`. For a Release
+# build we record the exact substrate revisions into the log (and, via the ship
+# ritual, the tag annotation), and — under ATHENA_LOCAL_DEV=1 (path deps) —
+# assert each neighbor tree is on its expected branch and clean, failing loudly
+# otherwise. The default (SCM) manifest pins revisions in Package.swift /
+# Package.resolved, so there the pin is self-recording.
+substrate_pin_guard() {
+  local sub="../mlx/mlx-swift-lm" hub="../swift-huggingface"
+  echo "build.sh: substrate pin —"
+  if [ "${ATHENA_LOCAL_DEV:-}" = "1" ]; then
+    echo "  manifest: ATHENA_LOCAL_DEV=1 (path deps)"
+    _assert_dep "$sub" "integration" "mlx-swift-lm"
+    _assert_dep "$hub" "athena/pr-50-download-progress" "swift-huggingface"
+  else
+    echo "  manifest: SCM pins (GoodOlClint forks — reproducible)"
+    grep -E 'revision: "[0-9a-f]{40}"' Package.swift \
+      | sed -E 's/^[[:space:]]*/  Package.swift pin: /' || true
+  fi
+}
+# _assert_dep <path> <expected-branch> <label>: on the expected branch, clean,
+# and echo HEAD; else fail the Release build.
+_assert_dep() {
+  local path="$1" want="$2" label="$3"
+  [ -d "$path/.git" ] || { echo "error: $label: $path is not a git tree" >&2; exit 1; }
+  local br head dirty
+  br="$(git -C "$path" rev-parse --abbrev-ref HEAD)"
+  head="$(git -C "$path" rev-parse HEAD)"
+  dirty="$(git -C "$path" status --porcelain)"
+  if [ "$br" != "$want" ]; then
+    echo "error: $label is on '$br', expected '$want' (ATHENA_LOCAL_DEV build)." >&2
+    echo "       git -C $path checkout $want" >&2
+    exit 1
+  fi
+  if [ -n "$dirty" ]; then
+    echo "error: $label ($path) has uncommitted changes — release must build a" >&2
+    echo "       recorded revision. Commit/stash, or drop ATHENA_LOCAL_DEV." >&2
+    exit 1
+  fi
+  echo "  $label: $br @ $head (clean)"
+}
+if [ "$CONFIG" = "Release" ]; then
+  substrate_pin_guard
+fi
+
 command -v xcodebuild >/dev/null || {
   echo "error: xcodebuild not found — a full Xcode install is required " \
        "(Command Line Tools cannot build MLX Metal shaders)" >&2
