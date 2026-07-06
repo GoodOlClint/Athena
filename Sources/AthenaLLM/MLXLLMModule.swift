@@ -148,6 +148,15 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     /// kicked off. nil ⇒ bind the default. Only consulted while the slot is
     /// unloaded; a warm swap goes through `rebind`.
     private var desiredName: String?
+
+    // ADR 039 S2 — continuous-batching queue state (fixed-batch minimal core).
+    // Plain-text-chat requests enqueue here (behind `BatchScheduler.enabled`)
+    // instead of each taking the ADR-029 gate; one detached worker drains the
+    // queue, admits a batch (SequenceKVLedger), and drives `BatchGenerator`
+    // under one gated span. See `BatchScheduler.swift`. All actor-isolated.
+    var batchQueue: [BatchPending] = []
+    var batchWorkerRunning = false
+    var batchUIDCounter = 0
     /// Structured-output vocabulary tokens: the model's full token set with
     /// decoded bytes (the ~150k `tokenizer.decode` calls are model-fixed and
     /// schema-independent), plus the eos id and the opener-alias table.
@@ -714,6 +723,21 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         // cap both generation paths enforce.
         AsyncStream { continuation in
             let task = Task {
+                // ADR 039 S2 — batched fast path: a plain-text-chat request on
+                // the resident model enqueues into the shared batch worker
+                // (which owns the gate for the batch) instead of taking the gate
+                // itself. Returns true when it took ownership of `continuation`
+                // (the worker drives usage/finish/finish() from here); false ⇒
+                // not batchable, fall through to the unchanged per-request path.
+                if await self.tryEnqueueBatched(
+                    messages: messages, schemaJSON: schemaJSON, tools: tools,
+                    maxTokens: maxTokens, temperature: temperature, topP: topP,
+                    seed: seed, speculative: speculative,
+                    chatTemplateKwargs: chatTemplateKwargs, logprobs: logprobs,
+                    requestedModel: requestedModel, continuation: continuation)
+                {
+                    return
+                }
                 do {
                     // ADR 029 — hold the process-global inference execution gate
                     // for the WHOLE decode so no other tenant (or a warm rebind)
@@ -1367,5 +1391,200 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             total += size
         }
         return total
+    }
+}
+
+// MARK: - ADR 039 S2 — batch worker (fixed-batch, default-off). Same-file so it
+// reaches the actor's private resident-model state; types + knob live in
+// `BatchScheduler.swift`.
+extension MLXLLMModule {
+    /// Try to enqueue a plain-text-chat request for batching. Returns `true` when
+    /// it took ownership of `continuation` (enqueued, or failed it with an error
+    /// chunk); `false` ⇒ not batchable, caller runs the unchanged serial path.
+    func tryEnqueueBatched(
+        messages: [ChatTurn], schemaJSON: String?,
+        tools: [[String: any Sendable]]?, maxTokens: Int?,
+        temperature: Double?, topP: Double?, seed: Int?, speculative: Bool?,
+        chatTemplateKwargs: [String: any Sendable]?,
+        logprobs: LogprobsRequest?, requestedModel: String?,
+        continuation: AsyncStream<GenChunk>.Continuation
+    ) async -> Bool {
+        // Batchable iff: flag on, no structured output / tools / logprobs / MTP,
+        // not a vision model, a model is resident, and the request targets the
+        // resident model (a different-model request rebinds via the serial path).
+        guard BatchScheduler.enabled,
+            schemaJSON == nil,
+            tools?.isEmpty ?? true,
+            logprobs == nil,
+            speculative != true,
+            // Batch text-only chat on ANY model, including a VLM's text path
+            // (verified end-to-end on gemma-4-26b-a4b). An IMAGE-bearing request
+            // must not batch — the batch engine decodes text tokens only and has
+            // no image-embedding path, so those take the serial VLM route.
+            !messages.contains(where: { !$0.images.isEmpty }),
+            let container = self.container,
+            (requestedModel?.isEmpty ?? true) || requestedModel == residentName
+        else { return false }
+
+        do {
+            // Same tokenization/chat-template as the serial path (parity); only
+            // the token ids are extracted, the batch engine re-embeds per row.
+            let userInput = UserInput(
+                chat: Self.chatMessages(messages), tools: nil,
+                additionalContext: chatTemplateKwargs)
+            let lmInput = try await container.prepare(input: userInput)
+            let promptTokens = lmInput.text.tokens.asArray(Int.self)
+            try enforcePromptCeiling(tokenCount: promptTokens.count)
+
+            let cap = Self.effectiveMaxTokens(maxTokens, params.maxTokens)
+            let temp =
+                (temperature.map { Float($0) }).flatMap { $0 >= 0 ? $0 : nil }
+                ?? params.temperature
+            let tp =
+                topP.map { Float($0) }.flatMap { $0 > 0 && $0 < 1 ? $0 : nil }
+                ?? params.topP
+            let sd: UInt64? = seed.flatMap { $0 >= 0 ? UInt64($0) : nil }
+            let sampler = makeRowSampler(temperature: temp, topP: tp, seed: sd)
+            let kvBytes = GovernorMemory.sequenceKVReservation(
+                maxTokens: cap, perTokenKVBytes: perTokenKVBytes)
+
+            let uid = batchUIDCounter
+            batchUIDCounter += 1
+            batchQueue.append(
+                BatchPending(
+                    uid: uid, promptTokens: promptTokens,
+                    promptCount: promptTokens.count, maxTokens: cap,
+                    sampler: sampler, kvBytes: kvBytes,
+                    continuation: continuation))
+            startBatchWorkerIfIdle()
+            return true
+        } catch {
+            let classified =
+                (error as? AthenaError) ?? AthenaError.classify(error, module: .llm)
+            continuation.yield(.error(classified))
+            continuation.finish()
+            return true
+        }
+    }
+
+    private func startBatchWorkerIfIdle() {
+        guard !batchWorkerRunning else { return }
+        batchWorkerRunning = true
+        Task.detached { await self.runBatchWorker() }
+    }
+
+    /// Detached worker: drain-admit-drive until the queue empties. Its heavy work
+    /// is inside `container.perform` (a different actor), so this module actor is
+    /// free to accept new enqueues between batches.
+    private func runBatchWorker() async {
+        while true {
+            let batch = await takeBatch()
+            if batch.isEmpty {
+                batchWorkerRunning = false
+                if !batchQueue.isEmpty { startBatchWorkerIfIdle() }
+                return
+            }
+            await runOneBatch(batch)
+        }
+    }
+
+    /// Admit as many queued rows as fit the ADR-023 budget (worst-case KV). A row
+    /// that can't fit even alone (over budget) is failed, not requeued; a row that
+    /// only fails because the batch is full is requeued for the next batch.
+    private func takeBatch() async -> [BatchPending] {
+        guard !batchQueue.isEmpty else { return [] }
+        let (denominator, budget) = await BatchScheduler.admissionInputs()
+        var admitted: [BatchPending] = []
+        var remaining: [BatchPending] = []
+        var ledger = SequenceKVLedger()
+        for p in batchQueue {
+            if ledger.admit(
+                uid: p.uid, rowKVBytes: p.kvBytes,
+                denominator: denominator, budget: budget)
+            {
+                admitted.append(p)
+            } else if admitted.isEmpty {
+                p.continuation.yield(
+                    .error(
+                        AthenaError.memoryBudgetExceeded(
+                            requested: p.kvBytes, available: budget - denominator,
+                            module: .llm)))
+                p.continuation.finish()
+            } else {
+                remaining.append(p)
+            }
+        }
+        batchQueue = remaining
+        return admitted
+    }
+
+    /// Drive one fixed batch to completion under one gated span, fanning each
+    /// row's tokens into its own stream via a per-row streaming detokenizer.
+    private func runOneBatch(_ batch: [BatchPending]) async {
+        guard let container = self.container else {
+            for p in batch {
+                p.continuation.yield(
+                    .error(
+                        AthenaError.moduleLoadFailed(
+                            .llm, reason: "batch drive before load")))
+                p.continuation.finish()
+            }
+            return
+        }
+        do {
+            try await InferenceGate.shared.withExclusiveExecution {
+                try await container.perform { ctx in
+                    let gen = BatchGenerator(model: ctx.model, defaultMaxTokens: 1)
+                    let uids = gen.insert(
+                        prompts: batch.map(\.promptTokens),
+                        maxTokens: batch.map(\.maxTokens),
+                        samplers: batch.map { Optional($0.sampler) })
+                    var detoks: [Int: NaiveStreamingDetokenizer] = [:]
+                    var conts: [Int: AsyncStream<GenChunk>.Continuation] = [:]
+                    var prompt: [Int: Int] = [:]
+                    var produced: [Int: Int] = [:]
+                    for (i, uid) in uids.enumerated() {
+                        detoks[uid] = NaiveStreamingDetokenizer(
+                            tokenizer: ctx.tokenizer)
+                        conts[uid] = batch[i].continuation
+                        prompt[uid] = batch[i].promptCount
+                        produced[uid] = 0
+                    }
+                    while gen.hasWork {
+                        for r in gen.next() {
+                            guard let cont = conts[r.uid] else { continue }
+                            produced[r.uid, default: 0] += 1
+                            if var d = detoks[r.uid] {
+                                d.append(token: r.token)
+                                let piece = d.next()
+                                detoks[r.uid] = d
+                                if let piece { cont.yield(.text(piece)) }
+                            }
+                            if let reason = r.finishReason {
+                                let completion =
+                                    r.allTokens?.count ?? produced[r.uid] ?? 0
+                                cont.yield(
+                                    .usage(
+                                        TokenUsage(
+                                            promptTokens: prompt[r.uid] ?? 0,
+                                            completionTokens: completion)))
+                                cont.yield(
+                                    .finish(reason == "length" ? .length : .stop))
+                                cont.finish()
+                                conts[r.uid] = nil
+                            }
+                        }
+                    }
+                    for (_, cont) in conts { cont.finish() }
+                }
+            }
+        } catch {
+            let classified =
+                (error as? AthenaError) ?? AthenaError.classify(error, module: .llm)
+            for p in batch {
+                p.continuation.yield(.error(classified))
+                p.continuation.finish()
+            }
+        }
     }
 }

@@ -590,6 +590,22 @@ struct Load: AsyncParsableCommand {
                 "inference execution gate DISABLED (ADR 029 revert knob)")
         }
 
+        // ADR 039 S2 — continuous batching (fixed-batch, minimal core). DEFAULT
+        // OFF; opt-in via env > TOML. The admission provider is wired after the
+        // governor is constructed (below). Enable only when /metrics shows
+        // routine gateWaiters >= 2 (ADR 038 trigger).
+        if let batchEnv = ProcessInfo.processInfo
+            .environment["ATHENA_BATCHING"]?.lowercased()
+        {
+            BatchScheduler.enabled = ["1", "true", "yes", "on"].contains(batchEnv)
+        } else {
+            BatchScheduler.enabled = tomlCfg?.batchingEnabled ?? false
+        }
+        if BatchScheduler.enabled {
+            Logging.Logger(label: AthenaLog.daemonLabel).notice(
+                "continuous batching ENABLED (ADR 039, default-off knob)")
+        }
+
         // ADR 030 Part 2 (WP2) — degrade recognized MLX allocation faults to a
         // 503 instead of aborting the daemon. Default ON; env > TOML > true.
         if let degradeEnv = ProcessInfo.processInfo
@@ -757,6 +773,11 @@ struct Load: AsyncParsableCommand {
                 }
             },
             admissionMode: admissionMode)
+
+        // ADR 039 S2 — feed the batch scheduler the governor's live admission
+        // inputs (denominator + budget) so per-sequence KV reservations meter
+        // against the same ADR-023 truthful number as module-load admission.
+        BatchScheduler.admissionInputsProvider = { await governor.admissionInputs() }
 
         let store = ModelStore(
             rootDirectory: modelStore.map {

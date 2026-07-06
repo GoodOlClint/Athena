@@ -1,6 +1,6 @@
 # ADR 039 — Per-sequence KV accounting + batch-within-the-span scheduler
 
-- **Status:** Proposed
+- **Status:** Accepted — S0 (re-pin v0.10.264) + S1 (governor per-seq KV v0.10.265) + S2 (scheduler + routing + fan-out v0.10.266) SHIPPED; batching default-off, verified end-to-end (`deploy/e2e-batching.sh`, 6 concurrent on gemma-4-26b-a4b-it-8bit — all coherent, no cross-contamination, 6-in-4s)
 - **Date:** 2026-07-05
 - **Deciders:** operator + agent
 - **Executes:** ADR 038 Decision 2 (continuous batching inside one gated span). **Extends:** ADR 011 (unified budget), ADR 023 (truthful accounting), ADR 029 (one gated span). **Plan:** `docs/batching-integration-plan.md`.
@@ -21,7 +21,7 @@ The current serialization point is `InferenceGate.shared.withExclusiveExecution`
 
 3. **Batching is default-off, config-flag opt-in** (`batching_enabled`, boot-set from TOML + env, mirroring `InferenceGate.enabled`). Flag off ⇒ the existing per-request `withExclusiveExecution` path is **byte-unchanged** (pinned by the OpenAI e2e parity checks). The shipped v0.10.263 observability slice is the trigger instrument; enable when `/metrics` shows routine `gateWaiters ≥ 2`.
 
-4. **Scope is minimal core.** Only plain unstructured chat batches. Structured output, MTP, speculative, and logprobs stay single-row (existing `runSpeculative` fork — no work). Per-row structured output (substrate `RowSampler` grammar hook, ADR 038 gap #4), paged KV (#12/#13), and shared-prefix dedup (#16) are deferred.
+4. **Scope is minimal core, fixed-batch.** Only **text-only** plain-unstructured chat batches — on **any** model including a VLM's text path (verified on the served gemma-4-26b-a4b; the guard excludes **image-bearing** requests, not vision *models*, since the batch engine decodes text tokens only). Structured output, MTP, speculative, and logprobs stay single-row (existing `runSpeculative` fork — no work). The scheduler is **fixed-batch** (drain → admit → drive → next), not mid-flight join; a different-model request takes the serial path (the gate is the rebind barrier). Per-row structured output (substrate `RowSampler` grammar hook, ADR 038 gap #4), the join/leave scheduler, paged KV (#12/#13), and shared-prefix dedup (#16) are deferred. **Correctness bar: close-to-single-stream, not exact token parity** — dense batched SDPA diverges slightly from single-seq SDPA on open-ended prompts (substrate #9 precedent); all completions stay coherent.
 
 ## Rejected alternatives
 

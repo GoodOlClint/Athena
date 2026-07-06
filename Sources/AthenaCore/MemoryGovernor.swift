@@ -756,6 +756,14 @@ public actor MemoryGovernor {
             mode: .footprint, committed: committed, reserved: residentBytes)
     }
 
+    /// ADR 039 S2 — the live admission inputs the batch scheduler meters
+    /// per-sequence KV reservations against: the current ADR-023 denominator
+    /// (`max(committed, reserved)`) and the total budget. Reuses the same probe
+    /// as request admission so batch rows and module loads compete on one number.
+    public func admissionInputs() -> (denominator: Int, budget: Int) {
+        (admissionDenominator(), totalBudgetBytes)
+    }
+
     /// Free budget for `estimate` bytes, evicting evictable loaded modules
     /// LRU-first. Throws if it still cannot fit after exhausting eviction.
     private func makeRoom(for estimate: Int, requestedBy id: ModuleID) async throws {

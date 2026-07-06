@@ -185,6 +185,9 @@ public struct AthenaConfig: Sendable, Equatable {
     /// (recognized OOM re-`fatalError`s). Env `ATHENA_METAL_FAULT_DEGRADE=0`
     /// overrides this to off.
     public var metalFaultDegrade: Bool?
+    /// ADR 039 — enable continuous batching (fixed-batch, default off). Env
+    /// `ATHENA_BATCHING=1` overrides. Enable only under routine gate contention.
+    public var batchingEnabled: Bool?
     /// Preload (warm) the LLM at startup instead of lazily on first
     /// request (M33.3). Optional — absent / false ⇒ lazy load (default).
     /// Opt-in: the operator trades a slower start for a warm first
@@ -256,6 +259,7 @@ public struct AthenaConfig: Sendable, Equatable {
         governorAdmissionMode: String? = nil,
         inferenceGateEnabled: Bool? = nil,
         metalFaultDegrade: Bool? = nil,
+        batchingEnabled: Bool? = nil,
         preload: Bool? = nil,
         encryptStore: Bool? = nil,
         persistStore: Bool? = nil,
@@ -313,6 +317,7 @@ public struct AthenaConfig: Sendable, Equatable {
         self.governorAdmissionMode = governorAdmissionMode
         self.inferenceGateEnabled = inferenceGateEnabled
         self.metalFaultDegrade = metalFaultDegrade
+        self.batchingEnabled = batchingEnabled
         self.preload = preload
         self.encryptStore = encryptStore
         self.persistStore = persistStore
@@ -512,6 +517,7 @@ public struct AthenaConfig: Sendable, Equatable {
         let denyDebuggerAttach = try bool("deny_debugger_attach")
         let inferenceGateEnabled = try bool("inference_gate_enabled")
         let metalFaultDegrade = try bool("metal_fault_degrade")
+        let batchingEnabled = try bool("batching_enabled")
         let preload = try bool("preload")
         let encStore = try bool("encrypt_store")
         let persistStore = try bool("persist_store")
@@ -568,6 +574,7 @@ public struct AthenaConfig: Sendable, Equatable {
             governorAdmissionMode: scalar("governor_admission_mode", in: toml),
             inferenceGateEnabled: inferenceGateEnabled,
             metalFaultDegrade: metalFaultDegrade,
+            batchingEnabled: batchingEnabled,
             preload: preload,
             encryptStore: encStore,
             persistStore: persistStore,
