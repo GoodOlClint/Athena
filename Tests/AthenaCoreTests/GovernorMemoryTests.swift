@@ -174,4 +174,73 @@ final class GovernorMemoryTests: XCTestCase {
         XCTAssertEqual(
             GovernorMemory.freeBytes(budget: 10, denominator: 25), 0)
     }
+
+    // MARK: - ADR 039 — per-sequence KV admission
+
+    func testSequenceKVReservationIsWorstCaseProduct() {
+        XCTAssertEqual(
+            GovernorMemory.sequenceKVReservation(
+                maxTokens: 150, perTokenKVBytes: 256 * 1024),
+            150 * 256 * 1024)
+    }
+
+    func testSequenceKVReservationClampsNegatives() {
+        XCTAssertEqual(
+            GovernorMemory.sequenceKVReservation(maxTokens: -5, perTokenKVBytes: 100), 0)
+        XCTAssertEqual(
+            GovernorMemory.sequenceKVReservation(maxTokens: 100, perTokenKVBytes: -1), 0)
+    }
+
+    func testAdmitsSequenceStacksOnDenominatorPlusActiveKV() {
+        // budget 100; model denominator 40; batch already holds 30 of KV.
+        // A 30-byte row fits exactly (40+30+30=100); 31 does not.
+        XCTAssertTrue(
+            GovernorMemory.admitsSequence(
+                rowKVBytes: 30, activeSequenceKVBytes: 30, denominator: 40, budget: 100))
+        XCTAssertFalse(
+            GovernorMemory.admitsSequence(
+                rowKVBytes: 31, activeSequenceKVBytes: 30, denominator: 40, budget: 100))
+    }
+
+    // MARK: - SequenceKVLedger (ADR 039)
+
+    func testLedgerAdmitsUntilBudgetThenDenies() {
+        // budget 100, denominator 10 → 90 of KV headroom. Rows of 40 each:
+        // two admit (10+40+40=90 ≤ 100), the third is denied.
+        var ledger = SequenceKVLedger()
+        XCTAssertTrue(ledger.admit(uid: 1, rowKVBytes: 40, denominator: 10, budget: 100))
+        XCTAssertTrue(ledger.admit(uid: 2, rowKVBytes: 40, denominator: 10, budget: 100))
+        XCTAssertFalse(
+            ledger.admit(uid: 3, rowKVBytes: 40, denominator: 10, budget: 100),
+            "third row overcommits the budget and must be denied")
+        XCTAssertEqual(ledger.activeCount, 2)
+        XCTAssertEqual(ledger.totalReservedBytes, 80)
+    }
+
+    func testLedgerReleaseFreesBudgetForNextRow() {
+        var ledger = SequenceKVLedger()
+        XCTAssertTrue(ledger.admit(uid: 1, rowKVBytes: 40, denominator: 10, budget: 100))
+        XCTAssertTrue(ledger.admit(uid: 2, rowKVBytes: 40, denominator: 10, budget: 100))
+        XCTAssertFalse(ledger.admit(uid: 3, rowKVBytes: 40, denominator: 10, budget: 100))
+        // Row 1 finishes → 40 bytes free → row 3 now admits.
+        XCTAssertEqual(ledger.release(uid: 1), 40)
+        XCTAssertTrue(ledger.admit(uid: 3, rowKVBytes: 40, denominator: 10, budget: 100))
+        XCTAssertEqual(ledger.activeCount, 2)  // rows 2 and 3
+    }
+
+    func testLedgerDeniedRowReservesNothing() {
+        var ledger = SequenceKVLedger()
+        XCTAssertTrue(ledger.admit(uid: 1, rowKVBytes: 90, denominator: 10, budget: 100))
+        XCTAssertFalse(ledger.admit(uid: 2, rowKVBytes: 1, denominator: 10, budget: 100))
+        XCTAssertEqual(ledger.totalReservedBytes, 90, "a denied row must not be recorded")
+        XCTAssertEqual(ledger.activeCount, 1)
+    }
+
+    func testLedgerAdmitIsIdempotentPerUID() {
+        var ledger = SequenceKVLedger()
+        XCTAssertTrue(ledger.admit(uid: 1, rowKVBytes: 40, denominator: 10, budget: 100))
+        XCTAssertTrue(ledger.admit(uid: 1, rowKVBytes: 40, denominator: 10, budget: 100))
+        XCTAssertEqual(ledger.totalReservedBytes, 40, "re-admitting a uid must not double-count")
+        XCTAssertEqual(ledger.release(uid: 999), 0, "releasing an unknown uid frees nothing")
+    }
 }

@@ -137,4 +137,30 @@ public enum GovernorMemory {
     public static func fits(request: Int, denominator: Int, budget: Int) -> Bool {
         denominator + request <= budget
     }
+
+    // MARK: - ADR 039 — per-sequence KV admission (continuous batching)
+
+    /// Worst-case KV bytes a batched row reserves **up front** (conservative
+    /// admission, ADR 039): `maxTokens × perTokenKVBytes`. Reserving the full
+    /// generation length before decoding means the batch can never grow its KV
+    /// past what was admitted — the ADR-023 budget-blowout the accounting
+    /// exists to prevent. Cheap because measured per-row KV is small (~0.1 GB).
+    /// Negative inputs clamp to 0 (a defensive floor, not an expected case).
+    public static func sequenceKVReservation(
+        maxTokens: Int, perTokenKVBytes: Int
+    ) -> Int {
+        max(0, maxTokens) * max(0, perTokenKVBytes)
+    }
+
+    /// Can a new batched row be admitted? Its worst-case `rowKVBytes` must fit on
+    /// top of the governor's current `denominator` (ADR-023 `max(committed,
+    /// reserved)`) **plus** the KV already reserved by live batch rows
+    /// (`activeSequenceKVBytes`), within `budget`. Pure Int decision, unit-pinned.
+    public static func admitsSequence(
+        rowKVBytes: Int, activeSequenceKVBytes: Int, denominator: Int, budget: Int
+    ) -> Bool {
+        fits(
+            request: rowKVBytes,
+            denominator: denominator + activeSequenceKVBytes, budget: budget)
+    }
 }
