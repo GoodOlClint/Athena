@@ -1,5 +1,5 @@
 {
-  "originHash" : "f84736cecffd33010985606025dcfc0b4d52a6e89b9da02d12b12ef30508cb75",
+  "originHash" : "ad46d070d0a5472e69fd85aed200fea36a0325c1ccffa35c80cb7187d9462713",
   "pins" : [
     {
       "identity" : "applesiliconmetrics",
@@ -51,7 +51,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/GoodOlClint/mlx-swift-lm.git",
       "state" : {
-        "revision" : "9f777fe48d746ad2e12ef21401bb1faa3fffa9a8"
+        "revision" : "cc9b8d5d12a27928214f00012b92bf10b07d33db"
       }
     },
     {
