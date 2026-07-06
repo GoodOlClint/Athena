@@ -24,7 +24,7 @@ let substrateDep: Package.Dependency =
     ? .package(path: "../mlx/mlx-swift-lm")
     : .package(
         url: "https://github.com/GoodOlClint/mlx-swift-lm.git",
-        revision: "5f17df48b2ec0c6c983c1cab3ef2a8baa6f1c29f")  // integration
+        revision: "9f777fe48d746ad2e12ef21401bb1faa3fffa9a8")  // integration (#263 continuous batching)
 let hubDep: Package.Dependency =
     athenaLocalDev
     ? .package(path: "../swift-huggingface")
