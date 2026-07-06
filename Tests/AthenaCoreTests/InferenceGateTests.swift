@@ -115,6 +115,84 @@ final class InferenceGateTests: XCTestCase {
         XCTAssertEqual(waiters, 0)
     }
 
+    // MARK: - ADR 038 slice 1 — gate observability accounting
+
+    /// Uncontended acquisitions: every acquire takes the fast path, so
+    /// `contended`/`maxWaiters`/wait-p95 all stay 0 (⇒ "no contention" on
+    /// /metrics), while `acquisitions` counts them all.
+    func testUncontendedAccounting() async throws {
+        let gate = InferenceGate()
+        for _ in 0..<5 { try await gate.withExclusiveExecution {} }
+        let s = await gate.stats()
+        XCTAssertEqual(s.acquisitions, 5)
+        XCTAssertEqual(s.contended, 0)
+        XCTAssertEqual(s.maxWaiters, 0)
+        XCTAssertEqual(s.waiters, 0)
+        XCTAssertFalse(s.held)
+        XCTAssertEqual(s.waitP95Ms, 0)
+    }
+
+    /// Contention: three requests queue behind a holder → depth + high-water +
+    /// contended count are visible mid-flight and after, and the holder itself
+    /// is not counted as contended.
+    func testContentionAccounting() async throws {
+        let gate = InferenceGate()
+        let holder = Task {
+            try await gate.withExclusiveExecution {
+                try? await Task.sleep(nanoseconds: 60_000_000)
+            }
+        }
+        try? await Task.sleep(nanoseconds: 5_000_000)  // holder acquires
+        let waiters = (0..<3).map { _ in
+            Task { try await gate.withExclusiveExecution {} }
+        }
+        try? await Task.sleep(nanoseconds: 10_000_000)  // all three enqueue
+        let mid = await gate.stats()
+        XCTAssertTrue(mid.held)
+        XCTAssertEqual(mid.waiters, 3, "expected 3 queued behind the holder")
+        XCTAssertEqual(mid.maxWaiters, 3)
+
+        _ = try await holder.value
+        for w in waiters { _ = try await w.value }
+        let done = await gate.stats()
+        XCTAssertEqual(done.acquisitions, 4, "holder + 3 waiters")
+        XCTAssertEqual(done.contended, 3, "only the 3 that queued")
+        XCTAssertEqual(done.maxWaiters, 3)
+        XCTAssertEqual(done.waiters, 0)
+        XCTAssertFalse(done.held)
+    }
+
+    /// The revert knob observes nothing: a disabled gate serializes nothing, so
+    /// stats stay all-zero/unheld.
+    func testDisabledGateObservesNothing() async throws {
+        InferenceGate.enabled = false
+        let gate = InferenceGate()
+        _ = try await gate.withExclusiveExecution { 1 }
+        let s = await gate.stats()
+        XCTAssertFalse(s.held)
+        XCTAssertEqual(s.acquisitions, 0)
+        XCTAssertEqual(s.waiters, 0)
+    }
+
+    /// The Prometheus render is pure: names, TYPE lines, and values are exact.
+    func testGatePrometheusRender() {
+        let s = InferenceGate.GateStats(
+            held: true, waiters: 2, heldMs: 12.5, maxWaiters: 3,
+            acquisitions: 10, contended: 4,
+            waitP50Ms: 1.0, waitP95Ms: 9.0, waitMaxMs: 15.0)
+        let out = InferenceGate.prometheus(s)
+        XCTAssertTrue(out.contains("athena_inference_gate_waiters 2"))
+        XCTAssertTrue(out.contains("athena_inference_gate_held 1"))
+        XCTAssertTrue(out.contains("athena_inference_gate_max_waiters 3"))
+        XCTAssertTrue(out.contains("athena_inference_gate_acquisitions_total 10"))
+        XCTAssertTrue(out.contains("athena_inference_gate_contended_total 4"))
+        XCTAssertTrue(
+            out.contains("athena_inference_gate_wait_ms{quantile=\"0.95\"} 9.0"))
+        XCTAssertTrue(
+            out.contains(
+                "# TYPE athena_inference_gate_acquisitions_total counter"))
+    }
+
     // MARK: - ADR 030 Part 2 (WP2) — degrade latched Metal faults
 
     /// A recognized allocation fault recorded during a gated span (as the global

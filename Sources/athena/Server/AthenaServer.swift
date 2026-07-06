@@ -189,6 +189,7 @@ struct AthenaServer {
             }
             let (inflight, lastAt, decodeTps) = await metrics.healthFields()
             let gpu = gpuProbe?.current ?? (mhz: nil, activeResidency: nil)
+            let gate = await InferenceGate.shared.stats()
             return Self.json(
                 HealthResponse(
                     snapshot: snapshot,
@@ -197,6 +198,7 @@ struct AthenaServer {
                     lastRequestAt: lastAt,
                     lastDecodeTokensPerSec: decodeTps,
                     powerAssertionHeld: powerAssertionHeld,
+                    gate: gate,
                     gpuClockMHz: gpu.mhz,
                     gpuActiveResidency: gpu.activeResidency))
         }
@@ -211,9 +213,14 @@ struct AthenaServer {
             {
                 return Self.json(snap)
             }
+            // ADR 038 slice 1 — append inference-gate queue depth + wait time
+            // so FIFO starvation and the batching-trigger contention signal are
+            // scrapeable (gate stats live on the actor, not in AthenaMetrics).
+            let gate = await InferenceGate.shared.stats()
             return Self.prometheusText(
                 AthenaMetrics.prometheus(
-                    snap, now: Date().timeIntervalSince1970))
+                    snap, now: Date().timeIntervalSince1970)
+                    + InferenceGate.prometheus(gate))
         }
 
         // Machine-readable API description (M32.1) — always open, like
@@ -1233,6 +1240,17 @@ struct HealthResponse: Encodable {
     let modules: [ModuleHealth]
     let inflight: Int
     let lastRequestAt: Double
+    /// ADR 038 slice 1 — inference-execution-gate observability (was test-only).
+    /// `gateWaiters` is the live queue depth behind the ADR-029 gate;
+    /// `gateHeldMs` is how long the current holder has held it (0 when free);
+    /// `gateMaxWaiters` is the high-water depth since boot; `gateWaitP95Ms` is
+    /// the recent queue wait — routine `gateWaiters ≥ 2` / rising `gateWaitP95Ms`
+    /// is the evidence trigger for in-span batching (Decision 2).
+    let gateWaiters: Int
+    let gateHeld: Bool
+    let gateHeldMs: Double
+    let gateMaxWaiters: Int
+    let gateWaitP95Ms: Double
 
     /// A governor module snapshot enriched with the id of the model currently
     /// resident in that module's slot (`nil` when unloaded) — so `athena ps`
@@ -1256,6 +1274,7 @@ struct HealthResponse: Encodable {
         inflight: Int,
         lastRequestAt: Double,
         lastDecodeTokensPerSec: Double, powerAssertionHeld: Bool,
+        gate: InferenceGate.GateStats,
         gpuClockMHz: Double? = nil, gpuActiveResidency: Double? = nil
     ) {
         self.totalBudgetBytes = snapshot.totalBudgetBytes
@@ -1283,6 +1302,11 @@ struct HealthResponse: Encodable {
         }
         self.inflight = inflight
         self.lastRequestAt = lastRequestAt
+        self.gateWaiters = gate.waiters
+        self.gateHeld = gate.held
+        self.gateHeldMs = gate.heldMs
+        self.gateMaxWaiters = gate.maxWaiters
+        self.gateWaitP95Ms = gate.waitP95Ms
     }
 
     /// M60.1 — stable string for the `ProcessInfo.ThermalState` enum so

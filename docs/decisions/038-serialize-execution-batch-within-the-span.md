@@ -1,0 +1,70 @@
+# ADR 038 — Serialize execution; batch within the span
+
+- **Status:** Accepted — immediate slice (Decision 4, InferenceGate observability) SHIPPED v0.10.263; batching (Decision 2) parked behind the evidence trigger + governor per-seq KV accounting
+- **Date:** 2026-07-04
+- **Deciders:** operator + agent
+- **Context source:** `docs/parallel-inference-audit-2026-07-04.md` (audit) + `docs/parallel-inference-supplement-2026-07-04.md` (DGX-Spark / cross-hardware supplement)
+
+> **Amendment 2026-07-05 — the substrate batch loop LANDED; blocker list re-scoped; trigger flips from "wait on upstream" to "gate the integration work."**
+>
+> ADR 038's #1 premise — "the substrate has no batched decode loop; only concurrent *unbatched* decodes exist (mlx-swift-lm #42 open)" — is **superseded.** Upstream **mlx-swift-lm #263 (continuous batching)** is **ported into the fork's `integration` branch** (`df5915a`; batched-decode parity DoD tests `d272b12`; fork HEAD `68e5998`). It is a faithful port of mlx-lm's `BatchGenerator` and adds, in `Libraries/MLXLMCommon/`:
+> - `BatchGenerator.swift` — continuous-batch engine (`insert`/`next`/`cancel`; join/leave mid-flight; finished rows freed for new admissions).
+> - `BatchKVCache.swift` (854 LOC) — **dense right-aligned** batched KV (left-pad, per-row RoPE positions, pre-alloc capacity); `MambaCache`/`ArraysCache` for SSM layers.
+> - `PromptProcessingBatch.swift` — batched **chunked prefill** (`prefillStepSize` 2048, rolls rows into the decode cache).
+> - `RowSamplers.swift` — per-row sampling (temp/top-p/top-k/seed, mix greedy+prob in one batch).
+> - `SequenceStateMachine.swift` — per-row stop sequences.
+> - `GenerationBatch.swift` — batch state + a **single-row** cross-request prefix-cache seam.
+>
+> It runs from **one execution context at a time** — one batched `next()` = one eval graph — so it composes with the ADR 029 gate **unchanged**. **#42 is superseded by #263; drop the #42 watch item** (Decision 2 + Consequences references to #42/"await upstream" are historical). This closes the substrate blockers in Decision 2 (batch loop, per-row sampling/stop, join/leave, batched prefill). Re-scoped remaining work, in dependency order:
+>
+> **Substrate gaps still open** (upstream/fork, substrate-first per ADR 028):
+> 1. **Paged KV** — `BatchKVCache` is dense right-aligned (padding waste at mixed lengths; max batch bounded by contiguous alloc), not PagedAttention/block-table.
+> 2. **Efficient batched/paged attention Metal kernel** — in **mlx core (C++)**; the dense batch runs masked SDPA. This is the realized-~4× vs physics-~15–20× lever (supplement §5/§6; the `gemv`(M=1)→`steel_gemm`(M≥2) reality).
+> 3. **Batched speculative / MTP** — absent (batch **or** speculate; MTP requests bypass the batch, as already ruled).
+> 4. **Per-row constrained decoding hook** — `RowSampler` has no grammar/JSON-schema/logit-bias seam; structured output cannot compose with batching until it gains one.
+> 5. **Cross-batch shared-prefix dedup** — the prefix seam is per-request single-row, not vLLM-style shared-prefix blocks across active rows.
+> 6. **MoE-under-batch: verify** on `gemma-4-a4b` (`SwitchGLU`/`gather_qmm` correctness under batch — likely fine, untested; efficiency caveat = activated-expert-union grows with batch).
+>
+> **Athena-side integration** (NONE wired yet — `grep -r BatchGenerator Sources/` = 0):
+> 1. **Governor per-sequence KV accounting** (ADR 023) — N-row `BatchKVCache` growth must be admitted against the truthful budget; the governor has zero per-request accounting today. **The load-bearing gap.**
+> 2. **Scheduler** feeding queued `InferenceGate` requests into `BatchGenerator.insert()` (the join/leave scheduler above `generateMetered`; same-model only; WP6 rebind = batch barrier).
+> 3. **Route plain requests through `BatchGenerator`** — replace the batch-1 vendored `GuidedGreedy`; speculative/MTP stays single-row.
+> 4. **Per-row structured output** — wire the Guide / rust-shim sieve into the `RowSampler` mask hook (substrate gap #4).
+> 5. **Per-row metering/audit**; leave-not-cancel already supported (`cancel(uid:)`).
+> 6. Reconcile Athena's ADR-027 disk `PrefixKVCache` with the batch prefix seam.
+>
+> **Unchanged:** the first slice is still **InferenceGate observability** (the evidence instrument that gates *when* to turn batching on); cross-tenant execution overlap stays forbidden (Decision 3); the calibrated target stays ~3–4× → ~15–20× as kernels mature (Consequences), not the CUDA 26–120×; **first batching target = a dense 8-bit checkpoint**, not the MoE (Decision 2).
+
+> **Capacity de-risk spike — 2026-07-05 (evidence, not a decision change).** Drove the substrate `BatchGenerator` (#263) directly on real models (throwaway `bench-batch`, `ATHENA_LOCAL_DEV=1`, removed after), bypassing the gate/governor to measure the raw ceiling. Results: **batching delivers on dense AND MoE** — dense gemma-4-12B-8bit up to ~18× aggregate at N=64, MoE gemma-4-26b-a4b-8bit **13.5× at N=64 (resolves the MoE-under-batch unknown above; scales slightly worse than dense, as predicted)**, ~3× at the realistic N=8. **Throughput plateaus at N≈64** (workload-dependent: ~500 tok/s for a 128-tok prompt, flat N=64→512; ~700 for a 24-tok prompt) — attention-compute-bound (masked SDPA), NOT memory; batches were uniform-length so this isolates the non-padding ceiling. **The alarming ~30→100GB memory swing was ~84% reclaimable MLX buffer cache, not committed** — the bench bypassed the ADR-023 G1 `cacheLimit`; setting it collapsed the footprint (~102→~48GB) and erased a memory-pressure throttle. Committed KV is small (~0.1GB/row; weights + ~3–4GB at 64-wide), so the memory ceiling (~N=1024) is academic and **the governor per-seq KV gap is tractable with a ~64-wide admission target**. Net: **capacity = GO, measured not hoped-for; the only remaining gate stays demand** (the observability slice's contention trigger, unfired). Detail in `~/Source/mlx/research/issue-13-batched-paged-attention-gonogo.md` (§5 dense-vs-paged de-risk) and memory `project_batching-capacity-spike`.
+
+## Context
+
+Athena serializes all inference behind the ADR 029 process-global `InferenceGate` (plus per-module actor chains and batch-1 decode loops). The operator asked whether that is still right, with the working rationale "Metal doesn't have as many compute cores as a GPU" — and asked that the answer be formalized.
+
+The audit corrected the physics: **batch-1 decode on Apple Silicon is memory-bandwidth-bound, not compute-bound** (~1–4 FLOP/byte arithmetic intensity against an M4 Max ridge of ~60; the GPU is ~95% compute-idle during decode). "Fewer cores" explains slow prefill and a lower batching ceiling, not why serialization is safe. Batched decode measurably yields 2.6–4.3× aggregate throughput at 16 concurrent sequences on M4 Max, and the whole field (mlx_lm.server, llama.cpp/Ollama, LM Studio, vllm-metal) converged on **one decode loop with continuous batching** in 2025–26 — never on N independent decode threads.
+
+What actually keeps serialization correct for Athena today: (a) the substrate (mlx-swift-lm) has **no batched decode loop** — only KV batch primitives; [mlx-swift-lm #42](https://github.com/ml-explore/mlx-swift-lm/issues/42) open — so the only parallelism available is concurrent *unbatched* decodes, which amortize zero weight reads, split the same bandwidth, land on MLX's still-hardening multithread path ([mlx #2133](https://github.com/ml-explore/mlx/issues/2133)), and re-open the 2026-06-05 wedge hazard class; (b) cross-modality tenants run different models and cannot batch at all; (c) speculative/MTP (ADR 032) and batching spend the same idle-compute headroom — mlx-lm disables batching when a draft model is set — and MTP is the right optimization for the actual ~single-client workload. In-house proof that multi-sequence-per-span works where there is no KV: `/v1/embeddings` already stacks length-bucketed inputs into one `[N, maxLen]` forward (`MLXEmbeddingModule.swift:365–403`).
+
+## Decision
+
+1. **Inference stays serialized behind the InferenceGate — with the rationale corrected on record.** Serialization is a consequence of substrate capability, MLX global state, and workload shape, not of Metal compute scarcity. Future decisions must not inherit the "fewer cores" premise.
+2. **The sanctioned upgrade path is continuous batching *inside one gated execution span*.** ADR 029 already permits it as written (its guarantee is "one eval graph in flight"; a batched step is one graph — the gate stays). The path is **substrate-gated** (a batch-aware `TokenIterator`/KVCache decode loop, substrate-first per ADR 028; watch/port mlx-swift-lm #42 — a working **Swift** prototype branch now exists (62→344 tok/s, batch 1→32, Llama-3B) alongside the Python `BatchGenerator` reference, so the port target is real, not just an upstream design to await) and **evidence-gated** (trigger: gate metrics showing routine ≥2-deep chat contention). Milestone blocker list, in dependency order: substrate batch loop → Athena's batch-1 vendored loops (plain greedy/sampling batch first; **speculative/MTP requests bypass the batch**, same rule mlx-lm ships) → a join/leave scheduler above `generateMetered` (same-model only; the WP6 in-gate rebind becomes a batch barrier) → **per-sequence KV reservations in the governor** (today there is zero per-request memory accounting; batch KV growth must not silently eat the ADR-023-truthful budget) → per-sequence stream fan-out with leave-not-cancel semantics → prefix-cache per-row snapshots → batch-wide 503 on a latched Metal fault (accepted) → **batched expert-grouped `SwitchGLU` (MoE)** — the served model (`gemma-4-26b-a4b`) is an MoE, so batched decode over it needs an expert-grouped gather-matmul (a distinct substrate capability from the dense batch loop) and amortizes weight reads worse as the batch grows the activated-expert union; **consider a dense 8-bit checkpoint as the first batching target.**
+3. **Cross-tenant execution overlap remains forbidden** (restates ADR 029/011 with the audit's evidence): MLX's allocator, buffer cache, and fault handler are process-global; separate streams give kernel interleaving, not isolation; no MPS-style partitioning exists on Metal; the wedge history is direct evidence. Re-opening this requires upstream MLX per-tenant isolation, which has no roadmap signal.
+4. **Immediate slice (ships with this ADR's acceptance): InferenceGate observability.** Production queue-depth and wait-time metrics on `/metrics` + `gate_waiters`/`gate_held_ms` on `/healthz` (today `waiterCount`/`isHeld` are test-only; FIFO starvation — a long transcription or convert ahead of chat — is invisible). Without wait data there is no evidence base for the batching trigger, so the instrument precedes any further decision. **SHIPPED v0.10.263:** `InferenceGate.stats()` (MLX-free, unit-pinned) records acquisitions/contended/high-water-depth/wait-ms reservoir; `/healthz` gains `gateWaiters`/`gateHeld`/`gateHeldMs`/`gateMaxWaiters`/`gateWaitP95Ms`; `/metrics` appends the `athena_inference_gate_*` Prometheus series. The batching trigger fires on routine `gateWaiters ≥ 2` / rising `gateWaitP95Ms`.
+
+Noted as accepted trades, now on record: cold-load's deliberately ungated Metal allocations overlapping a decode (ADR 029 rule 1 — availability over purity during `cold_load_wait_secs`); the unclaimed 2.6–4.3× aggregate throughput until the trigger fires. GB10/CUDA-UMA (see `docs/cuda-port-audit-2026-07-04.md`): the same one-scheduler architecture is the answer there, and batching pays sooner (~273 GB/s), so the in-span batching path is also the CUDA-port-compatible one. The DGX-vs-Mac gap is **mostly software (recoverable) on a silicon ridge floor that is rising** — M5's GPU Neural Accelerators (tensor cores) lift the batched-decode ceiling specifically; the batching win is software-gated now (full analysis: `docs/parallel-inference-supplement-2026-07-04.md`).
+
+## Rejected alternatives
+
+- **Concurrent unbatched decodes on separate MLX streams** — amortizes nothing (splits the same DRAM bandwidth), blinds governor admission (no per-request accounting), defeats fault attribution, and rides MLX's still-hardening multithread eval; strictly dominated by in-span batching. This is the thing the "fewer cores" intuition accidentally protected against, for the wrong reason.
+- **Cross-tenant execution overlap** — see Decision 3; the prohibition is load-bearing (wedge history, process-global MLX state).
+- **Adopting a batching engine (vllm-metal / llama.cpp) behind the module protocols** — forfeits the ADR 011 governor thesis: a foreign allocator on the one Metal pool is exactly "compose at the inference layer," and none of those engines exposes MLX-shaped one-pool accounting.
+- **Doing nothing** — leaves the gate uninstrumented (no evidence for any future call) and the wrong "fewer cores" rationale as the recorded reason.
+
+## Consequences
+
+- Wedge-safety posture unchanged; ADR 029/011 unamended (this ADR interprets, restates, and extends them — it supersedes nothing).
+- The gate-observability slice becomes the next piece of implementation work carried by this decision.
+- Measured multi-client throughput stays unclaimed until the evidence trigger fires. When it does, **plan the milestone against ~3–4× aggregate on current Metal kernels (climbing toward the ~15–20× that Apple-Silicon's roofline ridge allows as batched-attention kernels mature) — not the 26–120× a CUDA/DGX-Spark data point implies**; treat anything above 3–4× as upside. Single-client latency work (MTP speculative, prompt cache) remains the correct optimization axis for the current workload.
+- When mlx-swift-lm lands batch generation upstream, re-open with a milestone plan against the blocker list in Decision 2 — the trigger data will already exist if the observability slice shipped.
+- File the mlx-swift-lm #42 watch item in the MLX tracker per the issue-tracking convention once that tracker exists.
