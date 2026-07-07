@@ -1,0 +1,38 @@
+# PR CI — the MLX-free unit tier only. The full Release xcodebuild and the heavy
+# model-gated e2e scripts are NOT here (they need real models + hardware); run
+# those manually or on a main-branch/nightly job to control macOS-runner cost.
+#
+# NEEDS FIRST-RUN VALIDATION (do during the soak): confirm the Metal Toolchain
+# download + `swift test` build of the MLX-linked test target succeed on a hosted
+# Apple-Silicon runner, and tune `runs-on` / timeout / caching to actual cost.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches-ignore:
+      - main   # main is covered by a separate (heavier) gate
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: Unit tier (swift test)
+    runs-on: macos-15   # Apple Silicon; MLX Metal shaders require full Xcode
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select full Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Download Metal Toolchain
+        run: xcodebuild -downloadComponent MetalToolchain
+
+      - name: Build rust-shim (structured-output staticlib)
+        run: ./rust-shim/build.sh
+
+      - name: Unit tests
+        run: ./deploy/test.sh
