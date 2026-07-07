@@ -520,19 +520,13 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             throw AthenaError.modelNotAvailable(
                 requested: name, available: storeModelIds())
         }
-        // Route Qwen3.5 directories to Athena's vendored model so the
-        // substrate stays pristine. Idempotent; must precede the load.
-        // Debug seam: ATHENA_DISABLE_VENDORED_MODEL=1 keeps the substrate's
-        // own Qwen35 (used for the M2.1 deterministic parity A/B).
-        if ProcessInfo.processInfo.environment[
-            "ATHENA_DISABLE_VENDORED_MODEL"] != "1"
-        {
-            // Register the vendored creators (idempotent). The checkpoint
-            // directory is conveyed to them per-load via the `withValue`
-            // binding around `loadModelContainer` below (NC1), not a shared
-            // global — so a concurrent queued convert can't clobber it.
-            await AthenaModelRegistration.install()
-        }
+        // Publication S0 de-vendor: Qwen3.5 loads the substrate's own
+        // `Qwen35Model`/`Qwen35TextModel`/`Qwen35MoEModel` (auto-registered in
+        // `LLMTypeRegistry`), NOT the vendored `AthenaQwen35*`. The fused
+        // in-model MTP head is retired — MTP now rides the substrate's
+        // separate-drafter path (`loadMTPDrafterIfEligible` below), the same
+        // mechanism Gemma 4 uses (ADR 032). TriAttention eviction moved to the
+        // substrate `kvScheme` hook (see `beginGeneration`).
         guard
             FileManager.default.fileExists(
                 atPath: url.appendingPathComponent("config.json").path)
@@ -606,11 +600,18 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         mtpDrafterModel = nil
         mtpDrafterName = nil
         guard params.speculative else { return }
-        // The substrate drafter (`Gemma4AssistantDraftModel`) only drafts for a
-        // Gemma 4 target; gate on the family so a stray map entry can't mis-pair.
-        guard let mt = modelType?.lowercased(), mt.hasPrefix("gemma4") else {
+        guard let mt = modelType?.lowercased() else { return }
+        // Qwen3.5 MTP (publication S0): the fused `mtp.*` head ships inside the
+        // TARGET checkpoint, so the substrate drafter loads from the same
+        // directory — no separate drafter repo / pairing map. Inert when the
+        // checkpoint carries no `mtp.*` weights.
+        if mt.hasPrefix("qwen3_5") {
+            await loadQwen35MTPDrafter(targetName: targetName)
             return
         }
+        // The substrate drafter (`Gemma4AssistantDraftModel`) only drafts for a
+        // Gemma 4 target; gate on the family so a stray map entry can't mis-pair.
+        guard mt.hasPrefix("gemma4") else { return }
         guard
             let drafterId = MTPDrafterPairing.resolve(
                 targetID: targetName, explicit: params.mtpDrafter,
@@ -651,6 +652,39 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                 speculative decoding stays inert.
                 """,
                 metadata: ["function": "loadMTPDrafterIfEligible"])
+        }
+    }
+
+    /// Publication S0 — load the Qwen3.5 MTP drafter from the target's OWN
+    /// checkpoint (the fused `mtp.*` head lives in the same directory; the
+    /// substrate `Qwen35MTPDraftModel.sanitize` picks it out and shares the
+    /// target's embeddings + head). Replaces the retired vendored fused-head
+    /// decode loop with the substrate's separate-drafter path. Best-effort:
+    /// a checkpoint with no `mtp.*` weights, or a load failure, leaves MTP
+    /// inert (single-token) without failing the target load.
+    private func loadQwen35MTPDrafter(targetName: String) async {
+        guard let dir = directoryURL(for: targetName) else { return }
+        // No `mtp.*` in the checkpoint ⇒ nothing to draft with; stay inert.
+        guard MTPCheckpoint.checkpointHasMTP(dir) else { return }
+        do {
+            await Qwen35TextMTPRegistration.register()
+            let loader = #huggingFaceTokenizerLoader()
+            let ctx = try await MTPDrafterModelFactory.shared.load(
+                from: dir.resolvingSymlinksInPath(), using: loader)
+            mtpDrafterModel = DrafterBox(model: ctx.model)
+            mtpDrafterName = targetName
+            Self.log.notice(
+                "MTP drafter (Qwen3.5 fused) loaded target=\(targetName)",
+                metadata: ["function": "loadQwen35MTPDrafter"])
+        } catch {
+            mtpDrafterModel = nil
+            mtpDrafterName = nil
+            Self.log.warning(
+                """
+                Qwen3.5 MTP drafter load failed for '\(targetName)' (\(error)) \
+                — speculative decoding stays inert.
+                """,
+                metadata: ["function": "loadQwen35MTPDrafter"])
         }
     }
 
@@ -1229,7 +1263,6 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         // caches. nil (any non-triattention knob) ⇒ KVCacheSimple. The
         // `sending` UserInput/LMInput are constructed and consumed entirely
         // inside the closure so no non-Sendable value crosses its boundary.
-        let evictionPolicy = params.kvCompression.eviction
         // M24.3: per-request max_tokens/temperature override the loaded
         // defaults (a negative/zero temperature override is ignored).
         let temp =
@@ -1256,15 +1289,17 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         }
         let gp = GenerateParameters(
             maxTokens: Self.effectiveMaxTokens(maxTokens, params.maxTokens),
+            kvScheme: params.kvCompression.kvScheme,
             temperature: temp,
             topP: tp,
             seed: requestSeed)
-        // NF2: the eviction policy is visible to the substrate's eager,
-        // same-Task `newCache` call inside `generate`; the deferred decode
-        // loop never needs it, so binding around this call is sufficient.
-        return try await TriAttentionRequestPolicy.$current.withValue(
-            evictionPolicy
-        ) {
+        // Publication S0 — TriAttention eviction now rides the substrate's
+        // `kvScheme` hook on `gp` (upstream `applyKVScheme` swaps each
+        // `KVCacheSimple` for a `TriAttentionKVCache` when the cache is built
+        // inside `generate`); no task-local, no vendored model. The substrate
+        // deliberately skips eviction on the MTP/speculative path, matching the
+        // old inert-on-MTP behavior.
+        do {
             let userInput = UserInput(
                 chat: Self.chatMessages(messages), tools: tools,
                 additionalContext: chatTemplateKwargs)

@@ -24,7 +24,7 @@ let substrateDep: Package.Dependency =
     ? .package(path: "../mlx/mlx-swift-lm")
     : .package(
         url: "https://github.com/GoodOlClint/mlx-swift-lm.git",
-        revision: "cc9b8d5d12a27928214f00012b92bf10b07d33db")  // integration (#263 continuous batching + Qwen3.5 VLM RMSNorm double-shift fix b01c6b4)
+        revision: "751aaede94982e5597408e01f33dbf6fe33f3cea")  // integration — TriAttention (MLXLMCommon) + Qwen3.5 MTP separate-drafter landed upstream (publication S0 de-vendor)
 let hubDep: Package.Dependency =
     athenaLocalDev
     ? .package(path: "../swift-huggingface")

@@ -93,10 +93,15 @@ final class TriAttentionE2ETests: XCTestCase {
     func testEvictionBoundsCacheAndPopulatedRoundTrip() throws {
         try skipUnlessMLX()
         let prefill = 10
-        let cfg = TriAttentionConfig(
+        // Qualify to the vendored types: the substrate (751aaed) now also
+        // exports `TriAttention*` in MLXLMCommon (imported here), so the bare
+        // names are ambiguous. Publication S0 keeps these vendored tests
+        // pinned to the vendored code until the AthenaModels deletion phase
+        // rewires them to the substrate types.
+        let cfg = AthenaModels.TriAttentionConfig(
             kvBudget: 16, divideLength: 4, scoreAggregation: .mean,
             prefillPin: true)
-        let cache = TriAttentionKVCache(config: cfg)
+        let cache = AthenaModels.TriAttentionKVCache(config: cfg)
         func z(_ n: Int) -> MLXArray {
             MLXArray.zeros([1, 2, n, 8], dtype: .float32)
         }
@@ -141,7 +146,7 @@ final class TriAttentionE2ETests: XCTestCase {
         XCTAssertEqual(state.count, 2)
         XCTAssertEqual(state[0].dim(2), cache.offset)
 
-        let restored = try TriAttentionKVCache.fromState(
+        let restored = try AthenaModels.TriAttentionKVCache.fromState(
             state: state, metaState: cache.metaState)
         XCTAssertEqual(restored.offset, cache.offset)
         XCTAssertEqual(restored.metaState, cache.metaState)

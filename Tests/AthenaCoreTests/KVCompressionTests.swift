@@ -1,7 +1,7 @@
 import XCTest
 
 import AthenaCore  // NB4 (M70.1b): the KVCompression enum + resolve moved here.
-@testable import AthenaLLM  // the MLX-coupled .generation/.eviction/.servesArch extension
+@testable import AthenaLLM  // the MLX-coupled .kvScheme/.servesArch extension
 
 /// The shared `kv_compression` knob: precedence (env > TOML > none),
 /// fail-closed validation, and the eviction seam. Pure logic — no MLX,
@@ -52,9 +52,9 @@ final class KVCompressionTests: XCTestCase {
             .triattention)
     }
 
-    /// The eviction seam is non-nil only for `triattention`.
-    func testEvictionAccessor() {
-        XCTAssertNil(KVCompression.none.eviction)
-        XCTAssertNotNil(KVCompression.triattention.eviction)
+    /// The substrate `kvScheme` seam is non-nil only for `triattention`.
+    func testKVSchemeAccessor() {
+        XCTAssertNil(KVCompression.none.kvScheme)
+        XCTAssertEqual(KVCompression.triattention.kvScheme, "triattention")
     }
 }
