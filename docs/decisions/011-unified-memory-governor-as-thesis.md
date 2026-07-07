@@ -12,6 +12,8 @@
 > contend for the one Metal budget. Read the queue/vectors references below as
 > historical context, not the current tenant set.
 
+> **Amended (2026-07-04, CUDA-port audit):** the thesis is **unified-memory-general, not Metal-specific**. Metal is the Apple instance of unified memory; **CUDA UMA (GB10/DGX Spark, Jetson Thor/Orin) is the same shape**, and the governor ports without bending the thesis because MLX's `CudaAllocator` implements the **identical memory API the governor is built on** (`activeMemory`/`cacheMemory`/`cacheLimit`/`memoryLimit`/`clearCache`) and a GB10-class box is one coherent pool. Read "Metal budget" throughout as "the one unified-memory budget" — "one Metal budget" → "one CUDA budget" on a coherent-pool CUDA box (`docs/cuda-port-audit-2026-07-04.md`). This generalization is **node-local**: heterogeneous **sharding** of a single model across a Metal node and a CUDA node is a separate, harder problem it does **not** imply — that is blocked below the thesis (MLX's backend-homogeneous collectives + the interconnect), see `docs/multi-node-and-embedded-deployment-research.md` §3.7. GH200/GB200's two physical pools do not transfer 1:1 (governor denominator becomes the GPU pool).
+
 ## Context
 
 Triggered by a "build vs. switch" question: with LM Studio installed for vision, the

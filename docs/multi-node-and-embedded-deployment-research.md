@@ -315,6 +315,44 @@ which slot). The current single-number budget has no notion of "this budget is o
 several unequal ones." Memory asymmetry interacts with §3.2: pipeline stage sizing and
 expert placement both want to weight by per-node capacity.
 
+### 3.7 Heterogeneous cross-architecture (CUDA + Metal)
+
+§3.6 covered *Apple-to-Apple* asymmetry. The distinct question — **can one workload span an Apple-Silicon (Metal) node and an NVIDIA (CUDA) node, e.g. a Mac Studio + a DGX Spark** — splits into "run Athena on both" (yes) and "shard one model across both" (impractical today). Facts verified July 2026 (cross-backend research pass + `docs/parallel-inference-supplement-2026-07-04.md` sources).
+
+**The thesis is not the obstruction.** Per `docs/cuda-port-audit-2026-07-04.md`, the governor is unified-memory-general: MLX's `CudaAllocator` exposes the *identical* memory API the governor is built on, and GB10-class boxes are one coherent pool, so **a CUDA-UMA box can be a first-class governed Athena node** ("one Metal budget" → "one CUDA budget"). Heterogeneity *at the node level* (a governed Metal node beside a governed CUDA node) is therefore thesis-consistent, not a compromise (see the ADR 011 2026-07-04 amendment).
+
+**Single-model sharding across the two is blocked below the thesis, at two layers.** First, the runtime:
+
+| Path | Spans Metal+CUDA for one model? | Note |
+|---|---|---|
+| MLX `distributed` (ring/JACCL/NCCL) | **No** | Collectives are backend-homogeneous — ring/JACCL = Apple-only, NCCL = CUDA-only; `ring` hangs on the CUDA backend. No mixed-backend job even with MLX on both ends. |
+| mlx-swift distributed | **No — absent** | Swift side is single-device; distributed is Python/C++ only (PR #371 unmerged). Athena's route can't do multi-node at all yet. |
+| exo v1 | **No** | The v1 rewrite is MLX-only; the NVIDIA/tinygrad backend was dropped (old multi-runtime exo is archived). |
+| vLLM / TensorRT-LLM | **No** | CUDA-native; no mixed-vendor single-model cluster. |
+| **llama.cpp RPC (ggml)** | **Yes — the only working path** | Op-routing across CUDA+Metal backends over TCP; officially "fragile/insecure." **Forfeits the governor** (foreign allocator, no one-pool accounting — the ADR 011 tier not worth building). |
+
+Second, the interconnect. **No RDMA bridges a Mac and a Spark** (Apple's Thunderbolt-RDMA is Apple-only/proprietary; the Spark's ConnectX RoCE has no macOS driver). Realistic links are 10GbE (~9.4 Gb/s) or IP-over-USB4 (~10–20 Gb/s, untested for this pair) — plain TCP. That confines any cross-box scheme to **pipeline parallelism** (activation/KV passing at stage boundaries), never tensor parallelism (per-layer all-reduce needs RDMA-class bandwidth). Field evidence on exactly this hardware (M2 Ultra Metal + DGX Spark GB10 CUDA, 10GbE, llama.cpp RPC, Qwen2.5-72B): prefill speeds up (~4.2× on a 7B) but **decode roughly halves** (~16 ms/token per-layer round-trip). The maxim: "RPC is for capacity, not speed."
+
+**The two Athena-fit heterogeneous patterns** — both node-level, both above the `InferenceModule` seam, both governor-consistent:
+
+- **Replica + router** (§3.2 replica strategy): each box a full governed node; route by strength — big-batch / prefill-heavy → the DGX, low-latency / audio / governed-multi-tenant → the Mac. Zero inference-layer surgery.
+- **Prefill/decode disaggregation** (the real exo DGX+Mac demo — ~2.8× vs Mac-alone; *not* layer-sharding): prefill on the DGX (compute-bound → its FP4 tensor cores win), decode on the Mac (bandwidth-bound → its ~2× bandwidth wins), KV streamed **once** at the phase boundary (tolerant of 10GbE). Maps onto the roofline in `docs/parallel-inference-supplement-2026-07-04.md`. Needs a cross-engine KV wire format (Athena-MLX ↔ remote KV layouts differ) and is still a brownfield subsystem, but it cooperates at the HTTP/KV boundary — two governed daemons, not surgery below the seam.
+
+**Net for Area 1:** porting Athena to CUDA-UMA (its own research track) makes a DGX a governed node and unlocks the two node-level patterns; **true single-model sharding across Metal+CUDA stays impractical** (no cross-backend MLX collective, no RDMA link), and the only working path (llama.cpp RPC) forfeits the governor. GH200/GB200's two-pool topology is a further caveat (`docs/cuda-port-audit-2026-07-04.md` platform table).
+
+**If we wanted true sharding anyway: what the MLX change would be.** "The llama.cpp-RPC capacity hack" is two ggml mechanisms — an automatic graph-partitioning scheduler (`ggml_backend_sched`: assigns each op to a backend + inserts cross-backend copies) and a thin **RPC backend** that makes a remote device look like one more local backend. The magic is the scheduler; the RPC part is a pass-through. MLX has **no** such auto-partitioning scheduler — its distributed model is explicit SPMD (the model is *written* pipeline-sharded, with `mx.distributed.send`/`recv_like` wrapping layer-range boundaries; the ring backend restricts send/recv to neighbors, which is the pipeline shape). Three ways to get cross-backend sharding, by fit:
+
+- **(A) Literal ggml analog — a graph scheduler + remote-device backend in MLX core.** Rebuilds `ggml_backend_sched` + a remote `Device`/`Stream` + op/graph serialization + `eval_remote` inside MLX. **Large core surgery, against MLX's grain** (MLX chose explicit-SPMD over implicit placement). Not the path.
+- **(B) Backend-neutral point-to-point transport in `mlx.distributed` — the realistic one.** MLX *already* does pipeline parallelism via neighbor send/recv; the only blocker for a Metal+CUDA pipeline is that the transports are backend-homogeneous (ring/JACCL = Apple, NCCL = CUDA; `ring` hangs on CUDA). The fix is a transport that, on `send`, copies the boundary activation device→host on the sender's backend and writes TCP bytes; on `recv`, reads bytes and uploads host→device on the receiver's backend — agnostic to each rank's backend, because each rank runs a normal local `eval()` and only the *activation vector* crosses the wire. No scheduler, no remote primitive, no op serialization. Rides an active upstream seam (MLX issue #3205, backend collective parity). This is the ADR-028 substrate-first contribution — push it into MLX, don't hand-roll. Needs: mixed-backend `init`, seam-numerics agreement (only the hidden-state crosses → small surface), a pipeline-sharded model, and — for Athena — the mlx-swift distributed support that doesn't exist yet (PR #371).
+- **(C) Athena-layer pipeline (no MLX change).** Two Athena daemons, each a governed node loading a layer *range*, handing off hidden-states over HTTP/gRPC at the boundary. Keeps each governor intact; needs partial-layer model load (a layer range — not exposed in mlx-swift-lm today), a hidden-state wire format, and Athena orchestration. Fallback if upstream won't take (B).
+
+**Invariant across A/B/C:** capacity, not speed. None moves the interconnect wall — 10GbE/USB4 TCP, no RDMA between a Mac and a Spark — so every stage boundary is a network hop and decode (token-by-token) pays a per-token round-trip (the ~halved decode observed). Building it in MLX doesn't change that.
+
+**Deployment economics (why one might still want it — and why mostly not).** The realistic operator case is a **48 GB M4 Mac Studio + a ~$4,000 128 GB GB10 box** (DGX Spark / ASUS Ascent GX10 — commodity, multi-vendor, 128 GB unified at ~$4k, 200B-param-at-FP4 class). Two facts bound the ROI:
+- **The GB10 alone (128 GB) already out-RAMs the Studio (48 GB) by ~2.7×.** So the budget-driven *capacity* win is captured by **porting Athena to the GB10 and running big models on it solo** — no cluster, no sharding, no interconnect penalty. Clustering the pair adds capacity only for a model **larger than 128 GB**, where the 48 GB Mac is a weak partner (~27% of pooled RAM) that also drags decode to the slow-link speed.
+- **The Studio's value in that pairing is bandwidth, not capacity** (~546 GB/s vs the GB10's ~273 → the Mac is the faster *decoder*). So the economically-rational topology is not one sharded model but **replica + role-split**: big models / prefill-heavy / high-concurrency on the cheap-RAM GB10; latency-sensitive decode, audio, and governed multi-tenant on the Mac — §3.2 replica + the prefill/decode disaggregation pattern, both needing **zero** cross-backend sharding.
+- **Long-term price:** GB10-class is multi-vendor commodity competing on capacity-per-dollar; Apple is single-vendor and its RAM curve steepens past 128 GB (M3 Ultra territory for 256–512 GB). "GB10 is cheaper capacity long-term" is a reasonable planning assumption — but it argues for **GB10-as-the-big-model-node (the port)**, not for the cluster. True single-model sharding earns its cost only for the narrow "one model >128 GB *and* I insist on pooling the 48 GB box in" case.
+
 ---
 
 ## 4. Relevant prior art — multi-node
