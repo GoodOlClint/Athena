@@ -1,0 +1,89 @@
+Athena
+Copyright 2026 Clint Branham
+
+This product includes software developed by Clint Branham and contributors,
+licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Athena is developed primarily by autonomous AI agents (Anthropic's Claude)
+under human direction; see README for the authorship disclosure.
+
+================================================================================
+Third-party components — vendored or ported into this repository
+================================================================================
+
+The following third-party code is copied into, or ported/adapted within, this
+source tree. Each retains its upstream license; the notices below are provided
+per Section 4(d) of the Apache License. Where a file is a derivative work, its
+source header names the upstream and the modifications made.
+
+--------------------------------------------------------------------------------
+Database engine
+--------------------------------------------------------------------------------
+
+SQLCipher (vendored amalgamation, Sources/CSQLCipher/)
+  Copyright (c) Zetetic LLC. Licensed under a BSD-style license (see the header
+  of Sources/CSQLCipher/sqlite3.c). SQLCipher adds an AES-256 codec to SQLite.
+  https://www.zetetic.net/sqlcipher/
+
+SQLite (embedded within the SQLCipher amalgamation)
+  Public domain. https://www.sqlite.org/copyright.html
+
+--------------------------------------------------------------------------------
+Speech: transcription, diarization, speaker embeddings (Sources/AthenaTranscription/)
+--------------------------------------------------------------------------------
+
+Whisper (architecture; Athena-authored MLX implementation)
+  Copyright (c) OpenAI. MIT License. https://github.com/openai/whisper
+
+Parakeet-TDT (NVIDIA; Athena-authored MLX-Swift port)
+  NVIDIA NeMo. Apache License 2.0. https://github.com/NVIDIA/NeMo
+  Model: NVIDIA Parakeet-TDT-0.6B-v3.
+
+Sortformer diarization (Sources/AthenaTranscription/Sortformer/)
+  Vendored from Blaizzy/mlx-audio-swift (MIT License), which ports the NVIDIA
+  NeMo Sortformer model (Apache License 2.0).
+  https://github.com/Blaizzy/mlx-audio  •  https://github.com/NVIDIA/NeMo
+
+pyannote PyanNet speaker segmentation (Sources/AthenaTranscription/Pyannote/)
+  Athena-native MLX port. Model structure adapted from soniqo/speech-swift
+  (Apache License 2.0); weights from aufklarer/Pyannote-Segmentation-MLX
+  (MIT License). Upstream: pyannote.audio (MIT License).
+  https://github.com/pyannote/pyannote-audio
+
+WeSpeaker speaker embeddings (Sources/AthenaTranscription/WeSpeaker/)
+  Vendored from soniqo/speech-swift (Apache License 2.0). Implements the
+  WeSpeaker ResNet34-LM model from wenet-e2e/wespeaker (Apache License 2.0).
+  https://github.com/wenet-e2e/wespeaker
+
+--------------------------------------------------------------------------------
+Language models (Sources/AthenaModels/)
+--------------------------------------------------------------------------------
+
+Qwen3.5, Qwen3.5-MoE, GatedDelta, Qwen3-Next helpers
+  Ported from ml-explore/mlx-lm (MIT License) and vendored from the mlx-swift-lm
+  substrate. https://github.com/ml-explore/mlx-lm
+
+TriAttention (Sources/AthenaModels/TriAttention/)
+  Reference implementation WeianMao/triattention; MLX port by @DeadByDawn101.
+  MIT License.
+
+--------------------------------------------------------------------------------
+Structured-output shim (rust-shim/) — build dependencies
+--------------------------------------------------------------------------------
+
+llguidance and toktrie (guidance-ai)
+  Grammar-constrained decoding engine. See https://github.com/guidance-ai/llguidance
+  for license terms. Linked as Cargo dependencies (not vendored); see
+  rust-shim/Cargo.toml and rust-shim/Cargo.lock.
+
+serde_json — MIT/Apache-2.0 dual-licensed. https://github.com/serde-rs/json
+
+================================================================================
+Build/runtime dependencies resolved via SwiftPM (not vendored)
+================================================================================
+
+Athena links, but does not copy, a number of Swift packages (MLX / mlx-swift-lm,
+swift-transformers, swift-huggingface, Hummingbird, swift-nio, swift-crypto,
+swift-argument-parser, swift-log, swift-service-lifecycle, AppleSiliconMetrics).
+Each is fetched at build time and carries its own license; see Package.swift and
+Package.resolved for the exact set and pinned revisions.
