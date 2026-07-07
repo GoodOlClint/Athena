@@ -35,12 +35,21 @@ Two things in this repository reflect that:
 This disclosure keeps the history honest: the timestamps and the volume
 are a property of how the software is made, not an anomaly.
 
-## Two HTTP dialects
+## Three API surfaces, one engine
+
+Athena serves multiple API dialects as thin protocol adapters over a
+single inference engine — pick whichever your tooling already speaks:
 
 | Surface | Shape | Use it for |
 | --- | --- | --- |
 | `/v1/*` | OpenAI-compatible | Drop-in for OpenAI SDKs and existing tooling |
-| `/api/*` | Athena's own minimal dialect | Native clients, model-store + RBAC admin |
+| `POST /v1/messages` | Anthropic-compatible | Drop-in for Anthropic SDKs and Claude Code ([docs/claude-code.md](docs/claude-code.md)) |
+| `/api/*` | Athena native | Daemon **control plane**: model store + lifecycle, RBAC, config, audit/usage/logs — not inference |
+
+A few `/v1/*` routes are Athena-native extensions with no OpenAI
+equivalent (video transcription, diarization, speaker embeddings) —
+**[docs/api-surface.md](docs/api-surface.md)** lists exactly which
+endpoints are drop-in compatible and which are extensions.
 
 Every endpoint is described in a machine-readable **OpenAPI 3.0.3**
 document the daemon serves at **`GET /openapi.json`** (always open, no
@@ -56,10 +65,15 @@ All errors share one envelope:
 ## Capabilities
 
 - **Chat** — `POST /v1/chat/completions` (streaming SSE, tool calls,
-  JSON-schema structured output, `stop`/`seed`/`top_p`).
+  JSON-schema structured output, vision/image input,
+  `stop`/`seed`/`top_p`) and the Anthropic-compatible
+  `POST /v1/messages` (streaming, tools, system prompts — verified
+  end-to-end with real Claude Code).
 - **Embeddings** — `POST /v1/embeddings`.
 - **Audio** — transcription (`/v1/audio/transcriptions`, with word
   timestamps + SRT/VTT), diarization, and speaker embeddings.
+- **Video** — `POST /v1/video/transcriptions` demuxes a video's audio
+  track and transcribes it.
 - **Model lifecycle** — `POST /api/models/{pull,convert,prune}` run
   synchronously and stream Server-Sent Events progress (ADR 025).
 - **RBAC** — token → user → roles, managed over `/api/*` or the WebUI.
@@ -108,6 +122,8 @@ default.
 
 - **[Quickstart](docs/quickstart.md)** — install → seed admin → first
   curl → WebUI → TLS.
+- **[API surface](docs/api-surface.md)** — every endpoint, tagged
+  OpenAI-compatible / Anthropic-compatible / Athena-native.
 - **[Reverse proxy](docs/reverse-proxy.md)** — front Athena with
   nginx/Caddy for managed TLS.
 - **`GET /openapi.json`** — the live, machine-readable API reference.
