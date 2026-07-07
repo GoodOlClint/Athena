@@ -143,7 +143,7 @@ extension AthenaServer {
             """
             transcription done segments=\(result.segments.count) \
             audio_secs=\(String(format: "%.1f", result.duration)) \
-            lang=\(result.language ?? "auto") words=\(wantWords) \
+            lang=\(result.language) words=\(wantWords) \
             elapsed_ms=\(Self.elapsedMs(t0))
             """)
 
@@ -357,7 +357,7 @@ extension AthenaServer {
             """
             video transcription done segments=\(result.segments.count) \
             audio_secs=\(String(format: "%.1f", result.duration)) \
-            lang=\(result.language ?? "auto") words=\(wantWords) \
+            lang=\(result.language) words=\(wantWords) \
             elapsed_ms=\(Self.elapsedMs(t0))
             """)
 
