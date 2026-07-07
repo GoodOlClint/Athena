@@ -120,3 +120,7 @@ curl http://127.0.0.1:7447/openapi.json  # self-describing surface
 ```
 
 For production install (boot-time launchd, TLS, bearer auth, WebUI), see `docs/quickstart.md`.
+
+## Versioning (ADR 040 S8 — in force since v0.11.0)
+
+**Versions are release events, not commit events.** `Athena.appVersion` (`Sources/athena/Athena.swift`, SSOT — also stamped into `/openapi.json`) bumps only when a release is cut: **patch** = fix-only release, **minor** = feature release, **major/1.0** = operator-reserved. Slices land as plain commits with NO version bump and NO per-slice tag (the pre-publication bump-every-slice ritual is retired). Annotated `v*` tags mark releases and drive the release pipeline. Do not bump `appVersion` in a feature commit — bump it in the release commit the operator approves (`/ship`).
