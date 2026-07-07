@@ -19,7 +19,7 @@ triggers, transparent L2 (named-snapshot surface dropped on review).
 The M59 prompt-prefix cache (`PrefixKVCache`) lives **in RAM only** and is lost on
 restart ([PrefixKVCache.swift](../../Sources/AthenaLLM/PrefixKVCache.swift)). M59.5
 (disk persistence) was **deferred** for three reasons
-([docs/m59-prompt-prefix-cache.md](../m59-prompt-prefix-cache.md) §M59.5):
+(`docs/m59-prompt-prefix-cache.md` (internal repo) §M59.5):
 
 1. **No serializer existed** — *now obsolete:* ADR 024 T3 shipped `KVFrame`
    (MLX-free wire format) + `KVByteCodec` (`[MLXArray] ↔ Data`, bit-preserving)

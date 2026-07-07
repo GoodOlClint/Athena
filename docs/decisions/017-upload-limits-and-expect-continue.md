@@ -141,5 +141,5 @@ its cap — surfaced in `/openapi.json`.**
 
 ## Plan
 
-See [`docs/upload-limits-plan.md`](../upload-limits-plan.md) — staged, test-pinned slices with
+See `docs/upload-limits-plan.md` (internal repo) — staged, test-pinned slices with
 `appVersion` bumped in each slice commit (house style).

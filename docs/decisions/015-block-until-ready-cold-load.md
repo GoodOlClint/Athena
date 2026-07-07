@@ -106,5 +106,5 @@ failure.** This is the new default behavior, configurable off.
 
 ## Plan
 
-See [`docs/cold-load-blocking-plan.md`](../cold-load-blocking-plan.md) — staged, test-pinned
+See `docs/cold-load-blocking-plan.md` (internal repo) — staged, test-pinned
 slices, appVersion bumped in each slice commit.

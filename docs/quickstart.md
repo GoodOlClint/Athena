@@ -105,15 +105,7 @@ curl http://127.0.0.1:7447/v1/chat/completions \
   }'
 ```
 
-Add `"stream": true` for an SSE stream terminated by `data: [DONE]`. The
-native dialect is the same idea with a leaner shape:
-
-```sh
-curl http://127.0.0.1:7447/api/chat \
-  -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{ "messages": [{ "role": "user", "content": "Hello" }] }'
-```
+Add `"stream": true` for an SSE stream terminated by `data: [DONE]`.
 
 The CLI wraps all of this — `athena run <model> "your prompt"` against a
 running daemon, local or remote.

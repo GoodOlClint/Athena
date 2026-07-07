@@ -13,6 +13,28 @@ Diagnostic logs land in the macOS unified log (subsystem `athena`);
 off-box shipping is an operator concern — see [docs/logging.md](docs/logging.md)
 and [docs/logging-shipping.md](docs/logging-shipping.md).
 
+## How Athena is built
+
+Athena is developed primarily by autonomous AI agents (Anthropic's
+Claude) working under human direction. A human operator sets the goals,
+reviews every change, and gates all architecturally significant
+decisions — but most of the design exploration, implementation, and
+documentation is authored by agents across many sessions.
+
+Two things in this repository reflect that:
+
+- **The decision trail.** Every significant architectural choice is
+  recorded as an ADR under [docs/decisions/](docs/decisions/), and
+  changes land in small, test-pinned slices. The ADRs are how a human
+  governs an agent-authored codebase — load-bearing, not ceremonial.
+- **The commit timeline.** Commits land whenever agent sessions run,
+  not on one person's schedule — expect a distribution spanning
+  business hours and a long overnight tail. `Co-Authored-By` trailers
+  mark agent-authored commits.
+
+This disclosure keeps the history honest: the timestamps and the volume
+are a property of how the software is made, not an anomaly.
+
 ## Two HTTP dialects
 
 | Surface | Shape | Use it for |
