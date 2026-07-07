@@ -1,15 +1,6 @@
 {
-  "originHash" : "3d58fc523aa9a4400169e074bfbd31959be3a84f73cbef61a107fbaf7a2d92dc",
+  "originHash" : "f2f40f72a9035578cc2a49d17e10507f3efc7bf7bdc140fa4cd2d19786192f9e",
   "pins" : [
-    {
-      "identity" : "applesiliconmetrics",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/GoodOlClint/AppleSiliconMetrics.git",
-      "state" : {
-        "revision" : "74a6960db91ba96b3d1eed324d347d5f0a80b4d5",
-        "version" : "0.1.0"
-      }
-    },
     {
       "identity" : "async-http-client",
       "kind" : "remoteSourceControl",
@@ -267,6 +258,15 @@
       "state" : {
         "revision" : "9829955b385e5bb88128b73f1b8389e9b9c3191a",
         "version" : "2.11.0"
+      }
+    },
+    {
+      "identity" : "swift-soc-metrics",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/GoodOlClint/swift-soc-metrics.git",
+      "state" : {
+        "revision" : "e1a5fc4b1d9edd196409e1878da464b036a1584f",
+        "version" : "0.4.0"
       }
     },
     {

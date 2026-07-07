@@ -1079,9 +1079,9 @@ struct Load: AsyncParsableCommand {
         }
         defer { powerAssertion.release() }
         server.powerAssertionHeld = powerAssertion.isHeld
-        // M60.3 — sudoless GPU-clock telemetry on /healthz (IOReport via the
-        // AppleSiliconMetrics package). Background-sampled, nil-safe: if
-        // IOReport is unavailable the fields are simply omitted.
+        // M60.3 — sudoless GPU clock + die-temperature telemetry on /healthz
+        // (via the swift-soc-metrics `SoCMetrics` module). Background-sampled,
+        // nil-safe: if a signal is unavailable that field is simply omitted.
         let gpuProbe = GPUTelemetryProbe()
         server.gpuProbe = gpuProbe
         if gpuProbe.isAvailable {

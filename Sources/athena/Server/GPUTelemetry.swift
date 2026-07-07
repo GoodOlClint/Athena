@@ -1,8 +1,9 @@
-import AppleSiliconMetrics
 import Foundation
+import SoCMetrics
 
-/// M60.3 — sudoless GPU clock telemetry for `/healthz`, via the
-/// `AppleSiliconMetrics` package (IOReport, no root, no subprocess).
+/// M60.3 — sudoless GPU clock + die-temperature telemetry for `/healthz`, via
+/// the `swift-soc-metrics` package's `SoCMetrics` module (IOReport for clock/
+/// residency, SMC for temperature; no root, no subprocess).
 ///
 /// A single `SoCSampler` holds one IOReport subscription for the daemon's
 /// lifetime. A detached background thread refreshes a cached reading ~1 Hz so
@@ -19,6 +20,7 @@ final class GPUTelemetryProbe: @unchecked Sendable {
     private let lock = NSLock()
     private var cachedMHz: Double?
     private var cachedActive: Double?
+    private var cachedTempC: Double?
     private let sampler: SoCSampler?
 
     /// Refresh cadence and per-sample window. 0.1 s of sampling once per
@@ -34,9 +36,9 @@ final class GPUTelemetryProbe: @unchecked Sendable {
 
     /// Most recent cached reading. `(nil, nil)` until the first sample lands or
     /// when GPU telemetry is unavailable.
-    var current: (mhz: Double?, activeResidency: Double?) {
+    var current: (mhz: Double?, activeResidency: Double?, temperatureC: Double?) {
         lock.lock(); defer { lock.unlock() }
-        return (cachedMHz, cachedActive)
+        return (cachedMHz, cachedActive, cachedTempC)
     }
 
     /// Whether GPU telemetry is available on this host (the sampler opened).
@@ -49,6 +51,7 @@ final class GPUTelemetryProbe: @unchecked Sendable {
                 self.lock.lock()
                 self.cachedMHz = s.gpuFrequencyMHz
                 self.cachedActive = s.gpuActiveResidency
+                self.cachedTempC = s.gpuTemperatureC
                 self.lock.unlock()
                 Thread.sleep(forTimeInterval: Self.refreshInterval)
             }

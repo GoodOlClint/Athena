@@ -119,11 +119,12 @@ let package = Package(
         // `hubDep`. Revert to the upstream `url:` dep + a version bump once
         // PR #50 merges.
         hubDep,
-        // M60.3 — sudoless Apple Silicon GPU clock via IOReport (the
-        // in-process replacement for a root `powermetrics` subprocess).
+        // M60.3 — sudoless Apple Silicon GPU clock + die temperature via
+        // IOReport/SMC (the in-process replacement for a root `powermetrics`
+        // subprocess). Renamed from AppleSiliconMetrics; product `SoCMetrics`.
         .package(
-            url: "https://github.com/GoodOlClint/AppleSiliconMetrics.git",
-            from: "0.1.0"),
+            url: "https://github.com/GoodOlClint/swift-soc-metrics.git",
+            from: "0.4.0"),
     ],
     targets: [
         // The memory governor + module protocol. This is the thesis
@@ -364,8 +365,8 @@ let package = Package(
                     name: "ServiceLifecycle",
                     package: "swift-service-lifecycle"),
                 .product(
-                    name: "AppleSiliconMetrics",
-                    package: "AppleSiliconMetrics"),
+                    name: "SoCMetrics",
+                    package: "swift-soc-metrics"),
             ],
             path: "Sources/athena",
             linkerSettings: [

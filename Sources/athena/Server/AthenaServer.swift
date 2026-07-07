@@ -188,7 +188,7 @@ struct AthenaServer {
                 }
             }
             let (inflight, lastAt, decodeTps) = await metrics.healthFields()
-            let gpu = gpuProbe?.current ?? (mhz: nil, activeResidency: nil)
+            let gpu = gpuProbe?.current ?? (mhz: nil, activeResidency: nil, temperatureC: nil)
             let gate = await InferenceGate.shared.stats()
             return Self.json(
                 HealthResponse(
@@ -200,7 +200,8 @@ struct AthenaServer {
                     powerAssertionHeld: powerAssertionHeld,
                     gate: gate,
                     gpuClockMHz: gpu.mhz,
-                    gpuActiveResidency: gpu.activeResidency))
+                    gpuActiveResidency: gpu.activeResidency,
+                    gpuTemperatureC: gpu.temperatureC))
         }
 
         router.get("/metrics") { request, _ -> Response in
@@ -1237,6 +1238,11 @@ struct HealthResponse: Encodable {
     /// M60.3 — fraction of the recent window the GPU was active (`0...1`), or
     /// `null` when unavailable.
     let gpuActiveResidency: Double?
+    /// M60.3 — GPU die temperature in °C (mean of the SMC `Tg…` sensors), or
+    /// `null` when unavailable (e.g. a chip that exposes no GPU-temp channel).
+    /// Complements `thermalState`: an absolute °C reading alongside the OS's
+    /// coarse throttle label.
+    let gpuTemperatureC: Double?
     let modules: [ModuleHealth]
     let inflight: Int
     let lastRequestAt: Double
@@ -1275,7 +1281,8 @@ struct HealthResponse: Encodable {
         lastRequestAt: Double,
         lastDecodeTokensPerSec: Double, powerAssertionHeld: Bool,
         gate: InferenceGate.GateStats,
-        gpuClockMHz: Double? = nil, gpuActiveResidency: Double? = nil
+        gpuClockMHz: Double? = nil, gpuActiveResidency: Double? = nil,
+        gpuTemperatureC: Double? = nil
     ) {
         self.totalBudgetBytes = snapshot.totalBudgetBytes
         self.residentBytes = snapshot.residentBytes
@@ -1290,6 +1297,7 @@ struct HealthResponse: Encodable {
         self.powerAssertionHeld = powerAssertionHeld
         self.gpuClockMHz = gpuClockMHz
         self.gpuActiveResidency = gpuActiveResidency
+        self.gpuTemperatureC = gpuTemperatureC
         self.mlxActiveBytes = MLX.Memory.activeMemory
         self.mlxCacheBytes = MLX.Memory.cacheMemory
         self.mlxCacheLimitBytes = MLX.Memory.cacheLimit
