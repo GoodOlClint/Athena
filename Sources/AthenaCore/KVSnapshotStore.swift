@@ -33,7 +33,7 @@ public struct KVSnapshotStore {
     // MARK: - Addressing
 
     /// `<hex(prefixHash)>.kvs` — content-addressed, so a byte-prefix hit maps
-    /// straight to its file (the downstream client's SHA1-of-prefix scheme).
+    /// straight to its file (a SHA1-of-prefix scheme).
     public func fileURL(forPrefixHash prefixHash: Data) -> URL {
         directory.appendingPathComponent(
             "\(Self.hex(prefixHash)).\(Self.fileExtension)")

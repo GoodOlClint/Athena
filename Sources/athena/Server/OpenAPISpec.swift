@@ -25,7 +25,7 @@ enum OpenAPISpec {
           "openapi": "3.0.3",
           "info": {
             "title": "Athena",
-            "summary": "Project the platform inference appliance (passive oracle).",
+            "summary": "Athena inference appliance (passive oracle).",
             "description": "Athena is a single native macOS/MLX daemon that hosts LLM chat, embeddings, and audio/video transcription/diarization behind one Metal memory governor. It is a **passive oracle**: the daemon answers inbound requests only and never initiates outbound connections (except fetching model weights and an opt-in remote-syslog sink). Anything a client needs is delivered by pull / long-poll / SSE — there are no result or billing webhooks.\n\nTwo HTTP dialects are served:\n- `/v1/*` — OpenAI-compatible (drop-in for OpenAI SDKs).\n- `/api/*` — Athena's own minimal native dialect.\n\nAll errors share the envelope `{\"error\":{\"message\",\"type\",\"code\"}}`. Authentication is a bearer token (`Authorization: Bearer <token>`); each route requires a single RBAC permission. When auth is disabled (loopback, no seeded users) every route is open.",
             "version": "\#(version)",
             "license": { "name": "Proprietary" }

@@ -5,7 +5,7 @@ import MLXLMCommon
 import MLXNN
 
 // Multi-Token-Prediction (MTP) head for Qwen3.5 speculative decoding,
-// ported from the GoodOlClint/mlx-lm `the consuming application-patches` fork
+// ported from the GoodOlClint/mlx-lm `MTP-patches` fork
 // (mlx_lm/models/qwen3_5.py MTPModule 292–352) — technique only.
 //
 // M2.2a built structure + weight binding; the draft/verify/accept loop

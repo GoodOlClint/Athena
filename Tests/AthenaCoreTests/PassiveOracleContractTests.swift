@@ -3,7 +3,7 @@ import XCTest
 
 @testable import AthenaCore
 
-/// The the platform passive-oracle contract is Athena's security model, so it is
+/// The passive-oracle contract is Athena's security model, so it is
 /// asserted in code rather than left to documentation. These guard the
 /// architectural defaults; later milestones extend the suite (no on-disk
 /// persistence of request inputs, no Crete-initiated connections except

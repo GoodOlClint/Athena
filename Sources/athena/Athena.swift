@@ -1,7 +1,7 @@
 import ArgumentParser
 import AthenaClient
 
-/// `athena` — the Project the platform inference appliance: one unified CLI.
+/// `athena` — the Athena inference appliance: one unified CLI.
 /// On macOS it carries everything — local daemon lifecycle
 /// (`load`/`start`/`stop`/`status`), Apple-host operator ops
 /// (`install`/`pull`/`convert`/…), and the HTTP client verbs
@@ -14,12 +14,12 @@ struct Athena: AsyncParsableCommand {
     /// Single source of the daemon version — also stamped into the
     /// served OpenAPI document (`info.version`) so the spec can never
     /// report a version other than the build that serves it.
-    static let appVersion = "0.10.268"
+    static let appVersion = "0.10.269"
 
     static let configuration = CommandConfiguration(
         commandName: "athena",
         abstract:
-            "Project the platform inference appliance (passive oracle).",
+            "Athena inference appliance (passive oracle).",
         version: Athena.appVersion,
         subcommands: [
             Load.self, Init.self, Install.self, ListModels.self, Ps.self,

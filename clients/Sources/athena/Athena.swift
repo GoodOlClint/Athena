@@ -1,7 +1,7 @@
 import ArgumentParser
 import AthenaClient
 
-/// `athena` — the portable Project the platform client (Linux/Windows, and
+/// `athena` — the portable Athena client (Linux/Windows, and
 /// the macOS client subset). Same command everywhere; this build
 /// carries only the verbs that work against a (local or remote)
 /// daemon over HTTP. There is no local daemon to manage off-Apple,
@@ -12,7 +12,7 @@ struct Athena: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "athena",
         abstract:
-            "Project the platform client — remote inference, model store, "
+            "Athena client — remote inference, model store, "
             + "and RBAC admin over a daemon's HTTP API.",
         version: "0.10.48",
         subcommands: [

@@ -355,7 +355,7 @@ Do **not** encrypt the KV blob directly under a persisted key (that path is the
   future cluster wraps the DEK **once per peer** (ECIES to each node's SEP *public*
   key — multi-recipient), or re-wraps online when a node joins. **No SEP key ever
   leaves any chip**, and the blob is **not hardware-locked-forever** — provided the
-  DEK/KEK split exists now. (Research: `docs/the downstream client-ssd-streaming-and-kv-snapshot-research.md`
+  DEK/KEK split exists now. (Research: internal SSD-streaming / KV-snapshot notes
   §3a.1.)
 
 ### New at-rest secret class — threat notes

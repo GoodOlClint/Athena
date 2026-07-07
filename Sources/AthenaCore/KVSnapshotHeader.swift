@@ -43,7 +43,7 @@ public struct KVSnapshotHeader: Equatable, Sendable {
     /// Magic prefix — rejects a truncated / foreign / corrupt file up front.
     static let magic = Data("ATHN-KVS".utf8)
 
-    /// Why this snapshot was written (the downstream client-style provenance, ADR 027 §5).
+    /// Why this snapshot was written (versioned-snapshot provenance, ADR 027 §5).
     public enum SaveReason: UInt8, Equatable, Sendable {
         case cold = 1        // long prompt reached a stable prefix
         case continued = 2   // a frontier save during a long session

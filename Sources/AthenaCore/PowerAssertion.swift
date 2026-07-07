@@ -9,7 +9,7 @@ import IOKit.pwr_mgt
 /// SUSPENDS in-flight inference.
 ///
 /// ## Why this exists (the root cause it fixes)
-/// Investigated 2026-06-02: the consuming application saw the LLM "crater"/"freeze" on a
+/// Investigated 2026-06-02: a downstream client saw the LLM "crater"/"freeze" on a
 /// second back-to-back eval run left unattended overnight. It was NOT a
 /// daemon bug, thermal throttle, or memory leak. Athena held **no** power
 /// assertion, so when the laptop was left alone the display slept, `powerd`

@@ -1,7 +1,7 @@
 // swift-tools-version: 6.1
 import PackageDescription
 
-// Athena — the AI inference substrate of Project the platform.
+// Athena — a self-hosted AI inference substrate.
 // One native binary hosting LLM + transcription + embeddings under a single
 // Metal/MLX memory governor. M1 wires the real MLX-backed LLM module on top
 // of the local mlx-swift-lm substrate clone (a SwiftPM path dependency); the

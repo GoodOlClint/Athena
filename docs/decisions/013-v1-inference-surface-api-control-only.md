@@ -62,10 +62,10 @@ slice commit):
   has no in-repo caller.
 - **(c) `/api/chat` → deprecate.** Mark `deprecated: true`; keep serving through the sunset.
 - **(d) removal (breaking).** The external-consumer gate is **cleared** (2026-06-17):
-  the platform does not consume Athena yet, and the consuming application — the one external consumer that
+  No first-party product consumes Athena yet, and the downstream client — the one external consumer that
   does — will handle its own migration to `/v1`. So removal is no longer blocked on a
   consumer audit; it lands as its own ratified, breaking slice once the deprecation period
-  has given the consuming application time to migrate, with a version bump the operator chooses.
+  has given the downstream client time to migrate, with a version bump the operator chooses.
 
 The **control** plane stays and keeps growing — it is the governor/multi-tenant moat surface.
 
@@ -163,8 +163,8 @@ fiction). Recorded here so it isn't re-litigated; not a build-now.
   M71 vision and the deferred M72 audio were/are `/v1`-only.
 - **Control plane unaffected and affirmed** as the moat surface.
 - **`athena run` gains a tiny coupling to `/v1`** — acceptable; it's the OpenAI-standard path.
-- **Removal is breaking** but the external-consumer gate is **cleared** (the platform N/A;
-  the consuming application self-migrates) — it lands after the deprecation period gives the consuming application
+- **Removal is breaking** but the external-consumer gate is **cleared** (no first-party consumer;
+  the downstream client self-migrates) — it lands after the deprecation period gives the downstream client
   time to move. Deprecation (steps a–c) is non-breaking and safe to land now.
 - **Drift-guard** (spec↔routes) must stay green across every `deprecated:`/schema edit.
 - **`diarized_json` + `logprobs` + the issue-#4 400 reclassification** are additive/behavioural

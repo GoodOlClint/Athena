@@ -10,7 +10,7 @@ import Foundation
 /// string. From `collectMetered`'s point of view, no `.text` events
 /// arrive until the loop finishes — so the M46.1/M46.7 heartbeat sees
 /// `tokens=0` for the entire decode and reports `tokens_per_sec=0.0`.
-/// That's the "alive but no progress visible" failure mode the consuming application
+/// That's the "alive but no progress visible" failure mode a downstream client
 /// hit: the model genuinely IS producing tokens, the operator just
 /// can't tell from the log.
 ///

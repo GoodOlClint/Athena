@@ -37,7 +37,7 @@ both unconditionally, so **the daemon no longer compiled against the
 consolidated substrate** until the references were removed. This is a forced
 removal, not optional cleanup.
 
-Both features were **default-off** and had **no external consumer** (the consuming application
+Both features were **default-off** and had **no external consumer** (a downstream client
 uses neither; DFlash never shipped a non-MTP accelerator anyone depended on), so
 removal is behaviour-preserving for every live caller.
 

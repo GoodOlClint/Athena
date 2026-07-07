@@ -1,6 +1,6 @@
 # Athena CLI Reference
 
-`athena` is the single unified command for the Project the platform inference appliance
+`athena` is the single unified command for the Athena inference appliance
 (passive oracle). One binary carries three concerns:
 
 1. **Local daemon lifecycle** — `load`/`start`/`stop`/`restart`/`status`.
@@ -42,7 +42,7 @@ A bearer token (the "API key") always belongs to a **user**. Two steps:
 athena auth user add myapp --role member
 
 # 2. Mint a bearer token for that user — printed ONCE, stored only as a hash.
-athena auth token add --user myapp --label "the consuming application" --ttl 90d
+athena auth token add --user myapp --label "my-app" --ttl 90d
 ```
 
 Use it:

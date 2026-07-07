@@ -128,7 +128,7 @@ callers that genuinely want forced tool use.)
 ## Open questions (resolve in/after review)
 
 - **Consumer impact:** any consumer relying on `auto`-always-calls? (ADR 013
-  indicated the consuming application self-migrates; confirm none depends on the old forcing.)
+  indicated the downstream client self-migrates; confirm none depends on the old forcing.)
 - **Multi-tool-call turns:** OpenAI can emit several `tool_calls` in one turn.
   Does the substrate `.gemma4` handler emit multiple `.toolCall` events per
   turn? If so, the serializers must aggregate (array index 0,1,…). Scope check

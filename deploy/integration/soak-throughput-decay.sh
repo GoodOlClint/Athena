@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # soak-throughput-decay.sh — reproduce + diagnose the M60 sustained-load
-# throughput decay (the consuming application 540s timeouts). Self-measuring against the
+# throughput decay (a downstream client's 540s timeouts). Self-measuring against the
 # M60.1 /healthz fields (thermalState, lastDecodeTokensPerSec, mlxCacheBytes,
 # physFootprintBytes) so NO sudo/powermetrics is required.
 #
@@ -9,7 +9,7 @@
 #   1. Starts the freshly-built binary in the foreground (`load`) with the
 #      real model, prompt_cache + speculative as configured, on a test port.
 #   2. Fires N back-to-back large structured chat completions (prefill-heavy
-#      + long decode — the the consuming application shape). After each call it records
+#      + long decode — the downstream-client shape). After each call it records
 #      wall time, HTTP status, completion tokens, tok/s, and a /healthz sample.
 #   3. Flags the first call whose wall time crosses DEGRADE_SECS.
 #
@@ -68,7 +68,7 @@ echo "model=$MODEL calls=$CALLS max_tokens=$MAX_TOKENS prompt~${PROMPT_TOKENS}to
 # isolates DECODE). nonce="<n>" (UNIQUE_DOCS=1) → a per-call nonce at the FRONT
 # of the system prompt + a unique prompt_cache_key, so common-prefix < 512 ⇒
 # every call is a cold MISS that pays a full prefill (isolates PREFILL — the
-# compute-bound path that throttling hits hardest, matching the consuming application's
+# compute-bound path that throttling hits hardest, matching a downstream client's
 # single-pass uncached documents).
 gen_body () {
   local nonce="${1:-}"
@@ -168,7 +168,7 @@ fire_call () {
   local n="$1"
   local t0 t1 wall http ctoks toks_s hz body
   # UNIQUE_DOCS=1 ⇒ a fresh per-call body that misses the prefix cache (cold
-  # full prefill, the the consuming application single-pass shape); else the fixed body.
+  # full prefill, the downstream-client single-pass shape); else the fixed body.
   if [ "$UNIQUE_DOCS" = "1" ]; then
     body="$(gen_body "$n")"; body="${body/__MODEL__/$MODEL}"
   else

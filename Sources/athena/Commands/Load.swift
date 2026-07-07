@@ -1064,7 +1064,7 @@ struct Load: AsyncParsableCommand {
         }
         // M60.2 — hold a system-sleep power assertion for the lifetime of the
         // serve loop. Without it an unattended Mac sleeps and SUSPENDS the
-        // daemon mid-generation (the confirmed root cause of the consuming application's
+        // daemon mid-generation (the confirmed root cause of a downstream client's
         // overnight "freeze"/timeouts — see docs/m60-plan.md). Released on
         // shutdown via the defer. Acquisition failure is non-fatal: we log it
         // and keep serving (/healthz reports the held state).

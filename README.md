@@ -1,6 +1,6 @@
 # Athena
 
-The inference appliance of Project the platform: **one** native macOS/MLX
+A self-hosted inference appliance: **one** native macOS/MLX
 daemon that hosts LLM chat, text embeddings, and audio/video
 transcription/diarization/speaker-embeddings — all sharing a single Metal
 memory governor so the box never oversubscribes its unified memory.

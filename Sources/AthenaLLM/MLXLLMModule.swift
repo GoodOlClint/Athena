@@ -888,7 +888,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         // this is a deterministic (greedy/structured, temp==0) request, so the
         // capture routes through the ArgMax pick/processor seams below.
         let logprobSink = logprobs.map { LogprobSink(topLogprobs: $0.topLogprobs) }
-        // Per-request override (the consuming application intent): if the caller
+        // Per-request override (a downstream client's intent): if the caller
         // explicitly passes `speculative=true/false`, that wins for THIS
         // request; if nil, fall back to the daemon's loaded default. An
         // opt-in `speculative=true` without an explicit temperature
@@ -909,7 +909,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         // into the non-speculative GuidedGreedy path just because the
         // caller passed `temperature: 0.1`. Pre-M48.3 the gate was
         // `effectiveSpec && effectiveTemp == 0`, which silently dropped
-        // every the consuming application-style request (`spec=true temp=0.1
+        // every downstream-client-style request (`spec=true temp=0.1
         // schema=true`) to GuidedGreedy and gave up M47.2's speculative
         // win. The bit-identical-greedy contract is preserved — both
         // paths produce the same masked-argmax sequence; only the speed
@@ -940,7 +940,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         }
         // M48.2 — declare which internal generate path this request
         // will take, BEFORE any model work begins. Lets operators
-        // (and the consuming application) see at a glance whether a structured
+        // (and downstream clients) see at a glance whether a structured
         // request engaged the speculative loop or fell to the
         // non-speculative GuidedGreedy/GuidedSubstrate path. The
         // final architecture-dispatched branch (Qwen3.5 vendored vs
@@ -1088,10 +1088,10 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             // Structured ⇒ NO-THINK by construction: the Guide masks
             // from token 0, so the schema is enforced immediately and
             // the model's <think>…</think> is suppressed (matches
-            // the consuming application's enable_thinking=False production config).
+            // a downstream client's enable_thinking=False production config).
             // Schema-enforced output that ALSO permits a thinking prefix
             // (deferred enforcement, Patch 6) is tracked in
-            // GoodOlClint/athena#2.
+            // an internal issue.
             // M49.1 — `structuredIndex` is the cached/compiled DFA
             // captured from the outer scope. `StructuredGuide` wraps
             // it with per-request walker state (advance / rollback /

@@ -775,7 +775,7 @@ struct AthenaServer {
             // awaitLoad means the background load binds the requested
             // model directly; without this a cold/just-restarted slot loaded
             // the DEFAULT and 503'd before the rebind ran, so a request for a
-            // non-default model silently got the default (the consuming application's
+            // non-default model silently got the default (a downstream client's
             // 4bit→8bit). Validated here so an unknown id is a 400 before a
             // doomed multi-GB load starts; nil/empty ⇒ the default.
             try await llm.selectColdLoadModel(requestedModel)

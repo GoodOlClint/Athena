@@ -5,7 +5,7 @@ import Foundation
 #endif
 
 /// Bounded exponential-backoff retry policy for the thin client's
-/// HTTP calls (M19, adapted from the the consuming application LLM broker's
+/// HTTP calls (M19, adapted from a downstream client's LLM broker
 /// request-retry pattern). Pure + `Sendable` so the safety rules are
 /// unit-tested in isolation.
 ///

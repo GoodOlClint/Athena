@@ -9,7 +9,7 @@ needs the matching prompt); the transparent L2 delivers the value, and a disk-ti
 *management* surface (list/stat/clear) is left as optional future work. **S6
 (SEP-bound KEK) DEFERRED**, gated on the headless-launchd SEP operability spike (the
 blob `kek_type` reserves the slot for a drop-in swap). Companion: the **ADR 024
-amendment** (SEP envelope key). Research: `docs/the downstream client-ssd-streaming-and-kv-snapshot-research.md`;
+amendment** (SEP envelope key). Research: internal SSD-streaming / KV-snapshot notes;
 usage: `docs/kv-cache-disk-snapshots.md`; plan: `docs/kv-cache-disk-snapshots-plan.md`.
 Operator decisions: **disk-first with a swappable KEK**, **auto + frontier (eager)**
 triggers, transparent L2 (named-snapshot surface dropped on review).
@@ -29,12 +29,12 @@ restart ([PrefixKVCache.swift](../../Sources/AthenaLLM/PrefixKVCache.swift)). M5
 3. **Warm-daemon back-to-back access buys nothing from disk** — true for that
    access pattern; **false** for the one this ADR targets.
 
-**the downstream client (`the downstream client`) supplies the missing motivation and a concrete format.** It
+**A downstream client supplies the missing motivation and a concrete format.** It
 persists KV as **versioned snapshots** (fixed header, `save-reason`,
 SHA1-of-rendered-prefix filename) so "a two-hour coding session is a file you can
 come back to tomorrow" — **resume across restart with zero re-prefill**. That is
 exactly the access pattern reason (3) excluded, and it is what consumers asked
-for. (the downstream client's *mechanism* is a from-scratch C/Metal engine; we borrow its
+for. (that client's *mechanism* is a from-scratch C/Metal engine; we borrow its
 **format and policy**, not its engine — see the research note §3a.3.)
 
 **Constraint stack.** ADR 025 (minimize request data-at-rest; loopback writes
@@ -151,7 +151,7 @@ beneath the in-RAM **L1** prefix cache. Seven points:
 - **SEP-first sequencing** — deferred; the envelope makes SEP a drop-in KEK swap,
   so we ship disk-first with passphrase/keyfile and swap later, **not blocking on
   the headless-SEP operability spike** (research note §5.3).
-- **KV quant-on-write** (the downstream client's 2-bit) — deferred blob-size optimization; the
+- **KV quant-on-write** (the client's 2-bit) — deferred blob-size optimization; the
   first slice writes at the cache's existing dtype under a disk-bytes cap.
 - **Per-peer ECIES multi-node wraps** — deferred (YAGNI); the envelope keeps them
   reachable without building them now.

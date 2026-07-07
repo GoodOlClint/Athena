@@ -200,7 +200,7 @@ Key design choices:
   the tape/replay rollback kernels DFlash's hard path, which Gemma4-first
   specifically dodges. Separate later milestone.
 - **DiffusionGemma as the primary fast path** — rejected: parallel out-of-order
-  token fill breaks constrained decoding, which is exactly what the consuming application's
+  token fill breaks constrained decoding, which is exactly what a downstream client's
   schemas need; DFlash preserves the M3/M49/M53 structured-output investment.
 
 ## Consequences
@@ -225,7 +225,7 @@ error envelope unchanged; passive-oracle preserved)
 - **M63.0 — Feasibility benchmark (Python only, no Athena code, no version
   bump).** Stand up dflash-mlx in a venv; pull `gemma-4-31b-it-4bit` +
   `z-lab/gemma-4-31B-it-DFlash`; measure tok/s + acceptance on representative
-  Athena/the consuming application prompts **including a structured-output prompt** (acceptance
+  Athena/downstream-client prompts **including a structured-output prompt** (acceptance
   may collapse there). Record a numbers table. **Go/no-go gate**: if structured
   acceptance is below a useful threshold even with Guide-masked drafts, re-scope
   before any Swift. Coordinate Metal budget with the running daemon.

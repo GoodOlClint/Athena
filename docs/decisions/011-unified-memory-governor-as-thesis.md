@@ -48,7 +48,7 @@ Findings that framed the decision:
   a long-lived daemon rather than a library or per-invocation tool.
 
 Athena's purpose to the operator is mixed and all consistent with the backend role: a
-stable compute daemon for the platform (coding), the backend a consuming product was adapted
+stable compute daemon for a downstream client (coding), the backend a consuming product was adapted
 onto, and a possible future commercial / supporting product. Real workloads in use include **audio
 (transcribe/diarize/speaker)** and embeddings — both of which LM Studio cannot serve — so
 "switch to LM Studio" was never on the table for the workloads that matter; it only ever
@@ -71,7 +71,7 @@ Positioning, one line:
 > (LM Studio : Athena :: a SQLite GUI : a multi-tenant Postgres server.)
 
 Coexistence, not competition: LM Studio remains the operator's personal chat-with-vision
-client; Athena is the governed backend behind the operator's own products (the platform and
+client; Athena is the governed backend behind the operator's own products (a downstream client and
 other consumers). **Do not compose at the inference layer** — running LM Studio's process
 alongside Athena's puts two uncoordinated allocators on one Metal pool with no shared
 governor, destroying the single most differentiated capability. Inference stays in-process.
@@ -107,7 +107,7 @@ Two operative calls follow from making the governor the thesis:
 - **Next milestone is governor accounting**, not a new tenant. See call (1).
 - **The moat is invisible in single-user desktop use.** Its value scales with
   `(workload concurrency × modality mix × closeness to the RAM ceiling)` — i.e. it shows up
-  when the platform + another consumer hammer one Mac, not in personal chat. Do not expect to *feel*
+  when a downstream client + another consumer hammer one Mac, not in personal chat. Do not expect to *feel*
   it personally; measure it under concurrent multi-modal load.
 - **Tripwire to retire Athena (the honest counter-case):** if audio + multi-tenant +
   near-ceiling concurrency usage ever go to zero and consumers could live on a plain

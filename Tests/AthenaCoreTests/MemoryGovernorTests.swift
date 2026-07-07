@@ -354,7 +354,7 @@ final class MemoryGovernorTests: XCTestCase {
     /// A cold governor load must bind the model chosen via
     /// `selectColdLoadModel`, not the slot default — pre-M62 a request for a
     /// non-default model on a cold/just-restarted slot silently served the
-    /// default (the consuming application asked for 4bit, got the 8bit default).
+    /// default (a downstream client asked for 4bit, got the 8bit default).
     func testColdLoadBindsSelectedModelNotDefault() async throws {
         let gov = MemoryGovernor(totalBudgetBytes: 1_000)
         let stub = StubLLMModule(

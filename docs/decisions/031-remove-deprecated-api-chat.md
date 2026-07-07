@@ -17,7 +17,7 @@ ADR 013 established **`/v1` is the single inference surface; `/api/*` is the
 control plane**, and deprecated the native inference routes `/api/chat` and
 `/api/embed`. Removal was declared **breaking** and gated on external-consumer
 confirmation ("verified: `/api/embed` 0 callers, `/api/chat` only `athena run` →
-migrate to `/v1`"; "the consuming application self-migrates; the platform N/A").
+migrate to `/v1`"; "the downstream client self-migrates; no first-party consumer").
 
 The 2026-06-26 code review (over-engineering lens) confirmed the current state:
 
