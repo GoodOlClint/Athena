@@ -69,8 +69,8 @@ public enum LaunchdPlist {
             "SoftResourceLimits": ["NumberOfFiles": 8192],
         ]
         // NJ2 (M66.4): export the PREFIX-CORRECT installed config path so
-        // the daemon's TOML-only re-reads (kv_compression, prompt_cache_*,
-        // the egress-proxy keys — none forwarded as `load` args above)
+        // the daemon's TOML-only re-reads (kv_compression, the egress-proxy
+        // keys — none forwarded as `load` args above)
         // resolve to the file this install actually wrote, not the
         // hard-coded `/usr/local`. `ConfigEditor.resolvePath(nil)` reads
         // `ATHENA_CONFIG`.

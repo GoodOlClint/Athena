@@ -159,16 +159,6 @@ engine = "mlx"
 # at startup with ATHENA_DENY_DEBUGGER=1/true/0/false.
 # deny_debugger_attach = true
 
-# prompt_cache_encrypt_idle (ADR 024 T3) — when the prompt cache is enabled,
-# hold its IDLE KV entries as AES-256-GCM ciphertext in RAM. Only the entry
-# currently decoding is plaintext, so sensitive reused prefixes (PHI/PAN) are
-# never plaintext-at-rest and only ciphertext can reach swap. Process-ephemeral
-# key, rotated when the pool drains. Opt-in hardening, OFF by default; override
-# at startup with ATHENA_PROMPT_CACHE_ENCRYPT_IDLE=1/true/0/false. Honesty
-# boundary: the active working set + weights remain plaintext — not a defense
-# against a kernel/root adversary.
-# prompt_cache_encrypt_idle = true
-
 # Bearer-token auth keys file. Each line: `admin <key>` or
 # `inference <key>` (# comments ok). Keep it chmod 600. Keys may
 # also come from ATHENA_ADMIN_KEYS / ATHENA_INFERENCE_KEYS env

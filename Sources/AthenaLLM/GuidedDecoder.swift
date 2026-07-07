@@ -54,8 +54,13 @@ struct GuidedDecoder {
     mutating func pick(_ slice: MLXArray) -> Int {
         let t: Int
         if let guide, enforcing {
-            t = SpeculativeGeneration.guidedArgmax(
-                slice, vocab: vocab, guide: guide, maskBuf: &maskBuf)
+            // Guide-masked argmax: add −inf to every token the Guide
+            // disallows in its current state so the greedy pick is always
+            // schema-valid. `GuidedMask.additiveMask` is the CI-testable
+            // MLX-free equivalent of `argMax(slice + add)`.
+            _ = guide.allowedMask(into: &maskBuf)
+            let add = GuidedMask.additiveMask(allowed: maskBuf, vocab: vocab)
+            t = argMax(slice + MLXArray(add), axis: -1).item(Int.self)
         } else {
             t = argMax(slice, axis: -1).item(Int.self)
         }

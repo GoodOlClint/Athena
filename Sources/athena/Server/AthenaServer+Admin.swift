@@ -68,16 +68,6 @@ extension AthenaServer {
             await handleLogsStream(request)
         }
 
-        // M59.4 — prompt-prefix cache operator surface. Admin-only
-        // (AuthPolicy → daemon.admin). GET = pool stats; DELETE = flush the
-        // pool (entries not in use), audited at the shared chokepoint.
-        router.get("/api/cache/prompt") { _, _ -> Response in
-            handlePromptCacheStats()
-        }
-        router.delete("/api/cache/prompt") { request, _ -> Response in
-            await handlePromptCacheFlush(request)
-        }
-
         // ADR 037 — daemon-mediated config + sudoless restart (control plane,
         // AuthPolicy → daemon.admin, audited). GET projects the current TOML;
         // PUT sets a scalar via the hardened ConfigEditor (deny-list enforced);
@@ -267,58 +257,6 @@ extension AthenaServer {
                         target: $0.target, result: $0.result,
                         detail: $0.detail)
                 }))
-    }
-
-    /// `GET /api/cache/prompt` (M59.4). Admin-only stats for the
-    /// cross-request prompt-prefix KV pool: whether it's enabled, the live
-    /// entry/byte occupancy + caps, and cumulative hit/miss/eviction
-    /// counters. Read-only ⇒ not audited (mirrors `/api/audit` itself).
-    private func handlePromptCacheStats() -> Response {
-        guard let prefixCache else {
-            return Self.json(PromptCacheStatsResponse.disabled)
-        }
-        let s = prefixCache.stats()
-        return Self.json(
-            PromptCacheStatsResponse(
-                enabled: true, entries: s.entries, bytes: s.bytes,
-                hits: s.hits, misses: s.misses, evictions: s.evictions,
-                max_entries: s.maxEntries, max_bytes: s.maxBytes))
-    }
-
-    /// `DELETE /api/cache/prompt` (M59.4). Admin-only flush of the pool —
-    /// drops every entry NOT currently held by an in-flight generation
-    /// (those are freed when their request releases them). Audited at the
-    /// shared chokepoint (M30). Returns how many entries were freed plus the
-    /// post-flush occupancy.
-    private func handlePromptCacheFlush(_ request: Request) async -> Response {
-        guard let prefixCache else {
-            await audit(
-                request, action: "prompt_cache.flush", target: nil,
-                result: "ok", detail: "disabled")
-            return Self.json(PromptCacheFlushResponse(flushed: 0, entries: 0, bytes: 0))
-        }
-        // ADR 029 (2026-07-02 audit residual) — with the disk tier on,
-        // `flushIdle` demotes victims via MLX `eval`/encode, so this operator
-        // flush must not run concurrently with a gated decode on the one
-        // Metal pool. Same wrap as the governor relief hook (WP1).
-        let freed: Int
-        do {
-            freed = try await InferenceGate.shared.withExclusiveExecution {
-                prefixCache.flushIdle()
-            }
-        } catch {
-            await audit(
-                request, action: "prompt_cache.flush", target: nil,
-                result: "error", detail: "\(type(of: error))")
-            return Self.classified(error, module: .llm)
-        }
-        let s = prefixCache.stats()
-        await audit(
-            request, action: "prompt_cache.flush", target: nil,
-            result: "ok", detail: "freed=\(freed) remaining=\(s.entries)")
-        return Self.json(
-            PromptCacheFlushResponse(
-                flushed: freed, entries: s.entries, bytes: s.bytes))
     }
 
     // MARK: - ADR 037 — daemon-mediated config + sudoless restart

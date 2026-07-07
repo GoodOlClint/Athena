@@ -1,6 +1,6 @@
 # 028 — Retire DFlash + TurboQuant to track upstream swift-mlx-lm
 
-**Status:** Accepted — Shipped v0.10.217 (DFlash subsystem + TurboQuant KV-quant removed; tree compiles against the consolidated `integration` substrate again).
+**Status:** Accepted — Shipped v0.10.217 (DFlash subsystem + TurboQuant KV-quant removed; tree compiles against the consolidated `integration` substrate again). **Amended (publication S0, 2026-07-07):** the "Kept: TriAttention eviction (Athena-vendored)" posture is **no longer true** — the whole vendored `AthenaModels` target (Qwen3.5 base + fused MTP head + GatedDelta + TriAttention) was **de-vendored and deleted** once the substrate `integration` pin (751aaed) exported `Qwen35Model`, the `Qwen35MTPDraftModel` separate-drafter, and `MLXLMCommon.TriAttention*`. TriAttention now rides the substrate `GenerateParameters.kvScheme` hook (the tripwire below fired early, for the stronger reason it anticipated). Serve path verified bit-identical (greedy, speculative on/off) on Qwen3.5-27B-4bit-mtp.
 **Date:** 2026-06-22
 **Milestone:** substrate-consolidation
 

@@ -1,5 +1,4 @@
 import AthenaCore
-import AthenaModels
 import AthenaStructured
 import CoreImage
 import Foundation
@@ -211,13 +210,6 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     /// fork A; M41.2 makes it per-rebind.
     private var configVocabSize: Int?
 
-    /// M59.1 — cross-request prompt-prefix KV cache. `nil` unless the
-    /// operator enabled `[prompt_cache]`. The SAME instance is shared with
-    /// the governor (M59.2: pool-byte snapshot + pressure relief), so it is
-    /// constructed once in the serve path and injected, not owned here.
-    /// Entries are keyed by resident model id (M59.1 scope).
-    private let prefixCache: PrefixKVCache?
-
     /// Single-model convenience init kept for source-compat with M27/M40
     /// call sites (and tests): the directory IS a store entry, so the store
     /// root is its parent and the directory's basename is the configured
@@ -225,15 +217,13 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     public init(
         modelDirectory: URL,
         parameters: LLMGenerationParameters = .init(),
-        promptCacheCapBytes: Int = 0,
-        prefixCache: PrefixKVCache? = nil
+        promptCacheCapBytes: Int = 0
     ) {
         self.init(
             modelStoreRoot: modelDirectory.deletingLastPathComponent(),
             configuredDefault: modelDirectory.lastPathComponent,
             parameters: parameters,
-            promptCacheCapBytes: promptCacheCapBytes,
-            prefixCache: prefixCache)
+            promptCacheCapBytes: promptCacheCapBytes)
     }
 
     /// ADR 026 — the LLM slot serves whatever LLM/vision models are in the
@@ -243,10 +233,8 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         modelStoreRoot: URL,
         configuredDefault: String? = nil,
         parameters: LLMGenerationParameters = .init(),
-        promptCacheCapBytes: Int = 0,
-        prefixCache: PrefixKVCache? = nil
+        promptCacheCapBytes: Int = 0
     ) {
-        self.prefixCache = prefixCache
         self.modelStoreRoot = modelStoreRoot
         let cleanDefault = (configuredDefault?.isEmpty == true)
             ? nil : configuredDefault
@@ -458,14 +446,9 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             let vocabT0 = Date()
             let built = try await container.perform {
                 (ctx: ModelContext) -> ([VocabToken], UInt32)? in
-                // Qwen3.5 exposes vocabularySize directly; any other
-                // architecture uses config.json's vocab_size, so guided
+                // Every architecture uses config.json's vocab_size, so guided
                 // structured output is available everywhere (M23 fork A).
-                guard
-                    let vocabSize =
-                        (ctx.model as? AthenaQwen35Model)?.vocabularySize
-                        ?? cfgVocab
-                else { return nil }
+                guard let vocabSize = cfgVocab else { return nil }
                 let (t, e) = StructuredVocab.tokens(
                     tokenizer: ctx.tokenizer, vocabSize: vocabSize)
                 return (t, e)
@@ -550,22 +533,17 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         let isVision = info?.hasVisionConfig ?? false
         let loaded: ModelContainer
         do {
-            // NC1: bind the checkpoint directory for the registry creators,
-            // request-scoped, so the MTP-suppression decision reads THIS
-            // load's directory even if a queued convert loads concurrently.
-            loaded = try await AthenaModelRegistration.$currentModelDirectory
-                .withValue(url) {
-                    let resolved = url.resolvingSymlinksInPath()
-                    let loader = #huggingFaceTokenizerLoader()
-                    if isVision {
-                        // Single VLM container serves BOTH text and image for a
-                        // vision checkpoint (ADR 010/011: one resident copy).
-                        return try await VLMModelFactory.shared.loadContainer(
-                            from: resolved, using: loader)
-                    }
-                    return try await loadModelContainer(
-                        from: resolved, using: loader)
-                }
+            let resolved = url.resolvingSymlinksInPath()
+            let loader = #huggingFaceTokenizerLoader()
+            if isVision {
+                // Single VLM container serves BOTH text and image for a
+                // vision checkpoint (ADR 010/011: one resident copy).
+                loaded = try await VLMModelFactory.shared.loadContainer(
+                    from: resolved, using: loader)
+            } else {
+                loaded = try await loadModelContainer(
+                    from: resolved, using: loader)
+            }
         } catch {
             dropResidentModel()  // C10
             throw error
@@ -1091,18 +1069,6 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         }()
         let samplingSeed: Int? =
             requestSeed.flatMap { $0 >= 0 ? $0 : nil }
-        // M59.1/.3 — prefix-cache handle + scope captured for the closure.
-        // `prefixCache` is nil unless the operator enabled `[prompt_cache]`.
-        // The scope ALWAYS includes the resident model id (a rebind must not
-        // serve one model's KV to another) plus, per the configured scope
-        // mode, the authenticated principal (default — cross-principal reuse
-        // is never allowed) and/or the OpenAI `prompt_cache_key` hint.
-        let prefixCache = self.prefixCache
-        let cacheScope: String? = prefixCache.map {
-            $0.scopeKey(
-                model: residentName ?? (configuredDefault ?? ""),
-                principal: principal, cacheKey: promptCacheKey)
-        }
         // The closure returns the decoded text, the completion token count
         // (`ids.count`), and the cached-prefix token count (M59.3); the
         // prompt count is `promptTokens.count` from the outer scope. nil ⇒
@@ -1141,55 +1107,11 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             }
             let guide = try makeGuide()
 
-            // Vendored Qwen3.5 path — UNCHANGED (MTP speculative when
-            // eligible, else guided/plain greedy on the vendored model).
-            if let model = ctx.model as? AthenaQwen35Model {
-                // TriAttention is inert on the MTP/speculative + guided
-                // paths: eviction can't un-mix the GDN/Mamba recurrent
-                // state, and these paths must stay bit-identical greedy.
-                // Nothing to clear — this path never binds
-                // `TriAttentionRequestPolicy.current`, so the caches these
-                // generators build (`newCache(parameters: nil)`) read the
-                // task-local's default `nil` ⇒ `KVCacheSimple` (NF2).
-                let ids: [Int]
-                var cachedTokens = 0
-                if logprobSink == nil && greedyEligible && model.hasMTPHead {
-                    let r = SpeculativeGeneration.generate(
-                        model: model, promptTokens: promptTokens,
-                        maxTokens: maxTokens,
-                        eosTokenId: ctx.tokenizer.eosTokenId, guide: guide,
-                        prefixCache: prefixCache, cacheScope: cacheScope)
-                    ids = r.ids
-                    cachedTokens = r.cachedTokens
-                } else if logprobSink == nil && samplingEligible
-                    && model.hasMTPHead
-                {
-                    // M40.2 sampling-mode (internal). The Guide is nil
-                    // here by construction — `samplingEligible` requires
-                    // `schemaJSON == nil`.
-                    ids = SpeculativeSampling.generate(
-                        model: model, promptTokens: promptTokens,
-                        maxTokens: maxTokens,
-                        eosTokenId: ctx.tokenizer.eosTokenId,
-                        temperature: samplingTemp,
-                        topP: samplingTopP, seed: samplingSeed)
-                } else if guide != nil || logprobSink != nil {
-                    // Structured, OR a logprobs request (C2): force the
-                    // non-speculative greedy path so each token has clean
-                    // last-position logits to capture (bit-identical output;
-                    // `guide` may be nil ⇒ plain greedy capture).
-                    ids = GuidedGreedy.generate(
-                        model: model, promptTokens: promptTokens,
-                        maxTokens: maxTokens,
-                        eosTokenId: ctx.tokenizer.eosTokenId, guide: guide,
-                        sink: logprobSink)
-                } else {
-                    return nil  // unstructured + no MTP ⇒ substrate stream
-                }
-                return (
-                    ctx.tokenizer.decode(tokenIds: ids), ids.count,
-                    cachedTokens, builtLogprobs())
-            }
+            // Publication S0 — Qwen3.5 no longer has a vendored decode fork.
+            // It routes like every other architecture: structured/logprobs via
+            // the substrate GuidedSubstrate path below; unstructured returns nil
+            // → the substrate stream in `beginGeneration` (which drives the MTP
+            // separate-drafter overload when a drafter is resident).
 
             // Any other architecture: schema-guided decoding on the
             // substrate generation path (M23 fork A). Unstructured

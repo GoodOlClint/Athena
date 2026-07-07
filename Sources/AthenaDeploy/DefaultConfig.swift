@@ -53,52 +53,6 @@ public enum DefaultConfig {
         # KV-cache compression: "none" | "triattention".
         # kv_compression = "none"
 
-        # ── [prompt_cache] cross-request prompt-prefix KV reuse (M59) ──
-        # Transparent reuse of a previously-computed KV prefix across chat
-        # completions that share a leading token run (e.g. a static system
-        # prompt + verbatim document, varying only in the trailing
-        # instruction). MTP/speculative path only; bit-identical to a cold
-        # prefill. Default OFF. The ATHENA_PROMPT_CACHE env var
-        # (1/true/0/false) overrides prompt_cache_enabled at startup.
-        # The pool is governed: bounded by entry count, a byte cap
-        # (default = the governor prompt-cache cap), and an idle-TTL, and
-        # is shed under memory pressure before any module is evicted.
-        # prompt_cache_enabled = false
-        # prompt_cache_max_entries = 4
-        # prompt_cache_max_bytes = 0          # 0 ⇒ governor-derived
-        # prompt_cache_idle_ttl_secs = 600
-        # Scope: "principal" (never reuse across callers — the secure
-        # default), "cache_key" (key by the OpenAI prompt_cache_key hint),
-        # or "both". The resident model id is always part of the key.
-        # prompt_cache_scope = "principal"
-        # Encrypt idle cache entries at rest in RAM (ADR 024 T3). When ON,
-        # parked KV entries are held as AES-256-GCM ciphertext — only the
-        # entry currently decoding is plaintext — so sensitive reused
-        # prefixes (PHI/PAN) are never plaintext-at-rest and only ciphertext
-        # can reach swap. Opt-in hardening, default OFF; env override
-        # ATHENA_PROMPT_CACHE_ENCRYPT_IDLE (1/true/0/false). Honesty boundary:
-        # the active working set + weights stay plaintext; not a defense
-        # against a kernel/root adversary.
-        # prompt_cache_encrypt_idle = false
-        # Disk L2 tier (ADR 027). When ON, idle KV entries are spilled to
-        # encrypted blobs under <data_dir>/prompt-cache so a session resumes
-        # ACROSS A RESTART with zero re-prefill. Default OFF (a loopback daemon
-        # writes nothing — ADR 025). Encryption is MANDATORY when on: set
-        # prompt_cache_persist_kek to a keyfile holding ≥32 random bytes
-        # ("keyfile:/path"); SEP-bound keys are the follow-up. env overrides:
-        # ATHENA_PROMPT_CACHE_PERSIST (1/true), ATHENA_PROMPT_CACHE_PERSIST_KEYFILE.
-        # prompt_cache_persist_to_disk = false
-        # prompt_cache_persist_kek = "keyfile:/etc/athena/prompt-cache.key"
-        # prompt_cache_persist_dir = ""          # default <data_dir>/prompt-cache
-        # prompt_cache_persist_max_entries = 0   # 0 ⇒ unbounded
-        # prompt_cache_persist_max_bytes = 0     # 0 ⇒ unbounded
-        # prompt_cache_persist_max_age_secs = 0  # 0 ⇒ no age expiry
-        # Eager/frontier spill (ADR 027 S4): write each new entry to disk at the
-        # store seam (not only on idle-drop/shutdown) so a hard crash doesn't lose
-        # it. Off by default — the synchronous spill is a TTFT cost. env override
-        # ATHENA_PROMPT_CACHE_PERSIST_EAGER.
-        # prompt_cache_persist_eager = false
-
 
         # ── Storage ──────────────────────────────────────────────────
         # Embedded SQLite store (auth/audit/usage). Commented ⇒

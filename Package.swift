@@ -94,8 +94,8 @@ let package = Package(
         // SCM pin on GoodOlClint/mlx-swift-lm @ integration by default;
         // ATHENA_LOCAL_DEV=1 swaps to ../mlx/mlx-swift-lm — see `substrateDep`.
         substrateDep,
-        // Direct mlx-swift dep: the vendored AthenaModels Qwen3.5 needs the
-        // MLX/MLXNN modules (products of mlx-swift, not mlx-swift-lm).
+        // Direct mlx-swift dep: the inference modules need the MLX/MLXNN
+        // modules (products of mlx-swift, not mlx-swift-lm).
         // Same range mlx-swift-lm pins, so SwiftPM unifies the version.
         .package(
             url: "https://github.com/ml-explore/mlx-swift",
@@ -173,21 +173,6 @@ let package = Package(
             dependencies: ["AthenaCore"],
             path: "Sources/AthenaDeploy"),
 
-        // Athena-owned Qwen3.5 model, vendored from the pristine
-        // mlx-swift-lm clone (the 3 internal helpers it needs are not
-        // importable). Registered into the substrate's public model-type
-        // registry; M2 grows the MTP head here. The substrate stays an
-        // unmodified upstream path dependency.
-        .target(
-            name: "AthenaModels",
-            dependencies: [
-                .product(name: "MLXLLM", package: "mlx-swift-lm"),
-                .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
-                .product(name: "MLX", package: "mlx-swift"),
-                .product(name: "MLXNN", package: "mlx-swift"),
-            ],
-            path: "Sources/AthenaModels"),
-
         // Inference modules. M0 ships governed stubs that conform to the
         // module protocol and reserve/release real budget; the MLX-backed
         // implementations land in M1 (llm), M4 (transcription/embedding).
@@ -195,7 +180,6 @@ let package = Package(
             name: "AthenaLLM",
             dependencies: [
                 "AthenaCore",
-                "AthenaModels",
                 "AthenaStructured",
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXNN", package: "mlx-swift"),
@@ -380,7 +364,7 @@ let package = Package(
             dependencies: [
                 "AthenaCore", "AthenaClient", "AthenaDeploy",
                 "AthenaServerKit",
-                "AthenaLLM", "AthenaModels", "AthenaStructured",
+                "AthenaLLM", "AthenaStructured",
                 "AthenaTranscription", "AthenaEmbedding",
                 "AthenaStore",
                 // ADR 017 — NIOEmbeddedChannel pins ExpectContinueHandler.

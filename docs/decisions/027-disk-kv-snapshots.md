@@ -1,6 +1,8 @@
 # ADR 027 — disk-backed KV snapshots (versioned, encrypted, resumable)
 
-**Status:** **Accepted — S1–S4 SHIPPED v0.10.212–216** (M59.5 revived). Disk tier
+**Status:** **REMOVED (publication S0, 2026-07-07).** The disk-snapshot L2 was built on `PrefixKVCache` + the vendored Qwen3.5 GDN/KV state, so it was **Qwen3.5-fused-path-exclusive**; the S0 de-vendor moved Qwen3.5 onto the substrate generate loop (which has no equivalent seam — substrate cross-request prompt cache is unimplemented, mlx-tracker #24), making the whole stack inert. Per the operator, the `PrefixKVCache` + `KVFrame`/`KVByteCodec`/`KVSnapshot*` + `IdleKVCipher` code was deleted (all opt-in, off by default, no other architecture used it) and the capability tracked for upstream re-implementation: **mlx-tracker #36** (disk-backed KV snapshots), gated on #24 (the prompt-cache seam). Re-add when the substrate offers it.
+
+_Original acceptance record (historical):_ **Accepted — S1–S4 SHIPPED v0.10.212–216** (M59.5 revived). Disk tier
 proven on real Qwen3.5-27B-4bit-mtp: **bit-identical across a clean restart**
 (`e2e-m59-disk-restart.sh`) **and survives a `SIGKILL`** (`e2e-m59-disk-crash.sh`).
 **S5 (explicit named snapshots) DROPPED** — Athena's KV is prefix-keyed and

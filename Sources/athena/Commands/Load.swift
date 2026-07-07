@@ -476,26 +476,6 @@ struct Load: AsyncParsableCommand {
         }
         let kvCompression = try KVCompression.resolve(
             config: tomlCfg?.kvCompression)
-        // M59.1/.2 — cross-request prompt-prefix KV cache (`[prompt_cache]`),
-        // default OFF. Bit-identical greedy reuse on the MTP path. Enable
-        // precedence mirrors kv_compression: env ATHENA_PROMPT_CACHE
-        // (1/true/0/false) > TOML prompt_cache_enabled > built-in false.
-        let prefixEnvEnabled = ProcessInfo.processInfo
-            .environment["ATHENA_PROMPT_CACHE"]
-            .map { $0 == "1" || $0.lowercased() == "true" }
-        let prefixCacheEnabled =
-            prefixEnvEnabled ?? tomlCfg?.promptCacheEnabled ?? false
-
-        // ADR 024 T3 — encrypt idle prompt-cache KV at-rest-in-RAM. Same
-        // precedence: env ATHENA_PROMPT_CACHE_ENCRYPT_IDLE (1/true/0/false)
-        // > TOML prompt_cache_encrypt_idle > built-in false. Opt-in hardening;
-        // only meaningful when the prompt cache is enabled.
-        let prefixEncryptEnv = ProcessInfo.processInfo
-            .environment["ATHENA_PROMPT_CACHE_ENCRYPT_IDLE"]
-            .map { $0 == "1" || $0.lowercased() == "true" }
-        let prefixEncryptIdle =
-            prefixEncryptEnv ?? tomlCfg?.promptCacheEncryptIdle ?? false
-
         // ADR 024 Tier 2 (opt-in) — deny debugger attach. Precedence mirrors
         // the other startup toggles: env ATHENA_DENY_DEBUGGER (1/true/0/false)
         // > TOML deny_debugger_attach > built-in false. Redundant with the
@@ -621,107 +601,6 @@ struct Load: AsyncParsableCommand {
                 "MLX allocation-fault degrade DISABLED (ADR 030 P2 revert knob — recognized OOM will re-fatal, as pre-WP2)")
         }
 
-        // M59.2 — build the ONE shared pool instance now (when enabled), so
-        // the SAME object is injected into the LLM module (reuse) and the
-        // governor (pool-byte snapshot + pressure relief). `max_bytes`
-        // defaults to the governor's prompt-cache cap so the persistent pool
-        // and the per-request admission guard share one cap and don't starve
-        // each other. PrefixKVCache is a lock-guarded @unchecked Sendable, so
-        // the governor's sync probe/relief closures can call it directly.
-        let prefixMaxEntries = tomlCfg?.promptCacheMaxEntries ?? 4
-        let prefixIdleTTL = tomlCfg?.promptCacheIdleTtlSecs ?? 600
-        let prefixCfgBytes = tomlCfg?.promptCacheMaxBytes ?? 0
-        let prefixMaxBytes =
-            prefixCfgBytes > 0 ? prefixCfgBytes : config.promptCacheCapBytes
-        let prefixScope =
-            PrefixKVCache.ScopeMode(
-                rawValue: tomlCfg?.promptCacheScope ?? "principal")
-            ?? .principal
-        // ADR 027 — optional disk L2 tier under the in-RAM prompt cache. Off by
-        // default; encryption is MANDATORY when on (a keyfile KEK now; SEP is the
-        // S6 follow-up). env overrides TOML, mirroring the other prompt_cache_*
-        // knobs. A loopback default (flag off) writes nothing (ADR 025).
-        var prefixDisk: PrefixKVCache.DiskTier?
-        let procEnv = ProcessInfo.processInfo.environment
-        let persistEnv = procEnv["ATHENA_PROMPT_CACHE_PERSIST"].map {
-            ["1", "true", "yes", "on"].contains($0.lowercased())
-        }
-        let persistToDisk =
-            persistEnv ?? tomlCfg?.promptCachePersistToDisk ?? false
-        if prefixCacheEnabled && persistToDisk {
-            let dirOverride =
-                procEnv["ATHENA_PROMPT_CACHE_PERSIST_DIR"] ?? tomlCfg?.promptCachePersistDir
-            let baseData =
-                dataDir.map { URL(fileURLWithPath: $0, isDirectory: true) }
-                ?? AthenaEnv.userHome().appendingPathComponent(".athena", isDirectory: true)
-            let persistDir =
-                dirOverride.map { URL(fileURLWithPath: $0, isDirectory: true) }
-                ?? baseData.appendingPathComponent("prompt-cache", isDirectory: true)
-            let keyfilePath =
-                procEnv["ATHENA_PROMPT_CACHE_PERSIST_KEYFILE"]
-                ?? tomlCfg?.promptCachePersistKek.flatMap {
-                    $0.hasPrefix("keyfile:") ? String($0.dropFirst(8)) : nil
-                }
-            let intEnv: (String) -> Int? = { procEnv[$0].flatMap(Int.init) }
-            if let keyfilePath,
-                let keyData = try? Data(contentsOf: URL(fileURLWithPath: keyfilePath)),
-                let kek = try? KeyfileKEK(keyfile: keyData)
-            {
-                prefixDisk = PrefixKVCache.DiskTier(
-                    store: KVSnapshotStore(directory: persistDir),
-                    kek: kek,
-                    modelID: model ?? "",
-                    maxEntries: intEnv("ATHENA_PROMPT_CACHE_PERSIST_MAX_ENTRIES")
-                        ?? tomlCfg?.promptCachePersistMaxEntries,
-                    maxBytes: intEnv("ATHENA_PROMPT_CACHE_PERSIST_MAX_BYTES")
-                        ?? tomlCfg?.promptCachePersistMaxBytes,
-                    maxAgeSecs: (intEnv("ATHENA_PROMPT_CACHE_PERSIST_MAX_AGE_SECS")
-                        ?? tomlCfg?.promptCachePersistMaxAgeSecs).map { UInt64(max(0, $0)) },
-                    eager: procEnv["ATHENA_PROMPT_CACHE_PERSIST_EAGER"].map {
-                        ["1", "true", "yes", "on"].contains($0.lowercased())
-                    } ?? tomlCfg?.promptCachePersistEager ?? false)
-                Logger(label: AthenaLogLabel.daemon).notice(
-                    "prompt-cache disk persistence ON (ADR 027) dir=\(persistDir.path) kek=keyfile")
-                if prefixEncryptIdle {
-                    Logger(label: AthenaLogLabel.daemon).warning(
-                        "prompt_cache_encrypt_idle + persist_to_disk both on — sealed RAM entries are not spilled to disk in this slice")
-                }
-            } else {
-                Logger(label: AthenaLogLabel.daemon).error(
-                    "prompt_cache_persist_to_disk on but no readable ≥32-byte keyfile (ATHENA_PROMPT_CACHE_PERSIST_KEYFILE / prompt_cache_persist_kek=keyfile:PATH) — disk persistence DISABLED (encryption mandatory)")
-            }
-        }
-        let prefixCache: PrefixKVCache? =
-            prefixCacheEnabled
-            ? PrefixKVCache(
-                maxEntries: prefixMaxEntries,
-                maxBytes: prefixMaxBytes,
-                idleTTLSecs: prefixIdleTTL,
-                scope: prefixScope,
-                encryptIdle: prefixEncryptIdle,
-                disk: prefixDisk)
-            : nil
-        var prefixPoolProbe: MemoryGovernor.PromptCachePoolProbe?
-        var prefixPoolRelief: MemoryGovernor.PromptCacheReliefHook?
-        if let c = prefixCache {
-            prefixPoolProbe = { c.poolBytesAndEntries() }
-            // ADR 029 WP1 — run the pool flush + cache trim under the
-            // InferenceGate so a governor-initiated reclaim can't tear down
-            // Metal buffers while a decode holds the device. The governor
-            // awaits this hook, so the reclaim's effect is still seen by the
-            // admission re-gate — it just waits for any in-flight forward.
-            prefixPoolRelief = {
-                try? await InferenceGate.shared.withExclusiveExecution {
-                    _ = c.flushIdle()
-                    MLX.Memory.clearCache()
-                }
-            }
-            if c.encryptsIdleEntries {
-                Logger(label: AthenaLogLabel.daemon).notice(
-                    "hardening: prompt-cache idle entries encrypted at rest (AES-256-GCM, ADR 024 T3)")
-            }
-        }
-
         // M5.1 + M5.5 (M41 follow-up): reconcile reservations to the
         // real Metal/MLX footprint. The probe is process RSS, NOT
         // `MLX.Memory.activeMemory` — the latter sees only the MLX
@@ -754,8 +633,6 @@ struct Load: AsyncParsableCommand {
                 Logger(label: AthenaLogLabel.model(id))
                     .notice("model \(id.rawValue) \(msg)")
             },
-            promptCachePoolProbe: prefixPoolProbe,
-            promptCacheRelief: prefixPoolRelief,
             // ADR 023 G2 — the live-footprint probe (phys_footprint + the
             // reclaimable MLX cache) and the cache-reclaim hook. Both read MLX/
             // Mach counters HERE, at the serve seam; the admission algebra they
@@ -912,8 +789,7 @@ struct Load: AsyncParsableCommand {
                     }
                         ?? AthenaEnv.userHome().appendingPathComponent(
                             ".athena", isDirectory: true)),
-                promptCacheCapBytes: config.promptCacheCapBytes,
-                prefixCache: prefixCache)
+                promptCacheCapBytes: config.promptCacheCapBytes)
         }
         let embedding: any EmbeddingModule
         switch engine {
@@ -1037,8 +913,7 @@ struct Load: AsyncParsableCommand {
             maxAudioUploadBytes: maxAudioUploadBytes ?? 104_857_600,
             maxVideoUploadBytes: maxVideoUploadBytes ?? 1_073_741_824,
             maxRequestBodyBytes: maxRequestBodyBytes ?? 4_194_304,
-            preload: preload,
-            prefixCache: prefixCache)
+            preload: preload)
         // M54.3 — operator-action pull: at startup, fetch any configured
         // model that has an HF-style id and isn't in the store, in the
         // BACKGROUND. The HTTP surface comes up immediately (server.run

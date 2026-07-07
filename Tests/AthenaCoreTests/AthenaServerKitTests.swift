@@ -154,7 +154,6 @@ final class AthenaServerKitTests: XCTestCase {
             ("GET", "/api/audit", .daemonAdmin),
             ("GET", "/api/logs", .daemonAdmin),
             ("GET", "/api/logs/stream", .daemonAdmin),
-            ("GET", "/api/cache/prompt", .daemonAdmin),
             // ADR 037 — daemon-mediated config + restart (control plane).
             ("GET", "/api/config", .daemonAdmin),
             ("PUT", "/api/config", .daemonAdmin),

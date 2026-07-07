@@ -109,12 +109,6 @@ struct AthenaServer {
     /// effort: the warm runs concurrently with serving (the HTTP surface
     /// is up immediately) and a failure falls back to the lazy path.
     var preload: Bool = false
-    /// M59.4 — the shared cross-request prompt-prefix KV pool (or nil when
-    /// `[prompt_cache]` is disabled). The SAME lock-guarded instance the LLM
-    /// module and governor hold; the operator surface (`GET/DELETE
-    /// /api/cache/prompt`) reads its stats and flushes it. `var = nil` so it's
-    /// a memberwise-init param.
-    var prefixCache: PrefixKVCache? = nil
     /// M60.2 — whether the daemon holds a `PreventUserIdleSystemSleep` power
     /// assertion (set by `Load.run()` after acquiring it). Surfaced on
     /// `/healthz` so an operator can confirm the appliance won't idle-sleep
@@ -358,17 +352,6 @@ struct AthenaServer {
             )
         )
         try await app.runService()
-
-        // ADR 027 — graceful shutdown completed (in-flight requests drained, so
-        // entries are unreferenced): spill idle prompt-cache entries to the disk
-        // L2 so a restart resumes them. No-op unless `persist_to_disk` is on.
-        // Writes are atomic, so a SIGKILL past the shutdown window leaves no
-        // corrupt blob (a missed entry just cold-prefills next time).
-        if let prefixCache, prefixCache.persistsToDisk {
-            let freed = prefixCache.flushIdle(reason: .shutdown)
-            Logger(label: AthenaLogLabel.daemon).notice(
-                "prompt-cache: spilled \(freed) idle entries to disk on shutdown (ADR 027)")
-        }
     }
 
     /// Build the HTTP(S) listener. Both cert+key ⇒ TLS; neither ⇒
@@ -1193,9 +1176,6 @@ struct HealthResponse: Encodable {
     /// not. Surfaced so an operator can see the true footprint — and the
     /// GPU-transient gap above it — without scraping Activity Monitor.
     let physFootprintBytes: Int
-    /// M59.2 — cross-request prompt-prefix KV reuse pool (0 when disabled).
-    let promptCachePoolBytes: Int
-    let promptCachePoolEntries: Int
     /// M60.1 — macOS thermal-pressure level from
     /// `ProcessInfo.thermalState`: `nominal` / `fair` / `serious` /
     /// `critical`. No elevated privilege required (unlike `powermetrics`).
@@ -1289,8 +1269,6 @@ struct HealthResponse: Encodable {
         self.freeBytes = snapshot.freeBytes
         self.promptCacheCapBytes = snapshot.promptCacheCapBytes
         self.physFootprintBytes = ProcessMemory.sample().physFootprint
-        self.promptCachePoolBytes = snapshot.promptCachePoolBytes
-        self.promptCachePoolEntries = snapshot.promptCachePoolEntries
         self.thermalState = HealthResponse.thermalLabel(
             ProcessInfo.processInfo.thermalState)
         self.lastDecodeTokensPerSec = lastDecodeTokensPerSec

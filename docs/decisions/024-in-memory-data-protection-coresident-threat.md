@@ -1,6 +1,8 @@
 # ADR 024 — in-memory data protection against a co-resident adversary
 
-**Status:** **Accepted — T1 + T2 + T3 ALL SHIPPED** (hardening program, M80–M81;
+**Status (amended publication S0, 2026-07-07):** **T1 + T2 retained; T3 REMOVED.** T3 (encrypt idle prompt-cache KV at-rest-in-RAM, `IdleKVCipher`) rode the M59 `PrefixKVCache`, which was **Qwen3.5-vendored-path-exclusive**; the S0 de-vendor moved Qwen3.5 onto the substrate generate loop (no idle-prompt-cache seam yet), so T3 was inert and was deleted with the rest of the prompt-cache stack (opt-in, off by default). Capability tracked for upstream re-implementation: **mlx-tracker #37** (idle KV-at-rest encryption), gated on #24 (the prompt-cache seam). **T1 (hardened runtime / no `get-task-allow` / notarization) and T2 (`ProcessHardening`: `RLIMIT_CORE=0`, `PT_DENY_ATTACH`, PCM zeroize) are UNAFFECTED** — not prompt-cache-coupled, still shipped. Original acceptance record follows.
+
+_Original:_ **Accepted — T1 + T2 + T3 ALL SHIPPED** (hardening program, M80–M81;
 ADR 024 tier-scope decision resolved with the operator at Phase 0, T3 gate
 cleared + shipped M81). **T3 (encrypt idle prompt-cache KV at-rest-in-RAM)** was
 deferred as a stretch, gated on whether the target deployment runs the prompt

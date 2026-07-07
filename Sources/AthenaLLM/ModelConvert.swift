@@ -147,12 +147,10 @@ public enum ModelConvert {
             })
         progress?(.phase("load"))
 
-        // Same vendored-model route `serve` uses, so the converted
-        // checkpoint loads back through the identical path. NC1: bind the
-        // directory request-scoped (this runs on the queue worker, NOT
-        // serialized against a serve cold-load) so the two can't clobber a
-        // shared global and mis-decide MTP suppression.
-        await AthenaModelRegistration.install()
+        // Publication S0 — convert loads through the same substrate factories
+        // `serve` uses; the substrate's own `qwen3_5*` registration handles the
+        // base model (the vendored Qwen3.5 route + its MTP-suppression seam are
+        // retired).
         // M72 — a vision checkpoint (top-level `vision_config`) MUST load
         // through the VLM path so the image tower is kept: the generic
         // `loadModelContainer` would pick the text LLM factory, whose
@@ -170,16 +168,14 @@ public enum ModelConvert {
             modelType: srcInfo?.modelType)
         let container: ModelContainer
         do {
-            container = try await AthenaModelRegistration
-                .$currentModelDirectory.withValue(snapshot) {
-                    let loader = #huggingFaceTokenizerLoader()
-                    if isVision {
-                        return try await VLMModelFactory.shared.loadContainer(
-                            from: snapshot, using: loader)
-                    }
-                    return try await loadModelContainer(
-                        from: snapshot, using: loader)
-                }
+            let loader = #huggingFaceTokenizerLoader()
+            if isVision {
+                container = try await VLMModelFactory.shared.loadContainer(
+                    from: snapshot, using: loader)
+            } else {
+                container = try await loadModelContainer(
+                    from: snapshot, using: loader)
+            }
         } catch where AthenaError.looksLikeUnsupportedArch(error) {
             // A generative/vision checkpoint whose `model_type` the substrate
             // has no architecture for (ADR 016) — name the cause instead of

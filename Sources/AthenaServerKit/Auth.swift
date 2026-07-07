@@ -332,10 +332,6 @@ public enum AuthPolicy {
         if path == "/api/logs" || path == "/api/logs/stream" {
             return .daemonAdmin
         }
-        // M59.4 — prompt-prefix cache operator surface (stats + flush) is a
-        // privileged management view over a process-global pool; admin-only
-        // (daemon.admin), matching /api/audit's sensitivity profile.
-        if path == "/api/cache/prompt" { return .daemonAdmin }
         // ADR 037 — daemon-mediated config (GET current, PUT a scalar). A
         // privileged control-plane surface; admin-only (daemon.admin). The
         // security deny-list (auth/TLS/encryption/data-dir/debugger keys) is

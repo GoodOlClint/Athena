@@ -382,54 +382,6 @@ struct Doctor: AsyncParsableCommand {
             }
         }
 
-        // 12b. Prompt-prefix cache posture (M59). Off by default; when on,
-        //      report the scope (the secure default is per-principal) and
-        //      warn if it is enabled on an auth-off, non-loopback bind where
-        //      every caller collapses to the "anon" principal and would
-        //      therefore share cached prefixes.
-        let promptCacheOn =
-            (ProcessInfo.processInfo.environment["ATHENA_PROMPT_CACHE"]
-                .map { $0 == "1" || $0.lowercased() == "true" })
-            ?? (parsed?.promptCacheEnabled ?? false)
-        let promptCacheEncryptIdle =
-            (ProcessInfo.processInfo
-                .environment["ATHENA_PROMPT_CACHE_ENCRYPT_IDLE"]
-                .map { $0 == "1" || $0.lowercased() == "true" })
-            ?? (parsed?.promptCacheEncryptIdle ?? false)
-        if promptCacheOn {
-            let scope = parsed?.promptCacheScope ?? "principal"
-            let entries = parsed?.promptCacheMaxEntries ?? 4
-            say(
-                .ok,
-                "prompt cache: ON (scope=\(scope), max_entries=\(entries), "
-                    + "idle_encryption=\(promptCacheEncryptIdle ? "on" : "off")) "
-                    + "— MTP path, bit-identical reuse")
-            if promptCacheEncryptIdle {
-                say(
-                    .ok,
-                    "prompt cache: idle entries encrypted at rest in RAM "
-                        + "(AES-256-GCM, ADR 024 T3) — only the active decoding "
-                        + "entry is plaintext")
-            } else {
-                say(
-                    .ok,
-                    "prompt cache: idle entries are PLAINTEXT in RAM. For "
-                        + "HIPAA/PCI-sensitive reused prefixes set "
-                        + "prompt_cache_encrypt_idle = true (ADR 024 T3) so only "
-                        + "ciphertext can reach swap.")
-            }
-            if !anyCreds, !loopback.contains(host) {
-                say(
-                    .warn,
-                    "prompt cache is ON with auth disabled on non-loopback "
-                        + "\(host): every caller is the same 'anon' principal, "
-                        + "so cached prefixes are shared across callers. Enable "
-                        + "auth, or bind loopback / behind a proxy.")
-            }
-        } else {
-            say(.ok, "prompt cache: off")
-        }
-
         // 13. Data-at-rest posture (M34/ADR 025): store-persistence mode +
         //     SQLite encryption (or the FileVault fallback). Passwords
         //     (PBKDF2), token hashes (SHA-256) and outbound secrets (Keychain)

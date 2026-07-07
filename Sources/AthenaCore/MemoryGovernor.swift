@@ -54,15 +54,6 @@ public struct GovernorSnapshot: Sendable, Codable {
     public let freeBytes: Int
     public let promptCacheCapBytes: Int
     public let modules: [ModuleSnapshot]
-    /// M59.2 — cross-request prompt-prefix KV pool (the persistent reuse
-    /// cache, distinct from `promptCacheCapBytes` which is the per-request
-    /// admission guard). Bytes are the pool's own estimate of its live KV
-    /// snapshots; entries is the count. Both 0 when the pool is disabled or
-    /// empty. Deliberately NOT folded into `residentBytes` — the live memory
-    /// probe already sees these MLX buffers, so adding them there would
-    /// double-count against module admission.
-    public let promptCachePoolBytes: Int
-    public let promptCachePoolEntries: Int
     /// ADR 023 G2 — the active admission accounting mode. `"footprint"` ⇒
     /// `freeBytes` is `budget − max(committed, reserved)` (the live Metal
     /// footprint governs admission); `"estimate"` ⇒ the pre-G2 reservation-only
@@ -73,7 +64,6 @@ public struct GovernorSnapshot: Sendable, Codable {
     public init(
         totalBudgetBytes: Int, residentBytes: Int, freeBytes: Int,
         promptCacheCapBytes: Int, modules: [ModuleSnapshot],
-        promptCachePoolBytes: Int = 0, promptCachePoolEntries: Int = 0,
         admissionMode: String = GovernorMemory.AdmissionMode.footprint.rawValue
     ) {
         self.totalBudgetBytes = totalBudgetBytes
@@ -81,8 +71,6 @@ public struct GovernorSnapshot: Sendable, Codable {
         self.freeBytes = freeBytes
         self.promptCacheCapBytes = promptCacheCapBytes
         self.modules = modules
-        self.promptCachePoolBytes = promptCachePoolBytes
-        self.promptCachePoolEntries = promptCachePoolEntries
         self.admissionMode = admissionMode
     }
 }
@@ -950,7 +938,6 @@ public actor MemoryGovernor {
             )
         }
         .sorted { $0.id.rawValue < $1.id.rawValue }
-        let pool = promptCachePoolProbe?() ?? (bytes: 0, entries: 0)
         // ADR 023 G2 — report the HONEST free budget: `budget − max(committed,
         // reserved)` so `/healthz`/`athena ps` reflect what the box can actually
         // fit, not `budget − estimates`. Degrades to `budget − residentBytes`
@@ -965,8 +952,6 @@ public actor MemoryGovernor {
                 budget: totalBudgetBytes, denominator: admissionDenominator()),
             promptCacheCapBytes: promptCacheCapBytes,
             modules: mods,
-            promptCachePoolBytes: pool.bytes,
-            promptCachePoolEntries: pool.entries,
             admissionMode: admissionMode.rawValue
         )
     }

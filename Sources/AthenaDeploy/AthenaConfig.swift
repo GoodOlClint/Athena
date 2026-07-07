@@ -56,42 +56,6 @@ public struct AthenaConfig: Sendable, Equatable {
     /// Optional — daemon defaults to `none` when absent.
     /// The `ATHENA_KV_COMPRESSION` env var overrides this at startup.
     public var kvCompression: String?
-    /// `[prompt_cache]` — cross-request prompt-prefix KV reuse (M59).
-    /// `prompt_cache_enabled` (default false) is the master switch;
-    /// `prompt_cache_max_entries` (default 4) bounds the in-memory LRU by
-    /// count; `prompt_cache_max_bytes` (default governor-derived =
-    /// promptCacheCapBytes) caps the pool's bytes; `prompt_cache_idle_ttl_secs`
-    /// (default 600) evicts entries idle longer than that. Absent ⇒ disabled.
-    public var promptCacheEnabled: Bool?
-    public var promptCacheMaxEntries: Int?
-    public var promptCacheMaxBytes: Int?
-    public var promptCacheIdleTtlSecs: Int?
-    /// Scope mode (M59.3): `principal` (default — never cross callers),
-    /// `cache_key` (key by the OpenAI prompt_cache_key hint), or `both`.
-    public var promptCacheScope: String?
-    /// `prompt_cache_encrypt_idle` (ADR 024 T3) — hold idle prompt-cache KV
-    /// entries as AES-256-GCM ciphertext in RAM (only ciphertext is ever
-    /// swappable; the active decoding entry stays plaintext). Default false;
-    /// opt-in hardening for HIPAA/PCI-sensitive idle prefixes, mirroring
-    /// `encrypt_store`.
-    public var promptCacheEncryptIdle: Bool?
-    /// `[prompt_cache]` disk tier (ADR 027). `prompt_cache_persist_to_disk`
-    /// (default false) opts the in-RAM pool into a disk L2 that survives a
-    /// restart; encryption is MANDATORY when on (`prompt_cache_persist_kek =
-    /// "keyfile:/path"`, a ≥32-byte key — SEP is the follow-up). Off by default
-    /// ⇒ a loopback daemon writes nothing (ADR 025). `prompt_cache_persist_dir`
-    /// overrides the default `<data_dir>/prompt-cache`; the
-    /// `*_max_{entries,bytes,age_secs}` keys bound the on-disk set.
-    public var promptCachePersistToDisk: Bool?
-    public var promptCachePersistDir: String?
-    public var promptCachePersistKek: String?
-    public var promptCachePersistMaxEntries: Int?
-    public var promptCachePersistMaxBytes: Int?
-    public var promptCachePersistMaxAgeSecs: Int?
-    /// `prompt_cache_persist_eager` (ADR 027 S4) — spill a new entry to disk at
-    /// the store seam (not only on idle-drop/shutdown) so a crash doesn't lose
-    /// it. Off by default (synchronous post-prefill I/O is a TTFT cost).
-    public var promptCachePersistEager: Bool?
     /// ADR 024 Tier 2 (defense-in-depth, opt-in): call `ptrace(PT_DENY_ATTACH)`
     /// at startup so a debugger cannot attach to the daemon. Redundant with the
     /// Tier-1 Hardened Runtime / no-`get-task-allow` lockdown (which already
@@ -229,19 +193,6 @@ public struct AthenaConfig: Sendable, Equatable {
         speculative: Bool? = nil,
         mtpDrafter: String? = nil,
         kvCompression: String? = nil,
-        promptCacheEnabled: Bool? = nil,
-        promptCacheMaxEntries: Int? = nil,
-        promptCacheMaxBytes: Int? = nil,
-        promptCacheIdleTtlSecs: Int? = nil,
-        promptCacheScope: String? = nil,
-        promptCacheEncryptIdle: Bool? = nil,
-        promptCachePersistToDisk: Bool? = nil,
-        promptCachePersistDir: String? = nil,
-        promptCachePersistKek: String? = nil,
-        promptCachePersistMaxEntries: Int? = nil,
-        promptCachePersistMaxBytes: Int? = nil,
-        promptCachePersistMaxAgeSecs: Int? = nil,
-        promptCachePersistEager: Bool? = nil,
         denyDebuggerAttach: Bool? = nil,
         authKeysFile: String? = nil,
         tlsCert: String? = nil, tlsKey: String? = nil,
@@ -285,19 +236,6 @@ public struct AthenaConfig: Sendable, Equatable {
         self.speculative = speculative
         self.mtpDrafter = mtpDrafter
         self.kvCompression = kvCompression
-        self.promptCacheEnabled = promptCacheEnabled
-        self.promptCacheMaxEntries = promptCacheMaxEntries
-        self.promptCacheMaxBytes = promptCacheMaxBytes
-        self.promptCacheIdleTtlSecs = promptCacheIdleTtlSecs
-        self.promptCacheScope = promptCacheScope
-        self.promptCacheEncryptIdle = promptCacheEncryptIdle
-        self.promptCachePersistToDisk = promptCachePersistToDisk
-        self.promptCachePersistDir = promptCachePersistDir
-        self.promptCachePersistKek = promptCachePersistKek
-        self.promptCachePersistMaxEntries = promptCachePersistMaxEntries
-        self.promptCachePersistMaxBytes = promptCachePersistMaxBytes
-        self.promptCachePersistMaxAgeSecs = promptCachePersistMaxAgeSecs
-        self.promptCachePersistEager = promptCachePersistEager
         self.denyDebuggerAttach = denyDebuggerAttach
         self.authKeysFile = authKeysFile
         self.tlsCert = tlsCert
@@ -486,34 +424,6 @@ public struct AthenaConfig: Sendable, Equatable {
             return try parseBool(key, v)
         }
         let spec = try bool("speculative")
-        let pcEnabled = try bool("prompt_cache_enabled")
-        var pcMaxEntries: Int?
-        if let pm = scalar("prompt_cache_max_entries", in: toml) {
-            pcMaxEntries = try int("prompt_cache_max_entries", pm)
-        }
-        var pcMaxBytes: Int?
-        if let pb = scalar("prompt_cache_max_bytes", in: toml) {
-            pcMaxBytes = try int("prompt_cache_max_bytes", pb)
-        }
-        var pcIdleTtl: Int?
-        if let pt = scalar("prompt_cache_idle_ttl_secs", in: toml) {
-            pcIdleTtl = try int("prompt_cache_idle_ttl_secs", pt)
-        }
-        let pcEncryptIdle = try bool("prompt_cache_encrypt_idle")
-        let pcPersist = try bool("prompt_cache_persist_to_disk")
-        var pcPersistMaxEntries: Int?
-        if let v = scalar("prompt_cache_persist_max_entries", in: toml) {
-            pcPersistMaxEntries = try int("prompt_cache_persist_max_entries", v)
-        }
-        var pcPersistMaxBytes: Int?
-        if let v = scalar("prompt_cache_persist_max_bytes", in: toml) {
-            pcPersistMaxBytes = try int("prompt_cache_persist_max_bytes", v)
-        }
-        var pcPersistMaxAge: Int?
-        if let v = scalar("prompt_cache_persist_max_age_secs", in: toml) {
-            pcPersistMaxAge = try int("prompt_cache_persist_max_age_secs", v)
-        }
-        let pcPersistEager = try bool("prompt_cache_persist_eager")
         let denyDebuggerAttach = try bool("deny_debugger_attach")
         let inferenceGateEnabled = try bool("inference_gate_enabled")
         let metalFaultDegrade = try bool("metal_fault_degrade")
@@ -542,19 +452,6 @@ public struct AthenaConfig: Sendable, Equatable {
             speculative: spec,
             mtpDrafter: scalar("mtp_drafter", in: toml),
             kvCompression: scalar("kv_compression", in: toml),
-            promptCacheEnabled: pcEnabled,
-            promptCacheMaxEntries: pcMaxEntries,
-            promptCacheMaxBytes: pcMaxBytes,
-            promptCacheIdleTtlSecs: pcIdleTtl,
-            promptCacheScope: scalar("prompt_cache_scope", in: toml),
-            promptCacheEncryptIdle: pcEncryptIdle,
-            promptCachePersistToDisk: pcPersist,
-            promptCachePersistDir: scalar("prompt_cache_persist_dir", in: toml),
-            promptCachePersistKek: scalar("prompt_cache_persist_kek", in: toml),
-            promptCachePersistMaxEntries: pcPersistMaxEntries,
-            promptCachePersistMaxBytes: pcPersistMaxBytes,
-            promptCachePersistMaxAgeSecs: pcPersistMaxAge,
-            promptCachePersistEager: pcPersistEager,
             denyDebuggerAttach: denyDebuggerAttach,
             authKeysFile: scalar("auth_keys_file", in: toml),
             tlsCert: scalar("tls_cert", in: toml),

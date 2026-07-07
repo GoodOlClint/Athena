@@ -74,17 +74,6 @@ extension ConfigEditor {
         case "all_proxy": return cfg.allProxy
         case "no_proxy": return cfg.noProxy
         case "kv_compression": return cfg.kvCompression
-        case "prompt_cache_enabled":
-            return cfg.promptCacheEnabled.map { $0 ? "true" : "false" }
-        case "prompt_cache_max_entries":
-            return cfg.promptCacheMaxEntries.map(String.init)
-        case "prompt_cache_max_bytes":
-            return cfg.promptCacheMaxBytes.map(String.init)
-        case "prompt_cache_idle_ttl_secs":
-            return cfg.promptCacheIdleTtlSecs.map(String.init)
-        case "prompt_cache_scope": return cfg.promptCacheScope
-        case "prompt_cache_encrypt_idle":
-            return cfg.promptCacheEncryptIdle.map { $0 ? "true" : "false" }
         default: FailableExit.die("error: unknown key '\(key)'")
         }
     }
