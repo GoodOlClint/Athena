@@ -177,10 +177,10 @@ public actor AthenaStore {
     }
 
     /// WP5 (audit P2) — lock the store + its sidecars to the owner: 0600 on the
-    /// db / `-wal` / `-shm` / `.migrate-bak`, 0700 on its directory. Mirrors the
-    /// KVSnapshotStore pattern. Best-effort (`try?`): a filesystem that can't
-    /// chmod must not fail the open. The model-store dir is a separate concern
-    /// (weights aren't secret) and is left untouched here.
+    /// db / `-wal` / `-shm` / `.migrate-bak`, 0700 on its directory.
+    /// Best-effort (`try?`): a filesystem that can't chmod must not fail the
+    /// open. The model-store dir is a separate concern (weights aren't secret)
+    /// and is left untouched here.
     private static func restrictPermissions(dbPath: URL) {
         let fm = FileManager.default
         try? fm.setAttributes(

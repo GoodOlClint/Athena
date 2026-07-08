@@ -154,9 +154,10 @@ public actor MemoryGovernor {
     public typealias EventHook = @Sendable (ModuleID, String) -> Void
     /// M59.2 — sync read of the prompt-prefix KV pool's (bytes, entries) for
     /// the snapshot. Injected so AthenaCore stays free of any AthenaLLM
-    /// dependency; the serve path backs it with the shared `PrefixKVCache`
-    /// (a lock-guarded class, so this is safe to call synchronously from
-    /// `snapshot()`). nil ⇒ pool disabled / not wired.
+    /// dependency. NOTE: the M59 prompt cache was removed in the S0 de-vendor,
+    /// so this hook is currently unwired (always nil) — retained as the
+    /// injection point for a future substrate prefix-cache seam (mlx-tracker
+    /// #24). nil ⇒ pool disabled / not wired.
     public typealias PromptCachePoolProbe = @Sendable () -> (bytes: Int, entries: Int)
     /// M59.2 — shed the prompt-prefix KV pool (drop entries not in use) as a
     /// cheap reclaim BEFORE evicting a module or refusing a load. Injected.
