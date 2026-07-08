@@ -1,0 +1,129 @@
+# Release — tag push (v*) → build, sign, notarize, publish a GitHub Release.
+#
+# AUTHORED-BUT-INERT until the operator lands signing credentials post-flip
+# (Apple Developer ID certs + an App Store Connect API key, stored as repo
+# secrets). With NO secrets present the workflow still succeeds: it produces a
+# hardened *adhoc*-signed binary, runs the unit tier, and attaches an unsigned
+# tarball. The sign / notarize / .pkg steps each no-op cleanly when their
+# secret is absent — the workflow never hard-fails for want of a certificate.
+#
+# Nothing here hard-pins a Team ID (binding, publication brainstorm): the
+# signing identities are supplied as secrets, never as literals in the tree.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # create the Release and upload assets
+
+jobs:
+  release:
+    name: Build & publish release
+    runs-on: macos-15
+    timeout-minutes: 120
+    env:
+      # Presence of a secret flips the matching guarded step ON. Absent ⇒ that
+      # step self-skips (see each `if:`). Secrets in job-level env are allowed
+      # and are what the step-level `if: env.X != ''` reads.
+      APPLE_CERT_P12: ${{ secrets.APPLE_CERT_P12 }} # base64 .p12 (Developer ID App + Installer)
+      APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+      APPLE_CODESIGN_IDENTITY: ${{ secrets.APPLE_CODESIGN_IDENTITY }} # "Developer ID Application: … (TEAMID)"
+      APPLE_INSTALLER_IDENTITY: ${{ secrets.APPLE_INSTALLER_IDENTITY }} # "Developer ID Installer: … (TEAMID)"
+      AC_API_KEY_P8: ${{ secrets.AC_API_KEY_P8 }} # base64 App Store Connect API key (.p8)
+      AC_API_KEY_ID: ${{ secrets.AC_API_KEY_ID }}
+      AC_API_ISSUER: ${{ secrets.AC_API_ISSUER }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Select newest Xcode (Metal Toolchain needs Xcode 26+)
+        run: |
+          latest=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
+          sudo xcode-select -s "${latest:-/Applications/Xcode.app}/Contents/Developer"
+          xcodebuild -version
+
+      - name: Download Metal Toolchain
+        run: xcodebuild -downloadComponent MetalToolchain
+
+      - name: Build rust-shim (structured-output staticlib)
+        run: ./rust-shim/build.sh
+
+      # ── Signing (guarded: only when a certificate secret exists) ───────────
+      - name: Import Developer ID signing certificate
+        if: env.APPLE_CERT_P12 != ''
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/athena-signing.keychain-db"
+          KP="$(uuidgen)"
+          security create-keychain -p "$KP" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KP" "$KEYCHAIN"
+          echo "$APPLE_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "$APPLE_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/productsign
+          # Make the imported keychain searchable and authorize the tools.
+          security list-keychains -d user -s "$KEYCHAIN" \
+            $(security list-keychains -d user | sed 's/[\" ]//g')
+          security set-key-partition-list -S apple-tool:,apple:,codesign:,productsign: \
+            -s -k "$KP" "$KEYCHAIN" >/dev/null
+          # build.sh signs with $CODESIGN_IDENTITY (default "-" adhoc if unset).
+          echo "CODESIGN_IDENTITY=$APPLE_CODESIGN_IDENTITY" >> "$GITHUB_ENV"
+
+      # ── Notarization creds (guarded: needs BOTH a cert and the API key, else
+      #    build.sh would hard-fail NOTARIZE=1 with an adhoc identity) ─────────
+      - name: Store notarytool credentials (App Store Connect API key)
+        if: env.APPLE_CERT_P12 != '' && env.AC_API_KEY_P8 != ''
+        run: |
+          echo "$AC_API_KEY_P8" | base64 --decode > "$RUNNER_TEMP/ac_api_key.p8"
+          xcrun notarytool store-credentials athena-notary \
+            --key "$RUNNER_TEMP/ac_api_key.p8" \
+            --key-id "$AC_API_KEY_ID" \
+            --issuer "$AC_API_ISSUER"
+          echo "NOTARYTOOL_PROFILE=athena-notary" >> "$GITHUB_ENV"
+          echo "NOTARIZE=1" >> "$GITHUB_ENV"
+
+      - name: Release build (hardened; signed + notarized when certs present)
+        # CODESIGN_IDENTITY / NOTARIZE / NOTARYTOOL_PROFILE arrive via $GITHUB_ENV
+        # from the guarded steps above; unset ⇒ build.sh adhoc-signs, passes the
+        # verify-hardening gate, and skips notarization with a note.
+        run: ./deploy/build.sh Release
+
+      - name: Unit tests
+        run: ./deploy/test.sh
+
+      - name: Assemble tarball (binary + resource bundles)
+        run: |
+          OUT="$RUNNER_TEMP/dist"; mkdir -p "$OUT"
+          PROD=".build/xcode/Build/Products/Release"
+          TAR="$OUT/athena-${GITHUB_REF_NAME}-macos-arm64.tar.gz"
+          # InstallPlan.artifactNames: the athena binary + every *.bundle beside
+          # it (the metallib bundle etc. must ship together).
+          ( cd "$PROD" && tar -czf "$TAR" athena *.bundle )
+          echo "DIST_DIR=$OUT" >> "$GITHUB_ENV"
+          ls -la "$OUT"
+
+      # ── Installer .pkg (guarded: needs a cert AND the S10 packaging script) ─
+      - name: Build signed installer package (.pkg)
+        if: env.APPLE_CERT_P12 != ''
+        run: |
+          if [ -x deploy/package.sh ]; then
+            PRODUCTSIGN_IDENTITY="$APPLE_INSTALLER_IDENTITY" \
+              ./deploy/package.sh "${GITHUB_REF_NAME}" "$DIST_DIR"
+          else
+            echo "::notice::deploy/package.sh not present yet (publication S10) — shipping tarball only."
+          fi
+
+      - name: Staple notarization ticket to the .pkg
+        if: env.APPLE_CERT_P12 != '' && env.AC_API_KEY_P8 != ''
+        run: |
+          for p in "$DIST_DIR"/*.pkg; do
+            [ -e "$p" ] && xcrun stapler staple "$p"
+          done
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" "$DIST_DIR"/* \
+            --title "${GITHUB_REF_NAME}" --generate-notes --verify-tag
