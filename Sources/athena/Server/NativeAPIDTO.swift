@@ -287,6 +287,31 @@ struct UsageEntryDTO: Codable {
     let completion_tokens: Int
     let total_tokens: Int
     let updated: Double
+    /// ADR 041 — budget state, all three omitted when the principal has no
+    /// budget. `prompt_tokens`/`completion_tokens`/`total_tokens` above stay
+    /// LIFETIME totals; `period_tokens` is spend in the CURRENT period only
+    /// (zero once the period rolls, without any row being rewritten).
+    let budget: Int?
+    let period_tokens: Int?
+    /// UTC ISO8601 instant when the period rolls.
+    let period_reset: String?
+
+    init(
+        principal: String, requests: Int, prompt_tokens: Int,
+        completion_tokens: Int, total_tokens: Int, updated: Double,
+        budget: Int? = nil, period_tokens: Int? = nil,
+        period_reset: String? = nil
+    ) {
+        self.principal = principal
+        self.requests = requests
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+        self.total_tokens = total_tokens
+        self.updated = updated
+        self.budget = budget
+        self.period_tokens = period_tokens
+        self.period_reset = period_reset
+    }
 }
 
 /// `GET /api/usage` — own usage for a member; all principals for an

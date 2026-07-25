@@ -210,16 +210,46 @@ extension AthenaServer {
         } else {
             rows = []
         }
-        return Self.json(
-            UsageReportResponse(
-                usage: rows.map {
-                    UsageEntryDTO(
-                        principal: $0.principal, requests: $0.requests,
-                        prompt_tokens: $0.promptTokens,
-                        completion_tokens: $0.completionTokens,
-                        total_tokens: $0.totalTokens,
-                        updated: $0.updated)
-                }))
+        // ADR 041 A4 — join each row to its budget verdict. `period_tokens` is
+        // read through `QuotaWindow.periodTokens`, so a row whose period has
+        // already rolled reports 0 here exactly as enforcement sees it; the
+        // lifetime columns above are untouched. All three fields are omitted
+        // when the principal has no budget (absent ≠ unlimited-with-zero-left).
+        let now = Date().timeIntervalSince1970
+        let periodStart = tokenBudgetWindow.periodStart(containing: now)
+        let resets = QuotaHeaders.iso8601(
+            tokenBudgetWindow.nextRoll(after: now))
+        var entries: [UsageEntryDTO] = []
+        for r in rows {
+            let budget = await resolvedBudget(principal: r.principal)
+            let period = QuotaWindow.periodTokens(
+                storedPeriodStart: r.periodStart,
+                promptTokens: r.periodPromptTokens,
+                completionTokens: r.periodCompletionTokens,
+                currentPeriodStart: periodStart)
+            let budgeted = (budget ?? 0) > 0
+            entries.append(
+                UsageEntryDTO(
+                    principal: r.principal, requests: r.requests,
+                    prompt_tokens: r.promptTokens,
+                    completion_tokens: r.completionTokens,
+                    total_tokens: r.totalTokens,
+                    updated: r.updated,
+                    budget: budgeted ? budget : nil,
+                    period_tokens: budgeted ? period : nil,
+                    period_reset: budgeted ? resets : nil))
+        }
+        return Self.json(UsageReportResponse(usage: entries))
+    }
+
+    /// ADR 041 — the budget that applies to a principal: the per-user override
+    /// when it is a DB user, else the configured default. Same resolution the
+    /// middleware enforces with, so the reported number can't disagree with the
+    /// one that refuses.
+    private func resolvedBudget(principal: String) async -> Int? {
+        guard principal.hasPrefix("u:") else { return tokenBudget }
+        return await store.userBudget(
+            username: String(principal.dropFirst(2))) ?? tokenBudget
     }
 
     /// `GET /api/audit` (M30.2). Admin-only (AuthPolicy →

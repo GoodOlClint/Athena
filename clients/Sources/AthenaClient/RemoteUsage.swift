@@ -23,9 +23,17 @@ public enum RemoteUsage {
         public let completion_tokens: Int
         public let total_tokens: Int
         public let updated: Double
+        /// ADR 041 — budget state; all nil when the principal has no budget
+        /// (or, on the LOCAL path, when read straight from the store without
+        /// the daemon's configured default in hand).
+        public let budget: Int?
+        public let period_tokens: Int?
+        public let period_reset: String?
         public init(
             principal: String, requests: Int, prompt_tokens: Int,
-            completion_tokens: Int, total_tokens: Int, updated: Double
+            completion_tokens: Int, total_tokens: Int, updated: Double,
+            budget: Int? = nil, period_tokens: Int? = nil,
+            period_reset: String? = nil
         ) {
             self.principal = principal
             self.requests = requests
@@ -33,6 +41,9 @@ public enum RemoteUsage {
             self.completion_tokens = completion_tokens
             self.total_tokens = total_tokens
             self.updated = updated
+            self.budget = budget
+            self.period_tokens = period_tokens
+            self.period_reset = period_reset
         }
     }
     private struct Report: Decodable { let usage: [Entry] }
@@ -65,18 +76,32 @@ public enum RemoteUsage {
                 ? s
                 : String(repeating: " ", count: w - s.count) + s
         }
+        // ADR 041 — the budget columns appear only when at least one row has
+        // one, so an appliance with no quotas renders exactly as before.
+        let budgeted = entries.contains { ($0.budget ?? 0) > 0 }
         print(
             "PRINCIPAL".padding(toLength: 28, withPad: " ", startingAt: 0)
                 + r("REQS", 8) + r("PROMPT", 12) + r("COMPL", 12)
-                + r("TOTAL", 12))
+                + r("TOTAL", 12)
+                + (budgeted ? r("PERIOD", 12) + r("BUDGET", 12) : ""))
         for e in entries {
-            print(
+            var line =
                 e.principal.padding(
                     toLength: 28, withPad: " ", startingAt: 0)
-                    + r("\(e.requests)", 8)
-                    + r("\(e.prompt_tokens)", 12)
-                    + r("\(e.completion_tokens)", 12)
-                    + r("\(e.total_tokens)", 12))
+                + r("\(e.requests)", 8)
+                + r("\(e.prompt_tokens)", 12)
+                + r("\(e.completion_tokens)", 12)
+                + r("\(e.total_tokens)", 12)
+            if budgeted {
+                line +=
+                    r(e.period_tokens.map(String.init) ?? "-", 12)
+                    + r(e.budget.map(String.init) ?? "unlimited", 12)
+            }
+            print(line)
+        }
+        // One reset line for the table: the period is daemon-wide.
+        if let reset = entries.compactMap(\.period_reset).first {
+            print("period resets \(reset)")
         }
     }
 }

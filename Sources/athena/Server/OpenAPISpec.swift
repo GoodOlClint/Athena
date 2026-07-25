@@ -356,7 +356,7 @@ enum OpenAPISpec {
               "get": {
                 "tags": ["Usage"],
                 "summary": "Per-principal token usage (pull-only).",
-                "description": "A member sees its own counters; an admin sees all principals. Requires `inference`.",
+                "description": "A member sees its own counters; an admin sees all principals. Requires `inference`. Reachable even when the caller is over its token budget — quota enforcement covers the token-bearing routes only, precisely so an exhausted principal can still diagnose (ADR 041). Carries `budget`/`period_tokens`/`period_reset` when a budget applies.",
                 "responses": {
                   "200": { "description": "Usage report.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UsageReportResponse" } } } },
                   "401": { "$ref": "#/components/responses/Unauthorized" },
@@ -945,7 +945,7 @@ enum OpenAPISpec {
               },
               "UsageEntry": {
                 "type": "object",
-                "properties": { "principal": { "type": "string" }, "requests": { "type": "integer" }, "prompt_tokens": { "type": "integer" }, "completion_tokens": { "type": "integer" }, "total_tokens": { "type": "integer" }, "updated": { "type": "number" } }
+                "properties": { "principal": { "type": "string" }, "requests": { "type": "integer" }, "prompt_tokens": { "type": "integer" }, "completion_tokens": { "type": "integer" }, "total_tokens": { "type": "integer", "description": "LIFETIME total for this principal — a budget-period roll never resets it." }, "updated": { "type": "number" }, "budget": { "type": "integer", "description": "ADR 041 — tokens allowed per period for this principal (per-user override, else the configured default). OMITTED when the principal has no budget." }, "period_tokens": { "type": "integer", "description": "ADR 041 — tokens spent in the CURRENT period (0 once the period rolls, without any row being rewritten). Omitted when there is no budget." }, "period_reset": { "type": "string", "description": "ADR 041 — UTC ISO8601 instant when the budget period rolls. Omitted when there is no budget." } }
               },
               "UsageReportResponse": { "type": "object", "properties": { "usage": { "type": "array", "items": { "$ref": "#/components/schemas/UsageEntry" } } } },
               "AuditEntry": {

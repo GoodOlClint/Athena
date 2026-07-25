@@ -168,6 +168,22 @@ print(sum(r['total_tokens'] for r in u))" 2>/dev/null)"
   && ok "usage reports lifetime total_tokens = $LIFETIME" \
   || bad "usage lifetime total_tokens = '$LIFETIME'"
 
+# A4 — /api/usage reports the budget state for a budgeted principal.
+read -r UBUDGET UPERIOD URESET <<<"$(python3 -c "
+import json
+rows=json.load(open('$D/usage.json'))['usage']
+r=[x for x in rows if x['principal']=='u:alice']
+r=r[0] if r else {}
+print(r.get('budget','-'), r.get('period_tokens','-'), r.get('period_reset','-'))" 2>/dev/null)"
+[ "$UBUDGET" = "5" ] && ok "usage.budget = 5" || bad "usage.budget = '$UBUDGET'"
+[ -n "$UPERIOD" ] && [ "$UPERIOD" != "-" ] && [ "$UPERIOD" -ge 5 ] \
+  && ok "usage.period_tokens = $UPERIOD (at or over budget)" \
+  || bad "usage.period_tokens = '$UPERIOD'"
+case "$URESET" in
+  *T*Z) ok "usage.period_reset = $URESET" ;;
+  *) bad "usage.period_reset = '$URESET'" ;;
+esac
+
 # ADR 042 — counting must NOT be quota-refused (it exists to stay under budget).
 # The stub has no tokenizer, so 501 is the expected engine answer; what matters
 # is that it is not a 429.
@@ -189,6 +205,19 @@ BREMAIN="$(hdr "$D/b1.hdr" x-athena-tokens-remaining)"
 [ -z "$BLIMIT" ] && [ -z "$BREMAIN" ] \
   && ok "no x-athena-tokens-* headers when unlimited (absent ≠ zero)" \
   || bad "unlimited bob got limit='$BLIMIT' remaining='$BREMAIN'"
+
+# A4 — and no budget fields on an un-budgeted principal's usage row either.
+curl -s -o "$D/usage-admin.json" -H "Authorization: Bearer $ADMIN_TOK" \
+  "$B/api/usage" >/dev/null
+BOBFIELDS="$(python3 -c "
+import json
+rows=json.load(open('$D/usage-admin.json'))['usage']
+r=[x for x in rows if x['principal']=='u:bob']
+r=r[0] if r else {}
+print(','.join(k for k in ('budget','period_tokens','period_reset') if k in r))" 2>/dev/null)"
+[ -z "$BOBFIELDS" ] \
+  && ok "no budget fields on an un-budgeted principal's usage row" \
+  || bad "bob's usage row carried: $BOBFIELDS"
 
 echo
 echo "== phase 6: a period roll resets the period, preserves lifetime =="

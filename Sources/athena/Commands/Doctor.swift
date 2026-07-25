@@ -360,6 +360,26 @@ struct Doctor: AsyncParsableCommand {
                 .ok,
                 "concurrency caps: " + parts.joined(separator: ", "))
         }
+        // ADR 041 — token budgets. The loopback warning is the load-bearing
+        // one: an operator who sets a budget on a dev box gets no protection
+        // at all, because there is no principal to charge (ADR 025).
+        let budget = parsed?.tokenBudget ?? 0
+        let window = parsed?.tokenBudgetWindow ?? "month"
+        if budget > 0 {
+            if anyCreds {
+                say(
+                    .ok,
+                    "token budget: \(budget) tokens per \(window) per "
+                        + "principal (per-user overrides in the store win)")
+            } else {
+                say(
+                    .warn,
+                    "token_budget is set (\(budget)/\(window)) but auth is "
+                        + "disabled — quotas are INERT in loopback dev mode "
+                        + "(no principal to charge). Seed credentials to "
+                        + "enforce them.")
+            }
+        }
         if rateOn || concOn, !anyCreds {
             say(
                 .warn,
