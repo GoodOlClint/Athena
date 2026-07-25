@@ -25,6 +25,74 @@ extension AthenaServer {
         router.post("/v1/messages") { request, _ -> Response in
             await self.handleAnthropicMessages(request)
         }
+        // ADR 042 §4(a), deferral lifted 2026-07-25 — dialect parity: the
+        // Anthropic analogue of the OpenAI count route, over the same core.
+        router.post("/v1/messages/count_tokens") { request, _ -> Response in
+            await self.handleAnthropicCountTokens(request)
+        }
+    }
+
+    /// `POST /v1/messages/count_tokens` **[anthropic]** (ADR 042 §4(a)) — the
+    /// exact `input_tokens` this body would report, in the Anthropic dialect's
+    /// own shape and field name. Same decoder as `/v1/messages` and the same
+    /// `countPromptTokens` core as the OpenAI route, so all three agree by
+    /// construction: a client that switches dialects gets the same number for
+    /// the same conversation, and the count matches the subsequent request's
+    /// `usage.input_tokens`.
+    ///
+    /// Same boundaries as the OpenAI route: no generation, no eval, no ADR 029
+    /// gate (but not concurrent with a decode — the substrate's container mutex,
+    /// see ADR 042 §4(b)); obeys ADR 015 cold-load; neither metered nor
+    /// quota-enforced. `image`/`document` blocks are refused by the shared
+    /// decoder (`unsupported_content_block`), so counting inherits that refusal
+    /// rather than re-implementing it.
+    func handleAnthropicCountTokens(_ request: Request) async -> Response {
+        let body: AnthropicMessagesRequest
+        do {
+            let buffer = try await request.body.collect(
+                upTo: maxRequestBodyBytes)
+            body = try JSONDecoder().decode(
+                AnthropicMessagesRequest.self, from: Data(buffer: buffer))
+        } catch {
+            return Self.anthropicError(
+                status: .badRequest, message: "Invalid request body: \(error)")
+        }
+        let principal = await usagePrincipal(request)
+        let lowered: AnthropicMessagesRequest.Lowered
+        do {
+            lowered = try body.lower(principal: principal)
+        } catch let e as AnthropicDecodeError {
+            return Self.anthropicError(status: .badRequest, message: e.message)
+        } catch {
+            return Self.anthropicError(
+                status: .badRequest, message: "\(error)")
+        }
+        switch await prepareChat(
+            request: request, requestedModel: body.model,
+            messages: lowered.native.messages, tools: lowered.native.tools,
+            chatTemplateKwargs: nil, wantStream: false)
+        {
+        case .failed(let response): return response
+        case .ready: break
+        case .deferToStream:
+            return Self.anthropicError(
+                status: .serviceUnavailable, message: "model is loading")
+        }
+        do {
+            let n = try await llm.countPromptTokens(
+                messages: lowered.native.messages,
+                tools: lowered.native.tools, chatTemplateKwargs: nil)
+            return Self.json(AnthropicCountTokensResponse(input_tokens: n))
+        } catch let e as AthenaError {
+            return Self.anthropicError(
+                status: HTTPResponse.Status(code: e.httpStatus),
+                message: e.message)
+        } catch {
+            let c = AthenaError.classify(error, module: .llm)
+            return Self.anthropicError(
+                status: HTTPResponse.Status(code: c.httpStatus),
+                message: c.message)
+        }
     }
 
 

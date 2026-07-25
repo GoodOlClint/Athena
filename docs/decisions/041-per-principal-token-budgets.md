@@ -1,6 +1,6 @@
 # 041 — Per-principal token budgets (rolling window)
 
-**Status:** Accepted — **PLANNED, not implemented.** Brownfield-gated; operator-approved 2026-07-25 (window semantics, budget source, response shape all confirmed by interview).
+**Status:** Accepted — **IMPLEMENTED 2026-07-25** (A1 `222601b5`, A2 `626886ed`, A3 `5e98a6da`, A4 `1b51bc46`). Brownfield-gated; operator-approved 2026-07-25 (window semantics, budget source, response shape all confirmed by interview). DoD: `deploy/e2e-token-budget.sh` 31/0; usage: `docs/token-budgets.md`.
 **Date:** 2026-07-25
 **Milestone:** TBD (operability / product surface)
 **Executes:** ADR 007 #9 (token-budget quotas).

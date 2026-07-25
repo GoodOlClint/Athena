@@ -162,6 +162,36 @@ enum OpenAPISpec {
                 }
               }
             },
+            "/v1/messages/count_tokens": {
+              "post": {
+                "tags": ["Chat"],
+                "summary": "Count a Messages request's input tokens. [ANTHROPIC-COMPATIBLE]",
+                "description": "**Athena-native dialect, Anthropic-compatible (NOT OpenAI)** — the Messages-dialect analogue of POST /v1/chat/completions/count_tokens (ADR 042 section 4(a)), returning `{\"input_tokens\": N}` in Anthropic's own field name. Same body as POST /v1/messages minus generation params (which are ignored, not rejected), decoded by the same decoder and counted by the same core, so the number equals the `usage.input_tokens` the identical body reports after inference AND equals what the OpenAI count route reports for the same conversation — the two dialects cannot drift. Nothing generates and nothing is evaluated, and the call takes no inference execution gate: tens of milliseconds on an idle engine. It is NOT concurrent with a decode, though — the substrate holds a mutex over the model context for the whole generation, so a count issued mid-decode waits that decode out. Not metered and not quota-enforced. A non-resident-but-on-disk model triggers a cold load (ADR 015). `image`/`document` content blocks are refused 400 `unsupported_content_block` by the shared decoder rather than silently under-counted. Requires `inference`.",
+                "requestBody": {
+                  "required": true,
+                  "content": { "application/json": { "schema": {
+                    "type": "object",
+                    "required": ["model", "messages"],
+                    "properties": {
+                      "model": { "type": "string", "description": "A resident/store LLM id (same resolution as /v1/messages)." },
+                      "messages": { "type": "array", "items": { "type": "object" }, "description": "The same message array POST /v1/messages takes (text + tool_use/tool_result blocks). image/document blocks => 400 unsupported_content_block." },
+                      "system": { "description": "Same as on /v1/messages: a string or an array of text blocks. Counted as a leading system turn, exactly as the request path renders it." },
+                      "tools": { "type": "array", "items": { "type": "object" }, "description": "Tool definitions — their serialized schemas ARE counted (that is the point of counting through the request path)." },
+                      "tool_choice": { "type": "object", "description": "Honored for menu-advertisement purposes only; nothing is generated." },
+                      "max_tokens": { "type": "integer", "description": "Ignored, not rejected, so a client can post its outbound payload verbatim. Output tokens are not part of an input count." }
+                    }
+                  } } }
+                },
+                "responses": {
+                  "200": { "description": "The input token count.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AnthropicCountTokensResponse" } } } },
+                  "400": { "$ref": "#/components/responses/BadRequest" },
+                  "401": { "$ref": "#/components/responses/Unauthorized" },
+                  "403": { "$ref": "#/components/responses/Forbidden" },
+                  "413": { "$ref": "#/components/responses/PayloadTooLarge" },
+                  "503": { "$ref": "#/components/responses/Overloaded" }
+                }
+              }
+            },
             "/v1/models": {
               "get": {
                 "tags": ["Models"],
@@ -866,6 +896,13 @@ enum OpenAPISpec {
                   "model": { "type": "string" },
                   "choices": { "type": "array", "items": { "$ref": "#/components/schemas/ChatChoice" } },
                   "usage": { "$ref": "#/components/schemas/Usage" }
+                }
+              },
+              "AnthropicCountTokensResponse": {
+                "type": "object",
+                "required": ["input_tokens"],
+                "properties": {
+                  "input_tokens": { "type": "integer", "description": "Post-chat-template prompt length in tokens — identical to the `usage.input_tokens` the same body returns from /v1/messages, and to `prompt_tokens` from /v1/chat/completions/count_tokens for the same conversation." }
                 }
               },
               "CountTokensResponse": {

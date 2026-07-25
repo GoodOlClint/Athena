@@ -380,6 +380,15 @@ struct AnthropicUsage: Encodable {
     let output_tokens: Int
 }
 
+/// `POST /v1/messages/count_tokens` (ADR 042 §4(a)) — the Anthropic dialect's
+/// own field name for the pre-flight count, deliberately matching the
+/// `usage.input_tokens` the same body reports after inference so a client can
+/// compare the two directly. The OpenAI route returns the same number as
+/// `prompt_tokens`; both come from one core.
+struct AnthropicCountTokensResponse: Encodable {
+    let input_tokens: Int
+}
+
 struct AnthropicMessagesResponse: Encodable {
     let id: String
     let type = "message"

@@ -12,6 +12,11 @@
 #      definition  (pre-change: the route 404s). Equality, not proximity — that
 #      is the whole value of routing both through `container.prepare`, and the
 #      tool definition is what proves tool-schema tokens are counted.
+#   2c) The Anthropic route POST /v1/messages/count_tokens agrees with its own
+#      dialect's usage.input_tokens AND with the OpenAI count for the same
+#      conversation — dialect parity is a guarantee, not a promise (ADR 042
+#      §4(a)).
+#
 #   3) The count is CHEAP when the engine is idle (tens of ms — no prefill, no
 #      eval), and a count issued while a long decode is in flight still returns
 #      the same number with a 200.
@@ -119,6 +124,67 @@ else
   echo "  FAIL count_http=$CH chat_http=$RH count=$COUNT usage=$USED"
   echo "       count body: $(cat "$WORK/count.json")"; fail=1
 fi
+
+echo "== 2c) Anthropic dialect parity: same conversation, same number =="
+# The same conversation in the Messages dialect. count_tokens on BOTH dialects
+# must agree with each other AND with each dialect's own post-inference usage
+# field — one core, one tokenizer, one template (ADR 042 §4(a)).
+ABODY=$(python3 - "$MODEL" <<'PY2'
+import json, sys
+print(json.dumps({
+  "model": sys.argv[1],
+  "max_tokens": 16,
+  "system": "You are a terse assistant. Answer in one short sentence.",
+  "messages": [
+    {"role": "user", "content": "What is the weather in Chicago right now?"},
+    {"role": "assistant", "content": "I would need to look that up."},
+    {"role": "user", "content": "Then look it up and tell me whether I need a coat."},
+  ],
+  "tools": [{
+    "name": "searchWeb",
+    "description": "Search the public web for a short factual answer.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {"type": "string", "description": "The search query."},
+        "max_results": {"type": "integer", "description": "How many hits to return."},
+      },
+      "required": ["query"],
+    },
+  }],
+}))
+PY2
+)
+AH=$(curl -s -o "$WORK/acount.json" -w "%{http_code}" -X POST \
+  "$BASE/v1/messages/count_tokens" \
+  -H 'Content-Type: application/json' -d "$ABODY")
+ACOUNT=$(python3 -c "import json;print(json.load(open('$WORK/acount.json')).get('input_tokens','MISSING'))" 2>/dev/null)
+AMH=$(curl -s -o "$WORK/amsg.json" -w "%{http_code}" -X POST "$BASE/v1/messages" \
+  -H 'Content-Type: application/json' -d "$ABODY")
+AUSED=$(python3 -c "import json;print(json.load(open('$WORK/amsg.json'))['usage']['input_tokens'])" 2>/dev/null)
+if [ "$AH" = "200" ] && [ "$AMH" = "200" ] && [ -n "$ACOUNT" ] \
+  && [ "$ACOUNT" = "$AUSED" ]; then
+  echo "  ok: anthropic count=$ACOUNT == usage.input_tokens=$AUSED (exact)"
+else
+  echo "  FAIL count_http=$AH messages_http=$AMH count=$ACOUNT usage=$AUSED"
+  echo "       count body: $(cat "$WORK/acount.json")"; fail=1
+fi
+# Cross-dialect: the same conversation must cost the same, whichever dialect
+# describes it. (Both bodies carry the same system prompt, turns, and tool.)
+if [ "$ACOUNT" = "$COUNT" ]; then
+  echo "  ok: cross-dialect parity — openai=$COUNT == anthropic=$ACOUNT"
+else
+  echo "  FAIL cross-dialect drift: openai=$COUNT anthropic=$ACOUNT"; fail=1
+fi
+
+echo "== 2d) an image block is refused on the Anthropic count route too =="
+AIMG="{\"model\":\"$MODEL\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"image\",\"source\":{\"type\":\"base64\",\"media_type\":\"image/png\",\"data\":\"iVBORw0KGgo=\"}}]}]}"
+AIH=$(curl -s -o "$WORK/aimg.json" -w "%{http_code}" -X POST \
+  "$BASE/v1/messages/count_tokens" \
+  -H 'Content-Type: application/json' -d "$AIMG")
+[ "$AIH" = "400" ] \
+  && echo "  ok: 400 on an image content block" \
+  || { echo "  FAIL http=$AIH body=$(cat "$WORK/aimg.json")"; fail=1; }
 
 echo "== 2b) image content parts are refused, not under-counted =="
 IMGBODY="{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"what is this\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==\"}}]}]}"
