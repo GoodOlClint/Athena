@@ -111,6 +111,13 @@ struct AthenaServer {
     /// explicit `0` ⇒ unbounded (field omitted). `var = nil` so it's a
     /// memberwise-init param (same convention as `auth`).
     var maxPromptTokens: Int? = nil
+    /// ADR 041 — per-principal token budget per period (nil / 0 ⇒ unlimited,
+    /// unless a user carries an override) and the period itself. Enforced by
+    /// `QuotaMiddleware` on the token-bearing routes only; inert when auth is
+    /// off (ADR 025 — no principal to charge). `var = ` so they're
+    /// memberwise-init params.
+    var tokenBudget: Int? = nil
+    var tokenBudgetWindow: QuotaWindow = .month
     /// Warm the LLM at startup instead of lazily on first request
     /// (M33.3). `var = false` so it's a memberwise-init param. Best-
     /// effort: the warm runs concurrently with serving (the HTTP surface
@@ -176,6 +183,17 @@ struct AthenaServer {
                         perPrincipal: maxConcurrencyPerPrincipal),
                     auth: auth))
         }
+        // Token budgets just inside the concurrency caps (ADR 041): a refusal
+        // is accounting-based (429 quota_exceeded), distinct from the limiter's
+        // rate 429 and the governor's memory 503. Installed unconditionally
+        // because a per-USER override can exist with no global default — the
+        // middleware itself bypasses when auth is off, when the path spends no
+        // tokens, and (without reading any counter) when the resolved budget is
+        // unlimited.
+        router.add(
+            middleware: QuotaMiddleware(
+                store: store, auth: auth, defaultBudget: tokenBudget,
+                window: tokenBudgetWindow))
         router.add(middleware: MetricsMiddleware(metrics: metrics))
 
         router.get("/healthz") { [metrics] _, _ -> Response in
@@ -653,10 +671,14 @@ struct AthenaServer {
     /// non-fatal — metering must never break inference.
     func meter(principal: String?, usage: TokenUsage) async {
         await metrics.addTokens(usage.totalTokens)
+        // ADR 041 — the caller computes the current period so the window
+        // arithmetic lives in one pure place; the store rolls or accumulates.
         try? await store.addUsage(
             principal: principal ?? Self.xenos,
             promptTokens: usage.promptTokens,
-            completionTokens: usage.completionTokens)
+            completionTokens: usage.completionTokens,
+            periodStart: tokenBudgetWindow.periodStart(
+                containing: Date().timeIntervalSince1970))
     }
 
     // MARK: - Native /api inference (M16)

@@ -103,6 +103,7 @@ enum OpenAPISpec {
                   "401": { "$ref": "#/components/responses/Unauthorized" },
                   "403": { "$ref": "#/components/responses/Forbidden" },
                   "413": { "$ref": "#/components/responses/PayloadTooLarge" },
+                  "429": { "$ref": "#/components/responses/QuotaExceeded" },
                   "503": { "$ref": "#/components/responses/Overloaded" }
                 }
               }
@@ -156,6 +157,7 @@ enum OpenAPISpec {
                   "400": { "$ref": "#/components/responses/BadRequest" },
                   "401": { "$ref": "#/components/responses/Unauthorized" },
                   "403": { "$ref": "#/components/responses/Forbidden" },
+                  "429": { "$ref": "#/components/responses/QuotaExceeded" },
                   "503": { "$ref": "#/components/responses/Overloaded" }
                 }
               }
@@ -199,6 +201,7 @@ enum OpenAPISpec {
                   "401": { "$ref": "#/components/responses/Unauthorized" },
                   "403": { "$ref": "#/components/responses/Forbidden" },
                   "413": { "$ref": "#/components/responses/PayloadTooLarge" },
+                  "429": { "$ref": "#/components/responses/QuotaExceeded" },
                   "503": { "$ref": "#/components/responses/Overloaded" }
                 }
               }
@@ -776,6 +779,7 @@ enum OpenAPISpec {
               "Forbidden": { "description": "Insufficient permissions.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
               "NotFound": { "description": "Not found.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
               "Overloaded": { "description": "Backpressure — the memory governor or a rate/concurrency cap declined the request, or (code `module_loading`) a model is still being made resident. A request for an on-disk model now BLOCKS until ready (up to `cold_load_wait_secs`) and serves 200; a `module_loading` 503 here means the load exceeded that budget or an operator weight download is in progress. Retry after the indicated delay.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+              "QuotaExceeded": { "description": "ADR 041 — the caller's token budget for the current period is exhausted (type `insufficient_quota`, code `quota_exceeded`). Distinct from the rate-limit 429 (`rate_limited`, request RATE) and the governor's 503 (memory). `Retry-After` carries the seconds until the budget period rolls; `x-athena-tokens-reset` the roll instant. Enforced only on the token-bearing routes, so `/api/usage` still answers while exhausted. Inert when auth is off (loopback dev mode has no principal to charge).", "headers": { "Retry-After": { "schema": { "type": "integer" }, "description": "Seconds until the budget period rolls." }, "x-athena-tokens-reset": { "schema": { "type": "string" }, "description": "UTC ISO8601 instant when the period rolls." } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
               "PayloadTooLarge": { "description": "Request body exceeds the configured upload limit (code `payload_too_large`). Audio uploads (`/v1/audio/*`) are bounded by `max_audio_upload_bytes` (default 100 MiB); JSON bodies by `max_request_body_bytes` (default 4 MiB). Pre-check with `Content-Length` to avoid the rejected transfer.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
             },
             "schemas": {

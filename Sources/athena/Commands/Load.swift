@@ -490,11 +490,11 @@ struct Load: AsyncParsableCommand {
         }
         let kvCompression = try KVCompression.resolve(
             config: tomlCfg?.kvCompression)
-        // ADR 041 — validate the budget window at boot, fail-closed like
-        // kv_compression: a `--token-budget-window` typo (which bypasses the
-        // TOML parse check) must refuse to start rather than quietly enforce a
-        // window nobody asked for. A3 binds this to the quota middleware.
-        _ = try QuotaWindow.resolve(tokenBudgetWindow)
+        // ADR 041 — resolve the budget window fail-closed like kv_compression: a
+        // `--token-budget-window` typo (which bypasses the TOML parse check)
+        // must refuse to start rather than quietly enforce a window nobody
+        // asked for.
+        let quotaWindow = try QuotaWindow.resolve(tokenBudgetWindow)
         // ADR 024 Tier 2 (opt-in) — deny debugger attach. Precedence mirrors
         // the other startup toggles: env ATHENA_DENY_DEBUGGER (1/true/0/false)
         // > TOML deny_debugger_attach > built-in false. Redundant with the
@@ -933,6 +933,8 @@ struct Load: AsyncParsableCommand {
             maxVideoUploadBytes: maxVideoUploadBytes ?? 1_073_741_824,
             maxRequestBodyBytes: maxRequestBodyBytes ?? 4_194_304,
             maxPromptTokens: maxPromptTokens,
+            tokenBudget: tokenBudget,
+            tokenBudgetWindow: quotaWindow,
             preload: preload)
         // M54.3 — operator-action pull: at startup, fetch any configured
         // model that has an HF-style id and isn't in the store, in the
