@@ -107,6 +107,25 @@ enum OpenAPISpec {
                 }
               }
             },
+            "/v1/chat/completions/count_tokens": {
+              "post": {
+                "tags": ["Chat"],
+                "summary": "Count a request's prompt tokens without running it. [ATHENA-NATIVE]",
+                "description": "**Athena-native extension under /v1 (NOT OpenAI — no OpenAI equivalent; ADR 042).** Returns the EXACT `prompt_tokens` the identical body would report from POST /v1/chat/completions, counted through the request path's own chat template, tokenizer, and tool serialization — so a pre-flight count equals the subsequent request's `usage.prompt_tokens` by construction (tool definitions included). Send the same body you would send to /v1/chat/completions; generation params (`max_tokens`, `temperature`, `stream`, …) are ignored rather than rejected. Nothing generates and nothing is evaluated (the token array's shape is read, never its contents), and the call takes no inference execution gate: on an idle engine it costs tens of milliseconds. NOT metered and NOT quota-enforced (it exists so a client can stay under its budget). Three caveats: (1) it renders through the loaded model's context, which the substrate guards with a mutex held for the duration of a decode, so a count issued while another request is generating waits for that generation to finish (measured ~8s behind an 11s decode) — cheap, but not concurrent; (2) it needs the model's tokenizer, so a non-resident-but-on-disk model triggers a cold load and the call blocks up to `cold_load_wait_secs` (ADR 015); (3) image content parts are refused with 400 `image_count_unsupported` rather than silently under-counted. Pair with `context_length` + `max_prompt_tokens` from GET /v1/models to compute remaining room. Requires `inference`.",
+                "requestBody": {
+                  "required": true,
+                  "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ChatCompletionRequest" } } }
+                },
+                "responses": {
+                  "200": { "description": "The prompt token count.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CountTokensResponse" } } } },
+                  "400": { "$ref": "#/components/responses/BadRequest" },
+                  "401": { "$ref": "#/components/responses/Unauthorized" },
+                  "403": { "$ref": "#/components/responses/Forbidden" },
+                  "413": { "$ref": "#/components/responses/PayloadTooLarge" },
+                  "503": { "$ref": "#/components/responses/Overloaded" }
+                }
+              }
+            },
             "/v1/messages": {
               "post": {
                 "tags": ["Chat"],
@@ -822,6 +841,13 @@ enum OpenAPISpec {
                   "model": { "type": "string" },
                   "choices": { "type": "array", "items": { "$ref": "#/components/schemas/ChatChoice" } },
                   "usage": { "$ref": "#/components/schemas/Usage" }
+                }
+              },
+              "CountTokensResponse": {
+                "type": "object",
+                "required": ["prompt_tokens"],
+                "properties": {
+                  "prompt_tokens": { "type": "integer", "description": "Post-chat-template prompt length in tokens — identical to the `usage.prompt_tokens` the same body returns from /v1/chat/completions. Token ids and per-message breakdowns are deliberately not returned." }
                 }
               },
               "OpenAIModel": {

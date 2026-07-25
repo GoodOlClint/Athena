@@ -64,6 +64,22 @@ public protocol LLMModule: InferenceModule {
         chatTemplateKwargs: [String: any Sendable]?
     ) async throws
 
+    /// ADR 042 — count the prompt tokens this exact request WOULD send, using
+    /// the resident model's own chat template + tokenizer (the same
+    /// `container.prepare` the decode path calls), so a pre-flight count equals
+    /// the subsequent request's `usage.prompt_tokens` by construction rather
+    /// than by maintenance. Reads the token array's SHAPE only — nothing is
+    /// evaluated, no prefill, no kernel launch — so it takes no ADR 029
+    /// execution gate (ADR 042 §4(b), which records the tripwire).
+    /// Default: `notImplemented` (501) for conformers with no tokenizer (the
+    /// stub) — never a synthesized estimate, which would be worse than useless
+    /// for a client budgeting near the boundary.
+    func countPromptTokens(
+        messages: [ChatTurn],
+        tools: [[String: any Sendable]]?,
+        chatTemplateKwargs: [String: any Sendable]?
+    ) async throws -> Int
+
     /// M62 — choose the model the NEXT governor cold-load will bind, WITHOUT
     /// loading now: the non-blocking cold-load path (`beginLoadIfNeeded`)
     /// drives the actual load under the governor's reservation, and a cold
@@ -85,6 +101,15 @@ extension LLMModule {
     public func preflightPromptCache(prompt: String) async throws {}
 
     public func selectColdLoadModel(_ id: String?) async throws {}
+
+    public func countPromptTokens(
+        messages: [ChatTurn],
+        tools: [[String: any Sendable]]? = nil,
+        chatTemplateKwargs: [String: any Sendable]? = nil
+    ) async throws -> Int {
+        throw AthenaError.notImplemented(
+            feature: "token counting requires a model with a tokenizer")
+    }
 
     public func preflightPromptCache(
         messages: [ChatTurn],

@@ -27,6 +27,87 @@ extension AthenaServer {
         router.post("/v1/chat/completions") { request, _ -> Response in
             await self.handleChatCompletions(request)
         }
+        // ADR 042 — pre-flight token count [native]. Same request body, no
+        // generation: the client measures a prompt before spending on it.
+        router.post("/v1/chat/completions/count_tokens") {
+            request, _ -> Response in
+            await self.handleCountTokens(request)
+        }
+    }
+
+    /// `POST /v1/chat/completions/count_tokens` **[native]** (ADR 042) — the
+    /// exact `prompt_tokens` this body WOULD report, counted through the
+    /// request path's own chat template + tokenizer. Nothing generates and
+    /// nothing evaluates (`countPromptTokens` reads the token array's shape), so
+    /// this takes no ADR 029 execution gate: ~34 ms on an idle engine. It is
+    /// NOT concurrent with a decode, though — the substrate's `ModelContainer`
+    /// holds an async mutex over its context for the whole generation, and
+    /// `prepare` needs it, so a mid-decode count waits that decode out (ADR 042
+    /// §4(b) amendment). Not metered and not quota-enforced: it exists so a
+    /// client stays UNDER its budget.
+    ///
+    /// Generation params in the body are ignored, not rejected — the point is
+    /// that a client can post its outbound payload verbatim. Image content
+    /// parts are refused (the image path adds preprocessing + per-image tokens;
+    /// silently under-counting would be worse than a 400).
+    func handleCountTokens(_ request: Request) async -> Response {
+        let body: ChatCompletionRequest
+        do {
+            let buffer = try await request.body.collect(
+                upTo: maxRequestBodyBytes)
+            body = try JSONDecoder().decode(
+                ChatCompletionRequest.self, from: Data(buffer: buffer))
+        } catch {
+            return Self.error(
+                status: .badRequest,
+                message: "Invalid request body: \(error)",
+                type: "invalid_request_error", code: "invalid_body")
+        }
+        let turns: [ChatTurn]
+        do {
+            turns = try Self.chatTurns(from: body.messages)
+        } catch {
+            return Self.imageContentError(error)
+        }
+        guard turns.allSatisfy({ $0.images.isEmpty }) else {
+            return Self.error(
+                status: .badRequest,
+                message:
+                    "counting a request with image content parts is not "
+                    + "supported; count the text+tools portion and budget "
+                    + "image tokens separately",
+                type: "invalid_request_error",
+                code: "image_count_unsupported")
+        }
+        let toolSpecs = body.toolSpecs()
+        let kwargs = body.chatTemplateKwargsContext()
+        // The shared orchestration seam (ADR 036 S1b): admission, ADR 015
+        // cold-load (counting CAN block on a load — it needs the model's
+        // tokenizer), rebind, and the resident-model preflight. `wantStream:
+        // false` ⇒ `.deferToStream` is unreachable, but it is handled as the
+        // honest 503 rather than force-unwrapped.
+        // ponytail: the seam's prompt-cap preflight renders this prompt once
+        // more than strictly needed (a few ms on a 14k-token body); reuse of
+        // the canonical seam beats a bespoke admission path.
+        switch await prepareChat(
+            request: request, requestedModel: body.model, messages: turns,
+            tools: toolSpecs, chatTemplateKwargs: kwargs, wantStream: false)
+        {
+        case .failed(let response): return response
+        case .deferToStream: return Self.coldLoadResponse(.llm)
+        case .ready: break
+        }
+        do {
+            let n = try await llm.countPromptTokens(
+                messages: turns, tools: toolSpecs, chatTemplateKwargs: kwargs)
+            return Self.json(CountTokensResponse(prompt_tokens: n))
+        } catch let e as AthenaError {
+            return Self.error(
+                status: HTTPResponse.Status(code: e.httpStatus),
+                message: e.message, type: e.type, code: e.code)
+        } catch {
+            return Self.classified(error, module: .llm)
+        }
     }
 
     func handleChatCompletions(_ request: Request) async -> Response {

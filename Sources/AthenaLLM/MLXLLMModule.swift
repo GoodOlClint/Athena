@@ -337,6 +337,39 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         }
     }
 
+    /// ADR 042 — the exact prompt-token count for this request shape, rendered
+    /// through the SAME `container.prepare` (chat template + tokenizer + tool
+    /// serialization) the decode path uses, so the number equals the
+    /// `usage.prompt_tokens` the identical body will report.
+    ///
+    /// Reads `shape` only — never `asArray` — so no MLX evaluation happens: the
+    /// substrate's text and Gemma4-VLM processors both build the token
+    /// `MLXArray` host-side and image expansion is guarded on a non-empty image
+    /// list (the route refuses image parts up front). Hence no ADR 029 gate:
+    /// nothing executes. Measured ~34 ms on an idle engine.
+    ///
+    /// It is NOT concurrent with a decode: `container.prepare` reaches the
+    /// processor through `SerialAccessContainer.read`, whose async mutex the
+    /// generating request holds for its whole decode — so a count issued
+    /// mid-generation waits it out (~8 s behind an 11 s decode, measured
+    /// 2026-07-25). Recorded in the ADR 042 §4(b) amendment. Upgrade path if a
+    /// consumer needs true concurrency: hold the processor/tokenizer outside
+    /// the container, which is a substrate-side change, not a serve-path one.
+    public func countPromptTokens(
+        messages: [ChatTurn],
+        tools: [[String: any Sendable]]? = nil,
+        chatTemplateKwargs: [String: any Sendable]? = nil
+    ) async throws -> Int {
+        guard let container else {
+            throw AthenaError.moduleNotRegistered(.llm)
+        }
+        let lmInput = try await container.prepare(
+            input: UserInput(
+                chat: Self.chatMessages(messages), tools: tools,
+                additionalContext: chatTemplateKwargs))
+        return lmInput.text.tokens.shape.last ?? 0
+    }
+
     /// Map transport-neutral `ChatTurn`s to substrate `Chat.Message`s so
     /// the model's chat template sees real roles. Unknown roles fall back
     /// to `.user`; an empty list becomes a single empty user turn (the

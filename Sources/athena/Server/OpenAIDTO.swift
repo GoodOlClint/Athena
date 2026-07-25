@@ -588,6 +588,16 @@ struct APIErrorBody: Codable {
     let error: ErrorDetail
 }
 
+// MARK: - /v1/chat/completions/count_tokens (ADR 042 — [native])
+
+/// The pre-flight count. Deliberately one field: the name matches
+/// `usage.prompt_tokens` so a client can compare the two directly, and token
+/// ids / per-message breakdowns are NOT returned (nobody asked, and returning
+/// them would commit us to a decomposition we don't want to maintain).
+struct CountTokensResponse: Codable {
+    let prompt_tokens: Int
+}
+
 // MARK: - /v1/models (M31.1 — OpenAI list/retrieve)
 
 /// One model in the OpenAI `model` shape. `created` is the store entry's
