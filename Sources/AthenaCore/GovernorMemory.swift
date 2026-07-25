@@ -66,6 +66,23 @@ public enum GovernorMemory {
         return max(minCeiling, seq)
     }
 
+    /// ADR 042 — the prefill ceiling this daemon will actually enforce, i.e.
+    /// exactly what `MLXLLMModule.enforcePromptCeiling` computes, exposed so
+    /// `GET /v1/models` can publish it as `max_prompt_tokens`:
+    ///
+    /// - `configured == nil` ⇒ the ADR 030 device-derived default.
+    /// - `configured > 0` ⇒ the operator's value.
+    /// - `configured <= 0` ⇒ nil, the explicit unbounded opt-out (the wire
+    ///   field is then omitted — absent means unbounded, never zero).
+    public static func effectivePromptTokenCeiling(
+        configured: Int?, maxBufferBytes: Int, bytesPerScoreElem: Int = 128
+    ) -> Int? {
+        if let configured { return configured > 0 ? configured : nil }
+        return defaultPromptTokenCeiling(
+            maxBufferBytes: maxBufferBytes,
+            bytesPerScoreElem: bytesPerScoreElem)
+    }
+
     // MARK: - G2 — admission against the real footprint
 
     /// How the governor sizes the admission denominator (ADR 023 G2).

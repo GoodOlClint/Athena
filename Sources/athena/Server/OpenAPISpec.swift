@@ -145,7 +145,7 @@ enum OpenAPISpec {
               "get": {
                 "tags": ["Models"],
                 "summary": "List available models.",
-                "description": "OpenAI-compatible list shape. Requires `model.read`.",
+                "description": "OpenAI-compatible list shape. Requires `model.read`. **`context_length` and `max_prompt_tokens` are Athena-native extension fields** on this otherwise OpenAI-compatible route (ADR 042): OpenAI's model object has no context-length field, so a strict OpenAI client simply ignores two unknown keys. Both are omitted when unknown/unbounded. See the `OpenAIModel` schema.",
                 "responses": {
                   "200": { "description": "Model list.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OpenAIModelList" } } } },
                   "401": { "$ref": "#/components/responses/Unauthorized" },
@@ -157,7 +157,7 @@ enum OpenAPISpec {
               "get": {
                 "tags": ["Models"],
                 "summary": "Retrieve a model.",
-                "description": "OpenAI-compatible retrieve shape. Requires `model.read`.",
+                "description": "OpenAI-compatible retrieve shape. Requires `model.read`. **`context_length` and `max_prompt_tokens` are Athena-native extension fields** on this otherwise OpenAI-compatible route (ADR 042) — see the `OpenAIModel` schema.",
                 "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Model id (store entry name)." } ],
                 "responses": {
                   "200": { "description": "The model.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OpenAIModel" } } } },
@@ -830,7 +830,9 @@ enum OpenAPISpec {
                   "id": { "type": "string" },
                   "object": { "type": "string" },
                   "created": { "type": "integer" },
-                  "owned_by": { "type": "string" }
+                  "owned_by": { "type": "string" },
+                  "context_length": { "type": "integer", "description": "ATHENA-NATIVE EXTENSION (ADR 042). The context window the checkpoint advertises (config.json `max_position_embeddings`, top-level or nested `text_config`). Omitted when the config does not declare one — Athena reports what the checkpoint claims and does not validate it." },
+                  "max_prompt_tokens": { "type": "integer", "description": "ATHENA-NATIVE EXTENSION (ADR 042). The prefill ceiling THIS daemon enforces for a prompt, in post-chat-template tokens: the operator's `max_prompt_tokens` when set, else the ADR 030 device-derived default (~sqrt(maxMetalBufferSize/128)). Omitted only under the explicit unbounded opt-out (`max_prompt_tokens = 0`). Frequently an order of magnitude LOWER than `context_length`; a client's usable budget is the min of the two, and exceeding this one returns 400 `input_too_long`. Use POST /v1/chat/completions/count_tokens to measure a prompt against it exactly." }
                 }
               },
               "OpenAIModelList": {

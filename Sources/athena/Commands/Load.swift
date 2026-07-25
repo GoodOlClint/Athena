@@ -913,6 +913,7 @@ struct Load: AsyncParsableCommand {
             maxAudioUploadBytes: maxAudioUploadBytes ?? 104_857_600,
             maxVideoUploadBytes: maxVideoUploadBytes ?? 1_073_741_824,
             maxRequestBodyBytes: maxRequestBodyBytes ?? 4_194_304,
+            maxPromptTokens: maxPromptTokens,
             preload: preload)
         // M54.3 — operator-action pull: at startup, fetch any configured
         // model that has an HF-style id and isn't in the store, in the

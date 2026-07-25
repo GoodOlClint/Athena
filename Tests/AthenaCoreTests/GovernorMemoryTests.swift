@@ -84,6 +84,46 @@ final class GovernorMemoryTests: XCTestCase {
         XCTAssertGreaterThan(large, small)
     }
 
+    // MARK: - ADR 042 — the EFFECTIVE ceiling published on /v1/models
+
+    /// Unset ⇒ the device-derived default, i.e. the published number is the
+    /// same one the decode path enforces.
+    func testEffectiveCeilingUnsetUsesDerivedDefault() {
+        let buf = 48 * 1024 * 1024 * 1024
+        XCTAssertEqual(
+            GovernorMemory.effectivePromptTokenCeiling(
+                configured: nil, maxBufferBytes: buf),
+            GovernorMemory.defaultPromptTokenCeiling(maxBufferBytes: buf))
+    }
+
+    func testEffectiveCeilingConfiguredWins() {
+        XCTAssertEqual(
+            GovernorMemory.effectivePromptTokenCeiling(
+                configured: 96_000,
+                maxBufferBytes: 48 * 1024 * 1024 * 1024),
+            96_000)
+    }
+
+    /// Explicit `0` (or negative) is the unbounded opt-out — nil, so the wire
+    /// field is OMITTED. Absent must never be read as a zero-token ceiling.
+    func testEffectiveCeilingZeroIsUnboundedNotDerived() {
+        XCTAssertNil(
+            GovernorMemory.effectivePromptTokenCeiling(
+                configured: 0, maxBufferBytes: 48 * 1024 * 1024 * 1024))
+        XCTAssertNil(
+            GovernorMemory.effectivePromptTokenCeiling(
+                configured: -1, maxBufferBytes: 48 * 1024 * 1024 * 1024))
+    }
+
+    /// Unknown device + unset config still publishes the safe floor, never nil
+    /// (a client must not read "unbounded" off a device probe failure).
+    func testEffectiveCeilingUnknownDeviceStillBounded() {
+        XCTAssertEqual(
+            GovernorMemory.effectivePromptTokenCeiling(
+                configured: nil, maxBufferBytes: 0),
+            16_384)
+    }
+
     // MARK: - G2 — admission against the real footprint (ADR 023)
 
     func testAdmissionModeParseDefaultsToFootprint() {

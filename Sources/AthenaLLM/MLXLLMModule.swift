@@ -101,8 +101,10 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     /// Feeds the default prompt-length ceiling (`defaultPromptTokenCeiling`)
     /// when the operator hasn't set `max_prompt_tokens`. Device-constant, so a
     /// lazily-computed global is correct and cheap.
-    nonisolated static let deviceMaxBufferBytes: Int = MLX.GPU.deviceInfo()
-        .maxBufferSize
+    /// ADR 042 — `public` so the `/v1/models` handler can publish the same
+    /// derived ceiling the decode path enforces.
+    public nonisolated static let deviceMaxBufferBytes: Int =
+        MLX.GPU.deviceInfo().maxBufferSize
 
     /// ADR 026 — the selectable set is the model store classified by
     /// `ModelSupport` (an LLM slot accepts `.llm` and `.vision`), scanned live
@@ -1308,10 +1310,14 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     /// unbounded opt-out (calibration knob). Called at every `container.prepare`
     /// chokepoint (runSpeculative + beginGeneration).
     private func enforcePromptCeiling(tokenCount: Int) throws {
-        let cap =
-            params.maxPromptTokens
-            ?? GovernorMemory.defaultPromptTokenCeiling(
+        // ADR 042 — the same resolution `GET /v1/models` publishes as
+        // `max_prompt_tokens`, so the advertised ceiling is the enforced one.
+        // nil ⇒ the operator's explicit unbounded opt-out.
+        guard
+            let cap = GovernorMemory.effectivePromptTokenCeiling(
+                configured: params.maxPromptTokens,
                 maxBufferBytes: Self.deviceMaxBufferBytes)
+        else { return }
         if Self.promptExceedsCap(tokenCount, cap: cap) {
             throw AthenaError.inputTooLong(
                 module: .llm, tokens: tokenCount, maxTokens: cap)

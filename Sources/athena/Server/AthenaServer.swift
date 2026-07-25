@@ -104,6 +104,13 @@ struct AthenaServer {
     /// machinery as the audio cap. `var = ` so it's a memberwise-init param.
     var maxVideoUploadBytes: Int = 1_073_741_824
     var maxRequestBodyBytes: Int = 4_194_304
+    /// ADR 042 — the operator's `max_prompt_tokens` (the ADR 030 prefill cap),
+    /// as passed to the LLM module. Published on `GET /v1/models` as the
+    /// effective ceiling so a client can size its context budget without
+    /// tripping a 400 to discover it. nil ⇒ the device-derived default;
+    /// explicit `0` ⇒ unbounded (field omitted). `var = nil` so it's a
+    /// memberwise-init param (same convention as `auth`).
+    var maxPromptTokens: Int? = nil
     /// Warm the LLM at startup instead of lazily on first request
     /// (M33.3). `var = false` so it's a memberwise-init param. Best-
     /// effort: the warm runs concurrently with serving (the HTTP surface

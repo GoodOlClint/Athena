@@ -599,6 +599,19 @@ struct OpenAIModel: Codable {
     let object: String  // "model"
     let created: Int
     let owned_by: String
+    /// ADR 042 — **Athena-native extensions** on an `[oai]` route (the `/v1`
+    /// compatibility rule: marked here, in the spec description, and in the
+    /// CLAUDE.md endpoint list). Both omitted when nil, so a model whose
+    /// config lacks the field — or an unbounded prefill opt-out — encodes
+    /// byte-identically to the pre-ADR-042 object.
+    ///
+    /// `context_length` = what the checkpoint advertises
+    /// (`max_position_embeddings`); `max_prompt_tokens` = the prefill ceiling
+    /// this daemon enforces right now (ADR 030). A client's usable budget is
+    /// the **min** of the two — they are published separately because they
+    /// fail differently (model capability vs memory guard).
+    let context_length: Int?
+    let max_prompt_tokens: Int?
 }
 
 struct OpenAIModelList: Codable {

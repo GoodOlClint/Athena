@@ -949,7 +949,20 @@ extension AthenaServer {
             OpenAIModelList(
                 object: "list",
                 data: ModelStoreOps.list(root: modelStoreRoot)
-                    .map { Self.openAIModel($0.name, $0.modified) }))
+                    .map {
+                        // ADR 042 — one extra config.json read per entry; the
+                        // list already stat-walks + classifies every entry, so
+                        // this is small next to what it costs already.
+                        // ponytail: cache per (path, mtime) only if a large
+                        // store makes the list call measurably slow.
+                        Self.openAIModel(
+                            $0.name, $0.modified,
+                            contextLength: ModelConfigInfo.read(
+                                modelDirectory: modelStoreRoot
+                                    .appendingPathComponent($0.name))?
+                                .maxPositionEmbeddings,
+                            promptCeiling: promptTokenCeiling)
+                    }))
     }
 
     /// `GET /v1/models/:id` (M31.1) — OpenAI retrieve shape; 404 in the
@@ -970,16 +983,36 @@ extension AthenaServer {
         // A16 — `show` now carries this entry's own mtime, so a single-model
         // retrieve no longer stat-walks the entire store via `list` just to
         // find one `created` time.
-        return Self.json(Self.openAIModel(d.name, d.modified))
+        return Self.json(
+            Self.openAIModel(
+                d.name, d.modified,
+                // The retrieve path already carries this entry's config bytes.
+                contextLength: ModelConfigInfo.parse(configJSON: d.configJSON)
+                    .maxPositionEmbeddings,
+                promptCeiling: promptTokenCeiling))
     }
 
-    private static func openAIModel(_ name: String, _ modified: Date)
-        -> OpenAIModel
-    {
+    /// ADR 042 — the prefill ceiling this daemon will enforce, resolved exactly
+    /// as the decode path resolves it (`enforcePromptCeiling`): the operator's
+    /// `max_prompt_tokens`, else the device-derived ADR 030 default; nil under
+    /// the explicit unbounded opt-out. Device- and config-constant, so it is
+    /// computed per call without caching.
+    private var promptTokenCeiling: Int? {
+        GovernorMemory.effectivePromptTokenCeiling(
+            configured: maxPromptTokens,
+            maxBufferBytes: MLXLLMModule.deviceMaxBufferBytes)
+    }
+
+    private static func openAIModel(
+        _ name: String, _ modified: Date,
+        contextLength: Int?, promptCeiling: Int?
+    ) -> OpenAIModel {
         OpenAIModel(
             id: name, object: "model",
             created: Int(modified.timeIntervalSince1970),
-            owned_by: "athena")
+            owned_by: "athena",
+            context_length: contextLength,
+            max_prompt_tokens: promptCeiling)
     }
 
     func handleModelShow(_ name: String?) -> Response {
