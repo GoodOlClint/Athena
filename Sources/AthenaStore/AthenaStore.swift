@@ -9,16 +9,29 @@ public struct UsageRow: Sendable, Equatable {
     public let completionTokens: Int
     /// Wall-clock of the last metered request (epoch seconds).
     public let updated: Double
+    /// ADR 041 — the budget period these period counters belong to (epoch
+    /// seconds, `0` for a row written before ADR 041 / with no window). A
+    /// stored start older than the current period means the counters describe
+    /// a period that is over: read them through
+    /// `QuotaWindow.periodTokens(…)`, which returns zero in that case.
+    public let periodStart: Double
+    public let periodPromptTokens: Int
+    public let periodCompletionTokens: Int
     public var totalTokens: Int { promptTokens + completionTokens }
     public init(
         principal: String, requests: Int, promptTokens: Int,
-        completionTokens: Int, updated: Double
+        completionTokens: Int, updated: Double,
+        periodStart: Double = 0, periodPromptTokens: Int = 0,
+        periodCompletionTokens: Int = 0
     ) {
         self.principal = principal
         self.requests = requests
         self.promptTokens = promptTokens
         self.completionTokens = completionTokens
         self.updated = updated
+        self.periodStart = periodStart
+        self.periodPromptTokens = periodPromptTokens
+        self.periodCompletionTokens = periodCompletionTokens
     }
 }
 
@@ -255,6 +268,23 @@ public actor AthenaStore {
         // pre-migration tokens keep working (fail-safe / backward-
         // compatible). Only tokens minted with a TTL carry a timestamp.
         try? exec(db, "ALTER TABLE auth_tokens ADD COLUMN expires REAL;")
+        // ADR 041 — rolling-period token budgets. Additive, so an old DB opens
+        // and works with budgets unset (= unlimited, the pre-change behavior).
+        // The existing requests/prompt_tokens/completion_tokens columns keep
+        // their shipped meaning as LIFETIME totals: a period roll resets only
+        // the period trio and destroys no history.
+        for sql in [
+            "ALTER TABLE usage_counters ADD COLUMN "
+                + "period_start REAL NOT NULL DEFAULT 0;",
+            "ALTER TABLE usage_counters ADD COLUMN "
+                + "period_prompt_tokens INTEGER NOT NULL DEFAULT 0;",
+            "ALTER TABLE usage_counters ADD COLUMN "
+                + "period_completion_tokens INTEGER NOT NULL DEFAULT 0;",
+            // NULL ⇒ inherit the configured global default.
+            "ALTER TABLE auth_users ADD COLUMN token_budget INTEGER;",
+        ] {
+            try? exec(db, sql)
+        }
     }
 
     deinit { sqlite3_close(db) }
@@ -474,24 +504,49 @@ public actor AthenaStore {
     /// Add one request's token counts to `principal`'s running totals,
     /// creating the row on first use. Token columns are INTEGER (64-bit)
     /// so cumulative counts don't overflow over an appliance's lifetime.
+    /// ADR 041 — `periodStart` is the start of the CURRENT budget period
+    /// (epoch seconds), computed by the caller via `QuotaWindow` so the window
+    /// arithmetic stays in one pure, unit-pinned place and the store stays a
+    /// dumb comparator. When the row's stored `period_start` is older, the
+    /// period trio is OVERWRITTEN with this request's tokens (the lazy roll);
+    /// otherwise it accumulates. Lifetime columns always accumulate.
+    /// The `0` default keeps pre-ADR-041 callers (and tests) meaning "one
+    /// eternal period".
     public func addUsage(
-        principal: String, promptTokens: Int, completionTokens: Int
+        principal: String, promptTokens: Int, completionTokens: Int,
+        periodStart: Double = 0
     ) throws {
         let st = try Self.prepared(db,
             "INSERT INTO usage_counters"
                 + "(principal,requests,prompt_tokens,completion_tokens,"
-                + "updated) VALUES(?,1,?,?,?) "
+                + "updated,period_start,period_prompt_tokens,"
+                + "period_completion_tokens) VALUES(?,1,?,?,?,?,?,?) "
                 + "ON CONFLICT(principal) DO UPDATE SET "
                 + "requests=requests+1,"
                 + "prompt_tokens=prompt_tokens+excluded.prompt_tokens,"
                 + "completion_tokens=completion_tokens"
                 + "+excluded.completion_tokens,"
-                + "updated=excluded.updated;")
+                + "updated=excluded.updated,"
+                + "period_prompt_tokens=CASE WHEN "
+                + "usage_counters.period_start<excluded.period_start "
+                + "THEN excluded.period_prompt_tokens ELSE "
+                + "usage_counters.period_prompt_tokens"
+                + "+excluded.period_prompt_tokens END,"
+                + "period_completion_tokens=CASE WHEN "
+                + "usage_counters.period_start<excluded.period_start "
+                + "THEN excluded.period_completion_tokens ELSE "
+                + "usage_counters.period_completion_tokens"
+                + "+excluded.period_completion_tokens END,"
+                + "period_start=MAX(usage_counters.period_start,"
+                + "excluded.period_start);")
         defer { sqlite3_finalize(st) }
         sqlite3_bind_text(st, 1, principal, -1, Self.transient)
         sqlite3_bind_int64(st, 2, Int64(promptTokens))
         sqlite3_bind_int64(st, 3, Int64(completionTokens))
         sqlite3_bind_double(st, 4, Date().timeIntervalSince1970)
+        sqlite3_bind_double(st, 5, periodStart)
+        sqlite3_bind_int64(st, 6, Int64(promptTokens))
+        sqlite3_bind_int64(st, 7, Int64(completionTokens))
         guard sqlite3_step(st) == SQLITE_DONE else {
             throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
         }
@@ -503,11 +558,15 @@ public actor AthenaStore {
             requests: Int(sqlite3_column_int64(st, 1)),
             promptTokens: Int(sqlite3_column_int64(st, 2)),
             completionTokens: Int(sqlite3_column_int64(st, 3)),
-            updated: sqlite3_column_double(st, 4))
+            updated: sqlite3_column_double(st, 4),
+            periodStart: sqlite3_column_double(st, 5),
+            periodPromptTokens: Int(sqlite3_column_int64(st, 6)),
+            periodCompletionTokens: Int(sqlite3_column_int64(st, 7)))
     }
 
     private static let usageCols =
-        "principal,requests,prompt_tokens,completion_tokens,updated"
+        "principal,requests,prompt_tokens,completion_tokens,updated,"
+        + "period_start,period_prompt_tokens,period_completion_tokens"
 
     /// One principal's cumulative usage, or nil if it has none yet.
     public func usage(principal: String) -> UsageRow? {
@@ -674,13 +733,20 @@ public actor AthenaStore {
         public let expires: Double?
     }
 
+    /// Create or re-key a user. ADR 041: an UPSERT, not `INSERT OR REPLACE` —
+    /// REPLACE deletes the row first, which would silently drop the user's
+    /// `token_budget` (and any future additive column) on a password change.
+    /// `created` is still overwritten, preserving the prior behavior exactly.
     public func putUser(
         username: String, salt: Data, hash: Data, iters: Int
     ) throws {
         let st = try Self.prepared(db,
-            "INSERT OR REPLACE INTO auth_users"
+            "INSERT INTO auth_users"
                 + "(username,salt,hash,iters,created) "
-                + "VALUES(?,?,?,?,?);")
+                + "VALUES(?,?,?,?,?) "
+                + "ON CONFLICT(username) DO UPDATE SET "
+                + "salt=excluded.salt,hash=excluded.hash,"
+                + "iters=excluded.iters,created=excluded.created;")
         defer { sqlite3_finalize(st) }
         sqlite3_bind_text(st, 1, username, -1, Self.transient)
         Self.bindBlob(st, 2, salt)
@@ -749,6 +815,43 @@ public actor AthenaStore {
             }
             return sqlite3_changes(db) > 0
         }
+    }
+
+    /// ADR 041 — this user's per-period token budget override, or nil to
+    /// inherit the configured global default. Passing nil CLEARS the override
+    /// (back to inherit); `0` is a real value meaning "unlimited for this
+    /// user" even when a global budget is set. Returns whether the user
+    /// existed.
+    @discardableResult
+    public func setUserBudget(username: String, budget: Int?) throws -> Bool {
+        let st = try Self.prepared(db,
+            "UPDATE auth_users SET token_budget=? WHERE username=?;")
+        defer { sqlite3_finalize(st) }
+        if let budget {
+            sqlite3_bind_int64(st, 1, Int64(budget))
+        } else {
+            sqlite3_bind_null(st, 1)
+        }
+        sqlite3_bind_text(st, 2, username, -1, Self.transient)
+        guard sqlite3_step(st) == SQLITE_DONE else {
+            throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
+        }
+        return sqlite3_changes(db) > 0
+    }
+
+    /// This user's budget override, or nil when unset (inherit the global
+    /// default) — indistinguishable from an unknown user on purpose: both mean
+    /// "no override to apply".
+    public func userBudget(username: String) -> Int? {
+        guard let st = try? Self.prepared(db,
+            "SELECT token_budget FROM auth_users WHERE username=?;")
+        else { return nil }
+        defer { sqlite3_finalize(st) }
+        sqlite3_bind_text(st, 1, username, -1, Self.transient)
+        guard sqlite3_step(st) == SQLITE_ROW,
+            sqlite3_column_type(st, 0) != SQLITE_NULL
+        else { return nil }
+        return Int(sqlite3_column_int64(st, 0))
     }
 
     public func userCount() -> Int {

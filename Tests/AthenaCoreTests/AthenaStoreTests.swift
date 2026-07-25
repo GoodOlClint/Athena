@@ -211,6 +211,138 @@ final class AthenaStoreTests: XCTestCase {
         XCTAssertEqual(all.first?.totalTokens, 22)
     }
 
+    // MARK: - ADR 041 A1 — rolling-period usage counters
+
+    /// Within one period, period counters accumulate alongside lifetime ones.
+    func testPeriodCountersAccumulateWithinAPeriod() async throws {
+        let url = tmpURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let s = try AthenaStore(path: url)
+        let p = 1_750_000_000.0
+        try await s.addUsage(
+            principal: "u:alice", promptTokens: 10, completionTokens: 4,
+            periodStart: p)
+        try await s.addUsage(
+            principal: "u:alice", promptTokens: 6, completionTokens: 2,
+            periodStart: p)
+        let row = await s.usage(principal: "u:alice")
+        XCTAssertEqual(row?.periodStart, p)
+        XCTAssertEqual(row?.periodPromptTokens, 16)
+        XCTAssertEqual(row?.periodCompletionTokens, 6)
+        XCTAssertEqual(row?.promptTokens, 16)  // lifetime tracks it so far
+    }
+
+    /// The load-bearing one: a roll resets ONLY the period trio and preserves
+    /// lifetime accounting (ADR 041 §1 — a roll destroys no history).
+    func testPeriodRollResetsPeriodOnlyAndKeepsLifetime() async throws {
+        let url = tmpURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let s = try AthenaStore(path: url)
+        let june = 1_748_000_000.0
+        let july = 1_751_000_000.0
+        try await s.addUsage(
+            principal: "u:alice", promptTokens: 100, completionTokens: 20,
+            periodStart: june)
+        try await s.addUsage(
+            principal: "u:alice", promptTokens: 7, completionTokens: 3,
+            periodStart: july)
+        let row = await s.usage(principal: "u:alice")
+        XCTAssertEqual(row?.periodStart, july)
+        XCTAssertEqual(row?.periodPromptTokens, 7)  // reset, not 107
+        XCTAssertEqual(row?.periodCompletionTokens, 3)
+        XCTAssertEqual(row?.promptTokens, 107)  // lifetime intact
+        XCTAssertEqual(row?.completionTokens, 23)
+        XCTAssertEqual(row?.requests, 2)
+    }
+
+    /// A late write carrying an OLDER period (clock skew, a retry crossing the
+    /// boundary) must not rewind the row's period or wipe the new period's
+    /// tally.
+    func testStalePeriodWriteDoesNotRewindTheRow() async throws {
+        let url = tmpURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let s = try AthenaStore(path: url)
+        let june = 1_748_000_000.0
+        let july = 1_751_000_000.0
+        try await s.addUsage(
+            principal: "u:alice", promptTokens: 5, completionTokens: 1,
+            periodStart: july)
+        try await s.addUsage(
+            principal: "u:alice", promptTokens: 9, completionTokens: 2,
+            periodStart: june)
+        let row = await s.usage(principal: "u:alice")
+        XCTAssertEqual(row?.periodStart, july)
+        XCTAssertEqual(row?.periodPromptTokens, 14)
+        XCTAssertEqual(row?.promptTokens, 14)
+    }
+
+    /// A row written before ADR 041 (no periodStart) opens with the additive
+    /// columns defaulted, and the first period-aware write rolls it.
+    func testLegacyRowOpensAndRollsOnFirstPeriodWrite() async throws {
+        let url = tmpURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        do {
+            let s = try AthenaStore(path: url)
+            try await s.addUsage(
+                principal: "u:legacy", promptTokens: 50, completionTokens: 10)
+            let row = await s.usage(principal: "u:legacy")
+            XCTAssertEqual(row?.periodStart, 0)
+            XCTAssertEqual(row?.periodPromptTokens, 50)
+        }
+        let s2 = try AthenaStore(path: url)
+        try await s2.addUsage(
+            principal: "u:legacy", promptTokens: 1, completionTokens: 1,
+            periodStart: 1_751_000_000.0)
+        let row = await s2.usage(principal: "u:legacy")
+        XCTAssertEqual(row?.periodPromptTokens, 1)  // rolled off the legacy 50
+        XCTAssertEqual(row?.promptTokens, 51)  // lifetime kept
+    }
+
+    /// The per-user override: unset ⇒ nil (inherit), settable, clearable, and
+    /// `0` is a real "unlimited for this user" value rather than absence.
+    func testUserBudgetOverrideRoundTrip() async throws {
+        let url = tmpURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let s = try AthenaStore(path: url)
+        try await s.putUser(
+            username: "alice", salt: Data(repeating: 1, count: 16),
+            hash: Data(repeating: 2, count: 32), iters: 1000)
+        let inherited = await s.userBudget(username: "alice")
+        XCTAssertNil(inherited)
+        let set = try await s.setUserBudget(username: "alice", budget: 5000)
+        XCTAssertTrue(set)
+        let got = await s.userBudget(username: "alice")
+        XCTAssertEqual(got, 5000)
+        try await s.setUserBudget(username: "alice", budget: 0)
+        let zero = await s.userBudget(username: "alice")
+        XCTAssertEqual(zero, 0)  // explicit unlimited, NOT absence
+        try await s.setUserBudget(username: "alice", budget: nil)
+        let cleared = await s.userBudget(username: "alice")
+        XCTAssertNil(cleared)
+        let missing = try await s.setUserBudget(
+            username: "nobody", budget: 10)
+        XCTAssertFalse(missing)
+    }
+
+    /// A password change must not drop the budget — `putUser` upserts rather
+    /// than REPLACEing the row away.
+    func testRekeyingAUserPreservesItsBudget() async throws {
+        let url = tmpURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let s = try AthenaStore(path: url)
+        try await s.putUser(
+            username: "alice", salt: Data(repeating: 1, count: 16),
+            hash: Data(repeating: 2, count: 32), iters: 1000)
+        try await s.setUserBudget(username: "alice", budget: 777)
+        try await s.putUser(
+            username: "alice", salt: Data(repeating: 3, count: 16),
+            hash: Data(repeating: 4, count: 32), iters: 2000)
+        let budget = await s.userBudget(username: "alice")
+        XCTAssertEqual(budget, 777)
+        let row = await s.getUser(username: "alice")
+        XCTAssertEqual(row?.iters, 2000)  // the re-key did land
+    }
+
     func testAuditLogAppendFilterAndPersist() async throws {
         let url = tmpURL()
         defer { try? FileManager.default.removeItem(at: url) }
