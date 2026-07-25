@@ -1,6 +1,6 @@
 # Change plan — token budgets (ADR 041) + context discovery (ADR 042)
 
-**Status:** operator-approved. **Track B SHIPPED 2026-07-25** (B1 `76134365`, B2 `eae8724f`, B3 `56b13ccb` — plain commits, no version bump per ADR 040 S8). Track A not started.
+**Status:** operator-approved. **BOTH TRACKS SHIPPED 2026-07-25.** Track B: B1 `76134365`, B2 `eae8724f`, B3 `56b13ccb`. Track A: A1 `222601b5`, A2 `626886ed`, A3 `5e98a6da`, A4 `1b51bc46`. Plain commits, no version bump per ADR 040 S8.
 **Date:** 2026-07-25
 **ADRs:** [041 — per-principal token budgets](decisions/041-per-principal-token-budgets.md), [042 — context-window discovery + exact token counting](decisions/042-context-window-discovery-and-token-counting.md), [007 amended](decisions/007-api-metering-and-quotas.md) (#8 closed by obsolescence).
 
@@ -72,6 +72,27 @@ Two findings worth carrying forward:
 **The ceiling is the real budget, and it is ~10× below the advertised window.** Both models report `max_prompt_tokens = 26008` — the ADR 030 device-derived floor on this box — against checkpoints advertising 131k and 262k. A client budgeting on `context_length` alone would over-plan by an order of magnitude. This was the risk listed below; it is now measured, and setting `max_prompt_tokens` deliberately is the open operator decision.
 
 **Counting is cheap but not concurrent with generation.** ADR 042 §4(b) claimed a count would never queue behind another caller's decode. The no-gate/no-eval half holds (38 ms idle); the concurrency half does not — `ModelContainer.prepare` needs the substrate's `SerialAccessContainer` mutex, which a generation holds for its whole decode, so a mid-decode count waits it out. ADR 042 §4(b) is amended with the measurement, every client-facing surface says so, and the e2e script reports the latency rather than asserting a bound. Fixing it is an upstream `mlx-swift-lm` change; re-implementing tokenization outside `container.prepare` is explicitly ruled out (it would forfeit the exactness the route exists for).
+
+## Track A outcome (2026-07-25)
+
+Gates: `./deploy/test.sh` 787/0 (35 skipped), `./deploy/e2e-rbac.sh` 496/0, `./deploy/build.sh Release` green, and the new `deploy/e2e-token-budget.sh` **31/0** against a real auth-on daemon (`--engine stub` — the budget algebra is engine-independent and the stub meters real token counts, so the DoD needs no resident model).
+
+Every Track A DoD assertion passed as specified, with one deliberate substitution: the budget under test is a **per-user override of 5 tokens with no global default**, rather than a global 100. It exercises strictly more (the override path *and* that an un-overridden user stays unlimited), and 5 tokens is what makes a single stub request exhaust it.
+
+| DoD assertion | Result |
+|---|---|
+| First request succeeds, `x-athena-tokens-remaining` below the limit | 200, `limit=5 remaining=0` |
+| Next request 429 `quota_exceeded`, `Retry-After` before local midnight | 429, `insufficient_quota`, `Retry-After=36725s` (≤ 36726s to midnight) |
+| `GET /api/usage` still succeeds while exhausted, `period_tokens ≥ budget` | 200, `budget=5 period_tokens=14` |
+| A second user with no override and no global budget is unaffected | 200, and **no** `x-athena-tokens-*` headers or usage budget fields |
+| Rewinding `period_start` one period restores service; period resets, lifetime preserved | 200; period 14, lifetime 28, requests 2 |
+| (added) `count_tokens` is not quota-refused while exhausted | 501 from the stub engine — not 429 |
+
+Two implementation notes worth carrying:
+
+**`QuotaWindow` landed in `AthenaCore`, not `AthenaServerKit`** as the ADR wrote. Both the config editor (`AthenaDeploy`) and the store's caller need the case list, and `AthenaDeploy` cannot depend on `AthenaServerKit`. This is the house pattern for enum-ish config values (`Engine`, `KVCompression`, `AdmissionMode`); `QuotaDecision` and the middleware stayed server-side.
+
+**`putUser` was `INSERT OR REPLACE`**, which deletes the row — a password change would have silently wiped the new `token_budget` column. Fixed to an upsert of the credential columns, test-pinned. Any future additive `auth_users` column would have hit the same trap.
 
 ## Test bar
 
