@@ -1,6 +1,8 @@
 # 007 — Native `/api` metering + token-budget quotas (in-program)
 
-**Status:** Accepted — Partially implemented. Native `/api` metering (#8) + NA8 single-principal resolution shipped (v0.10.140, `AthenaServer.swift` `meter()` chokepoint). Token-budget quotas (#9) NOT implemented — milestone never scheduled. (Caveat: `handleNativeEmbed` still drops `meter()` — see `docs/backlog-hitlist.md` #6.)
+**Status:** Accepted — **SUPERSEDED IN PART by ADR 041 (2026-07-25), which carries #9 forward and closes #8.** Native `/api` metering (#8) + NA8 single-principal resolution shipped (v0.10.140, `AthenaServer.swift` `meter()` chokepoint). Token-budget quotas (#9) NOT implemented — milestone never scheduled; now designed in ADR 041.
+
+**AMENDED 2026-07-25 — #8 is closed by obsolescence, not by implementation.** ADR 013 made `/v1` the sole inference surface and `/api/*` the control plane; ADR 025 S2 removed the queue and ADR 031 removed `/api/chat`, and the `/api/embed` alias went with it (`AthenaServer.swift:239`). No native inference route survives, so `/api/*` carries **zero model tokens** and there is nothing left to meter. The caveat below names `handleNativeEmbed`, which no longer exists. #8 requires no further work; metering is complete for every surface that has tokens. NA8 remains in force (`bearerPrincipal` / `usagePrincipal`). #9 is the only live item and is designed in [ADR 041](041-per-principal-token-budgets.md).
 **Date:** 2026-06-12
 **Milestone:** M69+ (audit-remediation; resolves standing DECISION #5; backlog #8/#9 + audit NA8)
 
