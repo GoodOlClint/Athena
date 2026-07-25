@@ -125,6 +125,38 @@ final class ModelConfigInfoTests: XCTestCase {
         XCTAssertNil(i.perTokenKVBytes(bytesPerElement: 2))
     }
 
+    // ADR 042 B1 — the advertised context window, published as
+    // `context_length` on /v1/models. Same top-level-then-`text_config`
+    // resolution as every other dim; absent ⇒ nil (field omitted, never a
+    // guessed default).
+    func testContextWindowTopLevel() {
+        let i = info(#"{"model_type":"llama","max_position_embeddings":131072}"#)
+        XCTAssertEqual(i.maxPositionEmbeddings, 131_072)
+    }
+
+    func testContextWindowFromNestedTextConfig() {
+        let i = info(
+            """
+            {"model_type":"gemma4","vision_config":{"hidden_size":1152},
+             "text_config":{"max_position_embeddings":131072}}
+            """)
+        XCTAssertEqual(i.maxPositionEmbeddings, 131_072)
+    }
+
+    func testContextWindowTopLevelWinsOverNested() {
+        let i = info(
+            """
+            {"max_position_embeddings":8192,
+             "text_config":{"max_position_embeddings":131072}}
+            """)
+        XCTAssertEqual(i.maxPositionEmbeddings, 8192)
+    }
+
+    func testContextWindowAbsentIsNil() {
+        XCTAssertNil(info(#"{"model_type":"llama"}"#).maxPositionEmbeddings)
+        XCTAssertNil(info("not json at all {{{").maxPositionEmbeddings)
+    }
+
     func testZeroDimsRejected() {
         let i = ModelConfigInfo(
             numHiddenLayers: 0, numAttentionHeads: 8,

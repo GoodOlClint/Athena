@@ -19,6 +19,11 @@ public struct ModelConfigInfo: Sendable, Equatable {
     public let numKeyValueHeads: Int?
     public let headDim: Int?
     public let hiddenSize: Int?
+    /// ADR 042 — the context window the checkpoint advertises
+    /// (`max_position_embeddings`), published as `context_length` on
+    /// `GET /v1/models`. nil when the config omits it: Athena reports what the
+    /// checkpoint declares and never substitutes a guess.
+    public let maxPositionEmbeddings: Int?
     /// True when the checkpoint carries a `vision_config` object — i.e. it is
     /// a vision-language checkpoint with an image tower (e.g. gemma4_unified),
     /// not a text-only model. M71.2 uses this to route the load through the
@@ -29,7 +34,8 @@ public struct ModelConfigInfo: Sendable, Equatable {
         modelType: String? = nil, vocabSize: Int? = nil,
         numHiddenLayers: Int? = nil, numAttentionHeads: Int? = nil,
         numKeyValueHeads: Int? = nil, headDim: Int? = nil,
-        hiddenSize: Int? = nil, hasVisionConfig: Bool = false
+        hiddenSize: Int? = nil, maxPositionEmbeddings: Int? = nil,
+        hasVisionConfig: Bool = false
     ) {
         self.modelType = modelType
         self.vocabSize = vocabSize
@@ -38,6 +44,7 @@ public struct ModelConfigInfo: Sendable, Equatable {
         self.numKeyValueHeads = numKeyValueHeads
         self.headDim = headDim
         self.hiddenSize = hiddenSize
+        self.maxPositionEmbeddings = maxPositionEmbeddings
         self.hasVisionConfig = hasVisionConfig
     }
 
@@ -107,6 +114,7 @@ public struct ModelConfigInfo: Sendable, Equatable {
             numKeyValueHeads: int("num_key_value_heads"),
             headDim: int("head_dim"),
             hiddenSize: int("hidden_size"),
+            maxPositionEmbeddings: int("max_position_embeddings"),
             hasVisionConfig: hasVision)
     }
 
