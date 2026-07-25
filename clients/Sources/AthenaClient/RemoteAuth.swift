@@ -128,6 +128,34 @@ public enum RemoteAuth {
         try fail(code, data)
     }
 
+    /// ADR 041 — set (`budget`) or clear (`clear`) one user's per-period token
+    /// budget. A null `token_budget` is what clears it, so the body carries an
+    /// explicit NSNull rather than omitting the key.
+    public static func userBudget(
+        _ d: DaemonOptions, username: String, budget: Int?, clear: Bool
+    ) async throws {
+        let value: Any = budget.map { $0 as Any } ?? NSNull()
+        let body = try JSONSerialization.data(
+            withJSONObject: ["token_budget": value])
+        let (code, data): (Int, Data)
+        do {
+            (code, data) = try await HTTPClient.send(
+                "PUT", d.base + "/api/users/\(enc(username))/budget",
+                body: body, key: d.authKey)
+        } catch { HTTPClient.noDaemon(d, error) }
+        guard code < 400 else { return try fail(code, data) }
+        if clear {
+            print(
+                "budget override cleared for '\(username)' "
+                    + "(inherits the configured token_budget)")
+        } else {
+            let n = budget ?? 0
+            print(
+                "budget for '\(username)' set to \(n) tokens/period"
+                    + (n == 0 ? " (unlimited)" : ""))
+        }
+    }
+
     // MARK: roles
 
     public static func roleGrant(

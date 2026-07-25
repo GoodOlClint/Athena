@@ -1,6 +1,8 @@
 import Foundation
 import XCTest
 
+import AthenaCore
+
 @testable import AthenaDeploy
 
 final class AthenaConfigTests: XCTestCase {
@@ -113,6 +115,55 @@ final class AthenaConfigTests: XCTestCase {
         let c = try AthenaConfig.parse(toml: toml)
         XCTAssertNil(c.rateLimit)
         XCTAssertNil(c.rateBurst)
+    }
+
+    // ADR 041 A2 — token budget + window.
+
+    func testTokenBudgetKeysParse() throws {
+        let toml = """
+            listen_host = "127.0.0.1"
+            listen_port = 7447
+            log_dir = "/l"
+            token_budget = 50000000
+            token_budget_window = "day"
+            """
+        let c = try AthenaConfig.parse(toml: toml)
+        XCTAssertEqual(c.tokenBudget, 50_000_000)
+        XCTAssertEqual(c.tokenBudgetWindow, "day")
+        XCTAssertEqual(QuotaWindow.parse(c.tokenBudgetWindow), .day)
+    }
+
+    func testTokenBudgetKeysAbsentAreNil() throws {
+        let toml = """
+            listen_host = "127.0.0.1"
+            listen_port = 7447
+            log_dir = "/l"
+            """
+        let c = try AthenaConfig.parse(toml: toml)
+        XCTAssertNil(c.tokenBudget)
+        XCTAssertNil(c.tokenBudgetWindow)
+        // Absent window still resolves to the documented default.
+        XCTAssertEqual(QuotaWindow.parse(c.tokenBudgetWindow), .month)
+    }
+
+    /// An unrecognized window fails the parse LOUDLY (ADR 041 §2) — the daemon
+    /// must not boot enforcing a window the operator did not choose.
+    func testInvalidTokenBudgetWindowFailsParse() {
+        let toml = """
+            listen_host = "127.0.0.1"
+            listen_port = 7447
+            log_dir = "/l"
+            token_budget = 100
+            token_budget_window = "week"
+            """
+        XCTAssertThrowsError(try AthenaConfig.parse(toml: toml)) { err in
+            guard
+                case AthenaConfig.ParseError.invalidEnum(let key, let value, _)
+                    = err
+            else { return XCTFail("expected invalidEnum, got \(err)") }
+            XCTAssertEqual(key, "token_budget_window")
+            XCTAssertEqual(value, "week")
+        }
     }
 
     func testConcurrencyKeysParse() throws {

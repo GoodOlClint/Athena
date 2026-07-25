@@ -1,3 +1,4 @@
+import AthenaCore
 import Foundation
 
 /// Athena's daemon configuration, parsed from the flat TOML at
@@ -80,6 +81,14 @@ public struct AthenaConfig: Sendable, Equatable {
     /// (opt-in, off by default).
     public var rateLimit: String?
     public var rateBurst: Int?
+    /// ADR 041 — per-principal token budget. `tokenBudget` = tokens allowed per
+    /// period for every principal (absent / `0` ⇒ unlimited, the default);
+    /// `tokenBudgetWindow` = `day` | `month` (absent ⇒ `month`). A per-user
+    /// `auth_users.token_budget` overrides the global default. Quotas are
+    /// auth-on only — inert in loopback dev mode (ADR 025), same as the rate
+    /// limiter.
+    public var tokenBudget: Int?
+    public var tokenBudgetWindow: String?
     /// Inbound concurrency caps (M29.2). `maxConcurrency` = max in-flight
     /// requests daemon-wide; `maxConcurrencyPerPrincipal` = max in-flight
     /// per caller. Both optional — absent / non-positive ⇒ unlimited
@@ -197,6 +206,7 @@ public struct AthenaConfig: Sendable, Equatable {
         authKeysFile: String? = nil,
         tlsCert: String? = nil, tlsKey: String? = nil,
         rateLimit: String? = nil, rateBurst: Int? = nil,
+        tokenBudget: Int? = nil, tokenBudgetWindow: String? = nil,
         maxConcurrency: Int? = nil,
         maxConcurrencyPerPrincipal: Int? = nil,
         auditRetentionDays: Int? = nil,
@@ -242,6 +252,8 @@ public struct AthenaConfig: Sendable, Equatable {
         self.tlsKey = tlsKey
         self.rateLimit = rateLimit
         self.rateBurst = rateBurst
+        self.tokenBudget = tokenBudget
+        self.tokenBudgetWindow = tokenBudgetWindow
         self.maxConcurrency = maxConcurrency
         self.maxConcurrencyPerPrincipal = maxConcurrencyPerPrincipal
         self.auditRetentionDays = auditRetentionDays
@@ -270,6 +282,10 @@ public struct AthenaConfig: Sendable, Equatable {
         case missingRequiredKey(String)
         case invalidInt(key: String, value: String)
         case invalidBool(key: String, value: String)
+        /// An enum-valued key whose value isn't one of its cases (ADR 041's
+        /// `token_budget_window`). Loud at parse time — a budget with a window
+        /// the operator did not ask for is worse than a refusal to boot.
+        case invalidEnum(key: String, value: String, allowed: [String])
     }
 
     /// J1 (M66.4): parse a TOML bool truthily but strictly. Accepts
@@ -375,6 +391,19 @@ public struct AthenaConfig: Sendable, Equatable {
         if let rb = scalar("rate_burst", in: toml) {
             rateBurst = try int("rate_burst", rb)
         }
+        // ADR 041 — token budget + its window. An unrecognized window fails the
+        // parse (see ParseError.invalidEnum) rather than silently defaulting.
+        var tokenBudget: Int?
+        if let tb = scalar("token_budget", in: toml) {
+            tokenBudget = try int("token_budget", tb)
+        }
+        if let raw = scalar("token_budget_window", in: toml),
+            QuotaWindow.parse(raw) == nil
+        {
+            throw ParseError.invalidEnum(
+                key: "token_budget_window", value: raw,
+                allowed: QuotaWindow.allCases.map(\.rawValue))
+        }
         var maxConc: Int?
         if let mc = scalar("max_concurrency", in: toml) {
             maxConc = try int("max_concurrency", mc)
@@ -458,6 +487,8 @@ public struct AthenaConfig: Sendable, Equatable {
             tlsKey: scalar("tls_key", in: toml),
             rateLimit: scalar("rate_limit", in: toml),
             rateBurst: rateBurst,
+            tokenBudget: tokenBudget,
+            tokenBudgetWindow: scalar("token_budget_window", in: toml),
             maxConcurrency: maxConc,
             maxConcurrencyPerPrincipal: maxConcPP,
             auditRetentionDays: auditDays,

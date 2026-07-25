@@ -76,6 +76,21 @@ public enum DefaultConfig {
         # tls_key  = "/usr/local/etc/athena/tls/privkey.pem"
 
 
+        # ── Quotas (ADR 041) ─────────────────────────────────────────
+        # Per-principal token budget for the current period. Commented
+        # or 0 ⇒ unlimited. Enforced on the token-bearing routes only
+        # (/v1/chat/completions, /v1/embeddings, /v1/messages) — an
+        # exhausted caller can still read /api/usage to see why.
+        # AUTH-ON ONLY: with auth off (loopback dev) there is no
+        # principal to charge, so quotas are inert.
+        # A per-user override lives in the store:
+        # `athena auth user budget <user> <tokens>`.
+        # token_budget = 50000000
+        # Budget period: "day" or "month" (default "month"). Boundaries
+        # are LOCAL midnight / first of the local month.
+        # token_budget_window = "month"
+
+
         # ── Network (egress proxy) ───────────────────────────────────
         # Route the model-weight fetch (the only outbound) through a
         # proxy. The *_PROXY env vars always win; these only fill gaps.

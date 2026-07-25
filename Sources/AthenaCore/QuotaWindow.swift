@@ -27,6 +27,25 @@ public enum QuotaWindow: String, Sendable, CaseIterable, Codable {
             rawValue: raw.trimmingCharacters(in: .whitespaces).lowercased())
     }
 
+    public struct ResolutionError: Error, CustomStringConvertible {
+        public let value: String
+        public var description: String {
+            "invalid token_budget_window '\(value)' — expected one of "
+                + QuotaWindow.allCases.map(\.rawValue)
+                .joined(separator: ", ")
+        }
+    }
+
+    /// Fail-closed resolution for the daemon's startup path (mirrors
+    /// `KVCompression.resolve`): a typo refuses to boot instead of silently
+    /// installing a window the operator did not choose.
+    public static func resolve(_ raw: String?) throws -> QuotaWindow {
+        guard let w = parse(raw) else {
+            throw ResolutionError(value: raw ?? "")
+        }
+        return w
+    }
+
     /// Start of the period containing `time` (epoch seconds): local midnight
     /// for `.day`, the first instant of the local month for `.month`.
     public func periodStart(

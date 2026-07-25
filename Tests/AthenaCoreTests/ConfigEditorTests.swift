@@ -48,6 +48,46 @@ final class ConfigEditorTests: XCTestCase {
                 key: "kv_compression", value: "zip", in: dummy))
     }
 
+    /// ADR 041: `token_budget_window` is enum-ish — a typo is refused at
+    /// set-time instead of failing the daemon's next config parse.
+    func testRejectsBadTokenBudgetWindow() {
+        XCTAssertThrowsError(
+            try ConfigEditor.setScalarThrowing(
+                key: "token_budget_window", value: "week", in: dummy))
+    }
+
+    /// ADR 041/042: both new int keys are settable at all (they were unknown
+    /// keys before — `max_prompt_tokens` was readable but not writable).
+    func testAcceptsBudgetAndPromptCeilingKeys() throws {
+        let url = try tempConfig(
+            """
+            listen_port = 7447
+            # token_budget = 1
+            # max_prompt_tokens = 1
+            """)
+        try ConfigEditor.setScalarThrowing(
+            key: "token_budget", value: "50000000", in: url)
+        try ConfigEditor.setScalarThrowing(
+            key: "token_budget_window", value: "day", in: url)
+        try ConfigEditor.setScalarThrowing(
+            key: "max_prompt_tokens", value: "96000", in: url)
+        let text = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertTrue(text.contains("token_budget = 50000000"))
+        XCTAssertTrue(text.contains("token_budget_window = \"day\""))
+        XCTAssertTrue(text.contains("max_prompt_tokens = 96000"))
+        // And the daemon parses back what was written.
+        let cfg = try AthenaConfig.parse(
+            toml: text + "\nlisten_host = \"127.0.0.1\"\nlog_dir = \"/l\"")
+        XCTAssertEqual(cfg.tokenBudget, 50_000_000)
+        XCTAssertEqual(cfg.maxPromptTokens, 96_000)
+    }
+
+    func testRejectsNonIntegerForBudget() {
+        XCTAssertThrowsError(
+            try ConfigEditor.setScalarThrowing(
+                key: "token_budget", value: "lots", in: dummy))
+    }
+
     /// NB2: a quoted value containing a control character (newline) is the
     /// config-injection vector — rejected before any write.
     func testRejectsControlCharNB2() {

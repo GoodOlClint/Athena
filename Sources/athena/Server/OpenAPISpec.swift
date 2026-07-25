@@ -674,6 +674,27 @@ enum OpenAPISpec {
                 }
               }
             },
+            "/api/users/{name}/budget": {
+              "put": {
+                "tags": ["RBAC"],
+                "summary": "Set or clear a user's token budget.",
+                "description": "ADR 041 — per-user override of the configured `token_budget` default, in tokens per budget period. `{\"token_budget\": N}` sets it; `0` means unlimited for this user even when a global default exists; `null` (or an empty body) CLEARS the override so the user inherits the default again. Audited as `user.budget`. Requires `users.admin`.",
+                "parameters": [
+                  { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }
+                ],
+                "requestBody": {
+                  "required": false,
+                  "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SetUserBudgetRequest" } } }
+                },
+                "responses": {
+                  "200": { "description": "The updated user.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UserSummary" } } } },
+                  "400": { "$ref": "#/components/responses/BadRequest" },
+                  "404": { "$ref": "#/components/responses/NotFound" },
+                  "401": { "$ref": "#/components/responses/Unauthorized" },
+                  "403": { "$ref": "#/components/responses/Forbidden" }
+                }
+              }
+            },
             "/api/roles": {
               "get": {
                 "tags": ["RBAC"],
@@ -950,7 +971,8 @@ enum OpenAPISpec {
               "ModelLoadResponse": { "type": "object", "properties": { "module": { "type": "string" }, "id": { "type": "string", "description": "Id actually loaded into the slot." }, "status": { "type": "string", "enum": ["loaded"] } } },
               "ModelUnloadRequest": { "type": "object", "properties": { "module": { "type": "string", "description": "Module class to unload, or absent / `\"all\"` for every module." } } },
               "ModelUnloadResponse": { "type": "object", "properties": { "modules": { "type": "array", "items": { "type": "string" } }, "status": { "type": "string", "enum": ["unloaded"] } } },
-              "UserSummary": { "type": "object", "properties": { "username": { "type": "string" }, "roles": { "type": "array", "items": { "type": "string" } } } },
+              "UserSummary": { "type": "object", "properties": { "username": { "type": "string" }, "roles": { "type": "array", "items": { "type": "string" } }, "token_budget": { "type": "integer", "description": "ADR 041 — per-user token budget per period. OMITTED when the user has no override and inherits the configured `token_budget` default; absent is not zero. A value of 0 means unlimited for this user." } } },
+              "SetUserBudgetRequest": { "type": "object", "properties": { "token_budget": { "type": "integer", "nullable": true, "description": "Tokens per period for this user. 0 = unlimited for this user; null (or an empty body) clears the override so the configured default applies." } } },
               "UserListResponse": { "type": "object", "properties": { "users": { "type": "array", "items": { "$ref": "#/components/schemas/UserSummary" } } } },
               "CreateUserRequest": { "type": "object", "required": ["username", "password"], "properties": { "username": { "type": "string" }, "password": { "type": "string" }, "role": { "type": "string" } } },
               "UserRemovedResponse": { "type": "object", "properties": { "username": { "type": "string" }, "removed": { "type": "boolean" } } },

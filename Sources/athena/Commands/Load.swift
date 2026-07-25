@@ -210,6 +210,18 @@ struct Load: AsyncParsableCommand {
 
     @Option(
         help:
+            "Per-principal token budget per period (ADR 041). 0/absent ⇒ unlimited. Over budget ⇒ 429 (quota_exceeded) on the token-bearing routes only. Auth-on only — inert in loopback dev mode. A per-user override (`athena auth user budget`) wins over this default."
+    )
+    var tokenBudget: Int?
+
+    @Option(
+        help:
+            "Budget period for --token-budget: day | month (default month). Boundaries are LOCAL midnight / first of the local month."
+    )
+    var tokenBudgetWindow: String?
+
+    @Option(
+        help:
             "Max in-flight requests daemon-wide. 0/absent ⇒ unlimited. Over the cap ⇒ 429 (concurrency_limit). Only enforced when auth is on."
     )
     var maxConcurrency: Int?
@@ -448,6 +460,8 @@ struct Load: AsyncParsableCommand {
             tlsKey = tlsKey ?? t.tlsKey
             rateLimit = rateLimit ?? t.rateLimit.flatMap(Double.init)
             rateBurst = rateBurst ?? t.rateBurst
+            tokenBudget = tokenBudget ?? t.tokenBudget
+            tokenBudgetWindow = tokenBudgetWindow ?? t.tokenBudgetWindow
             maxConcurrency = maxConcurrency ?? t.maxConcurrency
             maxConcurrencyPerPrincipal =
                 maxConcurrencyPerPrincipal ?? t.maxConcurrencyPerPrincipal
@@ -476,6 +490,11 @@ struct Load: AsyncParsableCommand {
         }
         let kvCompression = try KVCompression.resolve(
             config: tomlCfg?.kvCompression)
+        // ADR 041 — validate the budget window at boot, fail-closed like
+        // kv_compression: a `--token-budget-window` typo (which bypasses the
+        // TOML parse check) must refuse to start rather than quietly enforce a
+        // window nobody asked for. A3 binds this to the quota middleware.
+        _ = try QuotaWindow.resolve(tokenBudgetWindow)
         // ADR 024 Tier 2 (opt-in) — deny debugger attach. Precedence mirrors
         // the other startup toggles: env ATHENA_DENY_DEBUGGER (1/true/0/false)
         // > TOML deny_debugger_attach > built-in false. Redundant with the

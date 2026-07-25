@@ -16,6 +16,12 @@ public enum ConfigEditor {
     /// String-valued keys are quoted; these two are bare ints.
     public static let intKeys: Set<String> = [
         "listen_port", "budget_bytes", "max_tokens",
+        // ADR 042 — `max_prompt_tokens` was readable via `athena config get`
+        // but not settable (absent from these sets ⇒ unknownKey), which is
+        // exactly the knob B2 now publishes and the operator has to tune.
+        "max_prompt_tokens",
+        // ADR 041 — per-period token budget (0 ⇒ unlimited).
+        "token_budget",
         "rate_burst",
         "max_concurrency", "max_concurrency_per_principal",
         "audit_retention_days", "token_max_age_days",
@@ -35,9 +41,13 @@ public enum ConfigEditor {
         // ADR 026 — per-module default model keys (the LLM default is `model`).
         "embedding_model", "transcription_model", "diarization_model",
         "speaker_embedding_model",
-        "log_dir", "max_tokens", "temperature",
+        "log_dir", "max_tokens", "max_prompt_tokens", "temperature",
         "speculative", "auth_keys_file",
         "tls_cert", "tls_key", "rate_limit", "rate_burst",
+        // ADR 041 — quotas. NOT deny-listed under ADR 037 (operability knobs,
+        // not a path to daemon takeover), so both are settable via the config
+        // API like `rate_limit`.
+        "token_budget", "token_budget_window",
         "max_concurrency", "max_concurrency_per_principal",
         "audit_retention_days", "token_max_age_days",
         "request_timeout_secs", "cold_load_wait_secs", "preload",
@@ -184,6 +194,16 @@ public enum ConfigEditor {
                 throw Failure.badValue(
                     key, "one of "
                         + Engine.allCases.map(\.rawValue)
+                        .joined(separator: ", "))
+            }
+            // ADR 041 — the budget window is enum-ish; a typo here would
+            // otherwise fail the daemon's next config parse.
+            if key == "token_budget_window",
+                !QuotaWindow.allCases.map(\.rawValue).contains(value)
+            {
+                throw Failure.badValue(
+                    key, "one of "
+                        + QuotaWindow.allCases.map(\.rawValue)
                         .joined(separator: ", "))
             }
             if key == "kv_compression",

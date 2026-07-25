@@ -155,6 +155,12 @@ extension AthenaServer {
             await handleUserDelete(
                 context.parameters.get("name"), request)
         }
+        // ADR 041 — per-user token-budget override (PUT with a null clears it).
+        router.put("/api/users/:name/budget") { request, context
+            -> Response in
+            await handleUserBudgetSet(
+                context.parameters.get("name"), request)
+        }
         router.post("/api/users/:name/roles/:role") {
             request, context -> Response in
             await handleRoleGrant(
@@ -1360,7 +1366,8 @@ extension AthenaServer {
             out.append(
                 UserSummaryDTO(
                     username: u,
-                    roles: await store.rolesForUser(username: u)))
+                    roles: await store.rolesForUser(username: u),
+                    token_budget: await store.userBudget(username: u)))
         }
         return Self.json(UserListResponse(users: out))
     }
@@ -1496,6 +1503,58 @@ extension AthenaServer {
             result: ok ? "ok" : "denied")
         return Self.json(
             UserRemovedResponse(username: username, removed: ok))
+    }
+
+    /// `PUT /api/users/:name/budget` (ADR 041) — set or clear one user's
+    /// per-period token budget. `{"token_budget": N}` sets it (`0` = unlimited
+    /// for this user, even when a global default exists); `{"token_budget":
+    /// null}` or `{}` clears the override so the user inherits the configured
+    /// default. Audited as `user.budget` like every other admin mutation;
+    /// gated `users.admin` by `AuthPolicy` (mutating `/api/users/*`).
+    func handleUserBudgetSet(
+        _ name: String?, _ request: Request
+    ) async -> Response {
+        guard let username = Self.safeIdent(name) else {
+            return Self.error(
+                status: .badRequest, message: "invalid username",
+                type: "invalid_request_error", code: "invalid_name")
+        }
+        let decoded = await decodeJSON(request, SetUserBudgetRequest.self)
+        guard case .ok(let body) = decoded else { return decoded.orFail }
+        if let budget = body.token_budget, budget < 0 {
+            return Self.error(
+                status: .badRequest,
+                message: "token_budget must be >= 0 (0 = unlimited); "
+                    + "omit or null to inherit the configured default",
+                type: "invalid_request_error", code: "invalid_budget")
+        }
+        let existed: Bool
+        do {
+            existed = try await store.setUserBudget(
+                username: username, budget: body.token_budget)
+        } catch {
+            await audit(
+                request, action: "user.budget", target: username,
+                result: "denied", detail: "store error")
+            return Self.error(
+                status: .internalServerError,
+                message: "failed to set token budget",
+                type: "server_error", code: "store_error")
+        }
+        guard existed else {
+            return Self.error(
+                status: .notFound, message: "no user '\(username)'",
+                type: "invalid_request_error", code: "not_found")
+        }
+        await audit(
+            request, action: "user.budget", target: username, result: "ok",
+            detail: body.token_budget.map { "token_budget=\($0)" }
+                ?? "cleared (inherit)")
+        return Self.json(
+            UserSummaryDTO(
+                username: username,
+                roles: await store.rolesForUser(username: username),
+                token_budget: body.token_budget))
     }
 
     func handleRoleGrant(

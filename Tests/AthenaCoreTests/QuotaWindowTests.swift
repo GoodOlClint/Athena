@@ -1,7 +1,7 @@
 import Foundation
 import XCTest
 
-@testable import AthenaServerKit
+@testable import AthenaCore
 
 /// ADR 041 A1 — the pure budget-period arithmetic. Every case pins an explicit
 /// calendar/time zone so the boundaries are deterministic in CI regardless of

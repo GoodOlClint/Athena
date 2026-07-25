@@ -103,7 +103,68 @@ struct AuthUser: AsyncParsableCommand {
         subcommands: [
             AuthUserAdd.self, AuthUserPasswd.self,
             AuthUserList.self, AuthUserRemove.self,
+            AuthUserBudget.self,
         ])
+}
+
+/// ADR 041 — per-user token budget. ONE verb, context-keyed: local SQLite when
+/// run on the daemon host, the `PUT /api/users/:name/budget` control-plane
+/// route when `--host` points off-box.
+struct AuthUserBudget: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "budget",
+        abstract:
+            "Set/clear a user's per-period token budget (0 = unlimited).")
+    @Argument(help: "Username.") var username: String
+    @Argument(
+        help:
+            "Tokens allowed per budget period. 0 ⇒ unlimited for this user. Omit with --clear to inherit the configured token_budget default."
+    )
+    var tokens: Int?
+    @Flag(
+        name: .long,
+        help: "Clear the override so the user inherits the configured default.")
+    var clear = false
+    @Option(help: "Data dir (default: configured / ~/.athena).")
+    var dataDir: String?
+    @OptionGroup var daemon: DaemonOptions
+
+    func run() async throws {
+        guard clear != (tokens != nil) else {
+            FailableExit.die(
+                "error: pass either a token count or --clear (not both, "
+                    + "not neither)")
+        }
+        if let tokens, tokens < 0 {
+            FailableExit.die("error: budget must be >= 0 (0 = unlimited)")
+        }
+        let budget: Int? = clear ? nil : tokens
+        if daemon.isRemote {
+            try await RemoteAuth.userBudget(
+                daemon, username: username, budget: budget, clear: clear)
+            return
+        }
+        let db = openStore(dataDir)
+        let existed: Bool
+        do {
+            existed = try await db.setUserBudget(
+                username: username, budget: budget)
+        } catch {
+            FailableExit.die("error: \(error)")
+        }
+        guard existed else {
+            FailableExit.die(
+                "error: no such user '\(username)' — create it with "
+                    + "`athena auth user add`")
+        }
+        print(
+            budget.map {
+                "budget for '\(username)' set to \($0) tokens/period"
+                    + ($0 == 0 ? " (unlimited)" : "")
+            }
+                ?? "budget override cleared for '\(username)' "
+                    + "(inherits the configured token_budget)")
+    }
 }
 
 struct AuthUserAdd: AsyncParsableCommand {
@@ -144,8 +205,8 @@ struct AuthUserAdd: AsyncParsableCommand {
             password: pw, salt: salt,
             iters: Passwords.defaultIterations)
         let db = openStore(dataDir)
-        // B5 (M66.2): `putUser` is INSERT OR REPLACE, so an `add` against an
-        // existing username would silently reset that account's password.
+        // B5 (M66.2): `putUser` upserts the credential columns, so an `add`
+        // against an existing username would silently reset that password.
         // Refuse unless `--force`; point at `passwd` for a roles-preserving
         // reset.
         if await db.getUser(username: username) != nil, !force {

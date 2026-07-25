@@ -41,6 +41,8 @@ extension ConfigEditor {
         case "tls_key": return cfg.tlsKey
         case "rate_limit": return cfg.rateLimit
         case "rate_burst": return cfg.rateBurst.map(String.init)
+        case "token_budget": return cfg.tokenBudget.map(String.init)
+        case "token_budget_window": return cfg.tokenBudgetWindow
         case "max_concurrency":
             return cfg.maxConcurrency.map(String.init)
         case "max_concurrency_per_principal":

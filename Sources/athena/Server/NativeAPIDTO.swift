@@ -203,6 +203,23 @@ struct ModelPruneResult: Codable {
 struct UserSummaryDTO: Codable {
     let username: String
     let roles: [String]
+    /// ADR 041 — this user's per-period token-budget override. Omitted when
+    /// unset: the user inherits the configured `token_budget` default (absent
+    /// ≠ zero).
+    let token_budget: Int?
+
+    init(username: String, roles: [String], token_budget: Int? = nil) {
+        self.username = username
+        self.roles = roles
+        self.token_budget = token_budget
+    }
+}
+
+/// ADR 041 — `PUT /api/users/{name}/budget` body. A null/absent
+/// `token_budget` CLEARS the override (inherit the configured default); `0`
+/// means unlimited for this user.
+struct SetUserBudgetRequest: Codable {
+    let token_budget: Int?
 }
 struct UserListResponse: Codable { let users: [UserSummaryDTO] }
 
