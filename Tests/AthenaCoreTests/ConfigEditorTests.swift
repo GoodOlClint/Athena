@@ -48,6 +48,70 @@ final class ConfigEditorTests: XCTestCase {
                 key: "kv_compression", value: "zip", in: dummy))
     }
 
+    /// ADR 037 amendment — the field bug: on a real install the config FILE is
+    /// service-user-writable but its DIRECTORY is root-owned (deliberately —
+    /// `auth_keys_file` and the TLS key live there), so an atomic write fails
+    /// EACCES creating its temp file and every daemon-mediated config write
+    /// returned `writeFailed`. Simulated here with a read-only directory
+    /// containing a writable file: the edit must still land, in place.
+    func testWritesInPlaceWhenTheDirectoryIsNotWritable() throws {
+        let url = try tempConfig(
+            """
+            listen_port = 7447
+            max_prompt_tokens = 8192
+            """)
+        let dir = url.deletingLastPathComponent()
+        let fm = FileManager.default
+        try fm.setAttributes(
+            [.posixPermissions: 0o555], ofItemAtPath: dir.path)
+        defer {
+            try? fm.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: dir.path)
+        }
+        // Pre-condition: the directory really does reject a new file, so this
+        // test can't pass for the wrong reason.
+        XCTAssertThrowsError(
+            try "x".write(
+                to: dir.appendingPathComponent("probe.tmp"),
+                atomically: false, encoding: .utf8),
+            "the test's read-only directory is not actually read-only")
+
+        try ConfigEditor.setScalarThrowing(
+            key: "max_prompt_tokens", value: "16384", in: url)
+        let text = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertTrue(text.contains("max_prompt_tokens = 16384"))
+        XCTAssertTrue(text.contains("listen_port = 7447"))  // layout kept
+    }
+
+    /// The rollback path (NB2) must survive the same unwritable directory —
+    /// otherwise a bad value would leave the config corrupt precisely where the
+    /// atomic write can't run.
+    func testRollbackAlsoWorksWithAnUnwritableDirectory() throws {
+        let url = try tempConfig(
+            """
+            listen_host = "127.0.0.1"
+            listen_port = 7447
+            log_dir = "/l"
+            """)
+        let dir = url.deletingLastPathComponent()
+        let fm = FileManager.default
+        try fm.setAttributes(
+            [.posixPermissions: 0o555], ofItemAtPath: dir.path)
+        defer {
+            try? fm.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: dir.path)
+        }
+        // `listen_port` must stay an int; a non-int is caught before the write,
+        // so drive the rollback with a value that parses as a key but breaks
+        // the config: an empty required scalar.
+        XCTAssertThrowsError(
+            try ConfigEditor.setScalarThrowing(
+                key: "listen_port", value: "notanint", in: url))
+        let text = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertTrue(text.contains("listen_port = 7447"))
+        XCTAssertNotNil(try? AthenaConfig.parse(toml: text))
+    }
+
     /// ADR 041: `token_budget_window` is enum-ish — a typo is refused at
     /// set-time instead of failing the daemon's next config parse.
     func testRejectsBadTokenBudgetWindow() {

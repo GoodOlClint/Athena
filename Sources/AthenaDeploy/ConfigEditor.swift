@@ -141,6 +141,47 @@ public enum ConfigEditor {
         }
     }
 
+    /// Write the config, surviving BOTH ownership shapes an installed
+    /// appliance presents (ADR 037 amendment, 2026-07-25).
+    ///
+    /// The installed TOML is chowned to the SERVICE USER so the daemon can
+    /// rewrite it (`PUT /api/config`, `athena config set`, the WebUI editor) —
+    /// but its DIRECTORY deliberately stays root-owned, because
+    /// `auth_keys_file` and the TLS key live in that same directory by default
+    /// and a service-writable directory would let a compromised daemon replace
+    /// them (unlink+create needs only directory write), silently defeating the
+    /// ADR 037 deny-list that stops those same keys being *repointed*.
+    ///
+    /// An atomic write creates a temp file in that directory, so as the daemon
+    /// it fails EACCES — the observed field bug: every daemon-mediated config
+    /// write on a real install returned `writeFailed`, which is precisely what
+    /// ADR 037 set out to remove. So: try atomic (root/dev-tree case), and on
+    /// failure write IN PLACE, which needs only the file's own write bit — the
+    /// bit the install already grants. Symmetrically, an atomic write replaces
+    /// the inode and would leave the file ROOT-owned after one `sudo athena
+    /// config set`, permanently breaking the daemon's own writes; restoring the
+    /// prior uid/gid keeps a sudo edit from re-rooting a service-owned config.
+    private static func writePreservingOwnership(
+        _ text: String, to url: URL
+    ) throws {
+        let fm = FileManager.default
+        let prior = try? fm.attributesOfItem(atPath: url.path)
+        let uid = prior?[.ownerAccountID] as? NSNumber
+        let gid = prior?[.groupOwnerAccountID] as? NSNumber
+        do {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            if let uid, let gid {
+                // Best-effort: only root can chown, and only root could have
+                // taken this branch on a service-owned file anyway.
+                try? fm.setAttributes(
+                    [.ownerAccountID: uid, .groupOwnerAccountID: gid],
+                    ofItemAtPath: url.path)
+            }
+        } catch {
+            try text.write(to: url, atomically: false, encoding: .utf8)
+        }
+    }
+
     /// Validate + rewrite one scalar in place (replacing an active
     /// line or uncommenting a `# key =` one), then sanity-parse.
     /// THROWS rather than exiting — safe to call from the server
@@ -277,8 +318,7 @@ public enum ConfigEditor {
         }
         let rewritten = lines.joined(separator: "\n") + "\n"
         do {
-            try rewritten.write(
-                to: url, atomically: true, encoding: .utf8)
+            try writePreservingOwnership(rewritten, to: url)
         } catch {
             throw Failure.writeFailed(url, "\(error)")
         }
@@ -289,8 +329,7 @@ public enum ConfigEditor {
         // key) keeps the edit and only warns, so it can still be repaired.
         if (try? AthenaConfig.parse(file: url)) == nil {
             if wasParseable {
-                try? contents.write(
-                    to: url, atomically: true, encoding: .utf8)
+                try? writePreservingOwnership(contents, to: url)
                 throw Failure.badValue(
                     key, "a value that keeps the config parseable")
             }
