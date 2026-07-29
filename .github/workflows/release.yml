@@ -118,7 +118,9 @@ jobs:
         if: env.APPLE_CERT_P12 != '' && env.AC_API_KEY_P8 != ''
         run: |
           for p in "$DIST_DIR"/*.pkg; do
-            [ -e "$p" ] && xcrun stapler staple "$p"
+            # unexpanded glob (no .pkg yet) must not fail the step
+            [ -e "$p" ] || continue
+            xcrun stapler staple "$p"
           done
 
       - name: Publish GitHub Release
