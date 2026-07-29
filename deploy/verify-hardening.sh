@@ -54,7 +54,8 @@ fi
 # 3) Advisory: report notarization / signer. Adhoc is fine for local dev; a
 #    release build SHOULD be Developer ID + notarized (operator-side, gated on a
 #    signing identity). Warn-only so local adhoc builds still pass the gate.
-signer="$(codesign -dv "$BIN" 2>&1 | grep -iE 'Authority|Signature' | head -3 || true)"
+# Authority= lines only appear at verbosity 2 (-dvv); -dv never shows the signer.
+signer="$(codesign -dvv "$BIN" 2>&1 | grep -iE 'Authority|Signature' | head -3 || true)"
 if echo "$signer" | grep -qi 'Developer ID'; then
   echo "✓ signed with Developer ID    (release posture)"
 else
