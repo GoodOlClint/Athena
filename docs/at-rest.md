@@ -48,8 +48,10 @@ and neither holds request content. (The former `queue_result_ttl_secs` /
 
 ## At-rest encryption
 
-The store engine is **SQLCipher** (AES-256, on the Apple CommonCrypto
-provider — no OpenSSL). It is opt-in:
+The store engine is **SQLCipher** (AES-256), consumed as the
+[`skiptools/swift-sqlcipher`](https://github.com/skiptools/swift-sqlcipher)
+package — source-built amalgamation on the embedded LibTomCrypt provider,
+cross-platform, exact-version pinned (ADR 043). It is opt-in:
 
 ### Option A — `encrypt_store` (recommended for sensitive content)
 

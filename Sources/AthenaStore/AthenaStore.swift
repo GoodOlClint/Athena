@@ -1,4 +1,4 @@
-import CSQLCipher
+import SQLCipher
 import Foundation
 
 /// One principal's cumulative token usage (M27.2).

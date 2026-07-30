@@ -90,6 +90,12 @@ let package = Package(
         .package(
             url: "https://github.com/swift-server/swift-service-lifecycle",
             from: "2.11.0"),
+        // ADR 043: SQLCipher engine (raw C module product; the SQLiteDB
+        // Swift wrapper is unused). EXACT pin — a crypto engine must not
+        // change under `swift package update`; bumps are reviewed commits.
+        .package(
+            url: "https://github.com/skiptools/swift-sqlcipher",
+            exact: "1.11.0"),
         // The MLX substrate (reusable Qwen3.5/Gemma4/TokenIterator code).
         // SCM pin on GoodOlClint/mlx-swift-lm @ integration by default;
         // ATHENA_LOCAL_DEV=1 swaps to ../mlx/mlx-swift-lm — see `substrateDep`.
@@ -221,43 +227,6 @@ let package = Package(
             ],
             path: "Sources/AthenaEmbedding"),
 
-        // Vendored SQLCipher amalgamation (v4.6.1): API-compatible SQLite
-        // with transparent AES-256 page encryption (sqlite3_key /
-        // PRAGMA key) on the CommonCrypto backend — no OpenSSL, single
-        // self-contained binary on Apple crypto. Inert without a key
-        // (standard SQLite on-disk format), so it vends in safe and the
-        // at-rest encryption is opt-in (M34.3 `encrypt_store`).
-        // SQLITE_TEMP_STORE=2 keeps sorter/temp spill in memory so an
-        // encrypted store never leaks plaintext to a temp file.
-        .target(
-            name: "CSQLCipher",
-            path: "Sources/CSQLCipher",
-            exclude: ["README.md"],
-            cSettings: [
-                // Enable the SQLCipher codec on the Apple CommonCrypto
-                // backend (no OpenSSL).
-                .define("SQLITE_HAS_CODEC"),
-                .define("SQLCIPHER_CRYPTO_CC"),
-                // The amalgamation's internal asserts reference
-                // SQLITE_DEBUG-only helpers; NDEBUG (the production
-                // setting) compiles them out. SwiftPM C targets don't
-                // define it even under -Os, so set it explicitly.
-                .define("NDEBUG"),
-                // Keep sorter/temp spill in memory so an encrypted store
-                // never leaks plaintext to a temp file on disk.
-                .define("SQLITE_TEMP_STORE", to: "2"),
-                .define("SQLITE_THREADSAFE", to: "1"),
-                // usleep() is always present on macOS — pick the precise
-                // busy-sleep without pulling in the autoconf-generated
-                // sqlite_cfg.h (which is keyed to the BUILD host's OS and
-                // would force newer-than-deployment APIs like strchrnul).
-                .define("HAVE_USLEEP", to: "1"),
-            ],
-            linkerSettings: [
-                .linkedFramework("Security"),
-                .linkedFramework("Foundation"),
-            ]),
-
         // M70.1 (audit NA2) — the daemon's HTTP server PRIMITIVES, split
         // out of the `athena` executable target so they are unit-testable
         // under `swift test` (the executable target is unreachable by the
@@ -286,18 +255,23 @@ let package = Package(
             ],
             path: "Sources/AthenaServerKit"),
 
-        // M7: one embedded SQLite store backing the built-in vector DB
-        // and the async request queue. Engine = vendored SQLCipher
-        // (CSQLCipher) so the store can be encrypted at rest (M34.3);
+        // M7: one embedded SQLite store (auth/audit/usage since ADR 025).
+        // Engine = SQLCipher via skiptools/swift-sqlcipher (ADR 043;
+        // raw C module, LibTomCrypt provider, SQLITE_TEMP_STORE=2 is the
+        // package default) so the store can be encrypted at rest (M34.3);
         // MLX for the governed cosine working set.
         .target(
             name: "AthenaStore",
             dependencies: [
                 "AthenaCore",
-                "CSQLCipher",
+                .product(name: "SQLCipher", package: "swift-sqlcipher"),
                 .product(name: "MLX", package: "mlx-swift"),
             ],
-            path: "Sources/AthenaStore"),
+            path: "Sources/AthenaStore",
+            // sqlite3_key/_v2 are behind `#ifdef SQLITE_HAS_CODEC` in the
+            // package's sqlite3.h; the define must reach the Clang importer
+            // of THIS target (same idiom as the package's own SQLiteDB).
+            cSettings: [.define("SQLITE_HAS_CODEC")]),
 
         // Portable client surface (M14.1): Keychain `Secrets`,
         // `Credentials`/`HFAuth`/`ProxyAuth`, `DaemonOptions`, the
