@@ -1,16 +1,22 @@
-# PR CI — the unit test tier. Runs on PRs and non-main pushes; the full Release
-# build + heavy model-gated e2e stay manual / main-only (real models + hardware).
+# PR CI — the unit test tier. Runs on PRs, plus pushes to main (cache seeding —
+# see `on:`); the full Release build + heavy model-gated e2e stay manual
+# (real models + hardware).
 #
 # The MLX Metal shaders need the Metal Toolchain, which requires Xcode 26+ — the
 # hosted runner's DEFAULT Xcode is too old, so we select the newest installed
 # Xcode explicitly (validated on macos-15 during the 2026-07 soak).
 name: CI
 
-# PR-only: a push trigger alongside pull_request double-runs every PR head
-# (different concurrency groups), burning macOS minutes for nothing. Branches
-# without a PR get CI by opening one.
+# PRs + main. A push trigger on PR BRANCHES alongside pull_request double-runs
+# every PR head (different concurrency groups), burning macOS minutes — so
+# branches without a PR get CI by opening one. The main push trigger is the
+# exception, and it's load-bearing: GitHub scopes caches created on a PR to
+# that PR, so only a cache saved from main is visible to every PR. The
+# post-merge run on main is what seeds the shared SPM dependency cache.
 on:
   pull_request:
+  push:
+    branches: [main]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -50,10 +56,12 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Select newest Xcode (Metal Toolchain needs Xcode 26+)
+        id: xcode
         run: |
           latest=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
           sudo xcode-select -s "${latest:-/Applications/Xcode.app}/Contents/Developer"
           xcodebuild -version
+          echo "version=$(xcodebuild -version | tr -d '\n ')" >> "$GITHUB_OUTPUT"
 
       - name: Download Metal Toolchain
         run: xcodebuild -downloadComponent MetalToolchain
@@ -77,6 +85,24 @@ jobs:
 
       - name: Build rust-shim (structured-output staticlib)
         run: ./rust-shim/build.sh
+
+      # SPM checkouts + compiled dependency artifacts (mlx-swift, mlx-swift-lm,
+      # hummingbird, …) — the bulk of the unit-tier wall clock. Keyed on the
+      # exact dependency pins + Xcode version (swiftmodules are not portable
+      # across compiler versions); on a dep bump the restore-keys prefix pulls
+      # the previous cache and SPM rebuilds only what changed. Athena's own
+      # targets recompile every run (their objects ride along but the key
+      # ignores source changes — an exact hit skips the save, so the cache is
+      # only re-uploaded when the pins or toolchain move). NOTE: PR-created
+      # caches are invisible to sibling PRs; the push-to-main run is what
+      # publishes the cache everyone restores.
+      - name: Cache SPM build
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: ${{ runner.os }}-spm-${{ steps.xcode.outputs.version }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-${{ steps.xcode.outputs.version }}-
 
       - name: Unit tests
         run: ./deploy/test.sh
