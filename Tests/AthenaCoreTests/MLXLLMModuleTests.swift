@@ -75,8 +75,9 @@ final class ModelStoreTests: XCTestCase {
     func testBareNameResolvedUnderStoreRoot() {
         let store = ModelStore(
             rootDirectory: URL(fileURLWithPath: "/models", isDirectory: true))
-        XCTAssertEqual(store.resolve("Qwen3.6-27B-8bit-mtp").path,
-                       "/models/Qwen3.6-27B-8bit-mtp")
+        XCTAssertEqual(
+            store.resolve("Qwen3.6-27B-8bit-mtp").path,
+            "/models/Qwen3.6-27B-8bit-mtp")
     }
 }
 

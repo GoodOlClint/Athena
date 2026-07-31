@@ -309,7 +309,8 @@ public struct AthenaConfig: Sendable, Equatable {
         // otherwise left a trailing `\r` on every value — breaking int
         // parsing (`Int("7447\r")` ⇒ nil ⇒ abort), the quote-strip
         // (closing `"` no longer last), and bool coercion (`"true\r"`).
-        let normalized = toml
+        let normalized =
+            toml
             .replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
         for rawLine in normalized.split(

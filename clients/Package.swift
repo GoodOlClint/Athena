@@ -25,7 +25,7 @@ let package = Package(
     dependencies: [
         .package(
             url: "https://github.com/apple/swift-argument-parser",
-            from: "1.4.0"),
+            from: "1.4.0")
     ],
     targets: [
         .target(
@@ -33,7 +33,7 @@ let package = Package(
             dependencies: [
                 .product(
                     name: "ArgumentParser",
-                    package: "swift-argument-parser"),
+                    package: "swift-argument-parser")
             ],
             path: "Sources/AthenaClient"),
         .executableTarget(

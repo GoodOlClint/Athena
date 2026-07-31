@@ -9,10 +9,10 @@ import AthenaTranscription
 import Foundation
 import HTTPTypes
 import Hummingbird
-import MLX
 import HummingbirdCore
 import HummingbirdTLS
 import Logging
+import MLX
 import NIOCore
 import NIOSSL
 
@@ -53,26 +53,31 @@ extension AthenaServer {
         router.get("/ui/api/models") { request, _ -> Response in
             await uiModelsList(request)
         }
-        router.get("/ui/api/models/show") { request, _
-            -> Response in
+        router.get("/ui/api/models/show") {
+            request, _
+                -> Response in
             await uiModelShow(request)
         }
-        router.get("/ui/api/models/default") { request, _
-            -> Response in
+        router.get("/ui/api/models/default") {
+            request, _
+                -> Response in
             await uiDefaultGet(request)
         }
-        router.post("/ui/api/models/default") { request, _
-            -> Response in
+        router.post("/ui/api/models/default") {
+            request, _
+                -> Response in
             await uiModelMutate(request) {
                 await self.handleDefaultModelSet($0)
             }
         }
-        router.post("/ui/api/models/rm") { request, _
-            -> Response in
+        router.post("/ui/api/models/rm") {
+            request, _
+                -> Response in
             await uiModelRemove(request)
         }
-        router.post("/ui/api/models/copy") { request, _
-            -> Response in
+        router.post("/ui/api/models/copy") {
+            request, _
+                -> Response in
             await uiModelMutate(request) {
                 await self.handleModelCopy($0)
             }
@@ -82,20 +87,23 @@ extension AthenaServer {
         // GET-only), so these POSTs BLOCK until the op completes and return
         // the terminal result JSON (or the error envelope). The CLI gets
         // streamed SSE progress on the same `/api/models/*` routes.
-        router.post("/ui/api/models/pull") { request, _
-            -> Response in
+        router.post("/ui/api/models/pull") {
+            request, _
+                -> Response in
             await uiModelMutate(request) { r in
                 await self.uiModelOp(kind: "model_pull", r)
             }
         }
-        router.post("/ui/api/models/convert") { request, _
-            -> Response in
+        router.post("/ui/api/models/convert") {
+            request, _
+                -> Response in
             await uiModelMutate(request) { r in
                 await self.uiModelOp(kind: "model_convert", r)
             }
         }
-        router.post("/ui/api/models/prune") { request, _
-            -> Response in
+        router.post("/ui/api/models/prune") {
+            request, _
+                -> Response in
             await uiModelMutate(request) { r in
                 await self.uiModelOp(kind: "model_prune", r)
             }
@@ -109,16 +117,19 @@ extension AthenaServer {
         router.get("/ui/daemon") { request, _ -> Response in
             await handleUIDaemonPage(request)
         }
-        router.get("/ui/api/admin/status") { request, _
-            -> Response in
+        router.get("/ui/api/admin/status") {
+            request, _
+                -> Response in
             await uiAdminStatus(request)
         }
-        router.post("/ui/api/admin/load") { request, _
-            -> Response in
+        router.post("/ui/api/admin/load") {
+            request, _
+                -> Response in
             await uiAdminLoad(request)
         }
-        router.post("/ui/api/admin/stop") { request, _
-            -> Response in
+        router.post("/ui/api/admin/stop") {
+            request, _
+                -> Response in
             await uiAdminStop(request)
         }
 
@@ -142,16 +153,19 @@ extension AthenaServer {
         router.post("/ui/api/users") { request, _ -> Response in
             await uiUserCreate(request)
         }
-        router.post("/ui/api/users/delete") { request, _
-            -> Response in
+        router.post("/ui/api/users/delete") {
+            request, _
+                -> Response in
             await uiUserDelete(request)
         }
-        router.post("/ui/api/users/role/grant") { request, _
-            -> Response in
+        router.post("/ui/api/users/role/grant") {
+            request, _
+                -> Response in
             await uiRoleGrant(request)
         }
-        router.post("/ui/api/users/role/revoke") { request, _
-            -> Response in
+        router.post("/ui/api/users/role/revoke") {
+            request, _
+                -> Response in
             await uiRoleRevoke(request)
         }
         router.get("/ui/api/roles") { request, _ -> Response in
@@ -163,8 +177,9 @@ extension AthenaServer {
         router.post("/ui/api/tokens") { request, _ -> Response in
             await uiTokenCreate(request)
         }
-        router.post("/ui/api/tokens/delete") { request, _
-            -> Response in
+        router.post("/ui/api/tokens/delete") {
+            request, _
+                -> Response in
             await uiTokenDelete(request)
         }
 
@@ -188,7 +203,6 @@ extension AthenaServer {
         }
     }
 
-
     /// `/ui` console model op (ADR 025 S2). EventSource is GET-only, so the
     /// browser POST BLOCKS until the op completes and returns the terminal
     /// result JSON (or the error envelope) — no streaming, no job poll.
@@ -204,8 +218,10 @@ extension AthenaServer {
                 message: "Invalid request body: \(error)",
                 type: "invalid_request_error", code: "invalid_body")
         }
-        let action = "model." + kind.replacingOccurrences(
-            of: "model_", with: "")
+        let action =
+            "model."
+            + kind.replacingOccurrences(
+                of: "model_", with: "")
         await audit(r, action: action, target: nil, result: "ok")
         let (result, error) = await performModelOp(kind: kind, body: body)
         if let result {
@@ -419,4 +435,5 @@ extension AthenaServer {
             let f = await self.uiJSONMap(req)
             return await self.handleTokenDelete(f["prefix"], req)
         }
-    }}
+    }
+}

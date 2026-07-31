@@ -1,7 +1,6 @@
+import AthenaTranscription
 import Foundation
 import XCTest
-
-import AthenaTranscription
 
 /// ND14 — `AgglomerativeClustering.cluster` is pure + MLX-free (UPGMA over
 /// cosine distance, M25.3), so its decision branches run in CI (ADR 009).
@@ -12,7 +11,7 @@ import AthenaTranscription
 ///   a·[-1,0] ⇒ 2 (opposite).
 final class AgglomerativeClusteringTests: XCTestCase {
     private let a: [Float] = [1, 0]
-    private let b: [Float] = [0, 1]   // orthogonal to a (distance 1)
+    private let b: [Float] = [0, 1]  // orthogonal to a (distance 1)
     private let c: [Float] = [-1, 0]  // opposite to a (distance 2)
 
     /// Distinct cluster labels, regardless of which id each got.
@@ -103,6 +102,6 @@ final class AgglomerativeClusteringTests: XCTestCase {
     func testLabelsAreContiguousZeroBased() {
         let l = AgglomerativeClustering.cluster([a, b, c])
         // All far apart ⇒ 3 singletons relabelled to exactly {0,1,2}.
-        XCTAssertEqual(Set(l), Set(0..<groups(l).count))
+        XCTAssertEqual(Set(l), Set(0 ..< groups(l).count))
     }
 }

@@ -9,10 +9,10 @@ import AthenaTranscription
 import Foundation
 import HTTPTypes
 import Hummingbird
-import MLX
 import HummingbirdCore
 import HummingbirdTLS
 import Logging
+import MLX
 import NIOCore
 import NIOSSL
 
@@ -195,8 +195,10 @@ extension AthenaServer {
         /// tool block was emitted, `stopHit` = the stop sequence that actually
         /// matched (nil if none), `usage` = final counts.
         var finish:
-            (_ reason: FinishReason, _ toolCalled: Bool, _ stopHit: String?,
-                _ usage: TokenUsage) -> Void
+            (
+                _ reason: FinishReason, _ toolCalled: Bool, _ stopHit: String?,
+                _ usage: TokenUsage
+            ) -> Void
     }
 
     /// ADR 036 WP7 — the single `GenChunk` traversal both dialects' streaming

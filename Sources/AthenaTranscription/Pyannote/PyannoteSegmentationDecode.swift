@@ -111,8 +111,8 @@ public enum PyannoteSegmentationDecode {
         let local = PyannotePowerset.localSpeakerProbs(posteriors)
         let frames = local.count
         var out: [SpeakerActivityRegion] = []
-        for s in 0..<PyannotePowerset.maxSpeakers {
-            let series = (0..<frames).map { local[$0][s] }
+        for s in 0 ..< PyannotePowerset.maxSpeakers {
+            let series = (0 ..< frames).map { local[$0][s] }
             for iv in binarizeFrames(
                 series, onset: params.onset, offset: params.offset)
             {
@@ -188,12 +188,11 @@ public enum PyannoteSegmentationDecode {
             return labels
         }
         var totalDur: [Int: Double] = [:]
-        for i in 0..<n { totalDur[labels[i], default: 0] += durations[i] }
+        for i in 0 ..< n { totalDur[labels[i], default: 0] += durations[i] }
         var big = Set(totalDur.filter { $0.value >= minDuration }.map { $0.key })
         // Never dissolve everything: anchor on the longest cluster if none
         // clear the bar.
-        if big.isEmpty, let top = totalDur.max(by: { $0.value < $1.value })?.key
-        {
+        if big.isEmpty, let top = totalDur.max(by: { $0.value < $1.value })?.key {
             big = [top]
         }
         if big.count == totalDur.count { return compact(labels) }
@@ -215,7 +214,7 @@ public enum PyannoteSegmentationDecode {
         guard n > 0, target > 0, embeddings.count == n, durations.count == n
         else { return compact(labels) }
         var totalDur: [Int: Double] = [:]
-        for i in 0..<n { totalDur[labels[i], default: 0] += durations[i] }
+        for i in 0 ..< n { totalDur[labels[i], default: 0] += durations[i] }
         if totalDur.count <= target { return compact(labels) }
         let anchors = Set(
             totalDur.sorted { $0.value > $1.value }
@@ -238,28 +237,28 @@ public enum PyannoteSegmentationDecode {
         // L2-normalized centroid per anchor cluster.
         var centroids: [Int: [Float]] = [:]
         for label in anchors {
-            let members = (0..<n).filter { labels[$0] == label }
+            let members = (0 ..< n).filter { labels[$0] == label }
             guard let dim = members.first.map({ embeddings[$0].count }) else {
                 continue
             }
             var mean = [Float](repeating: 0, count: dim)
             for m in members {
                 let e = embeddings[m]
-                for k in 0..<min(dim, e.count) { mean[k] += e[k] }
+                for k in 0 ..< min(dim, e.count) { mean[k] += e[k] }
             }
             let norm = max(sqrt(mean.reduce(0) { $0 + $1 * $1 }), 1e-9)
             centroids[label] = mean.map { $0 / norm }
         }
 
         var out = labels
-        for i in 0..<n where !anchors.contains(labels[i]) {
+        for i in 0 ..< n where !anchors.contains(labels[i]) {
             let e = embeddings[i]
             let en = max(sqrt(e.reduce(0) { $0 + $1 * $1 }), 1e-9)
             var bestLabel = fallback
             var bestSim = -Float.greatestFiniteMagnitude
             for (label, c) in centroids {
                 var dot: Float = 0
-                for k in 0..<min(c.count, e.count) { dot += c[k] * (e[k] / en) }
+                for k in 0 ..< min(c.count, e.count) { dot += c[k] * (e[k] / en) }
                 if dot > bestSim {
                     bestSim = dot
                     bestLabel = label
@@ -289,8 +288,8 @@ public enum PyannoteSegmentationDecode {
         _ regions: [SpeakerActivityRegion]
     ) -> [(Int, Int)] {
         var pairs: [(Int, Int)] = []
-        for i in 0..<regions.count {
-            for j in (i + 1)..<regions.count
+        for i in 0 ..< regions.count {
+            for j in (i + 1) ..< regions.count
             where regions[i].window == regions[j].window
                 && regions[i].localSpeaker != regions[j].localSpeaker
             {

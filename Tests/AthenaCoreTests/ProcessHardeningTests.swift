@@ -1,10 +1,11 @@
-#if canImport(Darwin)
-import Darwin
-#endif
 import Foundation
 import XCTest
 
 @testable import AthenaCore
+
+#if canImport(Darwin)
+    import Darwin
+#endif
 
 /// ADR 024 Tier 2 unit coverage. `secureZero` and the core-dump policy are pure
 /// libsystem decisions (MLX-free, ADR 008/009). `denyDebuggerAttachNow` is NOT
@@ -33,9 +34,9 @@ final class ProcessHardeningTests: XCTestCase {
     func testDisableCoreDumpsSetsLimitToZero() {
         XCTAssertTrue(ProcessHardening.disableCoreDumps())
         #if canImport(Darwin)
-        var lim = rlimit()
-        XCTAssertEqual(getrlimit(RLIMIT_CORE, &lim), 0)
-        XCTAssertEqual(lim.rlim_cur, 0, "RLIMIT_CORE soft limit should be 0")
+            var lim = rlimit()
+            XCTAssertEqual(getrlimit(RLIMIT_CORE, &lim), 0)
+            XCTAssertEqual(lim.rlim_cur, 0, "RLIMIT_CORE soft limit should be 0")
         #endif
     }
 }

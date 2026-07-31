@@ -74,7 +74,8 @@ final class MultiArchE2ETests: XCTestCase {
         {
             out += chunk
         }
-        assertCoherent(out.trimmingCharacters(in: .whitespacesAndNewlines),
+        assertCoherent(
+            out.trimmingCharacters(in: .whitespacesAndNewlines),
             "plain")
     }
 
@@ -115,7 +116,8 @@ final class MultiArchE2ETests: XCTestCase {
         {
             out += chunk
         }
-        assertCoherent(out.trimmingCharacters(in: .whitespacesAndNewlines),
+        assertCoherent(
+            out.trimmingCharacters(in: .whitespacesAndNewlines),
             "triattention-inert")
     }
 }

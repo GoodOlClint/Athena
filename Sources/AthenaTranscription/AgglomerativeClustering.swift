@@ -61,12 +61,12 @@ public enum AgglomerativeClustering {
             return v.map { $0 / m }
         }
         var dist = [Float](repeating: 0, count: n * n)
-        for i in 0..<n {
-            for j in (i + 1)..<n {
+        for i in 0 ..< n {
+            for j in (i + 1) ..< n {
                 var dot: Float = 0
                 let a = norm[i]
                 let b = norm[j]
-                for k in 0..<a.count { dot += a[k] * b[k] }
+                for k in 0 ..< a.count { dot += a[k] * b[k] }
                 let d = 1 - dot
                 dist[i * n + j] = d
                 dist[j * n + i] = d
@@ -77,7 +77,7 @@ public enum AgglomerativeClustering {
         var active = [Bool](repeating: true, count: n)
         var size = [Int](repeating: 1, count: n)
         // Representative cluster id per point; merges fold j → i.
-        var label = Array(0..<n)
+        var label = Array(0 ..< n)
         var activeCount = n
 
         let target = numClusters.map { max(1, min($0, n)) }
@@ -87,8 +87,8 @@ public enum AgglomerativeClustering {
             var bestI = -1
             var bestJ = -1
             var bestD = Float.greatestFiniteMagnitude
-            for i in 0..<n where active[i] {
-                for j in (i + 1)..<n where active[j] && !forbidden[i * n + j] {
+            for i in 0 ..< n where active[i] {
+                for j in (i + 1) ..< n where active[j] && !forbidden[i * n + j] {
                     let d = dist[i * n + j]
                     if d < bestD {
                         bestD = d
@@ -119,7 +119,7 @@ public enum AgglomerativeClustering {
             // UPGMA Lance-Williams update: merge bestJ into bestI.
             let si = Float(size[bestI])
             let sj = Float(size[bestJ])
-            for k in 0..<n where active[k] && k != bestI && k != bestJ {
+            for k in 0 ..< n where active[k] && k != bestI && k != bestJ {
                 let dik = dist[bestI * n + k]
                 let djk = dist[bestJ * n + k]
                 let merged = (si * dik + sj * djk) / (si + sj)
@@ -128,7 +128,7 @@ public enum AgglomerativeClustering {
             }
             // Propagate cannot-link: the merged cluster inherits every
             // forbidden relation of both halves.
-            for k in 0..<n where active[k] && k != bestI && k != bestJ {
+            for k in 0 ..< n where active[k] && k != bestI && k != bestJ {
                 if forbidden[bestJ * n + k] {
                     forbidden[bestI * n + k] = true
                     forbidden[k * n + bestI] = true
@@ -136,7 +136,7 @@ public enum AgglomerativeClustering {
             }
             size[bestI] += size[bestJ]
             active[bestJ] = false
-            for p in 0..<n where label[p] == bestJ { label[p] = bestI }
+            for p in 0 ..< n where label[p] == bestJ { label[p] = bestI }
             activeCount -= 1
         }
 
@@ -144,7 +144,7 @@ public enum AgglomerativeClustering {
         var remap: [Int: Int] = [:]
         var next = 0
         var out = [Int](repeating: 0, count: n)
-        for p in 0..<n {
+        for p in 0 ..< n {
             if let id = remap[label[p]] {
                 out[p] = id
             } else {

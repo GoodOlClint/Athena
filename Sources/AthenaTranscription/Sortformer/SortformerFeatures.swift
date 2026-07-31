@@ -66,7 +66,7 @@ public func extractMelFeatures(
     }
 
     var allFeatures = [MLXArray]()
-    for b in 0..<batchSize {
+    for b in 0 ..< batchSize {
         // STFT with constant (zero) padding — NeMo convention
         let spec = stft(
             audio: wav[b],
@@ -85,14 +85,15 @@ public func extractMelFeatures(
         allFeatures.append(logMel.transposed(1, 0))
     }
 
-    var features = MLX.stacked(allFeatures) // (batch, nMels, numFrames)
+    var features = MLX.stacked(allFeatures)  // (batch, nMels, numFrames)
 
     // Per-feature normalization with Bessel's correction
     if normalize == "per_feature" {
         let mean = MLX.mean(features, axis: 2, keepDims: true)
-        let variance = MLX.sum(
-            (features - mean).square(), axis: 2, keepDims: true
-        ) / Float(features.dim(2) - 1)
+        let variance =
+            MLX.sum(
+                (features - mean).square(), axis: 2, keepDims: true
+            ) / Float(features.dim(2) - 1)
         let std = MLX.sqrt(variance)
         features = (features - mean) / (std + normConstant)
     }
@@ -143,8 +144,8 @@ public func trimSilence(
     let speechList = speech.asArray(Bool.self)
 
     var startFrame = 0
-    for i in 0..<(numFrames - minSpeechFrames + 1) {
-        if speechList[i..<(i + minSpeechFrames)].allSatisfy({ $0 }) {
+    for i in 0 ..< (numFrames - minSpeechFrames + 1) {
+        if speechList[i ..< (i + minSpeechFrames)].allSatisfy({ $0 }) {
             startFrame = i
             break
         }
@@ -152,7 +153,7 @@ public func trimSilence(
 
     var endFrame = numFrames
     for i in stride(from: numFrames - 1, through: minSpeechFrames - 1, by: -1) {
-        if speechList[(i - minSpeechFrames + 1)...(i)].allSatisfy({ $0 }) {
+        if speechList[(i - minSpeechFrames + 1) ... (i)].allSatisfy({ $0 }) {
             endFrame = i + 1
             break
         }
@@ -165,5 +166,5 @@ public func trimSilence(
         return (waveform, 0)
     }
 
-    return (waveform[startSample..<endSample], startSample)
+    return (waveform[startSample ..< endSample], startSample)
 }

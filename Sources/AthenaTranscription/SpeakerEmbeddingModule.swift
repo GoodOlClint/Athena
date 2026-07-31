@@ -141,7 +141,7 @@ public actor StubSpeakerEmbeddingModule: SpeakerEmbeddingModule,
             for b in "\(seg.start):\(seg.end)".utf8 {
                 h = (h ^ UInt64(b)) &* 1_099_511_628_211
             }
-            for i in 0..<dimension {
+            for i in 0 ..< dimension {
                 h = (h ^ UInt64(i)) &* 1_099_511_628_211
                 v[i] = Float(Int64(bitPattern: h) % 1000) / 1000.0
             }

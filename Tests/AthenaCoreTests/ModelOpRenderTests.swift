@@ -1,7 +1,6 @@
+import AthenaClient
 import Foundation
 import XCTest
-
-import AthenaClient
 
 /// Usability audit 2026-07-02 §2/§3 — the pure render state behind the
 /// ollama-style multi-row progress. `ModelOpState.lines` is what makes local
@@ -30,7 +29,7 @@ final class ModelOpRenderTests: XCTestCase {
 
     func testActiveRowCapCollapses() {
         var s = ModelOpState(label: "pull")
-        for i in 0..<12 {
+        for i in 0 ..< 12 {
             s.file(name: "shard\(i)", bytes: 1, total: 10, done: false)
         }
         let lines = s.lines(maxRows: 8)

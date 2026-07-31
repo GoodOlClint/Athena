@@ -28,7 +28,7 @@ final class WeSpeakerFeatures {
         // Hamming window — pyannote/wespeaker inference uses
         // window_type='hamming' (not Kaldi's default 'povey').
         var w = [Float](repeating: 0, count: nFFT)
-        for i in 0..<nFFT {
+        for i in 0 ..< nFFT {
             w[i] = 0.54 - 0.46 * cos(2.0 * Float.pi * Float(i) / Float(nFFT - 1))
         }
         self.window = w
@@ -55,7 +55,7 @@ final class WeSpeakerFeatures {
         func melToHz(_ mel: Float) -> Float { 700.0 * (pow(10.0, mel / 2595.0) - 1.0) }
 
         var fftFreqs = [Float](repeating: 0, count: nBins)
-        for i in 0..<nBins {
+        for i in 0 ..< nBins {
             fftFreqs[i] = Float(i) * Float(sampleRate) / Float(paddedFFT)
         }
 
@@ -63,23 +63,23 @@ final class WeSpeakerFeatures {
         let melMax = hzToMel(fMax)
         let nMelPoints = nMels + 2
         var melPoints = [Float](repeating: 0, count: nMelPoints)
-        for i in 0..<nMelPoints {
+        for i in 0 ..< nMelPoints {
             melPoints[i] = melMin + Float(i) * (melMax - melMin) / Float(nMelPoints - 1)
         }
         let filterFreqs = melPoints.map(melToHz)
         var filterDiff = [Float](repeating: 0, count: nMelPoints - 1)
-        for i in 0..<(nMelPoints - 1) {
+        for i in 0 ..< (nMelPoints - 1) {
             filterDiff[i] = filterFreqs[i + 1] - filterFreqs[i]
         }
 
         // [nMels, nBins] row-major triangular filters with Slaney
         // area-normalization (matches the reference frontend).
         var fb = [Float](repeating: 0, count: nMels * nBins)
-        for m in 0..<nMels {
+        for m in 0 ..< nMels {
             let lo = filterFreqs[m]
             let hi = filterFreqs[m + 2]
             let enorm = 2.0 / (filterFreqs[m + 2] - filterFreqs[m])
-            for k in 0..<nBins {
+            for k in 0 ..< nBins {
                 let freq = fftFreqs[k]
                 let down = (freq - lo) / filterDiff[m]
                 let up = (hi - freq) / filterDiff[m + 1]
@@ -98,7 +98,7 @@ final class WeSpeakerFeatures {
         var emphasized = [Float](repeating: 0, count: audio.count)
         if !audio.isEmpty {
             emphasized[0] = audio[0]
-            for i in 1..<audio.count {
+            for i in 1 ..< audio.count {
                 emphasized[i] = audio[i] - preEmphasis * audio[i - 1]
             }
         }
@@ -108,12 +108,12 @@ final class WeSpeakerFeatures {
         let srcCount = emphasized.count
         var paddedAudio = [Float](
             repeating: 0, count: padLength + srcCount + padLength)
-        for i in 0..<padLength {
+        for i in 0 ..< padLength {
             let idx = min(padLength - i, max(srcCount - 1, 0))
             paddedAudio[i] = srcCount > 0 ? emphasized[max(0, idx)] : 0
         }
-        for i in 0..<srcCount { paddedAudio[padLength + i] = emphasized[i] }
-        for i in 0..<padLength {
+        for i in 0 ..< srcCount { paddedAudio[padLength + i] = emphasized[i] }
+        for i in 0 ..< padLength {
             let idx = srcCount - 2 - i
             paddedAudio[padLength + srcCount + i] =
                 srcCount > 0 ? emphasized[max(0, idx)] : 0
@@ -127,16 +127,16 @@ final class WeSpeakerFeatures {
         var frameBuf = [Float](repeating: 0, count: paddedFFT)
         var magnitude = [Float](repeating: 0, count: nFrames * nBins)
 
-        for frame in 0..<nFrames {
+        for frame in 0 ..< nFrames {
             let start = frame * hopLength
             paddedAudio.withUnsafeBufferPointer { buf in
                 vDSP_vmul(
                     buf.baseAddress! + start, 1, window, 1,
                     &frameBuf, 1, vDSP_Length(nFFT))
             }
-            for i in nFFT..<paddedFFT { frameBuf[i] = 0 }
+            for i in nFFT ..< paddedFFT { frameBuf[i] = 0 }
 
-            for i in 0..<halfPadded {
+            for i in 0 ..< halfPadded {
                 splitReal[i] = frameBuf[2 * i]
                 splitImag[i] = frameBuf[2 * i + 1]
             }
@@ -156,7 +156,7 @@ final class WeSpeakerFeatures {
             let base = frame * nBins
             magnitude[base] = splitReal[0] * splitReal[0]
             magnitude[base + halfPadded] = splitImag[0] * splitImag[0]
-            for k in 1..<halfPadded {
+            for k in 1 ..< halfPadded {
                 magnitude[base + k] =
                     splitReal[k] * splitReal[k] + splitImag[k] * splitImag[k]
             }
@@ -183,15 +183,15 @@ final class WeSpeakerFeatures {
 
         // CMN: subtract per-bin temporal mean (WeSpeaker: feat -= mean over time).
         var binMeans = [Float](repeating: 0, count: nMels)
-        for frame in 0..<nFrames {
+        for frame in 0 ..< nFrames {
             let b = frame * nMels
-            for m in 0..<nMels { binMeans[m] += melSpec[b + m] }
+            for m in 0 ..< nMels { binMeans[m] += melSpec[b + m] }
         }
         var inv = 1.0 / Float(nFrames)
         vDSP_vsmul(binMeans, 1, &inv, &binMeans, 1, vDSP_Length(nMels))
         melSpec.withUnsafeMutableBufferPointer { ms in
             binMeans.withUnsafeBufferPointer { bm in
-                for frame in 0..<nFrames {
+                for frame in 0 ..< nFrames {
                     vDSP_vsub(
                         bm.baseAddress!, 1,
                         ms.baseAddress! + frame * nMels, 1,

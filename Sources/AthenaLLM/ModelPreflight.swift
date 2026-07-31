@@ -37,9 +37,9 @@ public enum ModelPreflight {
         case .unknown:
             return .warn(
                 "Athena cannot confirm from config alone that '\(id)' "
-                + "(\(support.modality.label)) is an architecture the substrate "
-                + "implements; that is decided when the model loads. Pulling "
-                + "anyway.")
+                    + "(\(support.modality.label)) is an architecture the substrate "
+                    + "implements; that is decided when the model loads. Pulling "
+                    + "anyway.")
         case let .unsupported(reason, guidance):
             return .refuse(reason: "\(reason); \(guidance)")
         }

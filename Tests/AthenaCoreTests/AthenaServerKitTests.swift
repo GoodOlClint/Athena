@@ -1,3 +1,5 @@
+import AthenaCore
+import AthenaStore
 import Foundation
 import HTTPTypes
 import Logging
@@ -6,8 +8,6 @@ import NIOEmbedded
 import NIOHTTPTypes
 import XCTest
 
-import AthenaCore
-import AthenaStore
 @testable import AthenaServerKit
 
 /// M70.1 (audit NA2) — the daemon's HTTP-server security boundary, now a
@@ -227,7 +227,7 @@ final class AthenaServerKitTests: XCTestCase {
     func testConcurrencyLimiterZeroIsUnlimited() async {
         let cl = ConcurrencyLimiter(global: 0, perPrincipal: 0)
         var allAdmitted = true
-        for _ in 0..<50 {
+        for _ in 0 ..< 50 {
             let ok = await cl.acquire("p")
             allAdmitted = allAdmitted && ok
         }

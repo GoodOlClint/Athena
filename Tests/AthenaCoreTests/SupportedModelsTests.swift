@@ -1,6 +1,6 @@
+import AthenaCore  // NB4 (M70.1b): the KVCompression enum moved here.
 import XCTest
 
-import AthenaCore  // NB4 (M70.1b): the KVCompression enum moved here.
 @testable import AthenaLLM  // the .servesArch extension stays in AthenaLLM
 
 /// Validated-architecture tiers (M23 fork D) + the codec/arch "serves"

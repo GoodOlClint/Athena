@@ -59,8 +59,8 @@ public enum ParakeetChunkMerge {
         }
 
         var best: [(Int, Int)] = []
-        for i in 0..<overlapA.count {
-            for j in 0..<overlapB.count
+        for i in 0 ..< overlapA.count {
+            for j in 0 ..< overlapB.count
             where aligned(overlapA[i], overlapB[j], overlapDuration) {
                 var current: [(Int, Int)] = []
                 var k = i, l = j
@@ -96,8 +96,8 @@ public enum ParakeetChunkMerge {
 
         let m = overlapA.count, n = overlapB.count
         var dp = Array(repeating: Array(repeating: 0, count: n + 1), count: m + 1)
-        for i in 1...m {
-            for j in 1...n {
+        for i in 1 ... m {
+            for j in 1 ... n {
                 if aligned(overlapA[i - 1], overlapB[j - 1], overlapDuration) {
                     dp[i][j] = dp[i - 1][j - 1] + 1
                 } else {
@@ -138,12 +138,12 @@ public enum ParakeetChunkMerge {
         let idxB = pairs.map { $0.1 }
 
         var result: [Token] = []
-        result.append(contentsOf: a[0..<idxA[0]])
-        for k in 0..<pairs.count {
+        result.append(contentsOf: a[0 ..< idxA[0]])
+        for k in 0 ..< pairs.count {
             result.append(a[idxA[k]])
             if k < pairs.count - 1 {
-                let gapA = Array(a[(idxA[k] + 1)..<idxA[k + 1]])
-                let gapB = Array(b[(idxB[k] + 1)..<idxB[k + 1]])
+                let gapA = Array(a[(idxA[k] + 1) ..< idxA[k + 1]])
+                let gapB = Array(b[(idxB[k] + 1) ..< idxB[k + 1]])
                 result.append(contentsOf: gapB.count > gapA.count ? gapB : gapA)
             }
         }

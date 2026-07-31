@@ -297,7 +297,8 @@ extension ModelSupport {
                 try? JSONSerialization.jsonObject(with: $0)
             } as? [String: Any] ?? [:]
 
-        let info = ModelConfigInfo.read(modelDirectory: resolved)
+        let info =
+            ModelConfigInfo.read(modelDirectory: resolved)
             ?? ModelConfigInfo()
         let ta = TranscriptionArch.readConfig(in: resolved)
         let hasST = ModelClass.hasSentenceTransformerMarkers(in: resolved)

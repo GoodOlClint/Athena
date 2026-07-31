@@ -195,8 +195,10 @@ enum WordAlignMath {
             } else {
                 let last = words.removeLast()
                 words.append(
-                    (last.word + sw.text,
-                        last.range.lowerBound ..< sw.range.upperBound))
+                    (
+                        last.word + sw.text,
+                        last.range.lowerBound ..< sw.range.upperBound
+                    ))
             }
         }
         return words

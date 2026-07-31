@@ -13,7 +13,7 @@ final class SpeculativeSamplingTests: XCTestCase {
     func testSeededRNGIsReproducible() {
         var a = SamplingRNG(seed: 42)
         var b = SamplingRNG(seed: 42)
-        for _ in 0..<128 {
+        for _ in 0 ..< 128 {
             XCTAssertEqual(a.uniform(), b.uniform(), accuracy: 0)
         }
     }
@@ -24,7 +24,7 @@ final class SpeculativeSamplingTests: XCTestCase {
         // Some draw within the first window must differ — uniform
         // RNGs over different seeds shouldn't lockstep.
         var differed = false
-        for _ in 0..<32 where a.uniform() != b.uniform() {
+        for _ in 0 ..< 32 where a.uniform() != b.uniform() {
             differed = true
         }
         XCTAssertTrue(differed)
@@ -32,7 +32,7 @@ final class SpeculativeSamplingTests: XCTestCase {
 
     func testUniformDrawsInRange() {
         var rng = SamplingRNG(seed: 7)
-        for _ in 0..<1024 {
+        for _ in 0 ..< 1024 {
             let u = rng.uniform()
             XCTAssertGreaterThanOrEqual(u, 0)
             XCTAssertLessThan(u, 1)
@@ -76,7 +76,7 @@ final class SpeculativeSamplingTests: XCTestCase {
         let d = SpeculativeSampling.distribution(
             logits: logits, temperature: 1, topP: 0.5)
         XCTAssertEqual(d[0], 1.0, accuracy: 1e-5)
-        for i in 1..<4 { XCTAssertEqual(d[i], 0, accuracy: 1e-6) }
+        for i in 1 ..< 4 { XCTAssertEqual(d[i], 0, accuracy: 1e-6) }
     }
 
     func testTopPOneIsInert() {
@@ -85,7 +85,7 @@ final class SpeculativeSamplingTests: XCTestCase {
             logits: logits, temperature: 1, topP: 1.0)
         let b = SpeculativeSampling.distribution(
             logits: logits, temperature: 1, topP: nil)
-        for i in 0..<4 {
+        for i in 0 ..< 4 {
             XCTAssertEqual(a[i], b[i], accuracy: 1e-6)
         }
     }
@@ -134,7 +134,7 @@ final class SpeculativeSamplingTests: XCTestCase {
         // every accept-test passes regardless of u.
         let p: [Float] = [0.2, 0.3, 0.5]
         var rng = SamplingRNG(seed: 99)
-        for tok in 0..<3 {
+        for tok in 0 ..< 3 {
             XCTAssertTrue(
                 SpeculativeSampling.acceptOrReject(
                     token: tok, pDistribution: p, qDistribution: p,
@@ -150,7 +150,7 @@ final class SpeculativeSamplingTests: XCTestCase {
         var rng = SamplingRNG(seed: 12345)
         let trials = 4000
         var accepts = 0
-        for _ in 0..<trials {
+        for _ in 0 ..< trials {
             if SpeculativeSampling.acceptOrReject(
                 token: 0, pDistribution: p, qDistribution: q, rng: &rng)
             {
@@ -185,7 +185,7 @@ final class SpeculativeSamplingTests: XCTestCase {
         // returns p so the loop still has a valid sample distribution.
         let p: [Float] = [0.25, 0.25, 0.25, 0.25]
         let r = SpeculativeSampling.residual(p: p, q: p)
-        for i in 0..<4 { XCTAssertEqual(r[i], 0.25, accuracy: 1e-6) }
+        for i in 0 ..< 4 { XCTAssertEqual(r[i], 0.25, accuracy: 1e-6) }
     }
 
     // MARK: - sampleFromDistribution()
@@ -198,9 +198,8 @@ final class SpeculativeSamplingTests: XCTestCase {
         var rng = SamplingRNG(seed: 2026_05_26)
         let trials = 8000
         var counts = [0, 0, 0]
-        for _ in 0..<trials {
-            counts[SpeculativeSampling.sampleFromDistribution(p, rng: &rng)]
-                += 1
+        for _ in 0 ..< trials {
+            counts[SpeculativeSampling.sampleFromDistribution(p, rng: &rng)] += 1
         }
         XCTAssertEqual(
             Double(counts[0]) / Double(trials), 0.1, accuracy: 0.02)
@@ -214,7 +213,7 @@ final class SpeculativeSamplingTests: XCTestCase {
         var d = [Float](repeating: 0, count: 16)
         d[7] = 1
         var rng = SamplingRNG(seed: 0)
-        for _ in 0..<32 {
+        for _ in 0 ..< 32 {
             XCTAssertEqual(
                 SpeculativeSampling.sampleFromDistribution(d, rng: &rng), 7)
         }
@@ -276,7 +275,7 @@ final class SpeculativeSamplingTests: XCTestCase {
             logits: logits, temperature: 1.0, topP: nil, topK: 2)
         XCTAssertEqual(d[0], 0.5, accuracy: 1e-6)
         XCTAssertEqual(d[1], 0.5, accuracy: 1e-6)
-        for i in 2..<6 { XCTAssertEqual(d[i], 0, "index \(i) truncated") }
+        for i in 2 ..< 6 { XCTAssertEqual(d[i], 0, "index \(i) truncated") }
     }
 
     /// Same total-order tie-break for the nucleus boundary: p=0.5 over 6
@@ -285,8 +284,8 @@ final class SpeculativeSamplingTests: XCTestCase {
         let logits = [Float](repeating: 1.0, count: 6)
         let d = SpeculativeSampling.distribution(
             logits: logits, temperature: 1.0, topP: 0.5, topK: nil)
-        for i in 0..<3 { XCTAssertEqual(d[i], 1.0 / 3, accuracy: 1e-6) }
-        for i in 3..<6 { XCTAssertEqual(d[i], 0, "index \(i) truncated") }
+        for i in 0 ..< 3 { XCTAssertEqual(d[i], 1.0 / 3, accuracy: 1e-6) }
+        for i in 3 ..< 6 { XCTAssertEqual(d[i], 0, "index \(i) truncated") }
     }
 
     // MARK: - L7 (M70.3): multi-seed PROPERTY, not a single-seed snapshot
@@ -304,13 +303,13 @@ final class SpeculativeSamplingTests: XCTestCase {
     /// random decision from ONE seeded stream — and asserts the emitted token
     /// histogram matches the TARGET distribution `p` for every seed.
     func testSpeculativeSamplingReproducesTargetMarginalAcrossSeeds() {
-        let p: [Float] = [0.5, 0.3, 0.2]   // target
-        let q: [Float] = [0.2, 0.2, 0.6]   // a deliberately-wrong draft
+        let p: [Float] = [0.5, 0.3, 0.2]  // target
+        let q: [Float] = [0.2, 0.2, 0.6]  // a deliberately-wrong draft
         let trials = 12000
         for seed in [1, 7, 42, 2026, 999_983] {
             var rng = SamplingRNG(seed: seed)
             var counts = [0, 0, 0]
-            for _ in 0..<trials {
+            for _ in 0 ..< trials {
                 let draft =
                     SpeculativeSampling.sampleFromDistribution(q, rng: &rng)
                 let token: Int
@@ -326,7 +325,7 @@ final class SpeculativeSamplingTests: XCTestCase {
                 }
                 counts[token] += 1
             }
-            for i in 0..<3 {
+            for i in 0 ..< 3 {
                 XCTAssertEqual(
                     Double(counts[i]) / Double(trials), Double(p[i]),
                     accuracy: 0.03,
@@ -343,7 +342,7 @@ final class SpeculativeSamplingTests: XCTestCase {
         let p: [Float] = [0.1, 0.2, 0.3, 0.4]
         func draw(_ seed: Int) -> [Int] {
             var rng = SamplingRNG(seed: seed)
-            return (0..<64).map { _ in
+            return (0 ..< 64).map { _ in
                 SpeculativeSampling.sampleFromDistribution(p, rng: &rng)
             }
         }
@@ -354,8 +353,8 @@ final class SpeculativeSamplingTests: XCTestCase {
             XCTAssertEqual(a, draw(s), "seed \(s) must reproduce itself")
             streams.append(a)
         }
-        for i in 0..<streams.count {
-            for j in (i + 1)..<streams.count {
+        for i in 0 ..< streams.count {
+            for j in (i + 1) ..< streams.count {
                 XCTAssertNotEqual(
                     streams[i], streams[j],
                     "seeds \(seeds[i]) and \(seeds[j]) must diverge")

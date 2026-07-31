@@ -24,8 +24,12 @@ public enum ModelPull {
         id: String, revision: String? = nil, into storeRoot: URL,
         progress: (@Sendable (ModelOpProgress) -> Void)? = nil,
         maxAttempts: Int = 5,
-        onRetry: (@Sendable (_ attempt: Int, _ maxAttempts: Int,
-            _ error: any Error) -> Void)? = nil
+        onRetry: (
+            @Sendable (
+                _ attempt: Int, _ maxAttempts: Int,
+                _ error: any Error
+            ) -> Void
+        )? = nil
     ) async throws -> URL {
         var attempt = 1
         let snapshot: URL

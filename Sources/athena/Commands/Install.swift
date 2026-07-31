@@ -154,7 +154,7 @@ struct Install: AsyncParsableCommand {
         let sourceDir =
             from.map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? Bundle.main.executableURL!.resolvingSymlinksInPath()
-                .deletingLastPathComponent()
+            .deletingLastPathComponent()
 
         let plan = InstallPlan(
             sourceDir: sourceDir,
@@ -536,7 +536,9 @@ struct Install: AsyncParsableCommand {
         }
         print(
             "  health: curl -s http://\(cfg.listenHost):\(cfg.listenPort)/healthz")
-        print("  logs:   athena logs --follow   # or `log stream --predicate 'subsystem == \"athena\"'`")
+        print(
+            "  logs:   athena logs --follow   # or `log stream --predicate 'subsystem == \"athena\"'`"
+        )
         print(
             "  console: http://\(cfg.listenHost):\(cfg.listenPort)/ui"
                 + " — sign in to control this RUNNING daemon "
@@ -581,7 +583,7 @@ struct Install: AsyncParsableCommand {
             "abcdefghijkmnpqrstuvwxyz23456789ABCDEFGHJKLMNPQRSTUVWXYZ")
         var rng = SystemRandomNumberGenerator()
         return String(
-            (0..<12).map { _ in alpha.randomElement(using: &rng)! })
+            (0 ..< 12).map { _ in alpha.randomElement(using: &rng)! })
     }
 
     @discardableResult

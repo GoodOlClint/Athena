@@ -107,7 +107,7 @@ final class StructuredSchemaTests: XCTestCase {
 
     func testCompiledSchemaGuideWalks() throws {
         // Pure end-to-end: routed schema string → Index → Guide.
-        let tokens = (0..<10).map {
+        let tokens = (0 ..< 10).map {
             VocabToken(id: UInt32($0), bytes: [UInt8(0x30 + $0)])
         }
         let schema = StructuredSchema.schemaJSON(

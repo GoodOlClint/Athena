@@ -41,7 +41,7 @@ enum StructuredVocab {
         let eos = eosId ?? vocabSize
         var out: [VocabToken] = []
         out.reserveCapacity(vocabSize)
-        for id in 0..<vocabSize {
+        for id in 0 ..< vocabSize {
             if id == eos { continue }
             let s = decode(id)
             out.append(VocabToken(id: UInt32(id), bytes: Array(s.utf8)))

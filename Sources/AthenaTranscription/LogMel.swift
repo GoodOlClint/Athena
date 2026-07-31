@@ -44,20 +44,20 @@ public enum LogMel {
     public static func melFilterbank(nMels: Int = 128) -> [Float] {
         let nFreqs = nFFT / 2 + 1  // 201
         let fMax = Double(sampleRate) / 2.0  // 8000
-        let fftFreqs = (0..<nFreqs).map {
+        let fftFreqs = (0 ..< nFreqs).map {
             Double($0) * fMax / Double(nFreqs - 1)
         }
         let minMel = hzToMel(0), maxMel = hzToMel(fMax)
-        let melPts = (0..<(nMels + 2)).map {
+        let melPts = (0 ..< (nMels + 2)).map {
             melToHz(
                 minMel + (maxMel - minMel) * Double($0) / Double(nMels + 1))
         }
-        let fdiff = (0..<(nMels + 1)).map { melPts[$0 + 1] - melPts[$0] }
+        let fdiff = (0 ..< (nMels + 1)).map { melPts[$0 + 1] - melPts[$0] }
 
         var w = [Float](repeating: 0, count: nMels * nFreqs)
-        for i in 0..<nMels {
+        for i in 0 ..< nMels {
             let enorm = 2.0 / (melPts[i + 2] - melPts[i])  // slaney
-            for j in 0..<nFreqs {
+            for j in 0 ..< nFreqs {
                 let lower = -(melPts[i] - fftFreqs[j]) / fdiff[i]
                 let upper = (melPts[i + 2] - fftFreqs[j]) / fdiff[i + 1]
                 let v = max(0.0, min(lower, upper))
@@ -80,26 +80,26 @@ public enum LogMel {
             x.append(
                 contentsOf: [Float](repeating: 0, count: nSamples - x.count))
         } else if x.count > nSamples {
-            x = Array(x[0..<nSamples])
+            x = Array(x[0 ..< nSamples])
         }
 
         // torch.stft center=True: reflect-pad by nFFT/2 (no edge repeat)
         let p = nFFT / 2  // 200
         var padded = [Float](repeating: 0, count: x.count + 2 * p)
-        for k in 0..<p { padded[k] = x[p - k] }  // x[p..1]
-        for i in 0..<x.count { padded[p + i] = x[i] }
-        for k in 0..<p { padded[p + x.count + k] = x[x.count - 2 - k] }
+        for k in 0 ..< p { padded[k] = x[p - k] }  // x[p..1]
+        for i in 0 ..< x.count { padded[p + i] = x[i] }
+        for k in 0 ..< p { padded[p + x.count + k] = x[x.count - 2 - k] }
 
         // periodic Hann (torch.hann_window default periodic=True)
-        let hann = (0..<nFFT).map {
+        let hann = (0 ..< nFFT).map {
             Float(0.5 * (1.0 - cos(2.0 * .pi * Double($0) / Double(nFFT))))
         }
 
         let totalFrames = 1 + (padded.count - nFFT) / hop  // 3001
         var frames = [Float](repeating: 0, count: totalFrames * nFFT)
-        for t in 0..<totalFrames {
+        for t in 0 ..< totalFrames {
             let base = t * hop
-            for k in 0..<nFFT {
+            for k in 0 ..< nFFT {
                 frames[t * nFFT + k] = padded[base + k] * hann[k]
             }
         }

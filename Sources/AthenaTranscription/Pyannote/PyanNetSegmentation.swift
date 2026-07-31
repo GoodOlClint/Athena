@@ -47,7 +47,7 @@ private func pyanMaxPool1d(_ x: MLXArray, kernel: Int) -> MLXArray {
     let length = x.dim(-2)
     let outLen = (length - kernel) / kernel + 1
     var slices: [MLXArray] = []
-    for k in 0..<kernel {
+    for k in 0 ..< kernel {
         slices.append(
             x[0..., .stride(from: k, to: k + outLen * kernel, by: kernel), 0...])
     }
@@ -74,7 +74,7 @@ final class PyanLSTMCell: Module {
         var h: MLXArray?
         var c: MLXArray?
         var outs: [MLXArray] = []
-        for t in 0..<seqLen {
+        for t in 0 ..< seqLen {
             var ifgo = projected[.ellipsis, t, 0...]
             if let h { ifgo = ifgo + matmul(h, wh.T) }
             let g = split(ifgo, parts: 4, axis: -1)
@@ -103,10 +103,10 @@ private func runPyanBiLSTM(
     _ x: MLXArray, fwd: PyanLSTMStack, bwd: PyanLSTMStack
 ) -> MLXArray {
     var input = x
-    for i in 0..<fwd.layers.count {
+    for i in 0 ..< fwd.layers.count {
         let fwdOut = fwd.layers[i](input)
         let seqLen = input.dim(-2)
-        let idx = MLXArray(Array((0..<seqLen).reversed()))
+        let idx = MLXArray(Array((0 ..< seqLen).reversed()))
         let rev = input.take(idx, axis: -2)
         let bwdOut = bwd.layers[i](rev).take(idx, axis: -2)
         input = concatenated([fwdOut, bwdOut], axis: -1)
@@ -127,7 +127,7 @@ final class PyanSincNet: Module {
         let strides = [10, 1, 1]
         let inCh = [1, 80, 60]
         // The first (sinc) conv carries no bias in the checkpoint.
-        self.conv = (0..<3).map { i in
+        self.conv = (0 ..< 3).map { i in
             Conv1d(
                 inputChannels: inCh[i], outputChannels: filters[i],
                 kernelSize: kernels[i], stride: strides[i], bias: i != 0)
@@ -140,7 +140,7 @@ final class PyanSincNet: Module {
     func callAsFunction(_ x: MLXArray) -> MLXArray {
         var out = x.transposed(0, 2, 1)  // [B, samples, 1]
         out = wavNorm(out)
-        for i in 0..<conv.count {
+        for i in 0 ..< conv.count {
             out = conv[i](out)
             if i == 0 { out = abs(out) }
             out = pyanMaxPool1d(out, kernel: 3)
@@ -162,9 +162,9 @@ final class PyanNetSegmentationNetwork: Module {
     override init() {
         self.sincnet = PyanSincNet()
         let hidden = 128
-        let fwd = (0..<4).map { PyanLSTMCell(inputSize: $0 == 0 ? 60 : 256, hiddenSize: hidden) }
-        let bwd = (0..<4).map { PyanLSTMCell(inputSize: $0 == 0 ? 60 : 256, hiddenSize: hidden) }
-        self.linear = (0..<2).map { Linear($0 == 0 ? 256 : 128, 128) }
+        let fwd = (0 ..< 4).map { PyanLSTMCell(inputSize: $0 == 0 ? 60 : 256, hiddenSize: hidden) }
+        let bwd = (0 ..< 4).map { PyanLSTMCell(inputSize: $0 == 0 ? 60 : 256, hiddenSize: hidden) }
+        self.linear = (0 ..< 2).map { Linear($0 == 0 ? 256 : 128, 128) }
         self.classifier = Linear(128, 7)
         super.init()
         self._lstmFwd.wrappedValue = PyanLSTMStack(fwd)
@@ -264,7 +264,7 @@ final class PyanNetSegmentationModel {
     ) -> [Float] {
         let lo = max(0, s)
         let hi = min(lo + W, samples.count)
-        var win = lo < hi ? Array(samples[lo..<hi]) : []
+        var win = lo < hi ? Array(samples[lo ..< hi]) : []
         if win.count < W {
             win.append(contentsOf: repeatElement(0, count: W - win.count))
         }
@@ -299,8 +299,8 @@ final class PyanNetSegmentationModel {
             guard frames > 0 else { continue }
             var posteriors = [[Float]]()
             posteriors.reserveCapacity(frames)
-            for f in 0..<frames {
-                posteriors.append(Array(flat[(f * 7)..<(f * 7 + 7)]))
+            for f in 0 ..< frames {
+                posteriors.append(Array(flat[(f * 7) ..< (f * 7 + 7)]))
             }
             let windowStart = Double(s) / Double(Self.sampleRate)
             let frameDuration = Self.windowSeconds / Double(frames)

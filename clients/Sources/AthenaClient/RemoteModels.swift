@@ -335,7 +335,9 @@ public enum ModelOpStream {
                     if handleFrame(
                         String(line.dropFirst(6)), op: op,
                         renderer: renderer, sawError: &sawError)
-                    { break }
+                    {
+                        break
+                    }
                 }
             } catch let e as ExitCode {
                 throw e
@@ -361,7 +363,9 @@ public enum ModelOpStream {
                 if handleFrame(
                     String(line.dropFirst(6)), op: op,
                     renderer: renderer, sawError: &sawError)
-                { break }
+                {
+                    break
+                }
             }
         #endif
         renderer?.finish()

@@ -89,7 +89,7 @@ public enum SpeculativeSampling {
             var d = [Float](repeating: 0, count: logits.count)
             var best: Float = -.infinity
             var idx = 0
-            for i in 0..<logits.count where logits[i] > best {
+            for i in 0 ..< logits.count where logits[i] > best {
                 best = logits[i]; idx = i
             }
             d[idx] = 1
@@ -102,25 +102,25 @@ public enum SpeculativeSampling {
         let invT = 1.0 / temperature
         var probs = [Float](repeating: 0, count: logits.count)
         var m: Float = -.infinity
-        for i in 0..<logits.count {
+        for i in 0 ..< logits.count {
             let s = logits[i] * invT
             probs[i] = s
             if s > m { m = s }
         }
         if !m.isFinite { m = 0 }
         var sum: Float = 0
-        for i in 0..<probs.count {
+        for i in 0 ..< probs.count {
             let e = expf(probs[i] - m)
             probs[i] = e
             sum += e
         }
         if sum > 0 {
-            for i in 0..<probs.count { probs[i] /= sum }
+            for i in 0 ..< probs.count { probs[i] /= sum }
         } else {
             // Pathological — every logit was -inf. Fall back to
             // uniform so callers still get a valid distribution.
             let u = Float(1.0 / Double(probs.count))
-            for i in 0..<probs.count { probs[i] = u }
+            for i in 0 ..< probs.count { probs[i] = u }
         }
 
         // top_k: keep the K largest, zero the rest, renormalize.
@@ -136,12 +136,12 @@ public enum SpeculativeSampling {
                         ? probs[$0] > probs[$1] : $0 < $1
                 }.prefix(k))
             var newSum: Float = 0
-            for i in 0..<probs.count {
+            for i in 0 ..< probs.count {
                 if !kept.contains(i) { probs[i] = 0 }
                 newSum += probs[i]
             }
             if newSum > 0 {
-                for i in 0..<probs.count { probs[i] /= newSum }
+                for i in 0 ..< probs.count { probs[i] /= newSum }
             }
         }
 
@@ -163,12 +163,12 @@ public enum SpeculativeSampling {
                 if cum >= p { break }
             }
             var newSum: Float = 0
-            for i in 0..<probs.count {
+            for i in 0 ..< probs.count {
                 if !keep.contains(i) { probs[i] = 0 }
                 newSum += probs[i]
             }
             if newSum > 0 {
-                for i in 0..<probs.count { probs[i] /= newSum }
+                for i in 0 ..< probs.count { probs[i] /= newSum }
             }
         }
 
@@ -213,13 +213,13 @@ public enum SpeculativeSampling {
         precondition(p.count == q.count)
         var diff = [Float](repeating: 0, count: p.count)
         var sum: Float = 0
-        for i in 0..<p.count {
+        for i in 0 ..< p.count {
             let d = max(0, p[i] - q[i])
             diff[i] = d
             sum += d
         }
         if sum > 0 {
-            for i in 0..<diff.count { diff[i] /= sum }
+            for i in 0 ..< diff.count { diff[i] /= sum }
             return diff
         }
         return p
@@ -234,7 +234,7 @@ public enum SpeculativeSampling {
     ) -> Int {
         let u = Float(rng.uniform())
         var cum: Float = 0
-        for i in 0..<distribution.count {
+        for i in 0 ..< distribution.count {
             cum += distribution[i]
             if u < cum { return i }
         }

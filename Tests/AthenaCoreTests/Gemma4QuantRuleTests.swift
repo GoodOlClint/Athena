@@ -76,11 +76,13 @@ final class Gemma4QuantRuleTests: XCTestCase {
             "embed_vision.embedding_projection",  // 4-bit
         ]
         let ov = rule.overrides(forModules: modules)
-        XCTAssertEqual(Set(ov.map(\.path)), [
-            "language_model.model.layers.0.mlp.gate_proj",
-            "language_model.model.layers.0.mlp.up_proj",
-            "language_model.model.layers.0.router.proj",
-        ])
+        XCTAssertEqual(
+            Set(ov.map(\.path)),
+            [
+                "language_model.model.layers.0.mlp.gate_proj",
+                "language_model.model.layers.0.mlp.up_proj",
+                "language_model.model.layers.0.router.proj",
+            ])
         XCTAssertTrue(ov.allSatisfy { $0.bits == 8 && $0.groupSize == 64 })
     }
 

@@ -3,11 +3,11 @@
 // routed through Athena's governed #hubDownloader. M4.3a.
 import AthenaCore
 import Foundation
-import MLX
-import MLXNN
-import MLXLMCommon
 import HuggingFace
+import MLX
 import MLXHuggingFace
+import MLXLMCommon
+import MLXNN
 import os
 
 // M45.2: vendored port-debug `if verbose { print(...) }` blocks were
@@ -92,7 +92,7 @@ private class ConvSubsampling: Module {
 
         // floor((L - 1) / 2) + 1 per stride-2 stage
         var outLengths = lengths.asType(.float32)
-        for _ in 0..<3 {
+        for _ in 0 ..< 3 {
             outLengths = MLX.floor((outLengths - 1) / 2).asType(.int32) + 1
         }
 
@@ -113,7 +113,8 @@ private class RelPositionalEncoding: Module {
     /// - Returns: `(1, 2*time-1, dModel)`
     func callAsFunction(_ x: MLXArray) -> MLXArray {
         let seqLen = x.dim(1)
-        let positions = MLXArray(stride(from: seqLen - 1, through: -(seqLen - 1), by: -1).map { Float($0) })
+        let positions = MLXArray(
+            stride(from: seqLen - 1, through: -(seqLen - 1), by: -1).map { Float($0) })
 
         let dim = MLXArray(stride(from: 0, to: dModel, by: 2).map { Float($0) })
         let divTerm = MLX.exp(dim * Float(-log(10000.0) / Double(dModel)))
@@ -164,7 +165,8 @@ private class RelPositionMultiHeadAttention: Module {
     private func relShift(_ x: MLXArray) -> MLXArray {
         let (b, headCount, qlen, posLen) = (x.dim(0), x.dim(1), x.dim(2), x.dim(3))
         // Pad left
-        var padded = MLX.padded(x, widths: [.init((0, 0)), .init((0, 0)), .init((0, 0)), .init((1, 0))])
+        var padded = MLX.padded(
+            x, widths: [.init((0, 0)), .init((0, 0)), .init((0, 0)), .init((1, 0))])
         padded = padded.reshaped(b, headCount, posLen + 1, qlen)
         padded = padded[0..., 0..., 1..., 0...].reshaped(b, headCount, qlen, posLen)
         return padded
@@ -356,7 +358,7 @@ private class FastConformerEncoder: Module {
         hiddenSize = config.hiddenSize
 
         self._subsampling.wrappedValue = ConvSubsampling(config)
-        layers = (0..<config.numHiddenLayers).map { _ in ConformerLayer(config) }
+        layers = (0 ..< config.numHiddenLayers).map { _ in ConformerLayer(config) }
         self._posEnc.wrappedValue = RelPositionalEncoding(dModel: config.hiddenSize)
     }
 
@@ -447,10 +449,12 @@ private class TransformerEncoderLayer: Module {
 
     init(_ config: TFEncoderConfig) {
         self._selfAttn.wrappedValue = TransformerAttention(config)
-        self._selfAttnLayerNorm.wrappedValue = LayerNorm(dimensions: config.dModel, eps: config.layerNormEps)
+        self._selfAttnLayerNorm.wrappedValue = LayerNorm(
+            dimensions: config.dModel, eps: config.layerNormEps)
         self._fc1.wrappedValue = Linear(config.dModel, config.encoderFfnDim)
         self._fc2.wrappedValue = Linear(config.encoderFfnDim, config.dModel)
-        self._finalLayerNorm.wrappedValue = LayerNorm(dimensions: config.dModel, eps: config.layerNormEps)
+        self._finalLayerNorm.wrappedValue = LayerNorm(
+            dimensions: config.dModel, eps: config.layerNormEps)
     }
 
     /// Post-LN: Attn → Add → LN → FFN(ReLU) → Add → LN
@@ -476,13 +480,14 @@ private class TransformerEncoder: Module {
     var layers: [TransformerEncoderLayer]
 
     init(_ config: TFEncoderConfig) {
-        self._embedPositions.wrappedValue = Embedding(embeddingCount: config.maxSourcePositions, dimensions: config.dModel)
-        layers = (0..<config.encoderLayers).map { _ in TransformerEncoderLayer(config) }
+        self._embedPositions.wrappedValue = Embedding(
+            embeddingCount: config.maxSourcePositions, dimensions: config.dModel)
+        layers = (0 ..< config.encoderLayers).map { _ in TransformerEncoderLayer(config) }
     }
 
     func callAsFunction(_ encoderStates: MLXArray, encoderMask: MLXArray? = nil) -> MLXArray {
         let seqLen = encoderStates.dim(1)
-        let positions = MLXArray(0..<seqLen)
+        let positions = MLXArray(0 ..< seqLen)
         var x = encoderStates + embedPositions(positions)
 
         var attnMask: MLXArray? = nil
@@ -529,7 +534,7 @@ private class SortformerModules: Module {
     }
 
     static func lengthToMask(_ lengths: MLXArray, maxLength: Int) -> MLXArray {
-        let arange = MLXArray(0..<maxLength)
+        let arange = MLXArray(0 ..< maxLength)
         return arange.expandedDimensions(axis: 0) .< lengths.expandedDimensions(axis: 1)
     }
 }
@@ -614,7 +619,8 @@ public class SortformerModel: Module {
                 let featureLengths = MLXArray([Int32(features.dim(2))])
 
                 let subsamplingFactor = model.config.fcEncoderConfig.subsamplingFactor
-                let frameDuration = Float(proc.hopLength * subsamplingFactor) / Float(proc.samplingRate)
+                let frameDuration =
+                    Float(proc.hopLength * subsamplingFactor) / Float(proc.samplingRate)
 
                 // M24.4a: the offline path runs the whole clip through the
                 // transformer encoder, whose learned positional table caps
@@ -640,7 +646,8 @@ public class SortformerModel: Module {
 
                 let audioSec = Float(waveform.dim(0)) / Float(proc.samplingRate)
                 sortformerLog.debug(
-                    "offline: audio=\(audioSec, format: .fixed(precision: 2))s trim_leading=\(trimOffsetSec, format: .fixed(precision: 2))s features_shape=\(features.shape.description, privacy: .public)")
+                    "offline: audio=\(audioSec, format: .fixed(precision: 2))s trim_leading=\(trimOffsetSec, format: .fixed(precision: 2))s features_shape=\(features.shape.description, privacy: .public)"
+                )
 
                 let preds = model(features, audioSignalLength: featureLengths)
                 eval(preds)
@@ -667,7 +674,8 @@ public class SortformerModel: Module {
                 let elapsed = CFAbsoluteTimeGetCurrent() - startTime
 
                 sortformerLog.debug(
-                    "offline: segments=\(segments.count) speakers=\(activeSpeakers.count) elapsed=\(elapsed, format: .fixed(precision: 2))s")
+                    "offline: segments=\(segments.count) speakers=\(activeSpeakers.count) elapsed=\(elapsed, format: .fixed(precision: 2))s"
+                )
 
                 // End-of-call allocator-pool flush (M50.3). The forward
                 // pass + mel-feature pipeline accumulate intermediates
@@ -678,12 +686,13 @@ public class SortformerModel: Module {
                 // `preds[0]` is held by the returned DiarizationOutput
                 // so it isn't reclaimed.
                 MLX.Memory.clearCache()
-                continuation.resume(returning: DiarizationOutput(
-                    segments: segments,
-                    speakerProbs: preds[0],
-                    numSpeakers: activeSpeakers.count,
-                    totalTime: elapsed
-                ))
+                continuation.resume(
+                    returning: DiarizationOutput(
+                        segments: segments,
+                        speakerProbs: preds[0],
+                        numSpeakers: activeSpeakers.count,
+                        totalTime: elapsed
+                    ))
             }
         }
     }
@@ -763,9 +772,10 @@ public class SortformerModel: Module {
 
         // Extract predictions for the new chunk only
         let chunkStart = state.spkcacheLen + state.fifoLen + leftCtxLen
-        let chunkPreds = allPreds[0..., chunkStart..<(chunkStart + chunkDiarLen), 0...]
+        let chunkPreds = allPreds[0..., chunkStart ..< (chunkStart + chunkDiarLen), 0...]
         let updatedCachePreds = allPreds[0..., ..<state.spkcacheLen, 0...]
-        let updatedFifoPreds = allPreds[0..., state.spkcacheLen..<(state.spkcacheLen + state.fifoLen), 0...]
+        let updatedFifoPreds = allPreds[
+            0..., state.spkcacheLen ..< (state.spkcacheLen + state.fifoLen), 0...]
 
         eval(chunkPreds, chunkEmbs, updatedCachePreds, updatedFifoPreds)
 
@@ -801,7 +811,8 @@ public class SortformerModel: Module {
                 let state = sendableState.value
                 let proc = model.config.processorConfig
                 let subsamplingFactor = model.config.fcEncoderConfig.subsamplingFactor
-                let frameDuration = Float(proc.hopLength * subsamplingFactor) / Float(proc.samplingRate)
+                let frameDuration =
+                    Float(proc.hopLength * subsamplingFactor) / Float(proc.samplingRate)
 
                 var chunkMx = chunk.asType(.float32)
                 if chunkMx.ndim > 1 {
@@ -917,18 +928,23 @@ public class SortformerModel: Module {
 
                 let totalMelFrames = features.dim(2)
                 let subsamplingFactor = model.config.fcEncoderConfig.subsamplingFactor
-                let frameDuration = Float(proc.hopLength * subsamplingFactor) / Float(proc.samplingRate)
+                let frameDuration =
+                    Float(proc.hopLength * subsamplingFactor) / Float(proc.samplingRate)
 
-                var chunkMel = Int(round(
-                    chunkDuration * Float(proc.samplingRate) / Float(proc.hopLength) / Float(subsamplingFactor)
-                )) * subsamplingFactor
+                var chunkMel =
+                    Int(
+                        round(
+                            chunkDuration * Float(proc.samplingRate) / Float(proc.hopLength)
+                                / Float(subsamplingFactor)
+                        )) * subsamplingFactor
                 chunkMel = max(chunkMel, subsamplingFactor)
 
                 // For v2.1: pre-encode all features for right context
                 let rc = mc.chunkRightContext
                 var allPreEmbs: MLXArray? = nil
                 if useV2Feats && rc > 0 {
-                    let (preEmbs, _) = model.fcEncoder.preEncode(features, length: MLXArray([Int32(totalMelFrames)]))
+                    let (preEmbs, _) = model.fcEncoder.preEncode(
+                        features, length: MLXArray([Int32(totalMelFrames)]))
                     eval(preEmbs)
                     allPreEmbs = preEmbs
                 }
@@ -936,7 +952,8 @@ public class SortformerModel: Module {
                 let audioDur = Float(waveform.dim(0)) / Float(proc.samplingRate)
                 let nChunks = Int(ceil(Double(totalMelFrames) / Double(chunkMel)))
                 sortformerLog.debug(
-                    "stream: audio=\(audioDur, format: .fixed(precision: 2))s chunks=\(nChunks) chunk_size=\(chunkDuration, format: .fixed(precision: 1))s")
+                    "stream: audio=\(audioDur, format: .fixed(precision: 2))s chunks=\(nChunks) chunk_size=\(chunkDuration, format: .fixed(precision: 1))s"
+                )
 
                 var state = model.initStreamingState()
                 var offsetMel = 0
@@ -947,7 +964,7 @@ public class SortformerModel: Module {
                     try Task.checkCancellation()
 
                     let endMel = min(offsetMel + chunkMel, totalMelFrames)
-                    let chunkFeat = features[0..., 0..., offsetMel..<endMel]
+                    let chunkFeat = features[0..., 0..., offsetMel ..< endMel]
                     let chunkLen = MLXArray([Int32(chunkFeat.dim(2))])
 
                     // Compute right context embeddings for file mode
@@ -955,14 +972,14 @@ public class SortformerModel: Module {
                     if let allPreEmbs, rc > 0 {
                         let chunkMelFrames = chunkFeat.dim(2)
                         var dLen = Float(chunkMelFrames)
-                        for _ in 0..<3 {
+                        for _ in 0 ..< 3 {
                             dLen = floor((dLen - 1) / 2) + 1
                         }
                         let chunkEmbLen = Int(dLen)
                         let rcStart = embOffset + chunkEmbLen
                         let rcEnd = min(rcStart + rc, allPreEmbs.dim(1))
                         if rcEnd > rcStart {
-                            rightCtx = allPreEmbs[0..., rcStart..<rcEnd, 0...]
+                            rightCtx = allPreEmbs[0..., rcStart ..< rcEnd, 0...]
                         }
                         embOffset += chunkEmbLen
                     }
@@ -975,7 +992,8 @@ public class SortformerModel: Module {
                     )
                     state = newState
 
-                    let chunkTimeOffset = Float(offsetMel * proc.hopLength) / Float(proc.samplingRate)
+                    let chunkTimeOffset =
+                        Float(offsetMel * proc.hopLength) / Float(proc.samplingRate)
 
                     var segments = Self.predsToSegments(
                         chunkPreds,
@@ -999,13 +1017,15 @@ public class SortformerModel: Module {
                     let t0 = chunkTimeOffset + trimOffsetSec
                     let t1 = t0 + Float(chunkPreds.dim(0)) * frameDuration
                     sortformerLog.debug(
-                        "stream: chunk=\(chunkIdx) t0=\(t0, format: .fixed(precision: 2))s t1=\(t1, format: .fixed(precision: 2))s segments=\(segments.count) ctx=\(state.spkcacheLen)+\(state.fifoLen)")
+                        "stream: chunk=\(chunkIdx) t0=\(t0, format: .fixed(precision: 2))s t1=\(t1, format: .fixed(precision: 2))s segments=\(segments.count) ctx=\(state.spkcacheLen)+\(state.fifoLen)"
+                    )
 
-                    continuation.yield(DiarizationOutput(
-                        segments: segments,
-                        speakerProbs: chunkPreds,
-                        numSpeakers: activeSpeakers.count
-                    ))
+                    continuation.yield(
+                        DiarizationOutput(
+                            segments: segments,
+                            speakerProbs: chunkPreds,
+                            numSpeakers: activeSpeakers.count
+                        ))
 
                     state = Self.maybeCompressState(
                         state,
@@ -1187,7 +1207,7 @@ public class SortformerModel: Module {
         let boostVal = -scaleFactor * Float(log(0.5))
 
         var resultSlices = [MLXArray]()
-        for spk in 0..<nSpk {
+        for spk in 0 ..< nSpk {
             let flat = scores[0..., 0..., spk]  // (batch, nFrames)
             let topkIdx = MLX.argPartition(-flat, kth: k - 1, axis: 1)[0..., ..<k]
             let isFinite = flat .> (Float.infinity * -1)
@@ -1195,7 +1215,7 @@ public class SortformerModel: Module {
             var mask = MLXArray.zeros(like: flat)
             let ones = MLXArray.ones(like: topkIdx).asType(.float32)
             // Scatter ones at top-k positions
-            let batchIdx = MLXArray(0..<scores.dim(0)).expandedDimensions(axis: 1)
+            let batchIdx = MLXArray(0 ..< scores.dim(0)).expandedDimensions(axis: 1)
             let batchIdxBroadcast = MLX.broadcast(batchIdx, to: topkIdx.shape)
             mask = mask.at[batchIdxBroadcast, topkIdx].add(ones)
 
@@ -1280,10 +1300,13 @@ public class SortformerModel: Module {
 
         // Boost newly added frames
         if modulesCfg.scoresBoostLatest > 0 && scores.dim(1) > spkcacheLen {
-            let boostMask = MLX.concatenated([
-                MLXArray.zeros([scores.dim(0), spkcacheLen, nSpk]),
-                MLX.full([scores.dim(0), scores.dim(1) - spkcacheLen, nSpk], values: modulesCfg.scoresBoostLatest)
-            ], axis: 1)
+            let boostMask = MLX.concatenated(
+                [
+                    MLXArray.zeros([scores.dim(0), spkcacheLen, nSpk]),
+                    MLX.full(
+                        [scores.dim(0), scores.dim(1) - spkcacheLen, nSpk],
+                        values: modulesCfg.scoresBoostLatest),
+                ], axis: 1)
             scores = scores + boostMask
         }
 
@@ -1340,7 +1363,7 @@ public class SortformerModel: Module {
     ) -> Int {
         let stages = max(0, Int(log2(Double(max(1, subsamplingFactor)))))
         var l = melFrames
-        for _ in 0..<stages { l = (l - 1) / 2 + 1 }
+        for _ in 0 ..< stages { l = (l - 1) / 2 + 1 }
         return l
     }
 
@@ -1354,7 +1377,7 @@ public class SortformerModel: Module {
         let numSpeakers = preds.dim(1)
         var segments = [DiarizationSegment]()
 
-        for spk in 0..<numSpeakers {
+        for spk in 0 ..< numSpeakers {
             let activity = preds[0..., spk] .> threshold
             if !MLX.any(activity).item(Bool.self) {
                 continue
@@ -1363,7 +1386,7 @@ public class SortformerModel: Module {
             let padded = MLX.concatenated([
                 MLXArray.zeros([1]).asType(DType.bool),
                 activity,
-                MLXArray.zeros([1]).asType(DType.bool)
+                MLXArray.zeros([1]).asType(DType.bool),
             ])
             let changes = padded[1...].asType(DType.int32) - padded[..<(-1)].asType(DType.int32)
             eval(changes)
@@ -1384,9 +1407,10 @@ public class SortformerModel: Module {
                 let duration = endTime - startTime
 
                 if duration >= minDuration {
-                    spkSegments.append(DiarizationSegment(
-                        start: startTime, end: endTime, speaker: spk
-                    ))
+                    spkSegments.append(
+                        DiarizationSegment(
+                            start: startTime, end: endTime, speaker: spk
+                        ))
                 }
             }
 
@@ -1426,19 +1450,24 @@ public class SortformerModel: Module {
 
             if !alreadyConverted {
                 if newK.contains("fc_encoder.subsampling.layers.") {
-                    newK = newK.replacingOccurrences(of: "subsampling.layers.", with: "subsampling.layers_")
+                    newK = newK.replacingOccurrences(
+                        of: "subsampling.layers.", with: "subsampling.layers_")
                 }
 
                 // Conv2d: PyTorch (O,I,H,W) → MLX (O,H,W,I)
-                if newK.contains("subsampling") && newK.contains("weight") && !newK.contains("linear") {
+                if newK.contains("subsampling") && newK.contains("weight")
+                    && !newK.contains("linear")
+                {
                     if v.ndim == 4 {
                         v = v.transposed(0, 2, 3, 1)
                     }
                 }
 
                 // Conv1d: PyTorch (O,I,K) → MLX (O,K,I)
-                if (newK.contains("pointwise_conv1") || newK.contains("pointwise_conv2") || newK.contains("depthwise_conv"))
-                    && newK.contains("weight") {
+                if (newK.contains("pointwise_conv1") || newK.contains("pointwise_conv2")
+                    || newK.contains("depthwise_conv"))
+                    && newK.contains("weight")
+                {
                     if v.ndim == 3 {
                         v = v.transposed(0, 2, 1)
                     }

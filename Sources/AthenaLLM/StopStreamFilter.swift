@@ -34,7 +34,7 @@ public struct StopStreamFilter: Sendable {
         if stopped || !isActive { return stopped ? "" : piece }
         buffer += piece
         if let r = earliestStop(in: buffer) {
-            let out = String(buffer[buffer.startIndex..<r.range.lowerBound])
+            let out = String(buffer[buffer.startIndex ..< r.range.lowerBound])
             stopped = true
             matchedStop = r.stop
             buffer = ""
@@ -48,7 +48,7 @@ public struct StopStreamFilter: Sendable {
         let scalars = buffer.unicodeScalars
         guard scalars.count > keep else { return "" }
         let cut = scalars.index(scalars.endIndex, offsetBy: -keep)
-        let out = String(buffer.unicodeScalars[scalars.startIndex..<cut])
+        let out = String(buffer.unicodeScalars[scalars.startIndex ..< cut])
         buffer = String(buffer.unicodeScalars[cut...])
         return out
     }
@@ -94,7 +94,7 @@ public struct StopStreamFilter: Sendable {
         }
         if let best {
             return (
-                String(text[text.startIndex..<best.range.lowerBound]),
+                String(text[text.startIndex ..< best.range.lowerBound]),
                 true, best.stop
             )
         }

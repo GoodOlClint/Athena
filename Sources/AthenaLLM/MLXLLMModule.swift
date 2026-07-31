@@ -238,7 +238,8 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         promptCacheCapBytes: Int = 0
     ) {
         self.modelStoreRoot = modelStoreRoot
-        let cleanDefault = (configuredDefault?.isEmpty == true)
+        let cleanDefault =
+            (configuredDefault?.isEmpty == true)
             ? nil : configuredDefault
         self.configuredDefault = cleanDefault
         self.params = parameters
@@ -498,7 +499,8 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                 metadata: ["function": "structuredVocab"])
             return (
                 built.0, built.1,
-                StructuredVocabulary.openerAliases(tokens: built.0))
+                StructuredVocabulary.openerAliases(tokens: built.0)
+            )
         }
         vocabBuild = task  // actor-atomic with the nil-check (no await between)
         do {
@@ -1159,7 +1161,8 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             // Guided needs the structured vocab (eos + vocab size); unguided
             // capture uses the tokenizer EOS and doesn't mask, so vocab is
             // unused there (pass 0).
-            let substrateEos = vocabTokens.map { Int($0.eos) }
+            let substrateEos =
+                vocabTokens.map { Int($0.eos) }
                 ?? ctx.tokenizer.eosTokenId
             let substrateVocab = cfgVocab ?? 0
             if guide != nil && cfgVocab == nil { return nil }  // can't mask
@@ -1169,7 +1172,8 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                 eosTokenId: substrateEos, guide: guide, sink: logprobSink)
             return (
                 ctx.tokenizer.decode(tokenIds: ids), ids.count, 0,
-                builtLogprobs())
+                builtLogprobs()
+            )
         }
         guard let decoded else { return nil }
         return (
@@ -1178,7 +1182,8 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                 promptTokens: promptTokens.count,
                 completionTokens: decoded.completion,
                 cachedTokens: decoded.cached),
-            decoded.logprobs)
+            decoded.logprobs
+        )
     }
 
     /// C2 — turn a `LogprobSink`'s numeric captures into `[TokenLogprob]` by
@@ -1382,7 +1387,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             // admission gate — same root cause as ModelHealth's size check.
             let size =
                 (try? url.resolvingSymlinksInPath()
-                    .resourceValues(forKeys: [.fileSizeKey]))?.fileSize
+                .resourceValues(forKeys: [.fileSizeKey]))?.fileSize
                 ?? 0
             total += size
         }

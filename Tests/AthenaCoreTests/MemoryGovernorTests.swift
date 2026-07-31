@@ -100,7 +100,7 @@ final class MemoryGovernorTests: XCTestCase {
         await gov.register(StubLLMModule(reserveBytes: 400), evictable: false)
 
         await withThrowingTaskGroup(of: Void.self) { group in
-            for _ in 0..<8 {
+            for _ in 0 ..< 8 {
                 group.addTask { try await gov.ensureLoaded(.llm) }
             }
         }
@@ -234,7 +234,7 @@ final class MemoryGovernorTests: XCTestCase {
         try await gov.ensureLoaded(.transcription)
         try await gov.ensureLoaded(.textEmbedding)  // evicts transcription
         // eviction unload is detached; wait for it to settle.
-        for _ in 0..<50 where c.n == 0 {
+        for _ in 0 ..< 50 where c.n == 0 {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
         XCTAssertEqual(c.n, 1, "hook should fire on eviction")
@@ -245,8 +245,7 @@ final class MemoryGovernorTests: XCTestCase {
 
     // MARK: - M5.3 proactive pressure relief (live probe)
 
-    func testLivePressureShedsLRUEvenWhenBookkeepingHasRoom() async throws
-    {
+    func testLivePressureShedsLRUEvenWhenBookkeepingHasRoom() async throws {
         // Constant-high probe: 950 > 90% of 1000 ⇒ relief triggers.
         // before==after ⇒ reconcile observes 0 ⇒ no-op (isolated test).
         let gov = MemoryGovernor(
@@ -261,7 +260,7 @@ final class MemoryGovernorTests: XCTestCase {
         // Bookkeeping has ample room (60+60 ≪ 1000) but live memory is
         // over high-water, so loading embedding sheds the LRU evictable.
         try await gov.ensureLoaded(.textEmbedding)
-        for _ in 0..<50 {
+        for _ in 0 ..< 50 {
             let st = await gov.snapshot().modules
                 .first { $0.id == .transcription }?.state
             if st == .unloaded { break }
@@ -429,7 +428,7 @@ final class MemoryGovernorTests: XCTestCase {
         // While the load is in flight it stays .loading; once it fails, the
         // next call THROWS the real error instead of another .loading.
         var surfaced: Error?
-        for _ in 0..<100 {
+        for _ in 0 ..< 100 {
             do {
                 let s = try await gov.beginLoadIfNeeded(.llm)
                 guard case .loading = s else {
@@ -536,7 +535,7 @@ final class MemoryGovernorTests: XCTestCase {
         // its teardown (`.unloading`) before reloading — otherwise the reload
         // could take the `.loaded` fast path and never exercise the drain.
         async let unloadDone: Void = gov.unload(.llm)
-        for _ in 0..<500 {
+        for _ in 0 ..< 500 {
             let st = await gov.snapshot().modules
                 .first { $0.id == .llm }?.state
             if st == .unloading { break }
@@ -568,7 +567,7 @@ final class MemoryGovernorTests: XCTestCase {
             return XCTFail("first cold-load should be .loading")
         }
         var surfaced: Error?
-        for _ in 0..<100 {
+        for _ in 0 ..< 100 {
             do {
                 let s = try await gov.beginLoadIfNeeded(.llm)
                 guard case .loading = s else {
@@ -860,7 +859,7 @@ final class MemoryGovernorTests: XCTestCase {
         await gov.register(m, evictable: false)
 
         await withThrowingTaskGroup(of: Void.self) { group in
-            for _ in 0..<8 {
+            for _ in 0 ..< 8 {
                 group.addTask { try await gov.ensureLoaded(.llm) }
             }
         }
@@ -893,7 +892,7 @@ final class MemoryGovernorTests: XCTestCase {
 
         // Poll until the detached load lands and the slot reports .loaded.
         var landed: MemoryGovernor.LoadStatus = .loading
-        for _ in 0..<100 {
+        for _ in 0 ..< 100 {
             landed = try await gov.beginLoadIfNeeded(.llm)
             if landed == .loaded { break }
             try await Task.sleep(nanoseconds: 5_000_000)
@@ -981,7 +980,7 @@ final class MemoryGovernorTests: XCTestCase {
 
         // The detached load was NOT cancelled; poll until it lands .loaded.
         var landed: MemoryGovernor.LoadStatus = .loading
-        for _ in 0..<100 {
+        for _ in 0 ..< 100 {
             landed = try await gov.awaitLoad(.llm, within: 0.05)
             if landed == .loaded { break }
         }
@@ -1001,7 +1000,7 @@ final class MemoryGovernorTests: XCTestCase {
         XCTAssertEqual(status, .loading, "zero budget ⇒ immediate .loading")
         // It still kicked the load off (legacy beginLoadIfNeeded semantics).
         var landed: MemoryGovernor.LoadStatus = .loading
-        for _ in 0..<100 {
+        for _ in 0 ..< 100 {
             landed = try await gov.awaitLoad(.llm, within: 0)
             if landed == .loaded { break }
             try await Task.sleep(nanoseconds: 5_000_000)

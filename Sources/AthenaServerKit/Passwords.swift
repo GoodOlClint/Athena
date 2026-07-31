@@ -47,8 +47,9 @@ public enum Passwords {
     public static func verify(
         password: String, salt: Data, hash: Data, iters: Int
     ) -> Bool {
-        let got = Array(derive(
-            password: password, salt: salt, iters: iters))
+        let got = Array(
+            derive(
+                password: password, salt: salt, iters: iters))
         return AuthConfig.constantTimeEqual(got, Array(hash))
     }
 

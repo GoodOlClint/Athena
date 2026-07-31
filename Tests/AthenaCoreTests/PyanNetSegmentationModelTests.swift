@@ -42,7 +42,7 @@ final class PyanNetSegmentationModelTests: XCTestCase {
             XCTAssertLessThanOrEqual(r.end, durationSec + 0.05)
             XCTAssertGreaterThan(r.end, r.start)
         }
-        for i in 1..<regions.count {
+        for i in 1 ..< regions.count {
             XCTAssertLessThanOrEqual(regions[i - 1].start, regions[i].start)
         }
         let speech = regions.reduce(0.0) { $0 + ($1.end - $1.start) }
@@ -95,7 +95,7 @@ final class PyanNetSegmentationModelTests: XCTestCase {
                 embeddings.append([Float](repeating: 0, count: 256))
                 continue
             }
-            embeddings.append(we.embed(Array(pcm[a..<b])))
+            embeddings.append(we.embed(Array(pcm[a ..< b])))
         }
         let rawLabels = AgglomerativeClustering.cluster(
             embeddings, threshold: 0.75,

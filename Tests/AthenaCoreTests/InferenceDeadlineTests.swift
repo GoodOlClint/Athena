@@ -46,7 +46,7 @@ final class InferenceDeadlineTests: XCTestCase {
         // deadline, must stop well before its 100 elements are exhausted.
         let source = AsyncStream<Int> { cont in
             let t = Task {
-                for i in 0..<100 {
+                for i in 0 ..< 100 {
                     if Task.isCancelled { break }
                     cont.yield(i)
                     try? await Task.sleep(nanoseconds: 40_000_000)
@@ -65,7 +65,7 @@ final class InferenceDeadlineTests: XCTestCase {
 
     func testStreamZeroSecondsPassesEverythingThrough() async {
         let source = AsyncStream<Int> { cont in
-            for i in 0..<5 { cont.yield(i) }
+            for i in 0 ..< 5 { cont.yield(i) }
             cont.finish()
         }
         var got: [Int] = []
@@ -80,7 +80,7 @@ final class InferenceDeadlineTests: XCTestCase {
         // the M45.7 5xx legibility fix for the streaming path).
         let source = AsyncStream<Int> { cont in
             let t = Task {
-                for i in 0..<100 {
+                for i in 0 ..< 100 {
                     if Task.isCancelled { break }
                     cont.yield(i)
                     try? await Task.sleep(nanoseconds: 40_000_000)
@@ -106,7 +106,7 @@ final class InferenceDeadlineTests: XCTestCase {
         // false-positive truncation line on every short, normal
         // completion.
         let source = AsyncStream<Int> { cont in
-            for i in 0..<3 { cont.yield(i) }
+            for i in 0 ..< 3 { cont.yield(i) }
             cont.finish()
         }
         let fired = TestFlag()

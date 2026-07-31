@@ -85,7 +85,7 @@ final class DecodeProgressTaskLocalTests: XCTestCase {
     }
 
     nonisolated private static func incrementDynamically(times: Int) {
-        for _ in 0..<times {
+        for _ in 0 ..< times {
             DecodeProgress.counter?.incrementToken()
         }
     }

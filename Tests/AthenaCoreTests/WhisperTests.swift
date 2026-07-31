@@ -71,9 +71,11 @@ final class WhisperChunkingIntegrationTests: XCTestCase {
                 == "1"
         else { throw XCTSkip("set ATHENA_RUN_MODEL_TESTS=1 (heavy)") }
 
-        let filler = Array(repeating:
-            "one two three four five six seven eight nine ten,",
-            count: 14).joined(separator: " ")
+        let filler = Array(
+            repeating:
+                "one two three four five six seven eight nine ten,",
+            count: 14
+        ).joined(separator: " ")
         let sentence =
             "alpha is the opening word. \(filler) "
             + "omega is the closing word."
@@ -190,7 +192,7 @@ final class WhisperMemoryRegressionTests: XCTestCase {
         MLX.Memory.clearCache()
         let baseline = MLX.Memory.cacheMemory
 
-        for _ in 0..<22 {
+        for _ in 0 ..< 22 {
             _ = WhisperDecode.transcribe(
                 model: model, mel: LogMel.logMel(pcm),
                 tokenizer: tokenizer, language: "en")
@@ -206,7 +208,7 @@ final class WhisperMemoryRegressionTests: XCTestCase {
         XCTAssertLessThan(
             after - baseline, ceiling,
             "MLX cache pool drifted \(after - baseline) bytes "
-            + "above baseline after 22 transcribes (M50.1 leak)")
+                + "above baseline after 22 transcribes (M50.1 leak)")
     }
 }
 

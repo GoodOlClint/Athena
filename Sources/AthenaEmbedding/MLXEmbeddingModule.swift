@@ -271,7 +271,7 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
     static func lengthBuckets(
         tokenLengths: [Int], tokenBudget: Int, maxItemsPerBucket: Int
     ) -> [[Int]] {
-        let order = (0..<tokenLengths.count).sorted {
+        let order = (0 ..< tokenLengths.count).sorted {
             tokenLengths[$0] < tokenLengths[$1]
         }
         var buckets: [[Int]] = []

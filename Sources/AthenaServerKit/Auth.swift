@@ -109,7 +109,7 @@ public struct AuthConfig: Sendable {
         var i = hexStr.startIndex
         while i < hexStr.endIndex {
             let j = hexStr.index(i, offsetBy: 2)
-            guard let b = UInt8(hexStr[i..<j], radix: 16) else {
+            guard let b = UInt8(hexStr[i ..< j], radix: 16) else {
                 return nil
             }
             out.append(b)
@@ -145,11 +145,11 @@ public struct AuthConfig: Sendable {
         }
         if let file, !file.isEmpty {
             let url = URL(
-                fileURLWithPath:
-                    (file as NSString).expandingTildeInPath)
-            let perms = (try? FileManager.default
-                .attributesOfItem(atPath: url.path)[.posixPermissions]
-                as? Int)
+                fileURLWithPath: (file as NSString).expandingTildeInPath)
+            let perms =
+                (try? FileManager.default
+                    .attributesOfItem(atPath: url.path)[.posixPermissions]
+                    as? Int)
             if let perms, perms & 0o077 != 0 {
                 // A22: fail closed. A group/other-accessible keys file may
                 // have been read — or planted — by another local user, so
@@ -164,7 +164,8 @@ public struct AuthConfig: Sendable {
                     load it — chmod 600 to enable
                     """)
             } else if let text = try? String(
-                contentsOf: url, encoding: .utf8) {
+                contentsOf: url, encoding: .utf8)
+            {
                 for raw in text.split(
                     separator: "\n", omittingEmptySubsequences: true)
                 {
@@ -176,8 +177,10 @@ public struct AuthConfig: Sendable {
                         omittingEmptySubsequences: true)
                     guard parts.count == 2 else { continue }
                     let tok = parts[0]
-                        .trimmingCharacters(in: CharacterSet(
-                            charactersIn: ": \t"))
+                        .trimmingCharacters(
+                            in: CharacterSet(
+                                charactersIn: ": \t")
+                        )
                         .lowercased()
                     add(
                         String(parts[1]),
@@ -262,7 +265,7 @@ public struct AuthConfig: Sendable {
     public static func constantTimeEqual(_ a: [UInt8], _ b: [UInt8]) -> Bool {
         guard a.count == b.count else { return false }
         var diff: UInt8 = 0
-        for i in 0..<a.count { diff |= a[i] ^ b[i] }
+        for i in 0 ..< a.count { diff |= a[i] ^ b[i] }
         return diff == 0
     }
 

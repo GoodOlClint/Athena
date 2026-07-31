@@ -45,8 +45,7 @@ final class SortformerOfflineCapTests: XCTestCase {
 /// manual follow-up). Gated + heavy; validate via xcodebuild.
 final class SortformerIntegrationTests: XCTestCase {
 
-    private func sayClip(_ voice: String, _ text: String) throws -> [Float]
-    {
+    private func sayClip(_ voice: String, _ text: String) throws -> [Float] {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("athena-spk-\(UUID()).aiff")
         defer { try? FileManager.default.removeItem(at: url) }
@@ -168,7 +167,7 @@ final class SortformerMemoryRegressionTests: XCTestCase {
         // content-dependent.
         var pcm = [Float](repeating: 0, count: 2 * 16_000)
         var rng = SystemRandomNumberGenerator()
-        for i in 0..<pcm.count {
+        for i in 0 ..< pcm.count {
             pcm[i] = Float(Int(rng.next() % 1000)) / 1000.0 - 0.5
         }
         let audio = MLXArray(pcm).asType(.float32)
@@ -181,7 +180,7 @@ final class SortformerMemoryRegressionTests: XCTestCase {
         MLX.Memory.clearCache()
         let baseline = MLX.Memory.cacheMemory
 
-        for _ in 0..<22 {
+        for _ in 0 ..< 22 {
             _ = try await model.generate(audio: audio, sampleRate: 16_000)
         }
 
@@ -192,6 +191,6 @@ final class SortformerMemoryRegressionTests: XCTestCase {
         XCTAssertLessThan(
             after - baseline, ceiling,
             "MLX cache pool drifted \(after - baseline) bytes "
-            + "above baseline after 22 diarize calls (M50.3 leak)")
+                + "above baseline after 22 diarize calls (M50.3 leak)")
     }
 }

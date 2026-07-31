@@ -1,6 +1,6 @@
+import AthenaCore  // NB4 (M70.1b): the KVCompression enum + resolve moved here.
 import XCTest
 
-import AthenaCore  // NB4 (M70.1b): the KVCompression enum + resolve moved here.
 @testable import AthenaLLM  // the MLX-coupled .kvScheme/.servesArch extension
 
 /// The shared `kv_compression` knob: precedence (env > TOML > none),

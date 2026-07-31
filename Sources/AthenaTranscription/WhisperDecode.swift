@@ -77,7 +77,7 @@ public enum WhisperDecode {
     /// + `eot` + timestamp ids selectable. Built once per decode.
     private static func specialMask(vocab: Int) -> MLXArray {
         var m = [Float](repeating: 0, count: vocab)
-        for i in (eot + 1)..<timestampBegin { m[i] = -1e9 }
+        for i in (eot + 1) ..< timestampBegin { m[i] = -1e9 }
         return MLXArray(m)
     }
 

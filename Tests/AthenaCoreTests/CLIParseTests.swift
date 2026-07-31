@@ -1,7 +1,6 @@
+import AthenaDeploy
 import Foundation
 import XCTest
-
-import AthenaDeploy
 
 /// NB4 (M70.1b) — `parseTTLSeconds` and `isValidLabel` were unreachable by the
 /// test suite (free functions in the `athena` executable). Relocated to the

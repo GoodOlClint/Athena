@@ -22,7 +22,8 @@ public struct ReasoningChannelFilter: Sendable {
     // Holdback = longest marker minus one scalar: never surface a tail that
     // could complete into a start/end marker on the next chunk.
     private static let holdback =
-        max(reasoningChannelStart.unicodeScalars.count,
+        max(
+            reasoningChannelStart.unicodeScalars.count,
             reasoningChannelEnd.unicodeScalars.count) - 1
 
     public init() {}
@@ -93,7 +94,7 @@ public struct ReasoningChannelFilter: Sendable {
         let scalars = buffer.unicodeScalars
         guard scalars.count > Self.holdback else { return "" }
         let cut = scalars.index(scalars.endIndex, offsetBy: -Self.holdback)
-        let out = String(buffer.unicodeScalars[scalars.startIndex..<cut])
+        let out = String(buffer.unicodeScalars[scalars.startIndex ..< cut])
         buffer = String(buffer.unicodeScalars[cut...])
         return out
     }

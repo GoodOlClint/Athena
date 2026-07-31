@@ -47,7 +47,8 @@ final class ConfigJSONEmitTests: XCTestCase {
 
     func testNullAndNestedAndArrays() throws {
         let out = try roundTrip(
-            #"{"text_config": {"head_dim": 256, "attn_logit_softcapping": 50.0}, "x": null, "layer_types": ["full", "sliding"]}"#)
+            #"{"text_config": {"head_dim": 256, "attn_logit_softcapping": 50.0}, "x": null, "layer_types": ["full", "sliding"]}"#
+        )
         XCTAssertTrue(out.contains("\"attn_logit_softcapping\": 50.0"), out)
         XCTAssertTrue(out.contains("\"head_dim\": 256"), out)
         XCTAssertTrue(out.contains("\"x\": null"), out)

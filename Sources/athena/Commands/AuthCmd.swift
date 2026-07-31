@@ -38,8 +38,7 @@ func storeDBPath(_ override: String? = nil) -> URL {
     let dir: URL
     if let override, !override.isEmpty {
         dir = URL(
-            fileURLWithPath:
-                (override as NSString).expandingTildeInPath,
+            fileURLWithPath: (override as NSString).expandingTildeInPath,
             isDirectory: true)
     } else if let cfg = try? AthenaConfig.parse(
         file: ConfigEditor.resolvePath(nil)),
@@ -163,7 +162,7 @@ struct AuthUserBudget: AsyncParsableCommand {
                     + ($0 == 0 ? " (unlimited)" : "")
             }
                 ?? "budget override cleared for '\(username)' "
-                    + "(inherits the configured token_budget)")
+                + "(inherits the configured token_budget)")
     }
 }
 
@@ -174,13 +173,17 @@ struct AuthUserAdd: AsyncParsableCommand {
     @Argument(help: "Username.") var username: String
     @Flag(
         name: .customLong("password-stdin"),
-        help: "Read the password from stdin (one line) instead of prompting. Else set ATHENA_PASSWORD. (ADR 005 — never on argv.)")
+        help:
+            "Read the password from stdin (one line) instead of prompting. Else set ATHENA_PASSWORD. (ADR 005 — never on argv.)"
+    )
     var passwordStdin = false
     @Option(help: "Initial role to grant (default: member).")
     var role: String = "member"
     @Flag(
         name: .long,
-        help: "Replace an existing account (resets its password); add refuses to overwrite an existing user without it.")
+        help:
+            "Replace an existing account (resets its password); add refuses to overwrite an existing user without it."
+    )
     var force = false
     @Option(help: "Data dir (default: configured / ~/.athena).")
     var dataDir: String?
@@ -243,7 +246,9 @@ struct AuthUserPasswd: AsyncParsableCommand {
     @Argument(help: "Username.") var username: String
     @Flag(
         name: .customLong("password-stdin"),
-        help: "Read the new password from stdin (one line) instead of prompting. Else set ATHENA_PASSWORD. (ADR 005 — never on argv.)")
+        help:
+            "Read the new password from stdin (one line) instead of prompting. Else set ATHENA_PASSWORD. (ADR 005 — never on argv.)"
+    )
     var passwordStdin = false
     @Option(help: "Data dir (default: configured / ~/.athena).")
     var dataDir: String?
@@ -613,7 +618,7 @@ private func hexBytes(_ s: Substring) -> [UInt8]? {
     var i = s.startIndex
     while i < s.endIndex {
         let j = s.index(i, offsetBy: 2)
-        guard let b = UInt8(s[i..<j], radix: 16) else { return nil }
+        guard let b = UInt8(s[i ..< j], radix: 16) else { return nil }
         out.append(b)
         i = j
     }

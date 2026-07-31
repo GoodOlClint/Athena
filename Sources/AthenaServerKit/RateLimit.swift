@@ -168,7 +168,9 @@ public actor ConcurrencyLimiter {
     public func release(_ principal: String) {
         globalInFlight = max(0, globalInFlight - 1)
         if let n = perPrincipalInFlight[principal] {
-            if n <= 1 { perPrincipalInFlight[principal] = nil } else {
+            if n <= 1 {
+                perPrincipalInFlight[principal] = nil
+            } else {
                 perPrincipalInFlight[principal] = n - 1
             }
         }

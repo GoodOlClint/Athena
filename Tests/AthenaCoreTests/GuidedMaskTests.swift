@@ -1,8 +1,8 @@
+import AthenaStructured
 import Foundation
 import XCTest
 
 @testable import AthenaLLM
-import AthenaStructured
 
 /// L5 (M70.3) — the schema-mask seam. Structured enforcement was only
 /// validated model-on (env-gated); there was no CI test that an off-schema
@@ -14,7 +14,7 @@ final class GuidedMaskTests: XCTestCase {
     func testAdditiveMaskUnpacksBits() {
         // vocab 8, allow {2, 5}: byte0 bits 2 and 5 ⇒ 0b0010_0100 = 0x24.
         let add = GuidedMask.additiveMask(allowed: [0x24], vocab: 8)
-        for i in 0..<8 {
+        for i in 0 ..< 8 {
             if i == 2 || i == 5 {
                 XCTAssertEqual(add[i], 0, "token \(i) allowed ⇒ 0")
             } else {
@@ -47,7 +47,7 @@ final class GuidedMaskTests: XCTestCase {
 
     // Byte ids: token id == byte value (mirrors StructuredGuideTests).
     private func byteVocab() throws -> StructuredVocabulary {
-        let tokens = (0..<256).map {
+        let tokens = (0 ..< 256).map {
             VocabToken(id: UInt32($0), bytes: [UInt8($0)])
         }
         return try StructuredVocabulary(tokens: tokens, eosTokenId: 256)

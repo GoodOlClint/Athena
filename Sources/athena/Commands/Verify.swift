@@ -29,10 +29,12 @@ struct Verify: AsyncParsableCommand {
         if all {
             let subs =
                 (try? FileManager.default.contentsOfDirectory(
-                    at: root, includingPropertiesForKeys: [
+                    at: root,
+                    includingPropertiesForKeys: [
                         .isDirectoryKey
                     ])) ?? []
-            targets = subs
+            targets =
+                subs
                 .filter {
                     (try? $0.resourceValues(forKeys: [.isDirectoryKey])
                         .isDirectory) == true

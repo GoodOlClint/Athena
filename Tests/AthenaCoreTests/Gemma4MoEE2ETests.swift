@@ -35,11 +35,15 @@ final class Gemma4MoEE2ETests: XCTestCase {
                 FileManager.default.fileExists(
                     atPath: $0.appending(component: "config.json").path)
             })
-        { return first }
+        {
+            return first
+        }
         let store = home.appending(path: ".athena/models/gemma-4-26b-a4b-it-4bit")
         if FileManager.default.fileExists(
             atPath: store.appending(component: "config.json").path)
-        { return store }
+        {
+            return store
+        }
         throw XCTSkip("no gemma-4-26b-a4b-it-4bit checkpoint present")
     }
 

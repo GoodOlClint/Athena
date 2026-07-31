@@ -69,7 +69,7 @@ public enum TranscriptionArch: String, Sendable, Equatable {
     public static func classify(_ c: Config) -> TranscriptionArch {
         let hay =
             ([c.modelType, c.target, c.decodingModelType].compactMap { $0 }
-                + c.architectures)
+            + c.architectures)
             .map { $0.lowercased() }
         func matches(_ markers: [String]) -> Bool {
             hay.contains { field in markers.contains { field.contains($0) } }

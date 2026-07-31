@@ -1,7 +1,6 @@
+import AthenaDeploy
 import Foundation
 import XCTest
-
-import AthenaDeploy
 
 /// NB4 (M70.1b) — `ConfigEditor`'s editing/validation core was unreachable by
 /// the test suite (it lived in the `athena` executable, coupled to `Engine` +

@@ -1,7 +1,6 @@
+import AthenaTranscription
 import Foundation
 import XCTest
-
-import AthenaTranscription
 
 /// ND15 — `SpeakerWindowGate.keptIndices` is the pure relative-silence gate
 /// extracted from `MLXSpeakerEmbeddingModule` (M25.3), so its decision runs in

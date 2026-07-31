@@ -99,8 +99,9 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
         // WhisperLoader also seeds the alignment_heads
         // for M26 word timestamps; an unload+load on rebind picks up the
         // new model's heads.
-        guard let dir = ModelStoreLayout.localDirectory(
-            for: canonical, storeRoot: modelStoreRoot)
+        guard
+            let dir = ModelStoreLayout.localDirectory(
+                for: canonical, storeRoot: modelStoreRoot)
         else {
             throw AthenaError.moduleLoadFailed(
                 .transcription,

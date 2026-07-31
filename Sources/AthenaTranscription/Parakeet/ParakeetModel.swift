@@ -96,19 +96,19 @@ enum ParakeetMel {
         }
 
         // fft bin center frequencies (linear 0..sr/2)
-        let fftFreqs = (0..<nFreqs).map {
+        let fftFreqs = (0 ..< nFreqs).map {
             Double($0) * (sr / 2.0) / Double(nFreqs - 1)
         }
         let minMel = hzToMel(fmin), maxMel = hzToMel(fmax)
-        let melPts = (0..<(nMels + 2)).map {
+        let melPts = (0 ..< (nMels + 2)).map {
             melToHz(minMel + (maxMel - minMel) * Double($0) / Double(nMels + 1))
         }
-        let fdiff = (0..<(nMels + 1)).map { melPts[$0 + 1] - melPts[$0] }
+        let fdiff = (0 ..< (nMels + 1)).map { melPts[$0 + 1] - melPts[$0] }
 
         var w = [Float](repeating: 0, count: nMels * nFreqs)
-        for i in 0..<nMels {
+        for i in 0 ..< nMels {
             let enorm = 2.0 / (melPts[i + 2] - melPts[i])  // slaney area norm
-            for j in 0..<nFreqs {
+            for j in 0 ..< nFreqs {
                 let lower = -(melPts[i] - fftFreqs[j]) / fdiff[i]
                 let upper = (melPts[i + 2] - fftFreqs[j]) / fdiff[i + 1]
                 let v = max(0.0, min(lower, upper))
@@ -127,21 +127,21 @@ enum ParakeetMel {
         // preemphasis: x = concat([x[:1], x[1:] - 0.97*x[:-1]])
         var x = [Float](repeating: 0, count: n)
         if n > 0 { x[0] = samples[0] }
-        for i in 1..<max(n, 1) { x[i] = samples[i] - cfg.preemph * samples[i - 1] }
+        for i in 1 ..< max(n, 1) { x[i] = samples[i] - cfg.preemph * samples[i - 1] }
 
         // reflect pad by n_fft//2 = 256 (matches mlx stft _pad reflect:
         // prefix = x[1:p+1][::-1], suffix = x[-(p+1):-1][::-1])
         let p = cfg.nFFT / 2  // 256
         var padded = [Float](repeating: 0, count: n + 2 * p)
-        for k in 0..<p { padded[k] = x[p - k] }  // x[p], x[p-1], ... x[1]
-        for i in 0..<n { padded[p + i] = x[i] }
-        for k in 0..<p { padded[p + n + k] = x[n - 2 - k] }  // x[n-2]..x[n-1-p]
+        for k in 0 ..< p { padded[k] = x[p - k] }  // x[p], x[p-1], ... x[1]
+        for i in 0 ..< n { padded[p + i] = x[i] }
+        for k in 0 ..< p { padded[p + n + k] = x[n - 2 - k] }  // x[n-2]..x[n-1-p]
 
         // periodic hann over win_length=400, then zero-pad to n_fft=512.
         // np.hanning(N+1)[:-1] == 0.5*(1-cos(2π i/N)) for i in 0..N-1
         let wl = cfg.winLength
         var window = [Float](repeating: 0, count: cfg.nFFT)
-        for i in 0..<wl {
+        for i in 0 ..< wl {
             window[i] = Float(0.5 * (1.0 - cos(2.0 * .pi * Double(i) / Double(wl))))
         }
 
@@ -150,9 +150,9 @@ enum ParakeetMel {
         let totalLen = padded.count
         let nFrames = (totalLen - cfg.nFFT + cfg.hopLength) / cfg.hopLength
         var frames = [Float](repeating: 0, count: nFrames * cfg.nFFT)
-        for t in 0..<nFrames {
+        for t in 0 ..< nFrames {
             let base = t * cfg.hopLength
-            for k in 0..<cfg.nFFT {
+            for k in 0 ..< cfg.nFFT {
                 frames[t * cfg.nFFT + k] = padded[base + k] * window[k]
             }
         }
@@ -448,7 +448,7 @@ final class ParakeetEncoder: Module {
 
     init(_ c: ParakeetConfig) {
         self._preEncode.wrappedValue = ParakeetSubsampling(c)
-        layers = (0..<c.nLayers).map { _ in ParakeetConformerLayer(c) }
+        layers = (0 ..< c.nLayers).map { _ in ParakeetConformerLayer(c) }
         posEnc = ParakeetRelPosEnc(dModel: c.dModel)
     }
 
@@ -495,7 +495,7 @@ private final class ParakeetLSTMCell: Module {
 private final class ParakeetDecRNN: Module {
     @ModuleInfo(key: "lstm") var lstm: [ParakeetLSTMCell]
     init(_ c: ParakeetConfig) {
-        self._lstm.wrappedValue = (0..<c.predRNNLayers).map { _ in
+        self._lstm.wrappedValue = (0 ..< c.predRNNLayers).map { _ in
             ParakeetLSTMCell(inputSize: c.predHidden, hiddenSize: c.predHidden)
         }
     }
@@ -542,7 +542,7 @@ final class ParakeetDecoder: Module {
         var newH = [MLXArray]()
         var newC = [MLXArray]()
         var input = x
-        for l in 0..<nLayers {
+        for l in 0 ..< nLayers {
             let (hl, cl) = prediction.lstm[l].step(input, h: h[l], c: c[l])
             newH.append(hl)
             newC.append(cl)
@@ -553,8 +553,8 @@ final class ParakeetDecoder: Module {
     }
 
     func zeroState() -> ([MLXArray], [MLXArray]) {
-        let h = (0..<nLayers).map { _ in MLXArray.zeros([1, predHidden]) }
-        let c = (0..<nLayers).map { _ in MLXArray.zeros([1, predHidden]) }
+        let h = (0 ..< nLayers).map { _ in MLXArray.zeros([1, predHidden]) }
+        let c = (0 ..< nLayers).map { _ in MLXArray.zeros([1, predHidden]) }
         return (h, c)
     }
 }
@@ -645,7 +645,7 @@ public final class ParakeetTDTModel: Module {
             let end = min(start + chunkSamples, samples.count)
             if end - start < cfg.hopLength { break }  // no zero-length mel
             let r = transcribeWindow(
-                Array(samples[start..<end]),
+                Array(samples[start ..< end]),
                 offset: Double(start) / Double(cfg.sampleRate))
             encSec += r.encoderSeconds
             decSec += r.decodeSeconds
@@ -704,10 +704,10 @@ public final class ParakeetTDTModel: Module {
 
         while step < T {
             let (decOut, newH, newC) = decoder.stepOut(lastToken: lastToken, h: h, c: c)
-            let encFrame = features[0..., step..<(step + 1), 0...]  // [1,1,1024]
+            let encFrame = features[0..., step ..< (step + 1), 0...]  // [1,1,1024]
             let logits = joint(encFrame, decOut)  // [8198]
             // split: tokens [:8193], durations [8193:]
-            let tokenLogits = logits[0..<(blank + 1)]  // 8193
+            let tokenLogits = logits[0 ..< (blank + 1)]  // 8193
             let durLogits = logits[(blank + 1)...]  // 5
             let predToken = MLX.argMax(tokenLogits).item(Int.self)
             let decision = MLX.argMax(durLogits).item(Int.self)
