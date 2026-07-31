@@ -6,11 +6,11 @@
 # Xcode explicitly (validated on macos-15 during the 2026-07 soak).
 name: CI
 
+# PR-only: a push trigger alongside pull_request double-runs every PR head
+# (different concurrency groups), burning macOS minutes for nothing. Branches
+# without a PR get CI by opening one.
 on:
   pull_request:
-  push:
-    branches-ignore:
-      - main
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -31,10 +31,16 @@ jobs:
       - uses: actions/checkout@v5
       - name: Mark workspace safe for git-in-container
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-      - name: swift-format lint
+      # Gate = "the formatter was run", verified by running it and requiring a
+      # clean diff. Deliberately NOT `swift format lint --strict`: lint-only
+      # rules (e.g. EndOfLineComment) flag things `format --in-place` cannot
+      # fix, so a strict-lint gate can fail with no runnable remedy — the
+      # mlx-swift-lm pre-commit pattern avoids that class entirely.
+      - name: swift-format check
         run: |
-          swift format lint --strict --recursive Sources Tests clients Package.swift \
-            || { echo "::error::Style check failed — run: swift format --in-place --configuration .swift-format --recursive Sources Tests clients Package.swift"; exit 1; }
+          swift format --in-place --configuration .swift-format --recursive Sources Tests clients Package.swift
+          git diff --exit-code \
+            || { echo "::error::Style check failed — run: swift format --in-place --configuration .swift-format --recursive Sources Tests clients Package.swift and commit the diff (shown above)"; exit 1; }
 
   unit:
     name: Unit tier (swift test)
