@@ -119,8 +119,12 @@ public actor InferenceGate {
     }
 
     /// Acquire the gate, suspending FIFO behind any current holder + waiters.
+    ///
+    /// Deliberately does NOT consult `enabled`: the knob is read exactly once
+    /// per span, by `withExclusiveExecution` above, so acquire/release can never
+    /// disagree about whether this span owns the gate. Reading it here too made
+    /// the pair race a mid-span flip — see `release()`.
     func acquire() async throws {
-        guard Self.enabled else { return }
         try Task.checkCancellation()
         if !held && waiters.isEmpty {
             held = true
@@ -155,8 +159,14 @@ public actor InferenceGate {
     }
 
     /// Release the gate: hand it to the next FIFO waiter, or mark it free.
+    ///
+    /// Never consults `enabled`. It used to, and that stranded the gate: a span
+    /// acquired while enabled whose `enabled` flipped `true → false` mid-flight
+    /// released into a no-op, leaving `held == true` with no holder — every
+    /// later acquire then queued behind a phantom and was never resumed. The
+    /// guard was also unreachable on the path it was written for, since
+    /// `withExclusiveExecution` returns before releasing when the gate is off.
     func release() {
-        guard Self.enabled else { return }
         if waiters.isEmpty {
             held = false
             return
