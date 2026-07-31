@@ -124,7 +124,11 @@ public actor InferenceGate {
     /// per span, by `withExclusiveExecution` above, so acquire/release can never
     /// disagree about whether this span owns the gate. Reading it here too made
     /// the pair race a mid-span flip — see `release()`.
-    func acquire() async throws {
+    ///
+    /// `private`, with `release()`, so that "read once per span" is enforced by
+    /// the compiler rather than by this comment: a direct call from elsewhere in
+    /// AthenaCore would reintroduce the asymmetry with no guard at either end.
+    private func acquire() async throws {
         try Task.checkCancellation()
         if !held && waiters.isEmpty {
             held = true
@@ -166,7 +170,7 @@ public actor InferenceGate {
     /// later acquire then queued behind a phantom and was never resumed. The
     /// guard was also unreachable on the path it was written for, since
     /// `withExclusiveExecution` returns before releasing when the gate is off.
-    func release() {
+    private func release() {
         if waiters.isEmpty {
             held = false
             return
