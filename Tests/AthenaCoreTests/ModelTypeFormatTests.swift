@@ -1,7 +1,6 @@
+import AthenaClient
 import Foundation
 import XCTest
-
-import AthenaClient
 
 /// Usability audit 2026-07-02 §4 — TYPE column + `--type` filter. `ModelTypeFormat`
 /// is the single Foundation-only formatter behind both the local and remote
@@ -31,9 +30,10 @@ final class ModelTypeFormatTests: XCTestCase {
     }
 
     func testTypeFilterMatching() {
-        func m(_ filter: String, _ mod: String?, _ eng: String? = nil,
-            draft: Bool = false, mtp: Bool = false) -> Bool
-        {
+        func m(
+            _ filter: String, _ mod: String?, _ eng: String? = nil,
+            draft: Bool = false, mtp: Bool = false
+        ) -> Bool {
             ModelTypeFormat.matches(
                 filter: filter, modality: mod, engine: eng, draft: draft,
                 fusedMTP: mtp)

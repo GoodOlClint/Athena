@@ -28,7 +28,7 @@ final class InferenceGateTests: XCTestCase {
         let gate = InferenceGate()
         let track = Concurrency()
         await withThrowingTaskGroup(of: Void.self) { group in
-            for _ in 0..<20 {
+            for _ in 0 ..< 20 {
                 group.addTask {
                     try await gate.withExclusiveExecution {
                         await track.enter()
@@ -57,7 +57,7 @@ final class InferenceGateTests: XCTestCase {
 
         let track = Concurrency()
         await withTaskGroup(of: Void.self) { group in
-            for _ in 0..<6 {
+            for _ in 0 ..< 6 {
                 group.addTask {
                     try? await gate.withExclusiveExecution {
                         await track.enter()
@@ -122,7 +122,7 @@ final class InferenceGateTests: XCTestCase {
     /// /metrics), while `acquisitions` counts them all.
     func testUncontendedAccounting() async throws {
         let gate = InferenceGate()
-        for _ in 0..<5 { try await gate.withExclusiveExecution {} }
+        for _ in 0 ..< 5 { try await gate.withExclusiveExecution {} }
         let s = await gate.stats()
         XCTAssertEqual(s.acquisitions, 5)
         XCTAssertEqual(s.contended, 0)
@@ -143,7 +143,7 @@ final class InferenceGateTests: XCTestCase {
             }
         }
         try? await Task.sleep(nanoseconds: 5_000_000)  // holder acquires
-        let waiters = (0..<3).map { _ in
+        let waiters = (0 ..< 3).map { _ in
             Task { try await gate.withExclusiveExecution {} }
         }
         try? await Task.sleep(nanoseconds: 10_000_000)  // all three enqueue

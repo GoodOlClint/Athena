@@ -90,7 +90,7 @@ public struct Ps: AsyncParsableCommand {
                     + m.state.padding(
                         toLength: 12, withPad: " ", startingAt: 0)
                     + ((m.measured == false && m.residentBytes > 0
-                        ? "~" : "") + humanBytes(m.residentBytes)).padding(
+                    ? "~" : "") + humanBytes(m.residentBytes)).padding(
                         toLength: 12, withPad: " ", startingAt: 0)
                     + (m.model ?? "-").padding(
                         toLength: 40, withPad: " ", startingAt: 0)

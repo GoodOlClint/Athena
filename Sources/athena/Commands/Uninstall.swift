@@ -37,8 +37,7 @@ struct Uninstall: ParsableCommand {
             let cfgURL =
                 config.map {
                     URL(
-                        fileURLWithPath:
-                            ($0 as NSString).expandingTildeInPath)
+                        fileURLWithPath: ($0 as NSString).expandingTildeInPath)
                 } ?? plan.installedConfig
             if let cfg = try? AthenaConfig.parse(file: cfgURL) {
                 logDir = URL(

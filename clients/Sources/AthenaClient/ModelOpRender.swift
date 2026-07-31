@@ -84,7 +84,8 @@ public struct ModelOpState {
                     + " \(quantIndex)/\(quantCount)")
         } else if !files.isEmpty || aggTotal > 0 {
             let label = phase ?? "total"
-            var line = "  " + pad(label, 30) + " " + renderBar(aggFraction, width: 16)
+            var line =
+                "  " + pad(label, 30) + " " + renderBar(aggFraction, width: 16)
                 + " " + String(format: "%.0f%%", aggFraction * 100)
             if doneCount > 0 { line += "  (\(doneCount) done)" }
             out.append(line)

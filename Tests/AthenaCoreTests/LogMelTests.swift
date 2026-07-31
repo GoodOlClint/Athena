@@ -16,7 +16,7 @@ final class LogMelTests: XCTestCase {
         XCTAssertEqual(fb.count, nMels * nFreqs)
         XCTAssertTrue(fb.allSatisfy { $0 >= 0 && $0.isFinite })
         // Every mel band must have at least one positive weight.
-        for i in 0..<nMels {
+        for i in 0 ..< nMels {
             let row = fb[i * nFreqs ..< (i + 1) * nFreqs]
             XCTAssertTrue(
                 row.contains { $0 > 0 }, "empty mel band \(i)")
@@ -46,7 +46,7 @@ final class LogMelTests: XCTestCase {
 
         // 440 Hz tone, 1 s — padded to 30 s internally.
         let sr = Double(LogMel.sampleRate)
-        let tone = (0..<LogMel.sampleRate).map {
+        let tone = (0 ..< LogMel.sampleRate).map {
             Float(0.5 * sin(2.0 * .pi * 440.0 * Double($0) / sr))
         }
         let t = LogMel.logMel(tone)
@@ -92,7 +92,7 @@ final class AudioDecodeTests: XCTestCase {
                     pcmFormat: fmt, frameCapacity: AVAudioFrameCount(frames))
             else { return XCTFail("buffer") }
             buf.frameLength = AVAudioFrameCount(frames)
-            for i in 0..<frames {
+            for i in 0 ..< frames {
                 buf.floatChannelData![0][i] =
                     Float(
                         0.25 * sin(2.0 * .pi * 440.0 * Double(i) / 16_000.0))

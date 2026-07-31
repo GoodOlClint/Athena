@@ -18,7 +18,8 @@ struct Logs: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "logs",
         abstract:
-            "Show / stream the daemon's unified-log entries (via /api/logs by default; --offline for direct local query).")
+            "Show / stream the daemon's unified-log entries (via /api/logs by default; --offline for direct local query)."
+    )
 
     @OptionGroup var daemon: DaemonOptions
     @Flag(name: .shortAndLong, help: "Follow new entries as they arrive (SSE).")
@@ -85,7 +86,8 @@ struct Logs: AsyncParsableCommand {
         }
         var predicate = "subsystem == \"athena\""
         if !categories.isEmpty {
-            let list = categories
+            let list =
+                categories
                 .map { "\"\($0)\"" }
                 .joined(separator: ", ")
             predicate += " AND category IN { \(list) }"

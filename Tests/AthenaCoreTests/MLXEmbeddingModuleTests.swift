@@ -153,7 +153,7 @@ final class EmbeddingBucketingTests: XCTestCase {
         let bs = buckets(lens)
         let all = bs.flatMap { $0 }.sorted()
         XCTAssertEqual(
-            all, Array(0..<lens.count),
+            all, Array(0 ..< lens.count),
             "every original index packed exactly once (reassembly safety)")
     }
 

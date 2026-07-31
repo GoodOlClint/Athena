@@ -176,7 +176,7 @@ public enum ModelConvert {
                 container = try await loadModelContainer(
                     from: snapshot, using: loader)
             }
-        } catch where AthenaError.looksLikeUnsupportedArch(error) {
+        } catch  where AthenaError.looksLikeUnsupportedArch(error) {
             // A generative/vision checkpoint whose `model_type` the substrate
             // has no architecture for (ADR 016) — name the cause instead of
             // leaking the raw substrate `unsupportedModelType`/`keyNotFound`.
@@ -343,8 +343,7 @@ public enum ModelConvert {
         try out.write(to: destConfig)
     }
 
-    private static func copyAux(from snapshot: URL, to dest: URL) throws
-    {
+    private static func copyAux(from snapshot: URL, to dest: URL) throws {
         let fm = FileManager.default
         let entries =
             (try? fm.contentsOfDirectory(

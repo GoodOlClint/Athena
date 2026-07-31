@@ -52,8 +52,7 @@ public enum ParakeetLoader {
         return try fromModelDirectory(url)
     }
 
-    public static func fromModelDirectory(_ url: URL) throws -> ParakeetTDTModel
-    {
+    public static func fromModelDirectory(_ url: URL) throws -> ParakeetTDTModel {
         let configURL = url.appendingPathComponent("config.json")
         guard FileManager.default.fileExists(atPath: configURL.path) else {
             throw ParakeetLoadError.noConfig(url.path)

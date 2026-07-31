@@ -76,8 +76,7 @@ public enum ConfigEditor {
     public static func resolvePath(_ override: String?) -> URL {
         if let override {
             return URL(
-                fileURLWithPath:
-                    (override as NSString).expandingTildeInPath)
+                fileURLWithPath: (override as NSString).expandingTildeInPath)
         }
         if let env = ProcessInfo.processInfo.environment["ATHENA_CONFIG"],
             !env.isEmpty
@@ -207,19 +206,23 @@ public enum ConfigEditor {
                 throw Failure.badValue(key, "a number")
             }
             if key == "speculative",
-                value != "true", value != "false" {
+                value != "true", value != "false"
+            {
                 throw Failure.badValue(key, "true or false")
             }
             if key == "preload",
-                value != "true", value != "false" {
+                value != "true", value != "false"
+            {
                 throw Failure.badValue(key, "true or false")
             }
             if key == "encrypt_store",
-                value != "true", value != "false" {
+                value != "true", value != "false"
+            {
                 throw Failure.badValue(key, "true or false")
             }
             if key == "persist_store",
-                value != "true", value != "false" {
+                value != "true", value != "false"
+            {
                 throw Failure.badValue(key, "true or false")
             }
             formatted = "\(key) = \(value)"
@@ -233,7 +236,8 @@ public enum ConfigEditor {
                 !Engine.allCases.map(\.rawValue).contains(value)
             {
                 throw Failure.badValue(
-                    key, "one of "
+                    key,
+                    "one of "
                         + Engine.allCases.map(\.rawValue)
                         .joined(separator: ", "))
             }
@@ -243,7 +247,8 @@ public enum ConfigEditor {
                 !QuotaWindow.allCases.map(\.rawValue).contains(value)
             {
                 throw Failure.badValue(
-                    key, "one of "
+                    key,
+                    "one of "
                         + QuotaWindow.allCases.map(\.rawValue)
                         .joined(separator: ", "))
             }
@@ -251,7 +256,8 @@ public enum ConfigEditor {
                 !KVCompression.allCases.map(\.rawValue).contains(value)
             {
                 throw Failure.badValue(
-                    key, "one of "
+                    key,
+                    "one of "
                         + KVCompression.allCases.map(\.rawValue)
                         .joined(separator: ", "))
             }
@@ -264,7 +270,8 @@ public enum ConfigEditor {
                     .contains(value)
             {
                 throw Failure.badValue(
-                    key, "one of "
+                    key,
+                    "one of "
                         + GovernorMemory.AdmissionMode.allCases.map(\.rawValue)
                         .joined(separator: ", "))
             }
@@ -281,7 +288,8 @@ public enum ConfigEditor {
                 })
             {
                 throw Failure.badValue(
-                    key, "free of quotes, backslashes, and control "
+                    key,
+                    "free of quotes, backslashes, and control "
                         + "characters")
             }
             formatted = "\(key) = \"\(value)\""

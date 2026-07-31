@@ -386,7 +386,7 @@ final class AthenaStoreTests: XCTestCase {
         let url = tmpURL()
         defer { try? FileManager.default.removeItem(at: url) }
         let s = try AthenaStore(path: url)
-        for i in 0..<3 {
+        for i in 0 ..< 3 {
             try await s.addAudit(
                 principal: "u:admin", action: "user.create",
                 target: "u\(i)", result: "ok", detail: nil)

@@ -103,9 +103,11 @@ public enum WhisperWordAlign {
             let text = w.word.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { continue }
             out.append(
-                (WordTiming(
-                    word: text, start: start, end: max(start, end),
-                    probability: prob), w.range))
+                (
+                    WordTiming(
+                        word: text, start: start, end: max(start, end),
+                        probability: prob), w.range
+                ))
         }
         // End-of-align allocator-pool flush (M50.1). The non-cached
         // decoder pass + crossQK.evalAll() above leave behind per-layer

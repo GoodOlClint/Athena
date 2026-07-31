@@ -1,7 +1,6 @@
+import AthenaCore
 import Foundation
 import XCTest
-
-import AthenaCore
 
 /// Usability audit 2026-07-02 §4 — typed listing. Pins the fused-MTP probe
 /// (weight-index scan, config-gated) and the ModelSupport wire projection that

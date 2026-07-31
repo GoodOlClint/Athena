@@ -24,16 +24,16 @@ struct Pull: AsyncParsableCommand {
     @Flag(
         help: ArgumentHelp(
             "Dry run: fetch only the model's config and report whether Athena "
-            + "can load it (modality + loadability). Downloads no weights, "
-            + "touches no daemon. Exits non-zero if unsupported."))
+                + "can load it (modality + loadability). Downloads no weights, "
+                + "touches no daemon. Exits non-zero if unsupported."))
     var check = false
 
     @Flag(
         name: .long,
         help: ArgumentHelp(
             "Also pull the model's paired MTP speculative drafter, if one is "
-            + "known (ADR 032). Resolved from the seeded default-drafter map; "
-            + "no-op when the target has no mapped drafter."))
+                + "known (ADR 032). Resolved from the seeded default-drafter map; "
+                + "no-op when the target has no mapped drafter."))
     var withDrafter = false
 
     @Option(help: "Model store root. Default: ~/.athena/models.")
@@ -161,8 +161,9 @@ struct Pull: AsyncParsableCommand {
         } catch {
             // Couldn't even fetch the config (offline / 404 / gated repo) — that
             // IS the answer for a dry run.
-            print("error: could not preflight '\(model)' — "
-                + "\(ModelPull.friendlyError(error))")
+            print(
+                "error: could not preflight '\(model)' — "
+                    + "\(ModelPull.friendlyError(error))")
             print(
                 "  The repo may not exist, be gated (set `HF_TOKEN`), or the "
                     + "network is unavailable.")

@@ -41,7 +41,8 @@ public enum ModelTypeFormat {
         let f = filter.lowercased()
         let col = column(
             modality: modality, engine: engine, draft: draft,
-            fusedMTP: fusedMTP).lowercased()
+            fusedMTP: fusedMTP
+        ).lowercased()
         if col == f { return true }
         // Leading token (`asr` matches `asr:whisper`; `llm` matches `llm +mtp`).
         let head = col.split(whereSeparator: { $0 == ":" || $0 == " " }).first

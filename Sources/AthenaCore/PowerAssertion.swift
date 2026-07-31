@@ -1,7 +1,7 @@
 import Foundation
 
 #if canImport(IOKit)
-import IOKit.pwr_mgt
+    import IOKit.pwr_mgt
 #endif
 
 /// M60.2 — hold a macOS power assertion for the lifetime of the serving
@@ -57,19 +57,19 @@ public final class PowerAssertion: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         guard !held else { return true }
         #if canImport(IOKit)
-        var aid: IOPMAssertionID = 0
-        let rc = IOPMAssertionCreateWithName(
-            kIOPMAssertionTypePreventUserIdleSystemSleep as CFString,
-            IOPMAssertionLevel(kIOPMAssertionLevelOn),
-            reason as CFString,
-            &aid)
-        if rc == kIOReturnSuccess {
-            assertionID = aid
-            held = true
-        }
-        return held
+            var aid: IOPMAssertionID = 0
+            let rc = IOPMAssertionCreateWithName(
+                kIOPMAssertionTypePreventUserIdleSystemSleep as CFString,
+                IOPMAssertionLevel(kIOPMAssertionLevelOn),
+                reason as CFString,
+                &aid)
+            if rc == kIOReturnSuccess {
+                assertionID = aid
+                held = true
+            }
+            return held
         #else
-        return false
+            return false
         #endif
     }
 
@@ -78,7 +78,7 @@ public final class PowerAssertion: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         guard held else { return }
         #if canImport(IOKit)
-        IOPMAssertionRelease(assertionID)
+            IOPMAssertionRelease(assertionID)
         #endif
         held = false
         assertionID = 0

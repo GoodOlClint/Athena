@@ -41,8 +41,8 @@ final class StopStreamFilterTests: XCTestCase {
     func testStreamingMatchSplitAcrossChunks() {
         var f = StopStreamFilter(stops: ["STOP"])
         var out = ""
-        out += f.push("alpha ST")      // "ST" held back (prefix of STOP)
-        out += f.push("OP omega")      // completes STOP ⇒ cut
+        out += f.push("alpha ST")  // "ST" held back (prefix of STOP)
+        out += f.push("OP omega")  // completes STOP ⇒ cut
         out += f.flush()
         XCTAssertTrue(f.stopped)
         XCTAssertEqual(out, "alpha ")

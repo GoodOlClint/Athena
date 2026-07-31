@@ -1,6 +1,5 @@
-import XCTest
-
 import AthenaServerKit
+import XCTest
 
 /// ADR 037 — the `PUT /api/config` security deny-list. These keys govern
 /// auth/TLS/encryption/data-dir/debugger posture; config takeover would be

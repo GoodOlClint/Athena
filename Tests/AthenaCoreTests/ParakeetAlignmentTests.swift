@@ -42,7 +42,7 @@ final class ParakeetAlignmentTests: XCTestCase {
     func testTimestampsMonotonicAndOrdered() {
         let segs = ParakeetAlignment.segments(from: sample, attachWords: false)
         for s in segs { XCTAssertLessThanOrEqual(s.start, s.end) }
-        for i in 1..<segs.count {
+        for i in 1 ..< segs.count {
             XCTAssertLessThanOrEqual(segs[i - 1].start, segs[i].start)
         }
     }

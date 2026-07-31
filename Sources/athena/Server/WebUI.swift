@@ -110,7 +110,8 @@ extension AthenaServer {
         var errors: [String: String] = [:]
         for (k, v) in body
         where ConfigEditor.knownKeys.contains(k)
-            && !v.trimmingCharacters(in: .whitespaces).isEmpty {
+            && !v.trimmingCharacters(in: .whitespaces).isEmpty
+        {
             do {
                 try ConfigEditor.setScalarThrowing(
                     key: k, value: v, in: url)
@@ -845,11 +846,11 @@ extension AthenaServer {
             <form method="post" action="/ui/login">
             <h1>athena</h1>
             """# + banner + #"""
-            <input name="username" placeholder="username" autofocus>
-            <input name="password" type="password"
-              placeholder="password">
-            <button>Sign in</button></form></body></html>
-            """#
+                <input name="username" placeholder="username" autofocus>
+                <input name="password" type="password"
+                  placeholder="password">
+                <button>Sign in</button></form></body></html>
+                """#
     }
 
     private static func formField(
@@ -894,7 +895,8 @@ extension AthenaServer {
                         Self.loginPage(
                             error:
                                 "too many attempts; retry in "
-                                + "\(retryAfter)s").utf8))
+                                + "\(retryAfter)s"
+                        ).utf8))
                 return Response(
                     status: .tooManyRequests, headers: h,
                     body: ResponseBody(byteBuffer: buf))

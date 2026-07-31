@@ -22,7 +22,7 @@ enum GuidedMask {
     /// last-position logits slice, so it is the production seam.
     static func additiveMask(allowed mask: [UInt8], vocab: Int) -> [Float] {
         var add = [Float](repeating: -.infinity, count: vocab)
-        for i in 0..<vocab where (mask[i >> 3] >> UInt8(i & 7)) & 1 == 1 {
+        for i in 0 ..< vocab where (mask[i >> 3] >> UInt8(i & 7)) & 1 == 1 {
             add[i] = 0
         }
         return add
@@ -43,7 +43,7 @@ enum GuidedMask {
         let add = additiveMask(allowed: mask, vocab: vocab)
         var best = -Float.infinity
         var idx = 0
-        for i in 0..<vocab {
+        for i in 0 ..< vocab {
             let v = logits[i] + add[i]
             if v > best { best = v; idx = i }
         }

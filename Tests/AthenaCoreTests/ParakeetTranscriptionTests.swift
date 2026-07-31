@@ -44,7 +44,7 @@ final class ParakeetTranscriptionTests: XCTestCase {
         let sr = 16000
         let n = sr  // 1 s
         var samples = [Float](repeating: 0, count: n)
-        for i in 0..<n {
+        for i in 0 ..< n {
             let t = Double(i) / Double(sr)
             let f = 200.0 + 1800.0 * t  // 200 → 2000 Hz sweep
             samples[i] = Float(0.5 * sin(2.0 * .pi * f * t))
@@ -200,7 +200,7 @@ final class ParakeetTranscriptionTests: XCTestCase {
         let alignedWords = ParakeetAlignment.words(from: result.tokens)
         XCTAssertGreaterThan(
             alignedWords.count, 20, "too few timed words for 60 s of speech")
-        for i in 1..<alignedWords.count {
+        for i in 1 ..< alignedWords.count {
             XCTAssertLessThanOrEqual(
                 alignedWords[i - 1].start, alignedWords[i].start)
         }

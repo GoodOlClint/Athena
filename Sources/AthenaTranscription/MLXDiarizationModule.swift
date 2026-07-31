@@ -107,8 +107,9 @@ public actor MLXDiarizationModule: DiarizationModule, ModelSelectable {
     private func loadModel(id canonical: String) async throws {
         // M54.3 — local-store-dir load only; inference never auto-downloads
         // (operator pulls a missing model at startup).
-        guard let dir = ModelStoreLayout.localDirectory(
-            for: canonical, storeRoot: modelStoreRoot)
+        guard
+            let dir = ModelStoreLayout.localDirectory(
+                for: canonical, storeRoot: modelStoreRoot)
         else {
             throw AthenaError.moduleLoadFailed(
                 .diarization,

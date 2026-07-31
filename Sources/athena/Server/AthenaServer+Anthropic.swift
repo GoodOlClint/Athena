@@ -9,10 +9,10 @@ import AthenaTranscription
 import Foundation
 import HTTPTypes
 import Hummingbird
-import MLX
 import HummingbirdCore
 import HummingbirdTLS
 import Logging
+import MLX
 import NIOCore
 import NIOSSL
 
@@ -94,7 +94,6 @@ extension AthenaServer {
                 message: c.message)
         }
     }
-
 
     /// ADR 036 S2 — the Anthropic Messages adapter (`POST /v1/messages`). Decode
     /// → `NativeChatRequest`, run the shared `prepareChat` seam, drain or

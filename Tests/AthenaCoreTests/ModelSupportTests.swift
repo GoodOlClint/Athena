@@ -58,7 +58,8 @@ final class ModelSupportTests: XCTestCase {
     func testWhisperMissingVocabIsUnsupported() {
         let s = ModelSupport.classify(probe(modelType: "whisper"))
         XCTAssertEqual(s.modality, .transcription(.whisper))
-        if case .unsupported = s.loadability {} else {
+        if case .unsupported = s.loadability {
+        } else {
             XCTFail("missing n_vocab must be .unsupported")
         }
     }
@@ -170,7 +171,8 @@ final class ModelSupportTests: XCTestCase {
     func testNoModelTypeIsUnsupported() {
         let s = ModelSupport.classify(probe())
         XCTAssertEqual(s.modality, .unsupported)
-        if case .unsupported = s.loadability {} else {
+        if case .unsupported = s.loadability {
+        } else {
             XCTFail("empty config must be .unsupported")
         }
     }
@@ -251,7 +253,8 @@ final class ModelSupportTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: dir) }
         let s = ModelSupport.detect(in: dir)
         XCTAssertEqual(s.modality, .transcription(.parakeet))
-        if case .unsupported = s.loadability {} else {
+        if case .unsupported = s.loadability {
+        } else {
             XCTFail("transformers Parakeet (no joint.vocabulary) must refuse")
         }
     }

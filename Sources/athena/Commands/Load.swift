@@ -390,7 +390,8 @@ struct Load: AsyncParsableCommand {
                 modelStore.map {
                     URL(fileURLWithPath: $0, isDirectory: true)
                 } ?? ModelStore.defaultRoot
-            let hfCache = msRoot
+            let hfCache =
+                msRoot
                 .deletingLastPathComponent()
                 .appendingPathComponent("hf-cache", isDirectory: true)
             if FileManager.default.fileExists(atPath: hfCache.path) {
@@ -617,7 +618,8 @@ struct Load: AsyncParsableCommand {
         }
         if !MetalFaultDegrade.enabled {
             Logging.Logger(label: AthenaLog.daemonLabel).notice(
-                "MLX allocation-fault degrade DISABLED (ADR 030 P2 revert knob — recognized OOM will re-fatal, as pre-WP2)")
+                "MLX allocation-fault degrade DISABLED (ADR 030 P2 revert knob — recognized OOM will re-fatal, as pre-WP2)"
+            )
         }
 
         // M5.1 + M5.5 (M41 follow-up): reconcile reservations to the
@@ -642,7 +644,8 @@ struct Load: AsyncParsableCommand {
             governorAdmissionMode ?? tomlCfg?.governorAdmissionMode)
         if admissionMode == .estimate {
             Logger(label: AthenaLogLabel.daemon).notice(
-                "governor admission mode: estimate (ADR 023 G2 revert switch — metering reservations only, not the live footprint)")
+                "governor admission mode: estimate (ADR 023 G2 revert switch — metering reservations only, not the live footprint)"
+            )
         }
         let governor = MemoryGovernor(
             config: config,
@@ -687,7 +690,7 @@ struct Load: AsyncParsableCommand {
         let dataRoot =
             dataDir.map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? AthenaEnv.userHome()
-                .appendingPathComponent(".athena", isDirectory: true)
+            .appendingPathComponent(".athena", isDirectory: true)
         let dbPath = dataRoot.appendingPathComponent("athena.sqlite")
 
         // ADR 025 S4 — decide whether to persist the auth/audit/usage store
@@ -969,10 +972,12 @@ struct Load: AsyncParsableCommand {
             reason: "Athena serving inference (prevent idle system sleep)")
         if powerAssertion.acquire() {
             Logger(label: AthenaLogLabel.daemon).notice(
-                "power: holding PreventUserIdleSystemSleep (the machine will not idle-sleep while serving)")
+                "power: holding PreventUserIdleSystemSleep (the machine will not idle-sleep while serving)"
+            )
         } else {
             Logger(label: AthenaLogLabel.daemon).warning(
-                "power: could NOT acquire a sleep assertion — an unattended Mac may suspend inference mid-request. Run under `caffeinate -s` or set `pmset -c sleep 0` as a workaround.")
+                "power: could NOT acquire a sleep assertion — an unattended Mac may suspend inference mid-request. Run under `caffeinate -s` or set `pmset -c sleep 0` as a workaround."
+            )
         }
         defer { powerAssertion.release() }
         server.powerAssertionHeld = powerAssertion.isHeld

@@ -134,12 +134,11 @@ struct Doctor: AsyncParsableCommand {
         let dataDir =
             parsed?.dataDir.map {
                 URL(
-                    fileURLWithPath:
-                        ($0 as NSString).expandingTildeInPath,
+                    fileURLWithPath: ($0 as NSString).expandingTildeInPath,
                     isDirectory: true)
             }
             ?? AthenaEnv.userHome()
-                .appendingPathComponent(".athena", isDirectory: true)
+            .appendingPathComponent(".athena", isDirectory: true)
         if writable(dataDir) {
             say(.ok, "data dir writable: \(dataDir.path)")
         } else {
@@ -154,12 +153,14 @@ struct Doctor: AsyncParsableCommand {
         //    see docs/logging.md).
         if let log = parsed?.logDir {
             if fm.fileExists(atPath: log) {
-                say(.ok,
+                say(
+                    .ok,
                     "log dir present: \(log) (crash-dump capture only; "
                         + "diagnostic surface is the macOS unified log "
                         + "— `athena logs`)")
             } else {
-                say(.warn,
+                say(
+                    .warn,
                     "log dir missing: \(log) (created on install; "
                         + "crash-dump capture only)")
             }
@@ -287,8 +288,9 @@ struct Doctor: AsyncParsableCommand {
             if !fm.isReadableFile(atPath: key) {
                 say(.fail, "TLS: key not readable: \(key)")
                 tlsOK = false
-            } else if let mode = (try? fm.attributesOfItem(
-                atPath: key))?[.posixPermissions] as? NSNumber,
+            } else if let mode =
+                (try? fm.attributesOfItem(
+                    atPath: key))?[.posixPermissions] as? NSNumber,
                 mode.intValue & 0o077 != 0
             {
                 say(
@@ -587,7 +589,7 @@ struct Doctor: AsyncParsableCommand {
                 "--prompt-cache-cap-bytes",
                 "set on `athena load`; no TOML key (governor cache "
                     + "ceiling)"
-            ),
+            )
         ]
         say(
             .ok,

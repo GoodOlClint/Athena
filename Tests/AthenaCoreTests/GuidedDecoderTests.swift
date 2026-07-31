@@ -1,8 +1,8 @@
+import AthenaStructured
 import Foundation
 import XCTest
 
 @testable import AthenaLLM
-import AthenaStructured
 
 /// NC6 (M70.3) — the `GuidedDecoder` IDLE→ENFORCING phase machine guarantees
 /// non-empty, schema-valid structured output (idleBudget-forced enforcement,
@@ -15,7 +15,7 @@ final class GuidedDecoderTests: XCTestCase {
 
     // Byte ids: token id == byte value (mirrors StructuredGuideTests).
     private func byteVocab() throws -> StructuredVocabulary {
-        let tokens = (0..<256).map {
+        let tokens = (0 ..< 256).map {
             VocabToken(id: UInt32($0), bytes: [UInt8($0)])
         }
         return try StructuredVocabulary(tokens: tokens, eosTokenId: 256)

@@ -1,5 +1,5 @@
-import SQLCipher
 import Foundation
+import SQLCipher
 
 /// One principal's cumulative token usage (M27.2).
 public struct UsageRow: Sendable, Equatable {
@@ -516,7 +516,8 @@ public actor AthenaStore {
         principal: String, promptTokens: Int, completionTokens: Int,
         periodStart: Double = 0
     ) throws {
-        let st = try Self.prepared(db,
+        let st = try Self.prepared(
+            db,
             "INSERT INTO usage_counters"
                 + "(principal,requests,prompt_tokens,completion_tokens,"
                 + "updated,period_start,period_prompt_tokens,"
@@ -570,9 +571,11 @@ public actor AthenaStore {
 
     /// One principal's cumulative usage, or nil if it has none yet.
     public func usage(principal: String) -> UsageRow? {
-        guard let st = try? Self.prepared(db,
-            "SELECT \(Self.usageCols) FROM usage_counters "
-                + "WHERE principal=?;")
+        guard
+            let st = try? Self.prepared(
+                db,
+                "SELECT \(Self.usageCols) FROM usage_counters "
+                    + "WHERE principal=?;")
         else { return nil }
         defer { sqlite3_finalize(st) }
         sqlite3_bind_text(st, 1, principal, -1, Self.transient)
@@ -614,7 +617,8 @@ public actor AthenaStore {
         principal: String, action: String, target: String?,
         result: String, detail: String? = nil
     ) throws {
-        let st = try Self.prepared(db,
+        let st = try Self.prepared(
+            db,
             "INSERT INTO audit_log"
                 + "(ts,principal,action,target,result,detail) "
                 + "VALUES(?,?,?,?,?,?);")
@@ -624,11 +628,15 @@ public actor AthenaStore {
         sqlite3_bind_text(st, 3, action, -1, Self.transient)
         if let target {
             sqlite3_bind_text(st, 4, target, -1, Self.transient)
-        } else { sqlite3_bind_null(st, 4) }
+        } else {
+            sqlite3_bind_null(st, 4)
+        }
         sqlite3_bind_text(st, 5, result, -1, Self.transient)
         if let detail {
             sqlite3_bind_text(st, 6, detail, -1, Self.transient)
-        } else { sqlite3_bind_null(st, 6) }
+        } else {
+            sqlite3_bind_null(st, 6)
+        }
         guard sqlite3_step(st) == SQLITE_DONE else {
             throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
         }
@@ -687,8 +695,10 @@ public actor AthenaStore {
 
     /// Total audit rows (tests / retention accounting).
     public func auditCount() -> Int {
-        guard let st = try? Self.prepared(db,
-            "SELECT COUNT(*) FROM audit_log;")
+        guard
+            let st = try? Self.prepared(
+                db,
+                "SELECT COUNT(*) FROM audit_log;")
         else { return 0 }
         defer { sqlite3_finalize(st) }
         return sqlite3_step(st) == SQLITE_ROW
@@ -699,7 +709,8 @@ public actor AthenaStore {
     /// the number removed. Backs the M30.3 age-based retention bound.
     @discardableResult
     public func pruneAudit(olderThan cutoff: Double) throws -> Int {
-        let st = try Self.prepared(db,
+        let st = try Self.prepared(
+            db,
             "DELETE FROM audit_log WHERE ts < ?;")
         defer { sqlite3_finalize(st) }
         sqlite3_bind_double(st, 1, cutoff)
@@ -740,7 +751,8 @@ public actor AthenaStore {
     public func putUser(
         username: String, salt: Data, hash: Data, iters: Int
     ) throws {
-        let st = try Self.prepared(db,
+        let st = try Self.prepared(
+            db,
             "INSERT INTO auth_users"
                 + "(username,salt,hash,iters,created) "
                 + "VALUES(?,?,?,?,?) "
@@ -759,8 +771,10 @@ public actor AthenaStore {
     }
 
     public func getUser(username: String) -> UserRow? {
-        guard let st = try? Self.prepared(db,
-            "SELECT salt,hash,iters FROM auth_users WHERE username=?;")
+        guard
+            let st = try? Self.prepared(
+                db,
+                "SELECT salt,hash,iters FROM auth_users WHERE username=?;")
         else { return nil }
         defer { sqlite3_finalize(st) }
         sqlite3_bind_text(st, 1, username, -1, Self.transient)
@@ -771,8 +785,10 @@ public actor AthenaStore {
     }
 
     public func listUsers() -> [String] {
-        guard let st = try? Self.prepared(db,
-            "SELECT username FROM auth_users ORDER BY username;")
+        guard
+            let st = try? Self.prepared(
+                db,
+                "SELECT username FROM auth_users ORDER BY username;")
         else { return [] }
         defer { sqlite3_finalize(st) }
         var out: [String] = []
@@ -806,7 +822,8 @@ public actor AthenaStore {
                         String(cString: sqlite3_errmsg(db)))
                 }
             }
-            let st = try Self.prepared(db,
+            let st = try Self.prepared(
+                db,
                 "DELETE FROM auth_users WHERE username=?;")
             defer { sqlite3_finalize(st) }
             sqlite3_bind_text(st, 1, username, -1, Self.transient)
@@ -824,7 +841,8 @@ public actor AthenaStore {
     /// existed.
     @discardableResult
     public func setUserBudget(username: String, budget: Int?) throws -> Bool {
-        let st = try Self.prepared(db,
+        let st = try Self.prepared(
+            db,
             "UPDATE auth_users SET token_budget=? WHERE username=?;")
         defer { sqlite3_finalize(st) }
         if let budget {
@@ -843,8 +861,10 @@ public actor AthenaStore {
     /// default) — indistinguishable from an unknown user on purpose: both mean
     /// "no override to apply".
     public func userBudget(username: String) -> Int? {
-        guard let st = try? Self.prepared(db,
-            "SELECT token_budget FROM auth_users WHERE username=?;")
+        guard
+            let st = try? Self.prepared(
+                db,
+                "SELECT token_budget FROM auth_users WHERE username=?;")
         else { return nil }
         defer { sqlite3_finalize(st) }
         sqlite3_bind_text(st, 1, username, -1, Self.transient)
@@ -855,8 +875,10 @@ public actor AthenaStore {
     }
 
     public func userCount() -> Int {
-        guard let st = try? Self.prepared(db,
-            "SELECT COUNT(*) FROM auth_users;")
+        guard
+            let st = try? Self.prepared(
+                db,
+                "SELECT COUNT(*) FROM auth_users;")
         else { return 0 }
         defer { sqlite3_finalize(st) }
         return sqlite3_step(st) == SQLITE_ROW
@@ -866,7 +888,8 @@ public actor AthenaStore {
     // MARK: Auth — role grants (opaque role-name strings)
 
     public func grantRole(username: String, role: String) throws {
-        let st = try Self.prepared(db,
+        let st = try Self.prepared(
+            db,
             "INSERT OR IGNORE INTO auth_user_roles"
                 + "(username,role) VALUES(?,?);")
         defer { sqlite3_finalize(st) }
@@ -879,8 +902,10 @@ public actor AthenaStore {
 
     @discardableResult
     public func revokeRole(username: String, role: String) -> Bool {
-        guard let st = try? Self.prepared(db,
-            "DELETE FROM auth_user_roles WHERE username=? AND role=?;")
+        guard
+            let st = try? Self.prepared(
+                db,
+                "DELETE FROM auth_user_roles WHERE username=? AND role=?;")
         else { return false }
         defer { sqlite3_finalize(st) }
         sqlite3_bind_text(st, 1, username, -1, Self.transient)
@@ -890,9 +915,11 @@ public actor AthenaStore {
     }
 
     public func rolesForUser(username: String) -> [String] {
-        guard let st = try? Self.prepared(db,
-            "SELECT role FROM auth_user_roles WHERE username=? "
-                + "ORDER BY role;")
+        guard
+            let st = try? Self.prepared(
+                db,
+                "SELECT role FROM auth_user_roles WHERE username=? "
+                    + "ORDER BY role;")
         else { return [] }
         defer { sqlite3_finalize(st) }
         sqlite3_bind_text(st, 1, username, -1, Self.transient)
@@ -911,7 +938,8 @@ public actor AthenaStore {
     /// mean empty, never "the query broke" (which would silently bypass
     /// the protection and allow the final admin to be stripped).
     public func usersWithRole(_ role: String) throws -> [String] {
-        let st = try Self.prepared(db,
+        let st = try Self.prepared(
+            db,
             "SELECT username FROM auth_user_roles WHERE role=? "
                 + "ORDER BY username;")
         defer { sqlite3_finalize(st) }
@@ -940,7 +968,8 @@ public actor AthenaStore {
         hash: Data, username: String, scopedRoles: [String]?,
         label: String?, expires: Double? = nil
     ) throws {
-        let st = try Self.prepared(db,
+        let st = try Self.prepared(
+            db,
             "INSERT OR REPLACE INTO auth_tokens"
                 + "(hash,username,scoped_roles,label,created,expires) "
                 + "VALUES(?,?,?,?,?,?);")
@@ -949,14 +978,20 @@ public actor AthenaStore {
         sqlite3_bind_text(st, 2, username, -1, Self.transient)
         if let scope = Self.encodeScope(scopedRoles) {
             sqlite3_bind_text(st, 3, scope, -1, Self.transient)
-        } else { sqlite3_bind_null(st, 3) }
+        } else {
+            sqlite3_bind_null(st, 3)
+        }
         if let label {
             sqlite3_bind_text(st, 4, label, -1, Self.transient)
-        } else { sqlite3_bind_null(st, 4) }
+        } else {
+            sqlite3_bind_null(st, 4)
+        }
         sqlite3_bind_double(st, 5, Date().timeIntervalSince1970)
         if let expires {
             sqlite3_bind_double(st, 6, expires)
-        } else { sqlite3_bind_null(st, 6) }
+        } else {
+            sqlite3_bind_null(st, 6)
+        }
         guard sqlite3_step(st) == SQLITE_DONE else {
             throw StoreError.sql(String(cString: sqlite3_errmsg(db)))
         }
@@ -966,9 +1001,11 @@ public actor AthenaStore {
     /// (SHA-256 bytes). Indexed PK lookup — the presented value is
     /// already a hash, so a byte-probing timing attack is infeasible.
     public func tokenPrincipal(hash: Data) -> TokenRow? {
-        guard let st = try? Self.prepared(db,
-            "SELECT username,scoped_roles,created,expires FROM "
-                + "auth_tokens WHERE hash=?;")
+        guard
+            let st = try? Self.prepared(
+                db,
+                "SELECT username,scoped_roles,created,expires FROM "
+                    + "auth_tokens WHERE hash=?;")
         else { return nil }
         defer { sqlite3_finalize(st) }
         Self.bindBlob(st, 1, hash)
@@ -995,16 +1032,19 @@ public actor AthenaStore {
     /// digest no longer leaves the store for a listing. The rm/rotate
     /// paths, which legitimately need the full hash to delete a row, use
     /// `tokensMatchingHashPrefix` instead.
-    public func listTokens() -> [(hashPrefix: String, username: String,
-        scoped: [String]?, label: String?, expires: Double?)]
-    {
+    public func listTokens() -> [(
+        hashPrefix: String, username: String,
+        scoped: [String]?, label: String?, expires: Double?
+    )] {
         rowsForTokenQuery(
             "SELECT hash,username,scoped_roles,label,expires FROM "
                 + "auth_tokens ORDER BY created;",
             prefix: nil
         ).map {
-            (String($0.hex.prefix(Self.tokenHashPrefixLen)),
-                $0.username, $0.scoped, $0.label, $0.expires)
+            (
+                String($0.hex.prefix(Self.tokenHashPrefixLen)),
+                $0.username, $0.scoped, $0.label, $0.expires
+            )
         }
     }
 
@@ -1015,8 +1055,10 @@ public actor AthenaStore {
     /// `listTokens`. `prefix` is matched case-insensitively and is
     /// expected to be hex (callers validate), so no LIKE metacharacters.
     public func tokensMatchingHashPrefix(_ prefix: String)
-        -> [(hex: String, username: String, scoped: [String]?,
-            label: String?, expires: Double?)]
+        -> [(
+            hex: String, username: String, scoped: [String]?,
+            label: String?, expires: Double?
+        )]
     {
         rowsForTokenQuery(
             "SELECT hash,username,scoped_roles,label,expires FROM "
@@ -1028,8 +1070,10 @@ public actor AthenaStore {
     /// Shared row reader for the token queries above. When `prefix` is
     /// non-nil it is bound to the single `?` (a `LIKE` pattern).
     private func rowsForTokenQuery(_ sql: String, prefix: String?)
-        -> [(hex: String, username: String, scoped: [String]?,
-            label: String?, expires: Double?)]
+        -> [(
+            hex: String, username: String, scoped: [String]?,
+            label: String?, expires: Double?
+        )]
     {
         guard let st = try? Self.prepared(db, sql) else { return [] }
         defer { sqlite3_finalize(st) }
@@ -1058,8 +1102,10 @@ public actor AthenaStore {
 
     @discardableResult
     public func deleteToken(hash: Data) -> Bool {
-        guard let st = try? Self.prepared(db,
-            "DELETE FROM auth_tokens WHERE hash=?;")
+        guard
+            let st = try? Self.prepared(
+                db,
+                "DELETE FROM auth_tokens WHERE hash=?;")
         else { return false }
         defer { sqlite3_finalize(st) }
         Self.bindBlob(st, 1, hash)
@@ -1068,8 +1114,10 @@ public actor AthenaStore {
     }
 
     public func tokenCount() -> Int {
-        guard let st = try? Self.prepared(db,
-            "SELECT COUNT(*) FROM auth_tokens;")
+        guard
+            let st = try? Self.prepared(
+                db,
+                "SELECT COUNT(*) FROM auth_tokens;")
         else { return 0 }
         defer { sqlite3_finalize(st) }
         return sqlite3_step(st) == SQLITE_ROW

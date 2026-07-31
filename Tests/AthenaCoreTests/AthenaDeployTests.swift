@@ -1,7 +1,6 @@
+import AthenaCore
 import Foundation
 import XCTest
-
-import AthenaCore
 
 @testable import AthenaDeploy
 
@@ -158,8 +157,7 @@ final class AthenaConfigTests: XCTestCase {
             """
         XCTAssertThrowsError(try AthenaConfig.parse(toml: toml)) { err in
             guard
-                case AthenaConfig.ParseError.invalidEnum(let key, let value, _)
-                    = err
+                case AthenaConfig.ParseError.invalidEnum(let key, let value, _) = err
             else { return XCTFail("expected invalidEnum, got \(err)") }
             XCTAssertEqual(key, "token_budget_window")
             XCTAssertEqual(value, "week")
@@ -220,8 +218,9 @@ final class AthenaConfigTests: XCTestCase {
                 try AthenaConfig.parse(toml: toml),
                 "max_audio_upload_bytes=\(raw) must be rejected"
             ) { error in
-                guard case AthenaConfig.ParseError.invalidInt(let key, _) =
-                    error
+                guard
+                    case AthenaConfig.ParseError.invalidInt(let key, _) =
+                        error
                 else {
                     return XCTFail("expected invalidInt, got \(error)")
                 }
@@ -650,8 +649,9 @@ final class LaunchdPlistTests: XCTestCase {
         let data = try LaunchdPlist.xmlData(
             label: "l", executablePath: "/bin/athena", user: "svc",
             workingDirectory: "/w", config: cfg(budget: 1))
-        let back = try PropertyListSerialization.propertyList(
-            from: data, options: [], format: nil) as? [String: Any]
+        let back =
+            try PropertyListSerialization.propertyList(
+                from: data, options: [], format: nil) as? [String: Any]
         XCTAssertEqual(back?["Label"] as? String, "l")
         // Static args survive the XML round-trip; no --budget-bytes freeze.
         XCTAssertEqual(

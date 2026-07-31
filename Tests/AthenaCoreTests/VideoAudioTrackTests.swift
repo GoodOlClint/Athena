@@ -61,7 +61,7 @@ final class VideoAudioTrackTests: XCTestCase {
         d.append(contentsOf: Array("data".utf8)); u32(dataBytes)
         // A faint tone so the samples aren't all-zero (extraction is unaffected).
         var pcm = Data(capacity: Int(dataBytes))
-        for i in 0..<samples {
+        for i in 0 ..< samples {
             let v = Int16(truncatingIfNeeded: (i % 64) - 32)
             withUnsafeBytes(of: v.littleEndian) { pcm.append(contentsOf: $0) }
         }

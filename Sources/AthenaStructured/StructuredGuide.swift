@@ -2,7 +2,7 @@ import CAthenaStructured
 import Foundation
 
 #if DEBUG
-import os
+    import os
 #endif
 
 public struct StructuredError: Error, CustomStringConvertible {
@@ -187,15 +187,15 @@ public final class StructuredGuide {
     public var openerAlias: [UInt32: UInt32] = [:]
 
     #if DEBUG
-    /// G5 — single-owner sentinel. Held across each mutating FFI op; a
-    /// concurrent thread's `trylock` fails and trips the assertion, surfacing
-    /// a shared-guide misuse the non-`Sendable` type guard would normally
-    /// prevent at compile time. Heap-allocated so its address is stable.
-    private let ownerLock: UnsafeMutablePointer<os_unfair_lock> = {
-        let p = UnsafeMutablePointer<os_unfair_lock>.allocate(capacity: 1)
-        p.initialize(to: os_unfair_lock())
-        return p
-    }()
+        /// G5 — single-owner sentinel. Held across each mutating FFI op; a
+        /// concurrent thread's `trylock` fails and trips the assertion, surfacing
+        /// a shared-guide misuse the non-`Sendable` type guard would normally
+        /// prevent at compile time. Heap-allocated so its address is stable.
+        private let ownerLock: UnsafeMutablePointer<os_unfair_lock> = {
+            let p = UnsafeMutablePointer<os_unfair_lock>.allocate(capacity: 1)
+            p.initialize(to: os_unfair_lock())
+            return p
+        }()
     #endif
 
     public init(index: StructuredIndex) throws {
@@ -209,8 +209,8 @@ public final class StructuredGuide {
     deinit {
         oc_guide_free(ptr)
         #if DEBUG
-        ownerLock.deinitialize(count: 1)
-        ownerLock.deallocate()
+            ownerLock.deinitialize(count: 1)
+            ownerLock.deallocate()
         #endif
     }
 
@@ -221,9 +221,12 @@ public final class StructuredGuide {
     /// byte `i>>3` set ⇒ token `i` permitted from the current state.
     public func allowedMask(into buffer: inout [UInt8]) -> Bool {
         #if DEBUG
-        let locked = os_unfair_lock_trylock(ownerLock)
-        assert(locked, "StructuredGuide concurrent use — single-owner invariant (never @unchecked Sendable)")
-        defer { if locked { os_unfair_lock_unlock(ownerLock) } }
+            let locked = os_unfair_lock_trylock(ownerLock)
+            assert(
+                locked,
+                "StructuredGuide concurrent use — single-owner invariant (never @unchecked Sendable)"
+            )
+            defer { if locked { os_unfair_lock_unlock(ownerLock) } }
         #endif
         if buffer.count < maskLength { buffer = [UInt8](repeating: 0, count: maskLength) }
         return buffer.withUnsafeMutableBufferPointer {
@@ -236,9 +239,12 @@ public final class StructuredGuide {
     @discardableResult
     public func advance(_ token: UInt32) -> Bool {
         #if DEBUG
-        let locked = os_unfair_lock_trylock(ownerLock)
-        assert(locked, "StructuredGuide concurrent use — single-owner invariant (never @unchecked Sendable)")
-        defer { if locked { os_unfair_lock_unlock(ownerLock) } }
+            let locked = os_unfair_lock_trylock(ownerLock)
+            assert(
+                locked,
+                "StructuredGuide concurrent use — single-owner invariant (never @unchecked Sendable)"
+            )
+            defer { if locked { os_unfair_lock_unlock(ownerLock) } }
         #endif
         return oc_guide_advance(ptr, token)
     }
@@ -265,9 +271,12 @@ public final class StructuredGuide {
     @discardableResult
     public func rollback(_ n: Int) -> Bool {
         #if DEBUG
-        let locked = os_unfair_lock_trylock(ownerLock)
-        assert(locked, "StructuredGuide concurrent use — single-owner invariant (never @unchecked Sendable)")
-        defer { if locked { os_unfair_lock_unlock(ownerLock) } }
+            let locked = os_unfair_lock_trylock(ownerLock)
+            assert(
+                locked,
+                "StructuredGuide concurrent use — single-owner invariant (never @unchecked Sendable)"
+            )
+            defer { if locked { os_unfair_lock_unlock(ownerLock) } }
         #endif
         return oc_guide_rollback(ptr, n)
     }

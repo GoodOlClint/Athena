@@ -17,7 +17,7 @@ public enum VersionGuard {
     public static func compare(_ a: String, _ b: String) -> Int {
         let pa = a.split(separator: ".").map { Int($0) ?? 0 }
         let pb = b.split(separator: ".").map { Int($0) ?? 0 }
-        for i in 0..<Swift.max(pa.count, pb.count) {
+        for i in 0 ..< Swift.max(pa.count, pb.count) {
             let x = i < pa.count ? pa[i] : 0
             let y = i < pb.count ? pb[i] : 0
             if x != y { return x < y ? -1 : 1 }

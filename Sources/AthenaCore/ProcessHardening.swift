@@ -1,14 +1,15 @@
-#if canImport(Darwin)
-import Darwin
-// `ptrace` is intentionally not surfaced by Swift's Darwin overlay; bind the
-// libsystem C symbol directly so we can issue PT_DENY_ATTACH.
-@_silgen_name("ptrace")
-private func c_ptrace(
-    _ request: Int32, _ pid: pid_t, _ addr: UnsafeMutableRawPointer?,
-    _ data: Int32
-) -> Int32
-#endif
 import Foundation
+
+#if canImport(Darwin)
+    import Darwin
+    // `ptrace` is intentionally not surfaced by Swift's Darwin overlay; bind the
+    // libsystem C symbol directly so we can issue PT_DENY_ATTACH.
+    @_silgen_name("ptrace")
+    private func c_ptrace(
+        _ request: Int32, _ pid: pid_t, _ addr: UnsafeMutableRawPointer?,
+        _ data: Int32
+    ) -> Int32
+#endif
 
 /// ADR 024 Tier 2 — side-channel hygiene applied at daemon startup. Shrinks the
 /// plaintext footprint and closes cheap side channels around the resident
@@ -45,10 +46,10 @@ public enum ProcessHardening {
     @discardableResult
     public static func disableCoreDumps() -> Bool {
         #if canImport(Darwin)
-        var lim = rlimit(rlim_cur: 0, rlim_max: 0)
-        return setrlimit(RLIMIT_CORE, &lim) == 0
+            var lim = rlimit(rlim_cur: 0, rlim_max: 0)
+            return setrlimit(RLIMIT_CORE, &lim) == 0
         #else
-        return false
+            return false
         #endif
     }
 
@@ -59,9 +60,9 @@ public enum ProcessHardening {
     @discardableResult
     public static func denyDebuggerAttachNow() -> Bool {
         #if canImport(Darwin)
-        return c_ptrace(ptDenyAttach, 0, nil, 0) == 0
+            return c_ptrace(ptDenyAttach, 0, nil, 0) == 0
         #else
-        return false
+            return false
         #endif
     }
 
@@ -80,9 +81,9 @@ public enum ProcessHardening {
         array.withUnsafeMutableBytes { raw in
             guard let base = raw.baseAddress, raw.count > 0 else { return }
             #if canImport(Darwin)
-            _ = memset_s(base, rsize_t(raw.count), 0, rsize_t(raw.count))
+                _ = memset_s(base, rsize_t(raw.count), 0, rsize_t(raw.count))
             #else
-            memset(base, 0, raw.count)
+                memset(base, 0, raw.count)
             #endif
         }
     }
@@ -93,9 +94,9 @@ public enum ProcessHardening {
         data.withUnsafeMutableBytes { raw in
             guard let base = raw.baseAddress, raw.count > 0 else { return }
             #if canImport(Darwin)
-            _ = memset_s(base, rsize_t(raw.count), 0, rsize_t(raw.count))
+                _ = memset_s(base, rsize_t(raw.count), 0, rsize_t(raw.count))
             #else
-            memset(base, 0, raw.count)
+                memset(base, 0, raw.count)
             #endif
         }
     }

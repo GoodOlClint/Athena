@@ -9,10 +9,10 @@ import AthenaTranscription
 import Foundation
 import HTTPTypes
 import Hummingbird
-import MLX
 import HummingbirdCore
 import HummingbirdTLS
 import Logging
+import MLX
 import NIOCore
 import NIOSSL
 
@@ -166,7 +166,8 @@ struct AthenaServer {
         // installed only when a positive rate is configured; auth-off
         // loopback bypasses inside the middleware.
         if rateLimit > 0 {
-            let burst = rateBurst > 0
+            let burst =
+                rateBurst > 0
                 ? Double(rateBurst) : max(1, rateLimit.rounded(.up))
             router.add(
                 middleware: RateLimitMiddleware(
@@ -514,7 +515,8 @@ struct AthenaServer {
                         return (
                             "image input is not supported by the requested "
                                 + "model", "invalid_request_error",
-                            "vision_not_supported")
+                            "vision_not_supported"
+                        )
                     }
                     do {
                         try await llm.preflightPromptCache(
@@ -853,7 +855,6 @@ struct AthenaServer {
         return await sel.defaultModelId()
     }
 
-
     /// The `any ModelSelectable` corresponding to `id`. Every concrete
     /// module conforms (the stubs too), so this is total — no `nil`.
     func selectable(_ id: ModuleID) -> any ModelSelectable {
@@ -953,7 +954,8 @@ struct AthenaServer {
         // Opportunistic age-based retention (M30.3): bound the trail as
         // it grows. 0 ⇒ keep forever. Non-fatal.
         if auditRetentionDays > 0 {
-            let cutoff = Date().timeIntervalSince1970
+            let cutoff =
+                Date().timeIntervalSince1970
                 - Double(auditRetentionDays) * 86_400
             let removed =
                 (try? await store.pruneAudit(olderThan: cutoff)) ?? 0

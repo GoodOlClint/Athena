@@ -714,7 +714,8 @@ public actor MemoryGovernor {
             module: id, bytes: observed)
         learnedFootprint[id] = observed  // M5.4
         guard residentBytes > totalBudgetBytes else { return }
-        let victims = entries
+        let victims =
+            entries
             .filter {
                 $0.key != id && $0.value.evictable
                     && $0.value.state == .loaded
@@ -765,7 +766,9 @@ public actor MemoryGovernor {
         if GovernorMemory.fits(
             request: estimate, denominator: admissionDenominator(),
             budget: totalBudgetBytes)
-        { return }
+        {
+            return
+        }
 
         // Rung 1 — reclaim reconstructible headroom WITHOUT evicting a tenant:
         // shed the prompt-prefix KV pool (live MLX memory ⇒ counted in
@@ -784,14 +787,17 @@ public actor MemoryGovernor {
         if GovernorMemory.fits(
             request: estimate, denominator: admissionDenominator(),
             budget: totalBudgetBytes)
-        { return }
+        {
+            return
+        }
 
         // Rung 2 — evict evictable modules LRU-first. The loop meters the
         // SYNCHRONOUS reservation accounting (`residentBytes`): `evictSync`
         // returns a victim's bytes immediately, whereas the live footprint only
         // falls once the detached `unload()` runs, so reservations are the
         // reliable within-call progress signal here.
-        let candidates = entries
+        let candidates =
+            entries
             .filter { $0.key != id && $0.value.evictable && $0.value.state == .loaded }
             .sorted { $0.value.lastUsed < $1.value.lastUsed }
 

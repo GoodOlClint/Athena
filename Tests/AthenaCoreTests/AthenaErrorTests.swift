@@ -1,8 +1,8 @@
+import AthenaTranscription
 import Foundation
 import XCTest
 
 @testable import AthenaCore
-import AthenaTranscription
 
 /// Brief item 4a — Metal/MLX OOM is classified to a governed 503,
 /// never a bare 500 / process abort. Pure, CI-safe.
@@ -216,11 +216,13 @@ final class AthenaErrorTests: XCTestCase {
     func testTypeDerivesFromStatus() {
         XCTAssertEqual(
             AthenaError.inputTooLong(
-                module: .llm, tokens: 9, maxTokens: 1).type,
+                module: .llm, tokens: 9, maxTokens: 1
+            ).type,
             "invalid_request_error")
         XCTAssertEqual(
             AthenaError.modelNotAvailable(
-                requested: "x", available: []).type, "invalid_request_error")
+                requested: "x", available: []
+            ).type, "invalid_request_error")
         XCTAssertEqual(
             AthenaError.moduleLoadFailed(.llm, reason: "boom").type,
             "server_error")

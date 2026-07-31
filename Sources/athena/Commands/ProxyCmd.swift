@@ -75,7 +75,9 @@ struct ProxyLogin: AsyncParsableCommand {
     @Option(help: "Proxy username.") var user: String?
     @Flag(
         name: .customLong("password-stdin"),
-        help: "Read the proxy password from stdin (one line) instead of prompting. Else set ATHENA_PASSWORD. (ADR 005 — never on argv.)")
+        help:
+            "Read the proxy password from stdin (one line) instead of prompting. Else set ATHENA_PASSWORD. (ADR 005 — never on argv.)"
+    )
     var passwordStdin = false
 
     func run() async throws {

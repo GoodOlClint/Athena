@@ -1,8 +1,7 @@
-import Foundation
-import XCTest
-
 import AthenaCore
 import AthenaServerKit
+import Foundation
+import XCTest
 
 /// Usability audit 2026-07-02 §2/§3 — model-op progress SSE frames + throttle.
 /// Pins the wire format and the emit-rate decision (ADR 008/009), including the

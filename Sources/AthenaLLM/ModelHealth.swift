@@ -31,8 +31,10 @@ public enum ModelHealth {
 
         problems += safetensorsProblems(dir)
 
-        let tok = ["tokenizer.json", "tokenizer_config.json",
-            "tokenizer.model", "vocab.json"]
+        let tok = [
+            "tokenizer.json", "tokenizer_config.json",
+            "tokenizer.model", "vocab.json",
+        ]
         if !tok.contains(where: {
             fm.fileExists(
                 atPath: dir.appendingPathComponent($0).path)

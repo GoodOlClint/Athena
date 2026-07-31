@@ -54,7 +54,7 @@ final class ParakeetChunkMergeTests: XCTestCase {
         let a = [tok(1, 0), tok(2, 2), tok(3, 4), tok(4, 6)]
         let b = [tok(3, 4), tok(4, 6), tok(5, 8)]
         let r = ParakeetChunkMerge.merge(a, b, overlapDuration: 4)
-        for i in 1..<r.count {
+        for i in 1 ..< r.count {
             XCTAssertLessThanOrEqual(r[i - 1].start, r[i].start)
         }
     }

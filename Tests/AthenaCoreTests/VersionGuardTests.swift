@@ -1,6 +1,5 @@
-import XCTest
-
 import AthenaDeploy
+import XCTest
 
 final class VersionGuardTests: XCTestCase {
     func testCompareIsNumericNotLexical() {

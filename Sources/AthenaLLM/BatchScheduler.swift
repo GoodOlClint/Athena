@@ -23,8 +23,7 @@ public enum BatchScheduler {
     /// `Load.run()` to `{ await governor.admissionInputs() }`; nil ⇒ admit freely
     /// (only in a governor-less test/dev context — never the real daemon).
     public nonisolated(unsafe)
-        static var admissionInputsProvider:
-            (@Sendable () async -> (denominator: Int, budget: Int))?
+        static var admissionInputsProvider: (@Sendable () async -> (denominator: Int, budget: Int))?
 
     static func admissionInputs() async -> (denominator: Int, budget: Int) {
         if let p = admissionInputsProvider { return await p() }

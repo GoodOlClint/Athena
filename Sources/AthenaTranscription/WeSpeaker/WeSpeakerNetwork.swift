@@ -88,7 +88,7 @@ final class WeSpeakerNetwork: Module {
         inChannels: Int, outChannels: Int, blocks: Int, stride: Int
     ) -> [WeSpeakerBasicBlock] {
         var out: [WeSpeakerBasicBlock] = []
-        for i in 0..<blocks {
+        for i in 0 ..< blocks {
             out.append(
                 WeSpeakerBasicBlock(
                     inChannels: i == 0 ? inChannels : outChannels,

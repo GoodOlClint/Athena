@@ -1,7 +1,6 @@
+import AthenaServerKit
 import Foundation
 import XCTest
-
-import AthenaServerKit
 
 /// Usability audit 2026-07-02 §1 — `athena logs` returned the *oldest*
 /// `limit` entries of the window (drop-the-tail bug). `LogTail` is the pure,
@@ -15,34 +14,34 @@ final class LogTailTests: XCTestCase {
         let limit = 200
         let k = 137
         var tail = LogTail<Int>(limit: limit)
-        for i in 0..<(limit + k) { tail.append(i) }  // 0…336, oldest-first
+        for i in 0 ..< (limit + k) { tail.append(i) }  // 0…336, oldest-first
         XCTAssertEqual(tail.entries.count, limit)
-        XCTAssertEqual(tail.entries.first, k)               // 137, not 0
-        XCTAssertEqual(tail.entries.last, limit + k - 1)    // 336
-        XCTAssertEqual(tail.entries, Array(k..<(limit + k)))
+        XCTAssertEqual(tail.entries.first, k)  // 137, not 0
+        XCTAssertEqual(tail.entries.last, limit + k - 1)  // 336
+        XCTAssertEqual(tail.entries, Array(k ..< (limit + k)))
         XCTAssertTrue(tail.truncated)
     }
 
     /// Under capacity: everything retained, order preserved, not truncated.
     func testUnderCapacityKeepsAllInOrder() {
         var tail = LogTail<Int>(limit: 200)
-        for i in 0..<50 { tail.append(i) }
-        XCTAssertEqual(tail.entries, Array(0..<50))
+        for i in 0 ..< 50 { tail.append(i) }
+        XCTAssertEqual(tail.entries, Array(0 ..< 50))
         XCTAssertFalse(tail.truncated)
     }
 
     /// Exactly at capacity is not truncation (nothing dropped).
     func testExactCapacityNotTruncated() {
         var tail = LogTail<Int>(limit: 10)
-        for i in 0..<10 { tail.append(i) }
-        XCTAssertEqual(tail.entries, Array(0..<10))
+        for i in 0 ..< 10 { tail.append(i) }
+        XCTAssertEqual(tail.entries, Array(0 ..< 10))
         XCTAssertFalse(tail.truncated)
     }
 
     /// A non-positive limit clamps to 1 (never a zero-capacity buffer).
     func testLimitClampsToOne() {
         var tail = LogTail<Int>(limit: 0)
-        for i in 0..<5 { tail.append(i) }
+        for i in 0 ..< 5 { tail.append(i) }
         XCTAssertEqual(tail.entries, [4])
         XCTAssertTrue(tail.truncated)
     }

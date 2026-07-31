@@ -1,11 +1,10 @@
+import AthenaClient
 import Foundation
 import XCTest
 
 #if canImport(FoundationNetworking)
     import FoundationNetworking
 #endif
-
-import AthenaClient
 
 /// M19 — the retry policy is the safety boundary (must not silently
 /// double-execute a non-idempotent request), so the adversarial
@@ -61,8 +60,7 @@ final class RetryPolicyTests: XCTestCase {
     }
 
     func testTransportAmbiguousIdempotentOnly() {
-        for c: URLError.Code in [.timedOut, .networkConnectionLost]
-        {
+        for c: URLError.Code in [.timedOut, .networkConnectionLost] {
             XCTAssertNotNil(
                 p.delay(
                     attempt: 0, method: "GET",

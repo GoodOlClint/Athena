@@ -24,7 +24,7 @@ private func runtimeDir(_ dataDir: String?) -> URL {
             isDirectory: true)
     }
         ?? AthenaEnv.userHome()
-            .appendingPathComponent(".athena", isDirectory: true)
+        .appendingPathComponent(".athena", isDirectory: true)
 }
 
 private func pidFile(_ dataDir: String?) -> URL {
@@ -232,7 +232,7 @@ struct Stop: AsyncParsableCommand {
         if let pid = livePid(dataDir) {
             kill(pid, SIGTERM)
             // Up to ~5s for a graceful exit, then SIGKILL.
-            for _ in 0..<50 {
+            for _ in 0 ..< 50 {
                 if !alive(pid) { break }
                 try? await Task.sleep(nanoseconds: 100_000_000)
             }

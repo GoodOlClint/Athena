@@ -16,19 +16,21 @@ final class InMemoryAssetTests: XCTestCase {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("athena-imatest-\(UUID().uuidString).wav")
         defer { try? FileManager.default.removeItem(at: url) }
-        guard let fmt = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32, sampleRate: 16_000,
-            channels: 1, interleaved: false)
+        guard
+            let fmt = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32, sampleRate: 16_000,
+                channels: 1, interleaved: false)
         else { throw XCTSkip("format") }
         do {
             let file = try AVAudioFile(
                 forWriting: url, settings: fmt.settings,
                 commonFormat: .pcmFormatFloat32, interleaved: false)
-            guard let buf = AVAudioPCMBuffer(
-                pcmFormat: fmt, frameCapacity: AVAudioFrameCount(frames))
+            guard
+                let buf = AVAudioPCMBuffer(
+                    pcmFormat: fmt, frameCapacity: AVAudioFrameCount(frames))
             else { throw XCTSkip("buffer") }
             buf.frameLength = AVAudioFrameCount(frames)
-            for i in 0..<frames {
+            for i in 0 ..< frames {
                 buf.floatChannelData![0][i] =
                     Float(0.25 * sin(2.0 * .pi * 440.0 * Double(i) / 16_000.0))
             }
@@ -91,8 +93,9 @@ final class InMemoryAssetTests: XCTestCase {
         for bad in ["clip.wav evil", "clip.w|av", "clip.wav\u{01}", "clip.💥"] {
             let mem = try await AudioDecode.pcm16kMono(
                 from: data, filename: bad, module: .transcription)
-            XCTAssertEqual(Double(mem.count), 8_000, accuracy: 256,
-                           "decode should survive filename \(bad.debugDescription)")
+            XCTAssertEqual(
+                Double(mem.count), 8_000, accuracy: 256,
+                "decode should survive filename \(bad.debugDescription)")
         }
     }
 
@@ -118,9 +121,11 @@ final class InMemoryAssetTests: XCTestCase {
 
         InMemoryAsset.sweepLegacyUploadTempFiles()
 
-        XCTAssertFalse(FileManager.default.fileExists(atPath: mine.path),
-                       "legacy athena-* temp file should be swept")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: other.path),
-                      "unrelated temp file must be left alone")
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: mine.path),
+            "legacy athena-* temp file should be swept")
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: other.path),
+            "unrelated temp file must be left alone")
     }
 }

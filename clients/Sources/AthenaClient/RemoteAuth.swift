@@ -361,7 +361,9 @@ public struct CAuthUserAdd: AsyncParsableCommand {
     @Argument(help: "Username.") public var username: String
     @Flag(
         name: .customLong("password-stdin"),
-        help: "Read the password from stdin (one line) instead of prompting. Else set ATHENA_PASSWORD. (ADR 005 — never on argv.)")
+        help:
+            "Read the password from stdin (one line) instead of prompting. Else set ATHENA_PASSWORD. (ADR 005 — never on argv.)"
+    )
     public var passwordStdin = false
     @Option(help: "Initial role (default: member).")
     public var role: String = "member"

@@ -9,10 +9,10 @@ import AthenaTranscription
 import Foundation
 import HTTPTypes
 import Hummingbird
-import MLX
 import HummingbirdCore
 import HummingbirdTLS
 import Logging
+import MLX
 import NIOCore
 import NIOSSL
 
@@ -95,8 +95,7 @@ extension AthenaServer {
         return .ok((form, file))
     }
 
-    private func handleTranscriptions(_ request: Request) async -> Response
-    {
+    private func handleTranscriptions(_ request: Request) async -> Response {
         let t0 = Date()
         let upload = await extractUploadFile(request, cap: maxAudioUploadBytes)
         guard case .ok(let (form, file)) = upload else { return upload.orFail }
@@ -296,8 +295,7 @@ extension AthenaServer {
     /// its parser. Bounded by `maxVideoUploadBytes`. (`diarize=true` on video is
     /// not yet wired — a 501; transcribe, then diarize the extracted audio via
     /// `/v1/audio/diarizations`.)
-    private func handleVideoTranscriptions(_ request: Request) async -> Response
-    {
+    private func handleVideoTranscriptions(_ request: Request) async -> Response {
         let t0 = Date()
         let upload = await extractUploadFile(request, cap: maxVideoUploadBytes)
         guard case .ok(let (form, file)) = upload else { return upload.orFail }
@@ -368,8 +366,7 @@ extension AthenaServer {
             wantWords: wantWords, turns: [])
     }
 
-    private func handleDiarizations(_ request: Request) async -> Response
-    {
+    private func handleDiarizations(_ request: Request) async -> Response {
         let t0 = Date()
         let upload = await extractUploadFile(request, cap: maxAudioUploadBytes)
         guard case .ok(let (form, file)) = upload else { return upload.orFail }
@@ -639,7 +636,7 @@ extension AthenaServer {
         var curLabel = labels[0]
         var curStart = segs[0].start
         var curEnd = segs[0].end
-        for i in 1..<segs.count {
+        for i in 1 ..< segs.count {
             if labels[i] == curLabel {
                 curEnd = max(curEnd, segs[i].end)
             } else {

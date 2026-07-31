@@ -80,8 +80,9 @@ public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule,
     private func loadModel(id canonical: String) async throws {
         // M54.3 — local-store-dir load only; inference never auto-downloads
         // (operator pulls a missing model at startup).
-        guard let dir = ModelStoreLayout.localDirectory(
-            for: canonical, storeRoot: modelStoreRoot)
+        guard
+            let dir = ModelStoreLayout.localDirectory(
+                for: canonical, storeRoot: modelStoreRoot)
         else {
             throw AthenaError.moduleLoadFailed(
                 .speakerEmbedding,
@@ -194,7 +195,7 @@ public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule,
                             + "range for a %.3fs clip",
                         r.start, r.end, totalSeconds))
             }
-            let slice = Array(pcm[s..<e])
+            let slice = Array(pcm[s ..< e])
             let vec = model.embed(slice)
             out.append(
                 SpeakerSegmentEmbedding(
@@ -251,7 +252,7 @@ public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule,
         var i = 0
         while i + win <= pcm.count {
             var acc: Float = 0
-            for k in i..<(i + win) { acc += pcm[k] * pcm[k] }
+            for k in i ..< (i + win) { acc += pcm[k] * pcm[k] }
             starts.append(i)
             rms.append((acc / Float(win)).squareRoot())
             i += hop
@@ -265,7 +266,7 @@ public actor MLXSpeakerEmbeddingModule: SpeakerEmbeddingModule,
         out.reserveCapacity(kept.count)
         for idx in kept {
             let s = starts[idx]
-            let vec = model.embed(Array(pcm[s..<(s + win)]))
+            let vec = model.embed(Array(pcm[s ..< (s + win)]))
             out.append(
                 SpeakerSegmentEmbedding(
                     start: Double(s) / sr,

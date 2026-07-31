@@ -35,7 +35,9 @@ final class QuarantineAudioSweepTests: XCTestCase {
         let files =
             ((try? FileManager.default.contentsOfDirectory(
                 at: url, includingPropertiesForKeys: nil)) ?? [])
-            .filter { ["m4a", "wav", "mp3", "flac", "aac"].contains($0.pathExtension.lowercased()) }
+            .filter {
+                ["m4a", "wav", "mp3", "flac", "aac"].contains($0.pathExtension.lowercased())
+            }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
         guard !files.isEmpty else {
             throw XCTSkip("no audio files under \(dir)")
@@ -98,7 +100,9 @@ final class QuarantineAudioSweepTests: XCTestCase {
                     return "turns=\(r.turns.count) spk=\(r.numSpeakers)"
                 }
             }
-        } else { mark("SKIP diarize/sortformer: load failed") }
+        } else {
+            mark("SKIP diarize/sortformer: load failed")
+        }
 
         if (try? await d.rebind(to: "Pyannote-Segmentation-MLX")) != nil {
             for f in files {
@@ -108,7 +112,9 @@ final class QuarantineAudioSweepTests: XCTestCase {
                     return "regions=\(r.count)"
                 }
             }
-        } else { mark("SKIP segment/pyannote: load failed") }
+        } else {
+            mark("SKIP segment/pyannote: load failed")
+        }
 
         // --- Speaker embedding: WeSpeaker (whole-clip + sliding window). ---
         let s = MLXSpeakerEmbeddingModule(modelStoreRoot: Self.storeRoot)
@@ -127,7 +133,9 @@ final class QuarantineAudioSweepTests: XCTestCase {
                     return "wins=\(r.segments.count)"
                 }
             }
-        } else { mark("SKIP spk: load failed") }
+        } else {
+            mark("SKIP spk: load failed")
+        }
 
         // Reaching here means no pipeline aborted the process on any file.
         mark("DONE — all pipelines survived the corpus")

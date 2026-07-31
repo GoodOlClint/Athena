@@ -9,10 +9,10 @@ import AthenaTranscription
 import Foundation
 import HTTPTypes
 import Hummingbird
-import MLX
 import HummingbirdCore
 import HummingbirdTLS
 import Logging
+import MLX
 import NIOCore
 import NIOSSL
 
@@ -133,8 +133,9 @@ extension AthenaServer {
         router.get("/api/models/:name") { _, context -> Response in
             handleModelShow(context.parameters.get("name"))
         }
-        router.delete("/api/models/:name") { request, context
-            -> Response in
+        router.delete("/api/models/:name") {
+            request, context
+                -> Response in
             await handleModelRemove(
                 context.parameters.get("name"), request)
         }
@@ -150,14 +151,16 @@ extension AthenaServer {
         router.post("/api/users") { request, _ -> Response in
             await handleUserCreate(request)
         }
-        router.delete("/api/users/:name") { request, context
-            -> Response in
+        router.delete("/api/users/:name") {
+            request, context
+                -> Response in
             await handleUserDelete(
                 context.parameters.get("name"), request)
         }
         // ADR 041 — per-user token-budget override (PUT with a null clears it).
-        router.put("/api/users/:name/budget") { request, context
-            -> Response in
+        router.put("/api/users/:name/budget") {
+            request, context
+                -> Response in
             await handleUserBudgetSet(
                 context.parameters.get("name"), request)
         }
@@ -182,18 +185,19 @@ extension AthenaServer {
         router.post("/api/tokens") { request, _ -> Response in
             await handleTokenCreate(request)
         }
-        router.delete("/api/tokens/:prefix") { request, context
-            -> Response in
+        router.delete("/api/tokens/:prefix") {
+            request, context
+                -> Response in
             await handleTokenDelete(
                 context.parameters.get("prefix"), request)
         }
-        router.post("/api/tokens/:prefix/rotate") { request, context
-            -> Response in
+        router.post("/api/tokens/:prefix/rotate") {
+            request, context
+                -> Response in
             await handleTokenRotate(
                 context.parameters.get("prefix"), request)
         }
     }
-
 
     /// `GET /api/usage` (M27.3). An admin (or the single-tenant
     /// loopback operator when auth is off) sees every principal's
@@ -203,8 +207,9 @@ extension AthenaServer {
         let rows: [UsageRow]
         if !who.enforced || who.isAdmin {
             rows = await store.allUsage()
-        } else if let p = who.principal, let r = await store.usage(
-            principal: p)
+        } else if let p = who.principal,
+            let r = await store.usage(
+                principal: p)
         {
             rows = [r]
         } else {
@@ -454,11 +459,13 @@ extension AthenaServer {
             "--predicate", predicate,
         ]
         if debug { args += ["--info", "--debug"] }
-        let collected = (try? await Self.collectLogEntries(
-            args: args, limit: limit)) ?? (entries: [], truncated: false)
-        return Self.json(LogsReportResponse(
-            logs: collected.entries,
-            truncated: collected.truncated ? true : nil))
+        let collected =
+            (try? await Self.collectLogEntries(
+                args: args, limit: limit)) ?? (entries: [], truncated: false)
+        return Self.json(
+            LogsReportResponse(
+                logs: collected.entries,
+                truncated: collected.truncated ? true : nil))
     }
 
     /// `GET /api/logs/stream` (M45.5). Admin-only SSE following
@@ -516,9 +523,9 @@ extension AthenaServer {
                     buffer.append(chunk)
                     while let nl = buffer.firstIndex(of: 0x0A) {
                         let line = buffer.subdata(
-                            in: buffer.startIndex..<nl)
+                            in: buffer.startIndex ..< nl)
                         buffer = buffer.subdata(
-                            in: (nl + 1)..<buffer.endIndex)
+                            in: (nl + 1) ..< buffer.endIndex)
                         if let entry = Self.parseNDJSONLogLine(line),
                             let json = try? JSONEncoder().encode(entry)
                         {
@@ -567,7 +574,8 @@ extension AthenaServer {
         }
         var p = "subsystem == \"athena\""
         if !categories.isEmpty {
-            let list = categories
+            let list =
+                categories
                 .map { "\"\($0)\"" }
                 .joined(separator: ", ")
             p += " AND category IN { \(list) }"
@@ -617,9 +625,9 @@ extension AthenaServer {
             buffer.append(chunk)
             while let nl = buffer.firstIndex(of: 0x0A) {
                 let line = buffer.subdata(
-                    in: buffer.startIndex..<nl)
+                    in: buffer.startIndex ..< nl)
                 buffer = buffer.subdata(
-                    in: (nl + 1)..<buffer.endIndex)
+                    in: (nl + 1) ..< buffer.endIndex)
                 if let entry = parseNDJSONLogLine(line) {
                     tail.append(entry)
                 }
@@ -632,8 +640,7 @@ extension AthenaServer {
     /// Decode one `log show --style ndjson` line into our compact
     /// LogEntryDTO. Returns nil for header rows / parse failures —
     /// best-effort projection, not strict decoding.
-    private static func parseNDJSONLogLine(_ data: Data) -> LogEntryDTO?
-    {
+    private static func parseNDJSONLogLine(_ data: Data) -> LogEntryDTO? {
         guard !data.isEmpty,
             let obj = try? JSONSerialization.jsonObject(with: data)
                 as? [String: Any]
@@ -705,7 +712,8 @@ extension AthenaServer {
                     nil,
                     .init(
                         message: "model_pull requires non-empty 'id'",
-                        type: "invalid_request_error", code: "invalid_body"))
+                        type: "invalid_request_error", code: "invalid_body")
+                )
             }
             do {
                 let dest = try await ModelPull.pull(
@@ -715,13 +723,15 @@ extension AthenaServer {
                     try? JSONEncoder().encode(
                         ModelPullResult(
                             name: dest.lastPathComponent, path: dest.path)),
-                    nil)
+                    nil
+                )
             } catch {
                 return (
                     nil,
                     .init(
                         message: "pull failed: \(ModelPull.friendlyError(error))",
-                        type: "server_error", code: "pull_failed"))
+                        type: "server_error", code: "pull_failed")
+                )
             }
         case "model_convert":
             guard
@@ -732,7 +742,8 @@ extension AthenaServer {
                     nil,
                     .init(
                         message: "model_convert requires non-empty 'id'",
-                        type: "invalid_request_error", code: "invalid_body"))
+                        type: "invalid_request_error", code: "invalid_body")
+                )
             }
             do {
                 // M-conv: `bits` is opt-in (mlx_lm-style). Omit ⇒ no
@@ -753,20 +764,23 @@ extension AthenaServer {
                 return (
                     try? JSONEncoder().encode(
                         ModelConvertResult(path: r.path.path, bytes: r.bytes)),
-                    nil)
+                    nil
+                )
             } catch let e as AthenaError {
                 // Cause-naming convert errors (ADR 016 redirect / unsupported
                 // class) carry an actionable message + stable code — surface
                 // them verbatim instead of a raw substrate dump.
                 return (
                     nil,
-                    .init(message: e.message, type: e.type, code: e.code))
+                    .init(message: e.message, type: e.type, code: e.code)
+                )
             } catch {
                 return (
                     nil,
                     .init(
                         message: "convert failed: \(error)",
-                        type: "server_error", code: "convert_failed"))
+                        type: "server_error", code: "convert_failed")
+                )
             }
         case "model_prune":
             let req =
@@ -781,20 +795,23 @@ extension AthenaServer {
                         ModelPruneResult(
                             candidates: pr.victims.map { $0.name },
                             removed: pr.removed, dry_run: pr.dryRun)),
-                    nil)
+                    nil
+                )
             } catch {
                 return (
                     nil,
                     .init(
                         message: "prune failed: \(error)",
-                        type: "server_error", code: "prune_failed"))
+                        type: "server_error", code: "prune_failed")
+                )
             }
         default:
             return (
                 nil,
                 .init(
                     message: "unknown model op '\(kind)'",
-                    type: "invalid_request_error", code: "invalid_kind"))
+                    type: "invalid_request_error", code: "invalid_kind")
+            )
         }
     }
 
@@ -830,11 +847,13 @@ extension AthenaServer {
                     case let .download(f, _, _): (key, frac, done) = ("agg", f, false)
                     case let .file(name, _, _, b, t, d):
                         (key, frac, done) = (
-                            "file:\(name)", t > 0 ? Double(b) / Double(t) : 0, d)
+                            "file:\(name)", t > 0 ? Double(b) / Double(t) : 0, d
+                        )
                     case .phase: (key, frac, done) = ("phase", -1, true)
                     case let .quantize(i, n):
                         (key, frac, done) = (
-                            "quant", n > 0 ? Double(i) / Double(n) : 0, i >= n)
+                            "quant", n > 0 ? Double(i) / Double(n) : 0, i >= n
+                        )
                     }
                     guard throttle.shouldEmit(key: key, fraction: frac, done: done)
                     else { return }
@@ -994,7 +1013,8 @@ extension AthenaServer {
                         Self.openAIModel(
                             $0.name, $0.modified,
                             contextLength: ModelConfigInfo.read(
-                                modelDirectory: modelStoreRoot
+                                modelDirectory:
+                                    modelStoreRoot
                                     .appendingPathComponent($0.name))?
                                 .maxPositionEmbeddings,
                             promptCeiling: promptTokenCeiling)
@@ -1230,8 +1250,9 @@ extension AthenaServer {
         // NE5 — store-identity lookup (bare name OR full HF id), uniform
         // with the LLM rebind/select path and the embedding/audio modules;
         // the canonical stored id drives the load.
-        guard let target =
-            allowed.canonicalByStoreIdentity(requested)
+        guard
+            let target =
+                allowed.canonicalByStoreIdentity(requested)
         else {
             await audit(
                 request, action: "model.load",
@@ -1364,8 +1385,7 @@ extension AthenaServer {
                 auth_enabled: auth.isEnabled,
                 users: await store.userCount(),
                 tokens: await store.tokenCount(),
-                admins:
-                    (try? await store.usersWithRole("admin"))?.count ?? 0))
+                admins: (try? await store.usersWithRole("admin"))?.count ?? 0))
     }
 
     /// Bare identifier guard for network input (username/role names):
@@ -1434,7 +1454,8 @@ extension AthenaServer {
         else {
             await audit(
                 request, action: "user.create", target: username,
-                result: "denied", detail: "role '\(role)' exceeds "
+                result: "denied",
+                detail: "role '\(role)' exceeds "
                     + "grantor permissions")
             return Self.deny403(
                 "cannot grant a role conferring permissions you do "
@@ -1779,7 +1800,7 @@ extension AthenaServer {
         var i = s.startIndex
         while i < s.endIndex {
             let j = s.index(i, offsetBy: 2)
-            guard let b = UInt8(s[i..<j], radix: 16) else {
+            guard let b = UInt8(s[i ..< j], radix: 16) else {
                 return nil
             }
             out.append(b)
@@ -1852,7 +1873,8 @@ extension AthenaServer {
                         + "tokens — use a longer, unambiguous prefix"
                     : "no token matched \(prefix)",
                 type: "invalid_request_error",
-                code: matches.count > 1 ? "ambiguous_prefix"
+                code: matches.count > 1
+                    ? "ambiguous_prefix"
                     : "not_found")
         }
         // Same scope guard as create — rotation must not re-mint a token
@@ -1938,4 +1960,5 @@ extension AthenaServer {
                         permissions: (RBAC.catalog[r] ?? [])
                             .map(\.rawValue).sorted())
                 }))
-    }}
+    }
+}

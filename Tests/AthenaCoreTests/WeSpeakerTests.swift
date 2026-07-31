@@ -26,7 +26,7 @@ final class WeSpeakerStructureTests: XCTestCase {
         // fill (avoids an MLXRandom dependency in the test target).
         let count = 1 * 200 * 80 * 1
         var data = [Float](repeating: 0, count: count)
-        for i in 0..<count {
+        for i in 0 ..< count {
             data[i] = sin(Float(i) * 0.013) * 0.5
         }
         let x = MLXArray(data, [1, 200, 80, 1])
@@ -49,15 +49,15 @@ final class WeSpeakerStructureTests: XCTestCase {
             return v.map { $0 / n }
         }
         var embs: [[Float]] = []
-        for g in 0..<3 {
-            for k in 0..<5 { embs.append(axis(g, Float(k) * 0.02)) }
+        for g in 0 ..< 3 {
+            for k in 0 ..< 5 { embs.append(axis(g, Float(k) * 0.02)) }
         }
         // Exact-count mode.
         let fixed = AgglomerativeClustering.cluster(embs, numClusters: 3)
         XCTAssertEqual(Set(fixed).count, 3)
-        XCTAssertEqual(Set(fixed[0..<5]).count, 1, "group 0 split")
-        XCTAssertEqual(Set(fixed[5..<10]).count, 1, "group 1 split")
-        XCTAssertEqual(Set(fixed[10..<15]).count, 1, "group 2 split")
+        XCTAssertEqual(Set(fixed[0 ..< 5]).count, 1, "group 0 split")
+        XCTAssertEqual(Set(fixed[5 ..< 10]).count, 1, "group 1 split")
+        XCTAssertEqual(Set(fixed[10 ..< 15]).count, 1, "group 2 split")
         XCTAssertNotEqual(fixed[0], fixed[5])
         XCTAssertNotEqual(fixed[5], fixed[10])
         // Auto mode (well-separated ⇒ cross-cluster distance ~1 > 0.7).
@@ -84,7 +84,7 @@ final class WeSpeakerStructureTests: XCTestCase {
         // 1 s of a 220 Hz tone at 16 kHz.
         let n = 16_000
         var pcm = [Float](repeating: 0, count: n)
-        for i in 0..<n {
+        for i in 0 ..< n {
             pcm[i] = 0.2 * sin(2.0 * Float.pi * 220.0 * Float(i) / 16_000.0)
         }
         let (mel, frames) = fe.extractRaw(pcm)
@@ -121,7 +121,7 @@ final class WeSpeakerIntegrationTests: XCTestCase {
         var dot: Float = 0
         var na: Float = 0
         var nb: Float = 0
-        for i in 0..<min(a.count, b.count) {
+        for i in 0 ..< min(a.count, b.count) {
             dot += a[i] * b[i]
             na += a[i] * a[i]
             nb += b[i] * b[i]
@@ -154,14 +154,14 @@ final class WeSpeakerIntegrationTests: XCTestCase {
         var embs: [[Float]] = []
         var i = 0
         while i + win <= pcm.count {
-            embs.append(model.embed(Array(pcm[i..<(i + win)])))
+            embs.append(model.embed(Array(pcm[i ..< (i + win)])))
             i += win
         }
         XCTAssertGreaterThan(embs.count, 4, "need several windows")
         var lo: Float = 1
         var hi: Float = -1
-        for a in 0..<embs.count {
-            for b in (a + 1)..<embs.count {
+        for a in 0 ..< embs.count {
+            for b in (a + 1) ..< embs.count {
                 let c = cosine(embs[a], embs[b])
                 lo = min(lo, c)
                 hi = max(hi, c)
@@ -255,7 +255,7 @@ final class WeSpeakerMemoryRegressionTests: XCTestCase {
         // anything content-dependent — values don't matter.
         var pcm = [Float](repeating: 0, count: 3 * 16_000)
         var rng = SystemRandomNumberGenerator()
-        for i in 0..<pcm.count {
+        for i in 0 ..< pcm.count {
             pcm[i] = Float(Int(rng.next() % 1000)) / 1000.0 - 0.5
         }
 
@@ -264,7 +264,7 @@ final class WeSpeakerMemoryRegressionTests: XCTestCase {
         MLX.Memory.clearCache()
         let baseline = MLX.Memory.cacheMemory
 
-        for _ in 0..<22 { _ = model.embed(pcm) }
+        for _ in 0 ..< 22 { _ = model.embed(pcm) }
 
         let after = MLX.Memory.cacheMemory
         // Without M50.2's clear, the pool scales linearly with the
@@ -273,6 +273,6 @@ final class WeSpeakerMemoryRegressionTests: XCTestCase {
         XCTAssertLessThan(
             after - baseline, ceiling,
             "MLX cache pool drifted \(after - baseline) bytes "
-            + "above baseline after 22 WeSpeaker embeds (M50.2 leak)")
+                + "above baseline after 22 WeSpeaker embeds (M50.2 leak)")
     }
 }

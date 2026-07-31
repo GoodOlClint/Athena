@@ -169,7 +169,8 @@ struct ConfigSet: AsyncParsableCommand {
                 String(data: $0, encoding: .utf8)
             } ?? ""
         let user = Self.extractUserName(existing) ?? "_athena"
-        let exec = Self.extractExecutablePath(existing)
+        let exec =
+            Self.extractExecutablePath(existing)
             ?? "/usr/local/libexec/athena/athena"
         let workdir =
             (exec as NSString).deletingLastPathComponent

@@ -29,8 +29,9 @@ public struct Session: Sendable {
 
     /// `<b64url(payload)>.<b64url(hmac)>`, payload = `user:expiry`.
     public func mint(user: String, now: Date = Date()) -> String {
-        let exp = Int(now.addingTimeInterval(Self.ttl)
-            .timeIntervalSince1970)
+        let exp = Int(
+            now.addingTimeInterval(Self.ttl)
+                .timeIntervalSince1970)
         let payload = Data("\(user):\(exp)".utf8)
         let mac = HMAC<SHA256>.authenticationCode(
             for: payload, using: secret)

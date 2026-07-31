@@ -59,7 +59,8 @@ public enum QuotaWindow: String, Sendable, CaseIterable, Codable {
             let comps = calendar.dateComponents([.year, .month], from: date)
             // A missing month start is not reachable for a real date; fall back
             // to the day boundary rather than inventing an epoch.
-            return (calendar.date(from: comps)
+            return
+                (calendar.date(from: comps)
                 ?? calendar.startOfDay(for: date)).timeIntervalSince1970
         }
     }

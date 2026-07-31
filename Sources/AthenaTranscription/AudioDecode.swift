@@ -194,7 +194,8 @@ public enum AudioDecode {
         // `maxSamples` and never feed a non-finite value to `Int()` (D4).
         let inSR = inFormat.sampleRate > 0 ? inFormat.sampleRate : Double(sampleRate)
         let estimate = (Double(file.length) * Double(sampleRate) / inSR).rounded()
-        let reserve = estimate.isFinite
+        let reserve =
+            estimate.isFinite
             ? Int(min(estimate, Double(maxSamples))) : maxSamples
         out.reserveCapacity(reserve + sampleRate)
 

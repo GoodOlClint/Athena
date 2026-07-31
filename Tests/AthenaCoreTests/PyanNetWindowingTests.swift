@@ -37,7 +37,7 @@ final class PyanNetWindowingTests: XCTestCase {
     }
 
     func testFullWindowSliceIsUnchanged() {
-        let samples = (0..<(W + 5)).map { Float($0) }
+        let samples = (0 ..< (W + 5)).map { Float($0) }
         let win = PyanNetSegmentationModel.paddedWindow(
             samples, start: 0, windowSamples: W)
         XCTAssertEqual(win.count, W)
@@ -68,7 +68,7 @@ final class PyanNetWindowingTests: XCTestCase {
             total: total, windowSamples: W, stepSamples: W / 2)
         XCTAssertEqual(starts.first, 0)
         XCTAssertEqual(starts.last! + W, total, "tail right-aligned to the end")
-        for i in 1..<starts.count {
+        for i in 1 ..< starts.count {
             XCTAssertGreaterThan(starts[i], starts[i - 1])
         }
     }
@@ -79,8 +79,7 @@ final class PyanNetWindowingTests: XCTestCase {
     /// is exactly W samples — never below the 251-sample receptive field. This
     /// is the property whose absence aborted the daemon.
     func testEveryWindowClearsTheConvReceptiveField() {
-        for total in [1, 50, sincKernel - 1, sincKernel, 999, W - 1, W, W + 1, 400_000]
-        {
+        for total in [1, 50, sincKernel - 1, sincKernel, 999, W - 1, W, W + 1, 400_000] {
             let samples = [Float](repeating: 0.1, count: total)
             let starts = PyanNetSegmentationModel.windowStarts(
                 total: total, windowSamples: W, stepSamples: W / 2)

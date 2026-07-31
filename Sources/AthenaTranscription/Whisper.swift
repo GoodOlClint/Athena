@@ -226,8 +226,7 @@ final class WhisperAudioEncoder: Module {
 
 final class WhisperTextDecoder: Module {
     @ModuleInfo(key: "token_embedding") var tokenEmbedding: Embedding
-    @ParameterInfo(key: "positional_embedding") var positionalEmbedding:
-        MLXArray
+    @ParameterInfo(key: "positional_embedding") var positionalEmbedding: MLXArray
     @ModuleInfo(key: "blocks") var blocks: [WhisperBlock]
     @ModuleInfo(key: "ln") var ln: LayerNorm
 

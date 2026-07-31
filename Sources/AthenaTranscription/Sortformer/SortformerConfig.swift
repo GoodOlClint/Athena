@@ -48,10 +48,13 @@ public struct FCEncoderConfig: Codable, Sendable {
         numMelBins = try c.decodeIfPresent(Int.self, forKey: .numMelBins) ?? 80
         convKernelSize = try c.decodeIfPresent(Int.self, forKey: .convKernelSize) ?? 9
         subsamplingFactor = try c.decodeIfPresent(Int.self, forKey: .subsamplingFactor) ?? 8
-        subsamplingConvChannels = try c.decodeIfPresent(Int.self, forKey: .subsamplingConvChannels) ?? 256
-        subsamplingConvKernelSize = try c.decodeIfPresent(Int.self, forKey: .subsamplingConvKernelSize) ?? 3
+        subsamplingConvChannels =
+            try c.decodeIfPresent(Int.self, forKey: .subsamplingConvChannels) ?? 256
+        subsamplingConvKernelSize =
+            try c.decodeIfPresent(Int.self, forKey: .subsamplingConvKernelSize) ?? 3
         subsamplingConvStride = try c.decodeIfPresent(Int.self, forKey: .subsamplingConvStride) ?? 2
-        maxPositionEmbeddings = try c.decodeIfPresent(Int.self, forKey: .maxPositionEmbeddings) ?? 5000
+        maxPositionEmbeddings =
+            try c.decodeIfPresent(Int.self, forKey: .maxPositionEmbeddings) ?? 5000
         attentionBias = try c.decodeIfPresent(Bool.self, forKey: .attentionBias) ?? true
         scaleInput = try c.decodeIfPresent(Bool.self, forKey: .scaleInput) ?? true
     }
@@ -147,7 +150,8 @@ public struct ModulesConfig: Codable, Sendable {
         spkcacheUpdatePeriod = try c.decodeIfPresent(Int.self, forKey: .spkcacheUpdatePeriod) ?? 188
         chunkLeftContext = try c.decodeIfPresent(Int.self, forKey: .chunkLeftContext) ?? 1
         chunkRightContext = try c.decodeIfPresent(Int.self, forKey: .chunkRightContext) ?? 1
-        spkcacheSilFramesPerSpk = try c.decodeIfPresent(Int.self, forKey: .spkcacheSilFramesPerSpk) ?? 5
+        spkcacheSilFramesPerSpk =
+            try c.decodeIfPresent(Int.self, forKey: .spkcacheSilFramesPerSpk) ?? 5
         predScoreThreshold = try c.decodeIfPresent(Float.self, forKey: .predScoreThreshold) ?? 1e-6
         maxIndex = try c.decodeIfPresent(Int.self, forKey: .maxIndex) ?? 10000
         scoresBoostLatest = try c.decodeIfPresent(Float.self, forKey: .scoresBoostLatest) ?? 0.5
@@ -212,9 +216,17 @@ public struct SortformerConfig: Codable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         modelType = try c.decodeIfPresent(String.self, forKey: .modelType) ?? "sortformer"
         numSpeakers = try c.decodeIfPresent(Int.self, forKey: .numSpeakers) ?? 4
-        fcEncoderConfig = try c.decodeIfPresent(FCEncoderConfig.self, forKey: .fcEncoderConfig) ?? FCEncoderConfig(from: decoder)
-        tfEncoderConfig = try c.decodeIfPresent(TFEncoderConfig.self, forKey: .tfEncoderConfig) ?? TFEncoderConfig(from: decoder)
-        modulesConfig = try c.decodeIfPresent(ModulesConfig.self, forKey: .modulesConfig) ?? ModulesConfig(from: decoder)
-        processorConfig = try c.decodeIfPresent(ProcessorConfig.self, forKey: .processorConfig) ?? ProcessorConfig(from: decoder)
+        fcEncoderConfig =
+            try c.decodeIfPresent(FCEncoderConfig.self, forKey: .fcEncoderConfig)
+            ?? FCEncoderConfig(from: decoder)
+        tfEncoderConfig =
+            try c.decodeIfPresent(TFEncoderConfig.self, forKey: .tfEncoderConfig)
+            ?? TFEncoderConfig(from: decoder)
+        modulesConfig =
+            try c.decodeIfPresent(ModulesConfig.self, forKey: .modulesConfig)
+            ?? ModulesConfig(from: decoder)
+        processorConfig =
+            try c.decodeIfPresent(ProcessorConfig.self, forKey: .processorConfig)
+            ?? ProcessorConfig(from: decoder)
     }
 }

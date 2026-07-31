@@ -33,7 +33,7 @@ final class StructuredGuideTests: XCTestCase {
     /// 256 single-byte tokens (id == byte) + eos at id 256 — the Swift mirror
     /// of the shim's `byte_vocab()`.
     private func byteVocab() throws -> StructuredVocabulary {
-        let tokens = (0..<256).map {
+        let tokens = (0 ..< 256).map {
             VocabToken(id: UInt32($0), bytes: [UInt8($0)])
         }
         return try StructuredVocabulary(tokens: tokens, eosTokenId: 256)
@@ -284,7 +284,7 @@ final class StructuredGuideTests: XCTestCase {
         // NOT invalidate the shared compiled index.
         let index = try StructuredIndex(
             jsonSchema: #"{"type":"integer"}"#, vocabulary: byteVocab())
-        for _ in 0..<8 {
+        for _ in 0 ..< 8 {
             let g = try StructuredGuide(index: index)
             XCTAssertTrue(g.advance(digit(5)))
             XCTAssertTrue(g.isFinal)

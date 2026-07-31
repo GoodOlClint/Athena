@@ -73,9 +73,10 @@ public enum RemoteLogs {
         }
         render(r.logs)
         if r.truncated == true {
-            FileHandle.standardError.write(Data(
-                "(truncated — older entries dropped; narrow --since, raise --limit, or use --follow)\n"
-                    .utf8))
+            FileHandle.standardError.write(
+                Data(
+                    "(truncated — older entries dropped; narrow --since, raise --limit, or use --follow)\n"
+                        .utf8))
         }
     }
 

@@ -45,9 +45,10 @@ public final class InMemoryResourceLoader: NSObject, AVAssetResourceLoaderDelega
         if let dr = req.dataRequest {
             let start = Int(dr.requestedOffset)
             if start < 0 || start > data.count {
-                req.finishLoading(with: NSError(
-                    domain: "athena-mem", code: 1,
-                    userInfo: [NSLocalizedDescriptionKey: "range out of bounds"]))
+                req.finishLoading(
+                    with: NSError(
+                        domain: "athena-mem", code: 1,
+                        userInfo: [NSLocalizedDescriptionKey: "range out of bounds"]))
                 return true
             }
             let len: Int
@@ -57,7 +58,7 @@ public final class InMemoryResourceLoader: NSObject, AVAssetResourceLoaderDelega
                 len = min(dr.requestedLength, data.count - start)
             }
             if len > 0 {
-                dr.respond(with: data.subdata(in: start..<(start + len)))
+                dr.respond(with: data.subdata(in: start ..< (start + len)))
             }
         }
         req.finishLoading()
@@ -136,7 +137,8 @@ public enum InMemoryAsset {
         // would poison detection and make AVFoundation fail to open even valid
         // audio. `ext` is already either a safe filename ext or a sniffed known
         // format token.
-        let contentType = ext.isEmpty
+        let contentType =
+            ext.isEmpty
             ? nil : UTType(filenameExtension: ext)?.identifier
         let loader = InMemoryResourceLoader(data: data, contentType: contentType)
         let queue = DispatchQueue(label: "athena.inmem-asset.\(UUID().uuidString)")
@@ -254,8 +256,10 @@ public enum InMemoryAsset {
     /// insurance. Best-effort — failures are ignored.
     public static func sweepLegacyUploadTempFiles() {
         let dir = FileManager.default.temporaryDirectory
-        guard let entries = try? FileManager.default.contentsOfDirectory(
-            at: dir, includingPropertiesForKeys: nil) else { return }
+        guard
+            let entries = try? FileManager.default.contentsOfDirectory(
+                at: dir, includingPropertiesForKeys: nil)
+        else { return }
         for url in entries where url.lastPathComponent.hasPrefix("athena-") {
             try? FileManager.default.removeItem(at: url)
         }

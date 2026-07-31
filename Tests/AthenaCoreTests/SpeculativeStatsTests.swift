@@ -46,7 +46,7 @@ final class SpeculativeStatsTests: XCTestCase {
         let obs = CountingObserver()
         // accepted pattern: 64 accepts out of 100 — a representative
         // backbone/MTP agreement rate for the acceptance observer.
-        let pattern = (0..<100).map { $0 < 64 }
+        let pattern = (0 ..< 100).map { $0 < 64 }
         SpeculativeStats.$observer.withValue(obs) {
             simulateSpeculativeIterations(pattern)
         }
@@ -62,7 +62,7 @@ final class SpeculativeStatsTests: XCTestCase {
     /// dropped it to single digits would trip this on a stub.
     func testAcceptanceRateClearsFloor() {
         let obs = CountingObserver()
-        let pattern = (0..<100).map { $0 < 64 }
+        let pattern = (0 ..< 100).map { $0 < 64 }
         SpeculativeStats.$observer.withValue(obs) {
             simulateSpeculativeIterations(pattern)
         }

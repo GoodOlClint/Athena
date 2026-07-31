@@ -50,7 +50,7 @@ final class MetalFaultDegradeE2ETests: XCTestCase {
                 let big = zeros([200_000, 250_000], dtype: .float16)  // ~93 GiB
                 asyncEval(big)  // fault fires on MLX's worker thread → handler
                 // Wait for the async fault to reach the handler (≤ ~5 s).
-                for _ in 0..<200 where !MetalFaultLatch.shared.isSet {
+                for _ in 0 ..< 200 where !MetalFaultLatch.shared.isSet {
                     try? await Task.sleep(nanoseconds: 25_000_000)
                 }
                 return 0

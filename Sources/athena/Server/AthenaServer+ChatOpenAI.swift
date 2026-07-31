@@ -9,10 +9,10 @@ import AthenaTranscription
 import Foundation
 import HTTPTypes
 import Hummingbird
-import MLX
 import HummingbirdCore
 import HummingbirdTLS
 import Logging
+import MLX
 import NIOCore
 import NIOSSL
 
@@ -174,8 +174,7 @@ extension AthenaServer {
         // Anthropic `/v1/messages` adapter (ADR 036 S2) calls this same seam.
         let model: String
         let deferredLoad: (@Sendable () async -> ColdStreamLoad)?
-        let deferredPrepare:
-            (@Sendable () async -> (message: String, type: String, code: String)?)?
+        let deferredPrepare: (@Sendable () async -> (message: String, type: String, code: String)?)?
         switch await prepareChat(
             request: request, requestedModel: body.model, messages: turns,
             tools: toolSpecs, chatTemplateKwargs: body.chatTemplateKwargsContext(),

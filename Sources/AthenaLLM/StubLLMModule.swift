@@ -345,7 +345,8 @@ public actor StubLLMModule: LLMModule, ModelSelectable {
     /// own). Read once per stream.
     private static var chunkDelayNanos: UInt64 {
         if let raw = ProcessInfo.processInfo.environment[
-            "ATHENA_STUB_DELAY_MS"], let ms = UInt64(raw), ms > 0 {
+            "ATHENA_STUB_DELAY_MS"], let ms = UInt64(raw), ms > 0
+        {
             return ms * 1_000_000
         }
         return 15_000_000

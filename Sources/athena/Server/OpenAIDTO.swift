@@ -289,20 +289,23 @@ struct ChatCompletionRequest: Codable {
         if top_logprobs != nil && !wantsLogprobs {
             return (
                 "'top_logprobs' requires 'logprobs' to be true.",
-                "invalid_top_logprobs")
+                "invalid_top_logprobs"
+            )
         }
         guard wantsLogprobs else { return nil }
         if let k = top_logprobs, k < 0 || k > 20 {
             return (
                 "'top_logprobs' must be between 0 and 20.",
-                "invalid_top_logprobs")
+                "invalid_top_logprobs"
+            )
         }
         if !deterministic {
             return (
                 "'logprobs' is only supported on the deterministic decode "
                     + "path: set 'temperature' to 0, or use structured output "
                     + "(response_format / tools).",
-                "logprobs_requires_deterministic")
+                "logprobs_requires_deterministic"
+            )
         }
         return nil
     }
@@ -363,7 +366,7 @@ struct ChatCompletionRequest: Codable {
             if let d = t.function.description { fn["description"] = d }
             fn["parameters"] =
                 (t.function.parameters
-                    ?? .object(["type": .string("object")]))
+                ?? .object(["type": .string("object")]))
                 .guardingTypelessSchemaNodes()  // ADR 036
                 .foundationValue()
             return ["type": "function", "function": fn]
