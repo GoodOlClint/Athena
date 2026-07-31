@@ -35,7 +35,7 @@ The automated `claude-review` GitHub Action reviews on every push and submits ex
 - Fix every blocker.
 - Fold a filed follow-up issue into the PR **only if it fits the PR's scope**: it touches code the PR already changes, or is required for the PR's stated `Closes #N` goal. Out-of-scope follow-ups stay open for end-of-cycle triage.
 - Every folded-in issue gets a `Closes #N` added to the PR body (`gh pr edit <N> --body`) — otherwise it stays open after merge and can't be hand-closed.
-- **Fold-ins happen on the first fix round only.** Every later round fixes exactly what the reviewer flagged and nothing else. (Unconditional fold-in once spiraled a PR through three review rounds in a sibling repo — this cap is the lesson.)
+- **Fold-ins spend the PR's single fold budget — one round per PR, shared with the APPROVED path below.** A PR that has already folded once, on either path, has spent it: every later round fixes exactly what the reviewer flagged and nothing else. (Unconditional fold-in once spiraled a PR through three review rounds in a sibling repo — this cap is the lesson.)
 - Push; the reviewer re-reviews automatically. Loop.
 
 ### APPROVED
