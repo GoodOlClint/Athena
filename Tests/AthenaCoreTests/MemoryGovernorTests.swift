@@ -233,9 +233,10 @@ final class MemoryGovernorTests: XCTestCase {
 
         try await gov.ensureLoaded(.transcription)
         try await gov.ensureLoaded(.textEmbedding)  // evicts transcription
-        // eviction unload is detached; wait for it to settle.
-        for _ in 0 ..< 50 where c.n == 0 {
-            try await Task.sleep(nanoseconds: 10_000_000)
+        // eviction unload is detached; wait for it to settle (issue #4 —
+        // bounded poll on the observable counter, not a fixed window).
+        await waitUntil("the detached eviction unload fired the hook") {
+            c.n > 0
         }
         XCTAssertEqual(c.n, 1, "hook should fire on eviction")
 
@@ -260,11 +261,12 @@ final class MemoryGovernorTests: XCTestCase {
         // Bookkeeping has ample room (60+60 ≪ 1000) but live memory is
         // over high-water, so loading embedding sheds the LRU evictable.
         try await gov.ensureLoaded(.textEmbedding)
-        for _ in 0 ..< 50 {
-            let st = await gov.snapshot().modules
-                .first { $0.id == .transcription }?.state
-            if st == .unloaded { break }
-            try await Task.sleep(nanoseconds: 10_000_000)
+        // The shed is a DETACHED unload. Poll for `.unloaded`, not
+        // `.unloading` — the latter is set synchronously before the
+        // `ensureLoaded` above returns, so it would never actually wait.
+        await waitUntil("transcription is shed") {
+            await gov.snapshot().modules
+                .first { $0.id == .transcription }?.state == .unloaded
         }
 
         let s = await gov.snapshot()
@@ -428,16 +430,16 @@ final class MemoryGovernorTests: XCTestCase {
         // While the load is in flight it stays .loading; once it fails, the
         // next call THROWS the real error instead of another .loading.
         var surfaced: Error?
-        for _ in 0 ..< 100 {
+        let deadline = ContinuousClock.now + .seconds(10)
+        while surfaced == nil, ContinuousClock.now < deadline {
             do {
                 let s = try await gov.beginLoadIfNeeded(.llm)
                 guard case .loading = s else {
                     return XCTFail("unexpected non-loading status")
                 }
-                try await Task.sleep(nanoseconds: 10_000_000)
+                try await Task.sleep(for: .milliseconds(1))
             } catch {
                 surfaced = error
-                break
             }
         }
         let e = try XCTUnwrap(
@@ -535,11 +537,12 @@ final class MemoryGovernorTests: XCTestCase {
         // its teardown (`.unloading`) before reloading — otherwise the reload
         // could take the `.loaded` fast path and never exercise the drain.
         async let unloadDone: Void = gov.unload(.llm)
-        for _ in 0 ..< 500 {
-            let st = await gov.snapshot().modules
-                .first { $0.id == .llm }?.state
-            if st == .unloading { break }
-            try await Task.sleep(nanoseconds: 1_000_000)
+        // `!= .loaded` (not `== .unloading`) so the poll can't time out if the
+        // teardown races through to `.unloaded`; with a 60 ms unload it lands
+        // on `.unloading` in practice and the drain is exercised.
+        await waitUntil("the slot has entered teardown") {
+            await gov.snapshot().modules.first { $0.id == .llm }?.state
+                != .loaded
         }
         // Reload while the slow `unload()` is mid-flight: the reload must drain
         // the teardown, then load — and the trailing markUnloaded must NOT
@@ -567,16 +570,16 @@ final class MemoryGovernorTests: XCTestCase {
             return XCTFail("first cold-load should be .loading")
         }
         var surfaced: Error?
-        for _ in 0 ..< 100 {
+        let deadline = ContinuousClock.now + .seconds(10)
+        while surfaced == nil, ContinuousClock.now < deadline {
             do {
                 let s = try await gov.beginLoadIfNeeded(.llm)
                 guard case .loading = s else {
                     return XCTFail("unexpected non-loading status")
                 }
-                try await Task.sleep(nanoseconds: 5_000_000)
+                try await Task.sleep(for: .milliseconds(1))
             } catch {
                 surfaced = error
-                break
             }
         }
         let e = try XCTUnwrap(
@@ -764,8 +767,12 @@ final class MemoryGovernorTests: XCTestCase {
         // forward. Run it concurrently so we can observe it is stuck.
         let admit = Task { try await gov.ensureLoaded(.llm) }
 
-        // Give the admission time to reach (and block on) the gate.
-        try await Task.sleep(nanoseconds: 100_000_000)
+        // Deterministic handshake (issue #4): wait until the reclaim is
+        // provably QUEUED on the gate — observable state — instead of betting
+        // a fixed window was long enough for it to get there.
+        await waitUntil("the reclaim is queued behind the forward") {
+            await gate.waiterCount >= 1
+        }
         let mid = await log.events
         XCTAssertFalse(
             mid.contains("reclaim"),
@@ -825,23 +832,27 @@ final class MemoryGovernorTests: XCTestCase {
 
     // MARK: - M70.3 L9 — coalescing invokes module.load exactly once
 
-    /// A module that counts its `load()` invocations and sleeps briefly so
-    /// concurrent first-touch callers pile up on the in-flight load Task.
+    /// A module that counts its `load()` invocations and, when given a
+    /// `release` signal, parks inside `load()` until the test fires it — so the
+    /// in-flight window concurrent first-touch callers must coalesce on is held
+    /// open by a handshake, not by a fixed sleep that a slow runner can outrun
+    /// (issue #4).
     private actor CountingModule: InferenceModule {
         nonisolated let id: ModuleID
         private let bytes: Int
+        private let release: Signal?
         private(set) var loadCount = 0
         private var isLoaded = false
-        init(id: ModuleID, bytes: Int) {
+        init(id: ModuleID, bytes: Int, release: Signal? = nil) {
             self.id = id
             self.bytes = bytes
+            self.release = release
         }
         var residentBytes: Int { isLoaded ? bytes : 0 }
         func memoryEstimate() -> Int { bytes }
         func load(reservation: MemoryReservation) async throws {
             loadCount += 1
-            // Widen the window so all concurrent callers coalesce on one Task.
-            try? await Task.sleep(nanoseconds: 10_000_000)
+            await release?.wait()
             isLoaded = true
         }
         func unload() async { isLoaded = false }
@@ -855,14 +866,30 @@ final class MemoryGovernorTests: XCTestCase {
     /// never duplicated.
     func testConcurrentLoadsInvokeLoadExactlyOnceL9() async throws {
         let gov = MemoryGovernor(totalBudgetBytes: 1_000)
-        let m = CountingModule(id: .llm, bytes: 400)
+        let release = Signal()
+        let m = CountingModule(id: .llm, bytes: 400, release: release)
         await gov.register(m, evictable: false)
 
-        await withThrowingTaskGroup(of: Void.self) { group in
-            for _ in 0 ..< 8 {
-                group.addTask { try await gov.ensureLoaded(.llm) }
+        // Two mechanisms, opposite directions — neither alone is enough:
+        //  • the park stops the load COMPLETING before the callers pile up (the
+        //    direction the old 10 ms sleep could lose on a starved runner);
+        //  • the barrier + grace gives every caller time to REACH the governor.
+        //    "Arrived at the coalescing check" is not observable (`inFlight` is
+        //    private), so a straggler landing after the release would find the
+        //    slot `.loaded` and pass WITHOUT exercising coalescing. Over-waiting
+        //    is free here — the parked load cannot finish — so the grace is
+        //    generous rather than tuned, and it can only weaken, never flake.
+        let arrived = Counter()
+        let callers = (0 ..< 8).map { _ in
+            Task {
+                arrived.bump()
+                try await gov.ensureLoaded(.llm)
             }
         }
+        await waitUntil("all 8 first-touch callers arrived") { arrived.n == 8 }
+        try await Task.sleep(for: .milliseconds(50))
+        await release.fire()
+        for c in callers { try await c.value }
 
         let n = await m.count()
         XCTAssertEqual(
@@ -881,22 +908,23 @@ final class MemoryGovernorTests: XCTestCase {
     /// load completes a later call returns `.loaded`.
     func testBeginLoadIfNeededLoadingThenLoadedNL1() async throws {
         let gov = MemoryGovernor(totalBudgetBytes: 1_000)
-        let m = CountingModule(id: .llm, bytes: 400)
+        let release = Signal()
+        let m = CountingModule(id: .llm, bytes: 400, release: release)
         await gov.register(m, evictable: false)
 
         let first = try await gov.beginLoadIfNeeded(.llm)
         XCTAssertEqual(first, .loading, "cold first touch starts a bg load")
-        // A concurrent re-request joins the in-flight load (no 2nd load).
+        // The bg load is parked, so it CANNOT have completed before the
+        // re-request — the coalescing assertion no longer races a 10 ms window.
         let concurrent = try await gov.beginLoadIfNeeded(.llm)
         XCTAssertEqual(concurrent, .loading, "in-flight coalesces")
 
+        await release.fire()
         // Poll until the detached load lands and the slot reports .loaded.
-        var landed: MemoryGovernor.LoadStatus = .loading
-        for _ in 0 ..< 100 {
-            landed = try await gov.beginLoadIfNeeded(.llm)
-            if landed == .loaded { break }
-            try await Task.sleep(nanoseconds: 5_000_000)
+        try await waitUntil("the background load lands") {
+            try await gov.beginLoadIfNeeded(.llm) == .loaded
         }
+        let landed = try await gov.beginLoadIfNeeded(.llm)
         XCTAssertEqual(landed, .loaded, "slot becomes .loaded after the bg load")
         let n = await m.count()
         XCTAssertEqual(n, 1, "exactly one background load ran")
@@ -931,18 +959,24 @@ final class MemoryGovernorTests: XCTestCase {
         nonisolated let id: ModuleID
         private let bytes: Int
         private let loadDelayNs: UInt64
+        private let release: Signal?
         private(set) var loadCount = 0
         private var isLoaded = false
-        init(id: ModuleID, bytes: Int, loadDelayNs: UInt64) {
+        init(
+            id: ModuleID, bytes: Int, loadDelayNs: UInt64,
+            release: Signal? = nil
+        ) {
             self.id = id
             self.bytes = bytes
             self.loadDelayNs = loadDelayNs
+            self.release = release
         }
         var residentBytes: Int { isLoaded ? bytes : 0 }
         func memoryEstimate() -> Int { bytes }
         func load(reservation: MemoryReservation) async throws {
             loadCount += 1
             try? await Task.sleep(nanoseconds: loadDelayNs)
+            await release?.wait()
             isLoaded = true
         }
         func unload() async { isLoaded = false }
@@ -971,19 +1005,26 @@ final class MemoryGovernorTests: XCTestCase {
     /// detached so a later call finds the slot resident — and only ONE load ran.
     func testAwaitLoadTimesOutThenLandsLoaded() async throws {
         let gov = MemoryGovernor(totalBudgetBytes: 1_000)
-        let m = SlowLoadModule(id: .llm, bytes: 400, loadDelayNs: 200_000_000)
+        // The load parks until released, so it CANNOT land inside the budget.
+        // A fixed delay was an ordering assumption here, not a workload:
+        // `awaitLoad` sleeps `loadPollIntervalMillis` (100 ms) BEFORE its first
+        // state check, so the old 200 ms delay left only a ~100 ms margin
+        // against a starved runner — the issue #3/#4 flake class (issue #4).
+        let release = Signal()
+        let m = SlowLoadModule(
+            id: .llm, bytes: 400, loadDelayNs: 0, release: release)
         await gov.register(m, evictable: false)
 
-        // Budget far shorter than the 200ms load ⇒ timeout ⇒ .loading.
+        // Budget shorter than the (parked) load ⇒ timeout ⇒ .loading.
         let timed = try await gov.awaitLoad(.llm, within: 0.02)
         XCTAssertEqual(timed, .loading, "budget elapsed ⇒ .loading (503)")
 
+        await release.fire()
         // The detached load was NOT cancelled; poll until it lands .loaded.
-        var landed: MemoryGovernor.LoadStatus = .loading
-        for _ in 0 ..< 100 {
-            landed = try await gov.awaitLoad(.llm, within: 0.05)
-            if landed == .loaded { break }
+        try await waitUntil("the un-cancelled load lands") {
+            try await gov.awaitLoad(.llm, within: 0.05) == .loaded
         }
+        let landed = try await gov.awaitLoad(.llm, within: 0.05)
         XCTAssertEqual(landed, .loaded, "the un-cancelled load eventually lands")
         let count = await m.count()
         XCTAssertEqual(count, 1, "the timeout did not start a second load")
@@ -999,12 +1040,10 @@ final class MemoryGovernorTests: XCTestCase {
         let status = try await gov.awaitLoad(.llm, within: 0)
         XCTAssertEqual(status, .loading, "zero budget ⇒ immediate .loading")
         // It still kicked the load off (legacy beginLoadIfNeeded semantics).
-        var landed: MemoryGovernor.LoadStatus = .loading
-        for _ in 0 ..< 100 {
-            landed = try await gov.awaitLoad(.llm, within: 0)
-            if landed == .loaded { break }
-            try await Task.sleep(nanoseconds: 5_000_000)
+        try await waitUntil("the kicked-off load lands") {
+            try await gov.awaitLoad(.llm, within: 0) == .loaded
         }
+        let landed = try await gov.awaitLoad(.llm, within: 0)
         XCTAssertEqual(landed, .loaded)
         let count = await m.count()
         XCTAssertEqual(count, 1)

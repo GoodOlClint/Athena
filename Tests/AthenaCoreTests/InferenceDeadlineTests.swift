@@ -42,25 +42,18 @@ final class InferenceDeadlineTests: XCTestCase {
     }
 
     func testStreamTruncatedAtDeadline() async {
-        // A source that emits one element every 40 ms, bounded by a 120 ms
-        // deadline, must stop well before its 100 elements are exhausted.
-        let source = AsyncStream<Int> { cont in
-            let t = Task {
-                for i in 0 ..< 100 {
-                    if Task.isCancelled { break }
-                    cont.yield(i)
-                    try? await Task.sleep(nanoseconds: 40_000_000)
-                }
-                cont.finish()
-            }
-            cont.onTermination = { _ in t.cancel() }
-        }
+        // Issue #4: the old form paced a 100-element source at 40 ms/element
+        // under a 120 ms deadline and asserted `count > 0` — i.e. it bet the
+        // first element would be produced inside the window. Instead: buffer
+        // three elements up front and NEVER finish the source, so the ONLY way
+        // this loop can terminate is the deadline truncating it, and the ready
+        // elements are delivered regardless of scheduling.
         var count = 0
-        for await _ in deadlineBoundedNanos(120_000_000, source) {
+        for await _ in deadlineBoundedNanos(500_000_000, neverFinishing(3)) {
             count += 1
         }
-        XCTAssertGreaterThan(count, 0)
-        XCTAssertLessThan(count, 100)
+        XCTAssertEqual(
+            count, 3, "buffered elements delivered, then the deadline ended it")
     }
 
     func testStreamZeroSecondsPassesEverythingThrough() async {
@@ -78,19 +71,10 @@ final class InferenceDeadlineTests: XCTestCase {
         // `onTimerFired` closure must fire exactly once so the caller's
         // logger can record the truncation (the daemon-side analog of
         // the M45.7 5xx legibility fix for the streaming path).
-        let source = AsyncStream<Int> { cont in
-            let t = Task {
-                for i in 0 ..< 100 {
-                    if Task.isCancelled { break }
-                    cont.yield(i)
-                    try? await Task.sleep(nanoseconds: 40_000_000)
-                }
-                cont.finish()
-            }
-            cont.onTermination = { _ in t.cancel() }
-        }
+        // A source that never finishes ⇒ the timer always wins the race, with
+        // no dependence on how fast the runner paces the source (issue #4).
         let fired = TestFlag()
-        let bounded = deadlineBoundedNanos(120_000_000, source) {
+        let bounded = deadlineBoundedNanos(200_000_000, neverFinishing(3)) {
             fired.set()
         }
         for await _ in bounded {}
@@ -110,12 +94,16 @@ final class InferenceDeadlineTests: XCTestCase {
             cont.finish()
         }
         let fired = TestFlag()
+        let start = ContinuousClock.now  // the timer starts at stream creation
         let bounded = deadlineBoundedNanos(2_000_000_000, source) {
             fired.set()
         }
         for await _ in bounded {}
-        // Wait past the deadline so any latent timer would have fired.
-        try? await Task.sleep(nanoseconds: 2_100_000_000)
+        // Wait past the deadline so any latent timer would have fired —
+        // anchored to a MONOTONIC start, so the 200 ms margin holds no matter
+        // how long draining the source took (issue #4).
+        try? await Task.sleep(
+            until: start + .milliseconds(2_200), clock: .continuous)
         XCTAssertFalse(
             fired.value(),
             "onTimerFired must not fire when the stream finishes "
@@ -158,6 +146,23 @@ final class InferenceDeadlineTests: XCTestCase {
             fired.value(),
             "a downstream cancel must not fire the deadline-truncation callback"
         )
+    }
+}
+
+/// A source that hands over `n` ready elements and then never finishes, so the
+/// ONLY thing that can end the stream is the deadline — no bet on how fast the
+/// runner paces a source (issue #4). The 30 s tail is a hang guard: if
+/// truncation ever regressed, the caller fails on the element count instead of
+/// blocking CI forever. It is cancelled on the (normal) truncation path.
+private func neverFinishing(_ n: Int) -> AsyncStream<Int> {
+    AsyncStream<Int> { cont in
+        for i in 0 ..< n { cont.yield(i) }
+        let hangGuard = Task {
+            try? await Task.sleep(for: .seconds(30))
+            cont.yield(-1)  // extra element ⇒ a clean count mismatch
+            cont.finish()
+        }
+        cont.onTermination = { _ in hangGuard.cancel() }
     }
 }
 

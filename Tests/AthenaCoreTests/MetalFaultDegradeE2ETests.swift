@@ -49,9 +49,15 @@ final class MetalFaultDegradeE2ETests: XCTestCase {
                 () -> Int in
                 let big = zeros([200_000, 250_000], dtype: .float16)  // ~93 GiB
                 asyncEval(big)  // fault fires on MLX's worker thread → handler
-                // Wait for the async fault to reach the handler (≤ ~5 s).
-                for _ in 0 ..< 200 where !MetalFaultLatch.shared.isSet {
-                    try? await Task.sleep(nanoseconds: 25_000_000)
+                // Wait for the async fault to reach the handler — bounded poll
+                // on the observable latch against a monotonic deadline (issue
+                // #4). Inline rather than the shared `waitUntil` because this
+                // body is `@Sendable` and cannot capture the test case.
+                let deadline = ContinuousClock.now + .seconds(10)
+                while !MetalFaultLatch.shared.isSet,
+                    ContinuousClock.now < deadline
+                {
+                    try? await Task.sleep(for: .milliseconds(5))
                 }
                 return 0
             }
