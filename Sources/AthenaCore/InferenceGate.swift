@@ -119,8 +119,16 @@ public actor InferenceGate {
     }
 
     /// Acquire the gate, suspending FIFO behind any current holder + waiters.
-    func acquire() async throws {
-        guard Self.enabled else { return }
+    ///
+    /// Deliberately does NOT consult `enabled`: the knob is read exactly once
+    /// per span, by `withExclusiveExecution` above, so acquire/release can never
+    /// disagree about whether this span owns the gate. Reading it here too made
+    /// the pair race a mid-span flip — see `release()`.
+    ///
+    /// `private`, with `release()`, so that "read once per span" is enforced by
+    /// the compiler rather than by this comment: a direct call from elsewhere in
+    /// AthenaCore would reintroduce the asymmetry with no guard at either end.
+    private func acquire() async throws {
         try Task.checkCancellation()
         if !held && waiters.isEmpty {
             held = true
@@ -155,8 +163,14 @@ public actor InferenceGate {
     }
 
     /// Release the gate: hand it to the next FIFO waiter, or mark it free.
-    func release() {
-        guard Self.enabled else { return }
+    ///
+    /// Never consults `enabled`. It used to, and that stranded the gate: a span
+    /// acquired while enabled whose `enabled` flipped `true → false` mid-flight
+    /// released into a no-op, leaving `held == true` with no holder — every
+    /// later acquire then queued behind a phantom and was never resumed. The
+    /// guard was also unreachable on the path it was written for, since
+    /// `withExclusiveExecution` returns before releasing when the gate is off.
+    private func release() {
         if waiters.isEmpty {
             held = false
             return

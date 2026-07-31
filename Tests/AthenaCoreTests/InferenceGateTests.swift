@@ -152,6 +152,44 @@ final class InferenceGateTests: XCTestCase {
         XCTAssertEqual(waiters, 0)
     }
 
+    /// The revert knob flipping mid-span must not strand the gate. `release()`
+    /// used to open with `guard Self.enabled`, so a span acquired while enabled
+    /// released into a no-op once the knob went false — `held` stayed true with
+    /// no holder and every later acquire queued forever. Reachable from this
+    /// tier today: `MemoryGovernor.evictSync` spawns detached teardown tasks
+    /// that outlive their test method, and `testDisabledDoesNotSerialize` sets
+    /// `enabled = false` on its first line. Only alphabetical class ordering
+    /// hid it.
+    func testReleaseSurvivesDisabledFlipMidSpan() async throws {
+        let gate = InferenceGate()
+        let holder = await HeldGate(gate)  // acquired while enabled
+        defer { holder.release() }
+        InferenceGate.enabled = false  // …flips while the span is in flight
+        holder.release()
+        _ = try await holder.task.value
+
+        let held = await gate.isHeld
+        let waiters = await gate.waiterCount
+        XCTAssertFalse(held, "release() stranded the gate held after the flip")
+        XCTAssertEqual(waiters, 0)
+
+        // And the gate is genuinely reusable, not merely reported free. Bounded
+        // so a regression fails with a diagnostic instead of hanging CI — the
+        // stranded gate's symptom is an acquire that never returns.
+        InferenceGate.enabled = true
+        let reuse = Task { try await gate.withExclusiveExecution { 7 } }
+        guard
+            await waitUntil(
+                "gate reacquired after the mid-span flip",
+                { await gate.stats().acquisitions == 2 })
+        else {
+            reuse.cancel()
+            return
+        }
+        let r = try await reuse.value
+        XCTAssertEqual(r, 7)
+    }
+
     // MARK: - ADR 038 slice 1 — gate observability accounting
 
     /// Uncontended acquisitions: every acquire takes the fast path, so
