@@ -76,9 +76,9 @@ final class DecodeProgressTaskLocalTests: XCTestCase {
     /// point of using a TaskLocal in the first place (no signature
     /// plumbing through five layers of generate/runSpeculative/
     /// container.perform/closure/decode loop).
-    func testNonisolatedFunctionReadsBindingDynamically() async {
+    func testNonisolatedFunctionReadsBindingDynamically() {
         let counter = TestCounter()
-        await DecodeProgress.$counter.withValue(counter) {
+        DecodeProgress.$counter.withValue(counter) {
             Self.incrementDynamically(times: 3)
         }
         XCTAssertEqual(counter.tokens, 3)
@@ -229,9 +229,9 @@ final class DecodeProgressPrefillTests: XCTestCase {
     /// chunks computed once with the ceiling-divide, then per-chunk
     /// publish after asyncEval submits the work. Pinned here so a
     /// future refactor that drops the publish call gets caught.
-    func testPrefillLoopIdiomPublishesEveryChunk() async {
+    func testPrefillLoopIdiomPublishesEveryChunk() {
         let counter = TestCounter()
-        await DecodeProgress.$counter.withValue(counter) {
+        DecodeProgress.$counter.withValue(counter) {
             simulatePrefill(promptCount: 1500)  // 3 chunks at 512
         }
         let s = counter.prefillState

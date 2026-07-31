@@ -480,7 +480,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             DecodeProgress.counter?.setSetupStage("build-vocab")
             defer { DecodeProgress.counter?.setSetupStage(nil) }
             let vocabT0 = Date()
-            let built = try await container.perform {
+            let built = await container.perform {
                 (ctx: ModelContext) -> ([VocabToken], UInt32)? in
                 // Every architecture uses config.json's vocab_size, so guided
                 // structured output is available everywhere (M23 fork A).
@@ -815,7 +815,6 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                                 tools: tools, maxTokens: maxTokens,
                                 requestSpeculative: speculative,
                                 requestTemperature: temperature,
-                                requestTopP: topP, requestSeed: seed,
                                 chatTemplateKwargs: chatTemplateKwargs,
                                 promptCacheKey: promptCacheKey,
                                 principal: principal, logprobs: logprobs)
@@ -880,7 +879,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                         }
                     // M31.2: the effective cap is the same positive-wins
                     // resolution both paths apply; hitting it ⇒ truncated.
-                    let cap = await Self.effectiveMaxTokens(
+                    let cap = Self.effectiveMaxTokens(
                         maxTokens, self.params.maxTokens)
                     continuation.yield(
                         .finish(
@@ -924,8 +923,6 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         tools: [[String: any Sendable]]?, maxTokens: Int?,
         requestSpeculative: Bool?,
         requestTemperature: Double?,
-        requestTopP: Double?,
-        requestSeed: Int?,
         chatTemplateKwargs: [String: any Sendable]?,
         promptCacheKey: String? = nil,
         principal: String? = nil,
@@ -1093,19 +1090,11 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         }()
 
         let cfgVocab = configVocabSize
-        // Resolve sampling knobs for the M40.2 sampling-mode branch
-        // outside the (non-isolated) closure: same positive-wins
-        // resolution the standard substrate path uses, expressed in
-        // the types the pure-math helper wants. Inert when the branch
-        // doesn't engage (greedy path ignores them).
-        let samplingTemp = Float(effectiveTemp)
-        let samplingTopP: Float? = {
-            if let t = requestTopP, t > 0, t < 1 { return Float(t) }
-            if params.topP > 0, params.topP < 1 { return params.topP }
-            return nil
-        }()
-        let samplingSeed: Int? =
-            requestSeed.flatMap { $0 >= 0 ? $0 : nil }
+        // Publication S0 — the M40.2/M40.3 in-closure sampling-mode branch went
+        // away with the vendored Qwen3.5 decode fork, and with it the locally
+        // resolved temp/top_p/seed it consumed. An unstructured sampling request
+        // now returns nil below and lands on the substrate stream, which resolves
+        // the same knobs onto `GenerateParameters` in `beginGeneration`.
         // The closure returns the decoded text, the completion token count
         // (`ids.count`), and the cached-prefix token count (M59.3); the
         // prompt count is `promptTokens.count` from the outer scope. nil ⇒
@@ -1534,7 +1523,7 @@ extension MLXLLMModule {
         }
         do {
             try await InferenceGate.shared.withExclusiveExecution {
-                try await container.perform { ctx in
+                await container.perform { ctx in
                     let gen = BatchGenerator(model: ctx.model, defaultMaxTokens: 1)
                     let uids = gen.insert(
                         prompts: batch.map(\.promptTokens),

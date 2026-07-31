@@ -158,26 +158,24 @@ struct TerminalLogHandler: LogHandler {
         set { metadata[key] = newValue }
     }
 
-    func log(
-        level: Logging.Logger.Level,
-        message: Logging.Logger.Message,
-        metadata explicit: Logging.Logger.Metadata?,
-        source: String,
-        file: String,
-        function: String,
-        line: UInt
-    ) {
+    func log(event: Logging.LogEvent) {
         var merged = self.metadata
         if let provided = metadataProvider?.get() {
             merged.merge(provided) { _, new in new }
         }
-        if let explicit { merged.merge(explicit) { _, new in new } }
+        if let explicit = event.metadata {
+            merged.merge(explicit) { _, new in new }
+        }
+        // swift-log 1.12's `LogEvent` carries an optional `error` alongside the
+        // message. Surface it as a field — the handler owns the emit path now,
+        // so an unread `event.error` would vanish from the log entirely.
+        if let e = event.error { merged["error"] = "\(e)" }
         // M45.3: per-emission `function=` field, sourced from
         // swift-log's call-site capture. Always present, sorted with
         // the rest so the in-merged-view filter (`function=loadModel`)
         // works regardless of whether req/principal are bound.
-        merged["function"] = "\(function)"
-        var text = message.description
+        merged["function"] = "\(event.function)"
+        var text = event.message.description
         if !merged.isEmpty {
             text +=
                 " "
@@ -187,7 +185,7 @@ struct TerminalLogHandler: LogHandler {
         }
         let stamp = Self.ts.string(from: Date())
         let out =
-            "\(stamp) \(level.rawValue) \(category): \(text)\n"
+            "\(stamp) \(event.level.rawValue) \(category): \(text)\n"
         FileHandle.standardError.write(Data(out.utf8))
     }
 }
@@ -211,26 +209,22 @@ struct OSUnifiedLogHandler: LogHandler {
         set { metadata[key] = newValue }
     }
 
-    func log(
-        level: Logging.Logger.Level,
-        message: Logging.Logger.Message,
-        metadata explicit: Logging.Logger.Metadata?,
-        source: String,
-        file: String,
-        function: String,
-        line: UInt
-    ) {
+    func log(event: Logging.LogEvent) {
         var merged = self.metadata
         if let provided = metadataProvider?.get() {
             merged.merge(provided) { _, new in new }
         }
-        if let explicit { merged.merge(explicit) { _, new in new } }
+        if let explicit = event.metadata {
+            merged.merge(explicit) { _, new in new }
+        }
+        // Same `error=` surfacing as TerminalLogHandler — see there.
+        if let e = event.error { merged["error"] = "\(e)" }
         // M45.3: same per-emission `function=` field as
         // TerminalLogHandler so a merged `log show` view filters
         // identically by function across both sinks.
-        merged["function"] = "\(function)"
+        merged["function"] = "\(event.function)"
 
-        var text = message.description
+        var text = event.message.description
         if !merged.isEmpty {
             let pairs = merged.sorted { $0.key < $1.key }
                 .map { "\($0.key)=\($0.value)" }
@@ -245,7 +239,7 @@ struct OSUnifiedLogHandler: LogHandler {
         // and sysdiagnose. The audit trail keeps `target=u:foo` /
         // `t:hash[:8]` and never the raw token.
         osLogger.log(
-            level: Self.osType(level), "\(text, privacy: .public)")
+            level: Self.osType(event.level), "\(text, privacy: .public)")
     }
 
     /// swift-log → OSLogType. `.default` is the unified-log "notice"
