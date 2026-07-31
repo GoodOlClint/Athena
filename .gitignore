@@ -29,7 +29,9 @@ rust-shim/target/
 default.profraw
 
 # Claude/agent local settings
-.claude/
+# Local agent state stays untracked; committed skills are the exception.
+.claude/*
+!.claude/skills/
 
 # graphify: graphs live in the shared ~/.graph-index/ index, not in-repo.
 graphify-out/
