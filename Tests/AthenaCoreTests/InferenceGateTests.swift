@@ -22,6 +22,63 @@ final class InferenceGateTests: XCTestCase {
         func leave() { active -= 1 }
     }
 
+    /// Deterministic handshake for ordering-sensitive gate tests (issue #3):
+    /// fixed sleep windows flaked on slow shared runners when the assumed
+    /// scheduling didn't happen in time. `HeldGate` holds the gate until
+    /// released and signals when its body has provably entered; `waitUntil`
+    /// polls an observable condition with a generous deadline instead of
+    /// betting on a fixed window.
+    private final class HeldGate {
+        let task: Task<Void, Error>
+        private let releaseC: AsyncStream<Void>.Continuation
+        /// Acquire `gate` and suspend inside the body until `release()`.
+        /// Returns only after the body has provably entered (gate held) —
+        /// verified by assertion, since a disabled gate runs bodies ungated.
+        init(_ gate: InferenceGate) async {
+            let (entered, enteredC) = AsyncStream.makeStream(of: Void.self)
+            let (release, releaseC) = AsyncStream.makeStream(of: Void.self)
+            self.releaseC = releaseC
+            self.task = Task {
+                // Terminate `entered` on EVERY exit (incl. acquire-throws), so
+                // a failed acquisition surfaces below instead of hanging init.
+                defer { enteredC.finish() }
+                try await gate.withExclusiveExecution {
+                    enteredC.yield()
+                    var it = release.makeAsyncIterator()
+                    _ = await it.next()
+                }
+            }
+            var it = entered.makeAsyncIterator()
+            guard await it.next() != nil else {
+                XCTFail("HeldGate never acquired the gate")
+                return
+            }
+            let held = await gate.isHeld
+            XCTAssertTrue(held, "HeldGate returned without holding the gate")
+        }
+        func release() { releaseC.finish() }
+        // A skipped release() must not park the holder task forever.
+        deinit { releaseC.finish() }
+    }
+
+    /// Poll `condition` until true or the (monotonic) deadline passes — then
+    /// XCTFail and return false so the caller can bail with one diagnostic.
+    @discardableResult
+    private func waitUntil(
+        _ label: String, seconds: Double = 10,
+        _ condition: () async -> Bool
+    ) async -> Bool {
+        let deadline = ContinuousClock.now + .seconds(seconds)
+        while !(await condition()) {
+            if ContinuousClock.now > deadline {
+                XCTFail("timed out waiting for: \(label)")
+                return false
+            }
+            try? await Task.sleep(for: .milliseconds(1))
+        }
+        return true
+    }
+
     /// Mutual exclusion: gated sections never overlap, even under contention,
     /// and the gate drains to empty afterward.
     func testSerializesConcurrentSections() async throws {
@@ -92,23 +149,21 @@ final class InferenceGateTests: XCTestCase {
     /// `CancellationError` and never blocks the holder or the gate.
     func testCancelledWaiterThrowsAndDrains() async throws {
         let gate = InferenceGate()
-        let holder = Task {
-            try await gate.withExclusiveExecution {
-                try? await Task.sleep(nanoseconds: 50_000_000)
-            }
-        }
-        try? await Task.sleep(nanoseconds: 5_000_000)  // holder acquires
+        let holder = await HeldGate(gate)  // returns with the gate provably held
+        defer { holder.release() }
         let waiter = Task {
             try await gate.withExclusiveExecution { 1 }
         }
-        try? await Task.sleep(nanoseconds: 5_000_000)  // waiter enqueues
+        guard await waitUntil("waiter enqueued", { await gate.waiterCount == 1 })
+        else { return }
         waiter.cancel()
         do {
             _ = try await waiter.value
             XCTFail("cancelled waiter should throw")
         } catch is CancellationError {
         } catch { XCTFail("expected CancellationError, got \(error)") }
-        _ = try await holder.value
+        holder.release()
+        _ = try await holder.task.value
         let held = await gate.isHeld
         let waiters = await gate.waiterCount
         XCTAssertFalse(held)
@@ -137,22 +192,20 @@ final class InferenceGateTests: XCTestCase {
     /// is not counted as contended.
     func testContentionAccounting() async throws {
         let gate = InferenceGate()
-        let holder = Task {
-            try await gate.withExclusiveExecution {
-                try? await Task.sleep(nanoseconds: 60_000_000)
-            }
-        }
-        try? await Task.sleep(nanoseconds: 5_000_000)  // holder acquires
+        let holder = await HeldGate(gate)  // returns with the gate provably held
+        defer { holder.release() }
         let waiters = (0 ..< 3).map { _ in
             Task { try await gate.withExclusiveExecution {} }
         }
-        try? await Task.sleep(nanoseconds: 10_000_000)  // all three enqueue
+        guard await waitUntil("all three waiters enqueued", { await gate.waiterCount == 3 })
+        else { return }
         let mid = await gate.stats()
         XCTAssertTrue(mid.held)
         XCTAssertEqual(mid.waiters, 3, "expected 3 queued behind the holder")
         XCTAssertEqual(mid.maxWaiters, 3)
 
-        _ = try await holder.value
+        holder.release()
+        _ = try await holder.task.value
         for w in waiters { _ = try await w.value }
         let done = await gate.stats()
         XCTAssertEqual(done.acquisitions, 4, "holder + 3 waiters")
