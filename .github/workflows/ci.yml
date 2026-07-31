@@ -33,8 +33,39 @@ jobs:
       - name: Download Metal Toolchain
         run: xcodebuild -downloadComponent MetalToolchain
 
+      # Fail fast if the download silently didn't take (mlx-swift CI pattern):
+      # a missing toolchain otherwise surfaces later as a confusing Metal
+      # compile error.
+      - name: Verify Metal Toolchain present
+        run: xcodebuild -showComponent MetalToolchain
+
+      # Skip the cargo build entirely when rust-shim sources are unchanged
+      # (content-hashed cache, mlx setup-linux pattern).
+      - name: Cache rust-shim build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust-shim/target
+          key: ${{ runner.os }}-rust-shim-${{ hashFiles('rust-shim/**') }}
+
       - name: Build rust-shim (structured-output staticlib)
         run: ./rust-shim/build.sh
 
       - name: Unit tests
         run: ./deploy/test.sh
+
+      # CI-debugging breadcrumbs on red runs (mlx-swift-lm pattern): xcresult
+      # bundles + macOS crash logs, short retention.
+      - name: Upload test results and crash logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-failure-diagnostics
+          path: |
+            ~/Library/Developer/Xcode/DerivedData/**/Logs/Test/*.xcresult
+            .build/**/*.xcresult
+            ~/Library/Logs/DiagnosticReports/*
+          retention-days: 7
+          if-no-files-found: ignore

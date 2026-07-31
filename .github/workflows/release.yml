@@ -22,6 +22,9 @@ permissions:
 jobs:
   release:
     name: Build & publish release
+    # Guard: forks that push tags must not attempt a release build (no
+    # secrets there — it would publish an unsigned artifact under their fork).
+    if: github.repository == 'GoodOlClint/Athena'
     runs-on: macos-15
     timeout-minutes: 120
     env:
@@ -46,6 +49,9 @@ jobs:
 
       - name: Download Metal Toolchain
         run: xcodebuild -downloadComponent MetalToolchain
+
+      - name: Verify Metal Toolchain present
+        run: xcodebuild -showComponent MetalToolchain
 
       - name: Build rust-shim (structured-output staticlib)
         run: ./rust-shim/build.sh
