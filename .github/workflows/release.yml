@@ -39,7 +39,7 @@ jobs:
       AC_API_KEY_ID: ${{ secrets.AC_API_KEY_ID }}
       AC_API_ISSUER: ${{ secrets.AC_API_ISSUER }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Select newest Xcode (Metal Toolchain needs Xcode 26+)
         run: |

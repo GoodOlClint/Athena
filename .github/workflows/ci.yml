@@ -34,7 +34,7 @@ jobs:
     container:
       image: swift:6.3.3-rhel-ubi9
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Mark workspace safe for git-in-container
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       # Gate = "the formatter was run", verified by running it and requiring a
@@ -53,7 +53,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Select newest Xcode (Metal Toolchain needs Xcode 26+)
         id: xcode
@@ -75,7 +75,7 @@ jobs:
       # Skip the cargo build entirely when rust-shim sources are unchanged
       # (content-hashed cache, mlx setup-linux pattern).
       - name: Cache rust-shim build
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -97,7 +97,7 @@ jobs:
       # caches are invisible to sibling PRs; the push-to-main run is what
       # publishes the cache everyone restores.
       - name: Cache SPM build
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .build
           key: ${{ runner.os }}-spm-${{ steps.xcode.outputs.version }}-${{ hashFiles('Package.resolved') }}
@@ -111,7 +111,7 @@ jobs:
       # bundles + macOS crash logs, short retention.
       - name: Upload test results and crash logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: test-failure-diagnostics
           path: |
