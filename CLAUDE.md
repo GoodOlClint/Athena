@@ -119,6 +119,8 @@ Read `docs/decisions/` before architectural changes — particularly anything th
 ```sh
 ./deploy/build.sh Release           # xcodebuild → .build/xcode/.../Release/athena
 ./deploy/test.sh                    # unit tests
+swift format --in-place --configuration .swift-format --recursive Sources Tests clients Package.swift
+                                    # style gate (CI lints with swift-format pinned at 6.3.3)
 ./deploy/e2e-rbac.sh                # RBAC end-to-end
 athena load                         # run daemon in foreground on loopback (no auth)
 curl http://127.0.0.1:7447/healthz  # liveness

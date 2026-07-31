@@ -17,6 +17,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # swift-format style gate. Runs on a Linux container — free/fast, no macOS
+  # minutes. The container tag pins the EXACT swift-format version (issue #2:
+  # formatter defaults drift across releases and would redden every open PR
+  # at once); bump the tag deliberately, reformatting the tree in the same PR.
+  lint:
+    name: Lint (swift-format)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    container:
+      image: swift:6.3.3-rhel-ubi9
+    steps:
+      - uses: actions/checkout@v5
+      - name: Mark workspace safe for git-in-container
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: swift-format lint
+        run: |
+          swift format lint --strict --recursive Sources Tests clients Package.swift \
+            || { echo "::error::Style check failed — run: swift format --in-place --configuration .swift-format --recursive Sources Tests clients Package.swift"; exit 1; }
+
   unit:
     name: Unit tier (swift test)
     runs-on: macos-15
