@@ -482,7 +482,7 @@ struct AuthTokenAdd: AsyncParsableCommand {
     @OptionGroup var daemon: DaemonOptions
 
     func run() async throws {
-        let ttlSecs: Int? = try ttl.map {
+        let ttlSecs: Int? = ttl.map {
             guard let s = parseTTLSeconds($0) else {
                 FailableExit.die(
                     "error: invalid --ttl '\($0)' (use e.g. 30d, 12h, "
@@ -550,7 +550,7 @@ struct AuthTokenRotate: AsyncParsableCommand {
     @OptionGroup var daemon: DaemonOptions
 
     func run() async throws {
-        let ttlSecs: Int? = try ttl.map {
+        let ttlSecs: Int? = ttl.map {
             guard let s = parseTTLSeconds($0) else {
                 FailableExit.die(
                     "error: invalid --ttl '\($0)' (use e.g. 30d, 12h, "

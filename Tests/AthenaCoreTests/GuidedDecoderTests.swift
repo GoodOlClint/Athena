@@ -127,7 +127,3 @@ final class GuidedDecoderTests: XCTestCase {
         }
     }
 }
-
-/// CommitResult is payload-free, so Equatable synthesizes — lets the
-/// assertions above compare directly. (@testable-visible internal type.)
-extension CommitResult: @retroactive Equatable {}

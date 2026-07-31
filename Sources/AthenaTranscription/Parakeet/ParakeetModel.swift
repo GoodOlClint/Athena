@@ -479,7 +479,7 @@ private final class ParakeetLSTMCell: Module {
 
     /// One step. x: `[B, in]`, h/c: `[B, H]` → (hNew, cNew) each `[B, H]`.
     func step(_ x: MLXArray, h: MLXArray, c: MLXArray) -> (MLXArray, MLXArray) {
-        var ifgo = addMM(bias, x, wx.T) + MLX.matmul(h, wh.T)  // [B, 4H]
+        let ifgo = addMM(bias, x, wx.T) + MLX.matmul(h, wh.T)  // [B, 4H]
         let g = split(ifgo, parts: 4, axis: -1)
         let i = sigmoid(g[0])
         let f = sigmoid(g[1])

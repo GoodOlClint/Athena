@@ -20,6 +20,10 @@ public enum StructuredShim {
         guard needed > 1 else { return "" }
         var buf = [CChar](repeating: 0, count: needed)
         _ = oc_last_error(&buf, needed)
-        return String(cString: buf)
+        // Truncate at the shim's NUL terminator, then decode — the
+        // `[CChar]` `String(cString:)` overload is deprecated.
+        return String(
+            decoding: buf.prefix { $0 != 0 }.map(UInt8.init(bitPattern:)),
+            as: UTF8.self)
     }
 }
