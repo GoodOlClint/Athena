@@ -1,6 +1,6 @@
 ---
 name: pr-merge-loop
-description: Take a working diff to state=MERGED — pre-submit gate (sibling sweep + subagent review), auto-merge setup, review-response policy (scoped fold-in, round cap), follow-up triage, inline-thread resolution. Invoke when code is ready to become a PR, and again whenever a review verdict or failed merge needs handling.
+description: Take a working diff to state=MERGED — pre-submit gate (sibling sweep + subagent review + premise-check), verdict-gated merge (fold-in decision after APPROVED, then merge), review-response policy (scoped fold-in, round cap), follow-up triage, inline-thread resolution, post-merge harvest. Invoke when code is ready to become a PR, and again whenever a review verdict or failed merge needs handling.
 ---
 
 # PR merge loop
@@ -11,19 +11,20 @@ Opening a PR is the start of the job, not the end. Done means `state=MERGED`. Gr
 
 ## Before opening the PR (pre-submit gate)
 
-Three checks on the working diff, before the first push — a defect caught here costs one local fix; the same defect caught by CI costs a full round trip.
+Four checks on the working diff, before the first push — a defect caught here costs one local fix; the same defect caught by CI costs a full round trip.
 
 1. **Sibling sweep — no tunnel vision.** The instance you were asked to fix is rarely the only one. Before finalizing, hunt for similar code the same defect or pattern lives in: code-intel MCP `search` (semantic — "where else does X happen") plus grep for the exact symbol/pattern, and graphify blast-radius ("what calls the function I changed") when the change alters behavior callers depend on. In-scope siblings get fixed in this PR; out-of-scope ones get a `gh issue create` before you open the PR.
 2. **Subagent pre-review.** Spawn a code-review subagent (correctness-reviewer, or /code-review when available) on the working diff and fix real findings before pushing. This is a quick pass, not the CI review — its job is catching what a fresh pair of eyes sees, not re-running the full constraint checklist.
-2b. **Premise check — risk-class fixes only.** For a fix in a risk class (resource bound, cap/limit, security guard, concurrency) or one following an issue's prescribed mechanism, run the `premise-check` skill: state what the fix bounds, compare against what the finding said was unbounded, construct the evasion. (Lesson from a sibling repo: three follow-up fixes shipped with wrong premises — a body cap that didn't bound the parse, a per-request bound equated with a per-file one — and each cost a later merge cycle. One targeted subagent is cheaper.)
-3. **Green gate — tests, last.** After all pre-submit fixes land (steps 1–2b can change code, so this runs last), run the tiers the diff touches: `./deploy/test.sh` (unit tier) always; `./deploy/build.sh Release` when the change affects the MLX-linked targets or deploy scripts; the relevant `deploy/e2e-*.sh` when an HTTP surface or store behavior changed (model-gated e2e needs real hardware — say so if skipped). A red result never gets pushed. Docs-only diffs may skip the run; say so explicitly.
+3. **Premise check — risk-class fixes only.** For a fix in a risk class (resource bound, cap/limit, security guard, concurrency) or one following an issue's prescribed mechanism, spawn one reviewer subagent to answer: what quantity does this fix bound and at what point in the flow; what quantity did the finding say was unbounded; do they match; and what concrete input or interleaving still evades the fix. A mismatch or working evasion is fixed before push. That sentence is the whole procedure — the operator's environment carries it as a `premise-check` skill, but no skill is required. (Lesson from a sibling repo: three follow-up fixes shipped with wrong premises — a body cap that didn't bound the parse, a per-request bound equated with a per-file one — and each cost a later merge cycle.)
+4. **Green gate — tests, last.** After all pre-submit fixes land (steps 1–3 can change code, so this runs last), run the tiers the diff touches: `./deploy/test.sh` (unit tier) always; `./deploy/build.sh Release` when the change affects the MLX-linked targets or deploy scripts; the relevant `deploy/e2e-*.sh` when an HTTP surface or store behavior changed (model-gated e2e needs real hardware — say so if skipped). A red result never gets pushed. Docs-only diffs may skip the run; say so explicitly.
 
-## Open + arm auto-merge (one unit, always)
+## Open the PR — merge is verdict-gated (policy 2026-07-31)
 
-- Push branch → `gh pr create` (base main) → `gh pr merge <N> --auto --squash`. Enabling auto-merge is not optional and the operator does not have to ask for it.
+- Push branch → `gh pr create` (base main). Do NOT arm auto-merge: it merges the instant the review approves, before the fold-in decision below can run — the decision needs the verdict in hand while the PR is still open.
 - The PR body carries `Closes #N` for every issue it resolves — never close issues by hand with `gh issue close`; the merge closes them.
 - Squash on merge: per-PR commits collapse to one curated commit on main, matching the house one-commit-per-slice history.
 - Never bump `Athena.appVersion` or touch `v*` tags in a PR — versions are release events (ADR 040 S8), cut by the operator via `/ship`.
+- Merging is an explicit act after the verdict — see APPROVED below.
 
 ## The review loop
 
@@ -37,10 +38,11 @@ The automated `claude-review` GitHub Action reviews on every push and submits ex
 - **Fold-ins happen on the first fix round only.** Every later round fixes exactly what the reviewer flagged and nothing else. (Unconditional fold-in once spiraled a PR through three review rounds in a sibling repo — this cap is the lesson.)
 - Push; the reviewer re-reviews automatically. Loop.
 
-### APPROVED, with follow-up issues filed
+### APPROVED
 
-- Never fold them into this PR.
-- **Triage at end of cycle, before starting the next plan item**: report each new issue with a priority and when it will be resolved. Don't let them silently become backlog.
+- Follow-ups filed with the approval → decide fold-in NOW, while the PR is open. A follow-up folds in only if it fits the PR's scope: it touches lines this PR changed, or is required for the PR's stated `Closes #N` goal. Each fold-in gets a `Closes #N` added to the body; push and await re-review. **One fold round only** — after the fold round's approval, merge without a new triage (same spiral cap as the CHANGES_REQUESTED rule).
+- Out-of-scope follow-ups stay open: **triage at end of cycle, before starting the next plan item** — report each with a priority and when it will be resolved. Don't let them silently become backlog.
+- Nothing to fold (or the fold round re-approved) → merge: `gh pr merge <N> --squash`. Then the post-merge harvest.
 
 ### COMMENTED (deferral)
 
@@ -63,4 +65,4 @@ If `required_conversation_resolution` is enabled on the repo, unresolved inline 
 
 ## After merge (harvest — the loop's last act)
 
-On `state=MERGED`, run the `doc-reconcile` skill before end-of-cycle triage: (1) reconcile the tracker/ADR entry against the squashed diff — the entry describes the code that merged, never the first cut; (2) sweep every review body for "minor, not filed" notes → `review-note` issues or the next kickoff's OPEN THREADS, and @operator judgment flags → kickoff OPEN THREADS marked "needs operator decision". Review bodies are the only place this material exists; the harvest is what makes it survive the merge.
+On `state=MERGED`, before end-of-cycle triage: (1) if a tracked document (ADR, plan doc, issue) describes this change, reconcile it against the squashed diff — the record describes the code that merged, never the first cut; (2) sweep every review body on the PR for observations that exist nowhere else — "minor, not filed" / "notes, not blocking" items become issues labeled `review-note`, and anything the reviewer addressed to the operator directly is surfaced to the operator rather than left in the review. Review bodies are the only place this material exists; the harvest is what makes it survive the merge. Those two sentences are the whole procedure — the operator's environment carries it as a `doc-reconcile` skill, but no skill is required.
