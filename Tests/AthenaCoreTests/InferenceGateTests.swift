@@ -25,9 +25,9 @@ final class InferenceGateTests: XCTestCase {
     /// Deterministic handshake for ordering-sensitive gate tests (issue #3):
     /// fixed sleep windows flaked on slow shared runners when the assumed
     /// scheduling didn't happen in time. `HeldGate` holds the gate until
-    /// released and signals when its body has provably entered; `waitUntil`
-    /// polls an observable condition with a generous deadline instead of
-    /// betting on a fixed window.
+    /// released and signals when its body has provably entered; the shared
+    /// `waitUntil` (AsyncTestWait.swift) polls an observable condition with a
+    /// generous monotonic deadline instead of betting on a fixed window.
     private final class HeldGate {
         let task: Task<Void, Error>
         private let releaseC: AsyncStream<Void>.Continuation
@@ -59,24 +59,6 @@ final class InferenceGateTests: XCTestCase {
         func release() { releaseC.finish() }
         // A skipped release() must not park the holder task forever.
         deinit { releaseC.finish() }
-    }
-
-    /// Poll `condition` until true or the (monotonic) deadline passes — then
-    /// XCTFail and return false so the caller can bail with one diagnostic.
-    @discardableResult
-    private func waitUntil(
-        _ label: String, seconds: Double = 10,
-        _ condition: () async -> Bool
-    ) async -> Bool {
-        let deadline = ContinuousClock.now + .seconds(seconds)
-        while !(await condition()) {
-            if ContinuousClock.now > deadline {
-                XCTFail("timed out waiting for: \(label)")
-                return false
-            }
-            try? await Task.sleep(for: .milliseconds(1))
-        }
-        return true
     }
 
     /// Mutual exclusion: gated sections never overlap, even under contention,
