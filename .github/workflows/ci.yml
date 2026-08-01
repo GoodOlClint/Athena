@@ -146,15 +146,28 @@ jobs:
       # the export is dropped from BOTH jobs (keys would still agree, so a
       # key-rotation scheme alone cannot see it).
       #
-      # The fingerprint itself asks THE SCRIPT (`--print-toolchain`) rather
-      # than re-deriving its rule here: a second copy of that `case` would be
-      # free to drift, and a key derived from a drifted copy is the very
-      # failure this closes. Runs as its OWN step so $GITHUB_ENV is live.
+      # The fingerprint asks THE SCRIPT (`--print-toolchain`) rather than
+      # running `swift --version` inline. Note what that is and is not worth:
+      # the assertion below guarantees DEVELOPER_DIR is set, so test.sh's
+      # `case` never executes and the two are provably identical here. The
+      # indirection is therefore belt-and-braces, NOT load-bearing — kept
+      # because it costs nothing and stays correct if the assertion is ever
+      # relaxed, not because a drifting second copy is currently possible.
+      #
+      # Deliberate consequence: selecting a toolchain by DEVELOPER_DIR ALONE
+      # (the usual sudo-free way, and what a future Xcode matrix would reach
+      # for) now fails this step. The cache key is only truthful while the
+      # selection and the environment agree, so requiring both is the point —
+      # a matrix must `xcode-select` as well.
+      #
+      # Runs as its OWN step so $GITHUB_ENV is live.
       - name: Fingerprint the compiler that will build
         id: swiftc
-        shell: bash  # pipefail — the default shell has -e but not -o pipefail
+        # `shell: bash` is what supplies pipefail (GitHub's DEFAULT shell is
+        # `bash -e {0}` — no pipefail), so the pipeline below cannot pass on
+        # `tr`'s exit status while `test.sh` fails.
+        shell: bash
         run: |
-          set -o pipefail
           selected="$(xcode-select -p)"
           if [ -z "${DEVELOPER_DIR:-}" ] || [ "$DEVELOPER_DIR" != "$selected" ]; then
             echo "::error::DEVELOPER_DIR is '${DEVELOPER_DIR:-<unset>}' but the" \
@@ -297,15 +310,28 @@ jobs:
       # the export is dropped from BOTH jobs (keys would still agree, so a
       # key-rotation scheme alone cannot see it).
       #
-      # The fingerprint itself asks THE SCRIPT (`--print-toolchain`) rather
-      # than re-deriving its rule here: a second copy of that `case` would be
-      # free to drift, and a key derived from a drifted copy is the very
-      # failure this closes. Runs as its OWN step so $GITHUB_ENV is live.
+      # The fingerprint asks THE SCRIPT (`--print-toolchain`) rather than
+      # running `swift --version` inline. Note what that is and is not worth:
+      # the assertion below guarantees DEVELOPER_DIR is set, so test.sh's
+      # `case` never executes and the two are provably identical here. The
+      # indirection is therefore belt-and-braces, NOT load-bearing — kept
+      # because it costs nothing and stays correct if the assertion is ever
+      # relaxed, not because a drifting second copy is currently possible.
+      #
+      # Deliberate consequence: selecting a toolchain by DEVELOPER_DIR ALONE
+      # (the usual sudo-free way, and what a future Xcode matrix would reach
+      # for) now fails this step. The cache key is only truthful while the
+      # selection and the environment agree, so requiring both is the point —
+      # a matrix must `xcode-select` as well.
+      #
+      # Runs as its OWN step so $GITHUB_ENV is live.
       - name: Fingerprint the compiler that will build
         id: swiftc
-        shell: bash  # pipefail — the default shell has -e but not -o pipefail
+        # `shell: bash` is what supplies pipefail (GitHub's DEFAULT shell is
+        # `bash -e {0}` — no pipefail), so the pipeline below cannot pass on
+        # `tr`'s exit status while `test.sh` fails.
+        shell: bash
         run: |
-          set -o pipefail
           selected="$(xcode-select -p)"
           if [ -z "${DEVELOPER_DIR:-}" ] || [ "$DEVELOPER_DIR" != "$selected" ]; then
             echo "::error::DEVELOPER_DIR is '${DEVELOPER_DIR:-<unset>}' but the" \

@@ -54,12 +54,12 @@ fi
 # build with, then exit. Exists so CI can key its SPM cache on the compiler
 # that actually performs the build instead of on the Xcode it selected (#59).
 #
-# It has to live here rather than in the workflow because the resolution
-# above is the thing being reported: re-implementing that `case` in ci.yml
-# would be a second copy of the rule, free to drift from this one — and a
-# cache key derived from a drifted copy is exactly the #56 failure it is
-# meant to prevent. Same reason ci.yml calls the script rather than
-# open-coding `swift test`.
+# It lives here rather than in the workflow so the reported compiler is the
+# one THIS script would build with, whatever the resolution above decides.
+# In CI that is currently belt-and-braces — the workflow asserts
+# DEVELOPER_DIR is set, so the `case` never runs and an inline
+# `swift --version` would agree — but it keeps the two tied together for any
+# caller that has not made that guarantee.
 #
 # Placed BEFORE the rust-shim build so identifying the toolchain never
 # triggers a cargo build as a side effect.
