@@ -76,55 +76,32 @@ public enum DecodeProgress {
 }
 
 /// M49.2 — coarse phase of a metered generation as observed by the
-/// heartbeat. Distinguishes the three operationally-interesting
-/// states: setup (waiting on request prep / DFA compile / vocab
-/// build), prefill (CPU+GPU on the prompt chunks), and decode
-/// (committing tokens). Lets `athena logs` answer "is it hung in
-/// setup or just running long?" at a glance.
+/// heartbeat. Two states: setup (request prep, DFA compile, vocab build —
+/// **and the prompt prefill**) and decode (committing tokens). Lets
+/// `athena logs` answer "is it hung or just running long?" at a glance.
 ///
-/// `.prefill` is currently **unreachable in this daemon** — since publication
-/// S0 nothing publishes prefill counts, and #47 removed the last of that
-/// plumbing along with the heartbeat's `prefill=` field. In practice the
-/// heartbeat reports `setup` (covering prefill) then `decode`. The case is
-/// retained because this is public API of a library product and the algebra
-/// stays correct for a caller that can supply the counts.
+/// There used to be a third, `.prefill`, fed by `recordPrefillChunk`.
+/// Publication S0 deleted the only producer, and #47 removed the rest:
+/// `GuidedSubstrate` hands prefill to the substrate's
+/// `TokenIterator(prefillStepSize:)`, which exposes no per-chunk callback, so
+/// there is nowhere to hook one. Checked against the mlx tracker on
+/// 2026-08-01 — no upstream work is scheduled that would restore a producer,
+/// so the case was deleted rather than kept as unreachable public API.
+/// Restoring `phase=prefill` (and the `prefill=n/m` heartbeat field) requires
+/// an upstream per-chunk hook first.
 ///
-/// Derived from the counter snapshot (tokens + prefill completion);
-/// no separate state needed. Raw values match the log field
-/// convention (lowercase enum case).
-public enum DecodePhase: String, Sendable {
+/// Consequence for reading a heartbeat: a long `phase=setup` means "still in
+/// setup OR prefilling". On a large prompt, prefill is the likely answer.
+///
+/// Raw values match the log field convention (lowercase enum case).
+public enum DecodePhase: String, Sendable, CaseIterable {
     case setup
-    case prefill
     case decode
 
-    /// Compute the current phase from a counter snapshot.
-    ///
-    /// - `tokens > 0` ⇒ `.decode` (at least one token has been
-    ///   committed; we're past prefill regardless of whether prefill
-    ///   was tracked).
-    /// - `prefillTotal > 0 && prefillCompleted < prefillTotal` ⇒
-    ///   `.prefill` (chunks submitted but not all done).
-    /// - `prefillTotal > 0 && prefillCompleted == prefillTotal` ⇒
-    ///   `.decode` (prefill done; decode loop about to commit or
-    ///   already between iterations — the transient window is
-    ///   sub-second in practice).
-    /// - everything else ⇒ `.setup`.
-    /// **No in-tree producer publishes prefill progress**, so the one live
-    /// caller passes literal zeros: publication S0 removed the
-    /// vendored decode loop that called `recordPrefillChunk`, and
-    /// `GuidedSubstrate` hands prefill to the substrate's
-    /// `TokenIterator(prefillStepSize:)`, which exposes no per-chunk callback.
-    /// The `.prefill` arm is therefore unreachable in this daemon today (#47).
-    /// It is kept — this is a pure, unit-pinned decision function in a library
-    /// product, and it stays correct for a caller that can supply the counts.
-    public static func from(
-        tokens: Int, prefillCompleted: Int, prefillTotal: Int
-    ) -> DecodePhase {
-        if tokens > 0 { return .decode }
-        if prefillTotal > 0 {
-            return prefillCompleted < prefillTotal
-                ? .prefill : .decode
-        }
-        return .setup
+    /// Compute the current phase from a counter snapshot: any committed
+    /// token means we are decoding; otherwise we are still in setup (which
+    /// now includes the prefill — see the type doc).
+    public static func from(tokens: Int) -> DecodePhase {
+        tokens > 0 ? .decode : .setup
     }
 }

@@ -91,74 +91,39 @@ final class DecodeProgressTaskLocalTests: XCTestCase {
     }
 }
 
-/// M49.2 — phase classification for the heartbeat. Pins the three
-/// state transitions an operator reads:
-///   request entry → setup (no prefill data, no commits)
-///                 → prefill (chunks submitted, none committed)
-///                 → decode (any token committed, or prefill complete)
+/// M49.2 — phase classification for the heartbeat. Two states an operator
+/// reads: setup (no commits yet — request prep, DFA compile, vocab build, and
+/// the prompt prefill) then decode (any token committed).
 ///
-/// These pin the pure function, not a live path. No in-tree producer has
-/// published prefill counts since publication S0 (#47 removed the last
-/// vestiges of that plumbing), so the one live caller passes literal zeros
-/// and the `.prefill` arm is unreachable in the daemon. The arm is still
-/// worth pinning: `from` is public API of the `AthenaCore` library product
-/// and must stay correct for a caller that can supply the counts.
+/// The `.prefill` case and its arms are gone as of #47: publication S0 deleted
+/// the only producer of prefill counts, the substrate's
+/// `TokenIterator(prefillStepSize:)` exposes no per-chunk hook to replace it,
+/// and the mlx tracker has no upstream work scheduled that would restore one.
+/// Keeping an unreachable case as public API was the alternative and was
+/// rejected — nothing has shipped a release yet, so the source break is free.
 final class DecodePhaseTests: XCTestCase {
 
-    func testNoSignalIsSetup() {
+    func testNoTokensIsSetup() {
         XCTAssertEqual(
-            DecodePhase.from(tokens: 0, prefillCompleted: 0, prefillTotal: 0),
-            .setup,
-            "Fresh request before any progress publishes ⇒ setup.")
-    }
-
-    func testPrefillInProgress() {
-        XCTAssertEqual(
-            DecodePhase.from(tokens: 0, prefillCompleted: 1, prefillTotal: 22),
-            .prefill)
-        XCTAssertEqual(
-            DecodePhase.from(tokens: 0, prefillCompleted: 13, prefillTotal: 22),
-            .prefill)
-        XCTAssertEqual(
-            DecodePhase.from(tokens: 0, prefillCompleted: 21, prefillTotal: 22),
-            .prefill,
-            "Anything strictly less than total ⇒ still prefill.")
-    }
-
-    func testPrefillCompleteWithoutTokensIsDecode() {
-        XCTAssertEqual(
-            DecodePhase.from(tokens: 0, prefillCompleted: 22, prefillTotal: 22),
-            .decode,
-            "Prefill done + no commit yet is the transient between "
-                + "prefill and first decoded token — classify as decode "
-                + "because we're past the prefill workload.")
+            DecodePhase.from(tokens: 0), .setup,
+            "Before the first committed token the request is in setup — "
+                + "which now spans the prefill, so a long setup phase on a "
+                + "large prompt is expected, not a hang.")
     }
 
     func testAnyTokenIsDecode() {
-        XCTAssertEqual(
-            DecodePhase.from(tokens: 1, prefillCompleted: 22, prefillTotal: 22),
-            .decode)
-        XCTAssertEqual(
-            DecodePhase.from(tokens: 1000, prefillCompleted: 22, prefillTotal: 22),
-            .decode)
-    }
-
-    func testTokensWithoutPrefillStateIsDecode() {
-        // Substrate-streamed (non-Guide) path doesn't publish prefill
-        // chunks — it goes straight to incrementing tokens. Phase
-        // must still resolve as decode.
-        XCTAssertEqual(
-            DecodePhase.from(tokens: 5, prefillCompleted: 0, prefillTotal: 0),
-            .decode)
+        XCTAssertEqual(DecodePhase.from(tokens: 1), .decode)
+        XCTAssertEqual(DecodePhase.from(tokens: 1000), .decode)
     }
 
     func testRawValuesMatchLogFieldConvention() {
-        // Heartbeat log line embeds `.rawValue` directly. If these
-        // change, operator dashboards/greps that key off
-        // `phase=setup|prefill|decode` will silently break.
+        // Heartbeat log line embeds `.rawValue` directly. If these change,
+        // operator dashboards/greps that key off `phase=setup|decode` break.
         XCTAssertEqual(DecodePhase.setup.rawValue, "setup")
-        XCTAssertEqual(DecodePhase.prefill.rawValue, "prefill")
         XCTAssertEqual(DecodePhase.decode.rawValue, "decode")
+        XCTAssertEqual(
+            DecodePhase.allCases.map(\.rawValue), ["setup", "decode"],
+            "a new phase must be a deliberate operator-surface change")
     }
 }
 

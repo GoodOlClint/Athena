@@ -693,13 +693,7 @@ extension AthenaServer {
                     // `phase=setup:compile-dfa` instead of bare
                     // `phase=setup`. Decode paths annotate via
                     // `DecodeProgress.counter?.setSetupStage(...)`.
-                    // Zeros, not defaults: nothing has published prefill
-                    // counts since publication S0 (#47), so this is always
-                    // the setup/decode branch. Spelled out at the call site
-                    // so the deadness is visible here, not only in a doc.
-                    let phase = DecodePhase.from(
-                        tokens: snap.tokens, prefillCompleted: 0,
-                        prefillTotal: 0)
+                    let phase = DecodePhase.from(tokens: snap.tokens)
                     let phaseField: String
                     if phase == .setup, let stage = snap.setupStage {
                         phaseField = "setup:\(stage)"
