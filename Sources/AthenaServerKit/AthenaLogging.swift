@@ -262,9 +262,14 @@ enum LogFormat {
     /// Sanitizing here rather than at those call sites is deliberate: both
     /// handlers funnel through this function, so a future interpolation is
     /// covered without anyone having to remember. The message is free text by
-    /// design, so it is NOT quoted — only control characters are neutralized,
-    /// which leaves ordinary messages byte-unchanged (no log message in this
-    /// repo contains a literal newline).
+    /// design, so it is NOT quoted — only control characters and the
+    /// backslash are neutralized (#36: without doubling the backslash, a
+    /// message containing the two characters `\` `n` rendered byte-identically
+    /// to one containing a neutralized real newline — the escaped rendering
+    /// was lossy). Ordinary messages stay byte-unchanged (no static log
+    /// message in this repo contains either; an interpolated error
+    /// description that does will now render its backslashes doubled —
+    /// intended).
     ///
     /// Honesty boundary — narrower than `escape`'s, deliberately. This closes
     /// the *line* forgery only. It does NOT stop field forgery: the message is
@@ -279,12 +284,18 @@ enum LogFormat {
     /// instead — the message is untrusted text, the tail is the structured
     /// record; pass anything that must be trustworthy as metadata.
     static func sanitizeMessage(_ s: String) -> String {
-        guard s.unicodeScalars.contains(where: isLineStructural) else {
+        guard
+            s.unicodeScalars.contains(where: {
+                isLineStructural($0) || $0 == "\\"
+            })
+        else {
             return s
         }
         var out = ""
         for scalar in s.unicodeScalars {
-            if isLineStructural(scalar) {
+            if scalar == "\\" {
+                out += "\\\\"
+            } else if isLineStructural(scalar) {
                 out += escapeControl(scalar)
             } else {
                 out.unicodeScalars.append(scalar)

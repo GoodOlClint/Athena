@@ -234,11 +234,32 @@ final class LogFormatTests: XCTestCase {
     }
 
     /// Ordinary messages are byte-unchanged — sanitizing only touches control
-    /// characters, and no log message in the repo contains one.
+    /// characters and backslashes, and no log message in the repo contains
+    /// either.
     func testOrdinaryMessagesUnchanged() {
         for m in ["daemon up", "loaded model id=x (4.2 GB)", "", "a=b c=d"] {
             XCTAssertEqual(LogFormat.sanitizeMessage(m), m)
         }
+    }
+
+    /// #36: a literal backslash is doubled, so a message containing the two
+    /// characters `\` `n` renders differently from one containing a real
+    /// newline — the escaped rendering is unambiguous, matching what `escape`
+    /// already guaranteed on the metadata path.
+    func testLiteralBackslashDistinctFromNeutralizedControl() {
+        XCTAssertEqual(LogFormat.sanitizeMessage("a\nb"), #"a\nb"#)
+        XCTAssertEqual(LogFormat.sanitizeMessage(#"a\nb"#), #"a\\nb"#)
+        XCTAssertNotEqual(
+            LogFormat.sanitizeMessage("a\nb"),
+            LogFormat.sanitizeMessage(#"a\nb"#))
+        // The two classic escaping edge cases: backslash immediately before a
+        // real control, and a trailing backslash (no dangling escape).
+        XCTAssertEqual(LogFormat.sanitizeMessage("a\\\nb"), #"a\\\nb"#)
+        XCTAssertEqual(LogFormat.sanitizeMessage(#"a\"#), #"a\\"#)
+        // #35 parity: BOTH paths double the backslash — a revert of either
+        // side fails here, not just on the message path.
+        XCTAssertEqual(LogFormat.sanitizeMessage(#"a\b"#), #"a\\b"#)
+        XCTAssertEqual(LogFormat.escape(#"a\b"#), #""a\\b""#)
     }
 
     /// #35: one predicate, two callers. If `escape` and `sanitizeMessage` ever
