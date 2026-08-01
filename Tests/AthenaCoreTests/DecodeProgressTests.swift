@@ -127,17 +127,10 @@ final class DecodePhaseTests: XCTestCase {
     }
 }
 
-/// NSLock-isolated counter that satisfies `DecodeProgressCounter`.
-/// Tests assert against `tokens` after draining the stream.
+/// Counter satisfying `DecodeProgressCounter`, backed by the suite's shared
+/// `Locked` box (#70). Tests assert against `tokens` after draining the stream.
 private final class TestCounter: @unchecked Sendable, DecodeProgressCounter {
-    private let lock = NSLock()
-    private var n = 0
-    func incrementToken() {
-        lock.lock(); defer { lock.unlock() }
-        n += 1
-    }
-    var tokens: Int {
-        lock.lock(); defer { lock.unlock() }
-        return n
-    }
+    private let n = Locked(0)
+    func incrementToken() { n.mutate { $0 += 1 } }
+    var tokens: Int { n.current }
 }

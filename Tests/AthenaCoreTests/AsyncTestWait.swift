@@ -1,5 +1,45 @@
 import XCTest
 
+/// ONE thread-safe box for the whole suite (#70).
+///
+/// Six hand-rolled `final class X: @unchecked Sendable` types wrapping an
+/// `NSLock` around a `Bool`, an `Int` or an array had accumulated across
+/// `AthenaCoreTests` — each correct, but six chances for one to acquire a
+/// subtly different memory-ordering or reentrancy property, in helpers whose
+/// entire job is making concurrency tests trustworthy. That is the drift class
+/// ADR 008 exists to prevent and that `GuidedMask` was extracted for (M70.3).
+///
+/// Generic rather than a `Flag` + a `Counter` + a `Collector`, because one
+/// type covering all three shapes is less to keep consistent than three.
+///
+/// `NSLock`, not `Synchronization.Mutex`: the package floor is macOS 14
+/// (`Package.swift`) and `Mutex` requires 15. Same primitive the six copies
+/// used, so this is a consolidation and not a change of locking semantics.
+final class Locked<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Value
+
+    init(_ value: Value) { self.value = value }
+
+    /// Read a snapshot. The lock is released before the caller sees it, so
+    /// this is a point-in-time copy — never read twice expecting agreement.
+    var current: Value {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+
+    /// Read-modify-write under one acquisition. Takes `inout` so
+    /// increment/append cannot be split into a racing read and write — the
+    /// exact defect `MemoryGovernorTests.Counter` was introduced to fix.
+    @discardableResult
+    func mutate<R>(_ body: (inout Value) -> R) -> R {
+        lock.lock()
+        defer { lock.unlock() }
+        return body(&value)
+    }
+}
+
 /// Deterministic waiting for ordering-sensitive async tests (issues #3/#4).
 ///
 /// A fixed `Task.sleep` window is not a scheduling guarantee: on a slow shared
