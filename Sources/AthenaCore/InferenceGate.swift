@@ -90,24 +90,33 @@ public actor InferenceGate {
         // cancelled task still runs these actor hops (cancellation is
         // cooperative; an actor call doesn't auto-throw), so the gate never
         // leaks on cancel.
+        // Capture the outcome first, so the release below is the ONLY one on
+        // every path. The previous shape put `try throwIfMetalFaulted()` inside
+        // the `do`, so on the success-with-latched-fault path its throw was
+        // caught by the attached `catch`, which released a second time for one
+        // acquisition — handing the gate to a second waiter alongside the first,
+        // or clearing `held` while the real holder still ran. That is the ADR
+        // 029 exclusivity violation this type exists to prevent, on the exact
+        // path ADR 030 Part 2 added the latch for.
+        let outcome: Result<T, Error>
         do {
-            let result = try await work()
-            await release()
-            // ADR 030 Part 2 — an async allocation fault fired on MLX's worker
-            // thread during this span (the handler recorded it instead of
-            // aborting the daemon). The eval barrier inside `work` has completed,
-            // so the latch is set by now; convert it to a classified 503 so the
-            // request degrades and the process stays up.
-            try throwIfMetalFaulted()
-            return result
+            outcome = .success(try await work())
         } catch {
-            await release()
-            // Prefer the recorded allocation fault over the raw thrown error: a
-            // throw here is often a cascade artifact of the decode loop touching
-            // the invalid arrays before it broke on the latch.
-            try throwIfMetalFaulted()
-            throw error
+            outcome = .failure(error)
         }
+        await release()
+        // ADR 030 Part 2 — an async allocation fault fired on MLX's worker
+        // thread during this span (the handler recorded it instead of aborting
+        // the daemon). The eval barrier inside `work` has completed, so the
+        // latch is set by now; convert it to a classified 503 so the request
+        // degrades and the process stays up.
+        //
+        // Checked after the release on BOTH paths, and before surfacing the raw
+        // error, so a recorded allocation fault still wins over a thrown one —
+        // a throw is often a cascade artifact of the decode loop touching the
+        // invalid arrays before it broke on the latch.
+        try throwIfMetalFaulted()
+        return try outcome.get()
     }
 
     /// ADR 030 Part 2 (WP2) — if a recognized MLX allocation fault was latched

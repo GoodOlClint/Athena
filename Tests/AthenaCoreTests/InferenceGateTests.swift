@@ -370,6 +370,80 @@ final class InferenceGateTests: XCTestCase {
         XCTAssertFalse(held, "gate left held after a degraded fault")
     }
 
+    /// Issue #20 — a span that SUCCEEDS while a Metal fault is latched must
+    /// release exactly once.
+    ///
+    /// `try throwIfMetalFaulted()` used to sit inside the `do`, so its throw on
+    /// the success path was caught by the attached `catch`, which released
+    /// again. The final state is identical either way (both releases end with
+    /// the queue drained), so this asserts the only thing that differs: with two
+    /// waiters queued, a double release resumes BOTH, and their gated sections
+    /// overlap — the ADR 029 violation the gate exists to prevent.
+    ///
+    /// Reachable on the designed path, not an exotic one: an async allocation
+    /// fault fired on MLX's worker thread while `work()` returned normally is
+    /// exactly what ADR 030 Part 2 added the latch for. It was masked because
+    /// the one test that latches a fault has no queued waiters.
+    func testLatchedFaultOnSuccessReleasesOnce() async throws {
+        let gate = InferenceGate()
+        let track = Concurrency()
+        let (park, parkC) = AsyncStream.makeStream(of: Void.self)
+        let (entered, enteredC) = AsyncStream.makeStream(of: Void.self)
+
+        // Holder: parks until the waiters are queued, then succeeds having
+        // latched a fault — the double-release trigger.
+        let holder = Task {
+            try await gate.withExclusiveExecution { () -> Int in
+                enteredC.yield()
+                var it = park.makeAsyncIterator()
+                _ = await it.next()
+                MetalFaultLatch.shared.record(
+                    "[metal::malloc] Attempting to allocate 111 GB")
+                return 0
+            }
+        }
+        var enteredIt = entered.makeAsyncIterator()
+        guard await enteredIt.next() != nil else {
+            return XCTFail("holder never acquired the gate")
+        }
+
+        let waiters = (0 ..< 2).map { _ in
+            Task {
+                try await gate.withExclusiveExecution {
+                    await track.enter()
+                    try? await Task.sleep(for: .milliseconds(20))
+                    await track.leave()
+                }
+            }
+        }
+        guard await waitUntil("both waiters queued", { await gate.waiterCount == 2 })
+        else {
+            parkC.finish()
+            for w in waiters { w.cancel() }
+            return
+        }
+
+        parkC.finish()
+        // The holder surfaces the latched fault as a classified 503.
+        do {
+            _ = try await holder.value
+            XCTFail("a latched fault must surface even on the success path")
+        } catch let e as AthenaError {
+            XCTAssertEqual(e.code, "metal_oom")
+        }
+        for w in waiters { _ = try await w.value }
+
+        let overlapped = await track.maxActive
+        XCTAssertEqual(
+            overlapped, 1,
+            "double release handed the gate to both waiters — two Metal "
+                + "tenants executing concurrently (ADR 029)")
+        let held = await gate.isHeld
+        let queued = await gate.waiterCount
+        XCTAssertFalse(held)
+        XCTAssertEqual(queued, 0)
+    }
+
     /// The recorded fault wins even when the span ALSO throws (the raw throw is
     /// usually a cascade artifact of touching the invalid arrays).
     func testLatchedFaultPreferredOverRawThrowWP2() async throws {
