@@ -43,15 +43,20 @@ final class InferenceGateTests: XCTestCase {
         /// injection below.
         ///
         /// That took correcting a wrong premise, recorded so it is not
-        /// re-adopted. `acquire()` does throw in only two places, both needing
-        /// the HOLDER task cancelled (`Task.checkCancellation()` on entry, or
-        /// `cancelWaiter` on a queued continuation), and the init owns that
-        /// task and never exposes it — so no test can make `acquire()` throw.
-        /// But that is a different proposition from "no test can drive this
-        /// arm": `.neverAcquired` is selected by the `entered` stream
-        /// finishing WITHOUT a yield, which ANY early exit of the holder body
-        /// produces. Injecting that exit is deterministic (40/40), 0.08 s, and
-        /// leaves `Sources/` untouched.
+        /// re-adopted. `acquire()` throws in only two places, both needing the
+        /// HOLDER task cancelled: `Task.checkCancellation()` on entry, or
+        /// `cancelWaiter` resuming a queued continuation. Tests DO reach the
+        /// second — arm 1's own `task.cancel()` drives it. What no test can do
+        /// is make `acquire()` throw BEFORE the handshake resolves, which is
+        /// what selecting `.neverAcquired` that way would require, since the
+        /// init owns the holder task and never exposes it beforehand.
+        ///
+        /// That narrower fact is still a different proposition from "no test
+        /// can drive this arm", which is what the gap note used to claim.
+        /// `.neverAcquired` is selected by the `entered` stream finishing
+        /// WITHOUT a yield, and ANY early exit of the holder body produces
+        /// that. Injecting one is deterministic (40/40), 0.003 s, and leaves
+        /// `Sources/` untouched.
         ///
         /// SEPARATE DEFECT, do not confuse the two: under CALLER cancellation
         /// the handshake misreports. Both task-group children finish at once —
@@ -687,10 +692,6 @@ final class InferenceGateTests: XCTestCase {
                 + "have released someone else's gate")
     }
 
-    /// Arm 2 — the acquired-but-not-held arm, added by the #25 fold-in. A
-    /// disabled gate runs the body ungated, so the handshake succeeds while
-    /// `isHeld` is false.
-    ///
     /// Arm 3 — the `.neverAcquired` arm. #69 first recorded this as a known
     /// gap on the premise that driving it needed `acquire()` to throw, which
     /// would mean a production change. The pre-submit review refuted that: the
@@ -728,13 +729,24 @@ final class InferenceGateTests: XCTestCase {
         XCTAssertEqual(stats.waiters, 0, "no waiter left behind")
     }
 
-    /// #69 — the derived unwind budget, pinned rather than asserted in prose.
-    /// The claim "every default call site keeps exactly the 10 s it has today"
-    /// is what makes this change safe to land, so it is a test, not a comment.
+    /// #69 — the derived unwind budget's ARITHMETIC. Scoped deliberately, and
+    /// the scope is worth stating because the obvious overclaim is tempting:
+    /// this pins `unwindBudget` itself, NOT that either bail arm calls it.
+    /// Reverting both `joinUnwind(…, seconds:)` call sites to the bare form
+    /// leaves this test — and the whole suite — green, because on a healthy
+    /// path `joinUnwind` returns the moment the holder unwinds and never
+    /// consults its deadline. Only a broken unwind reaches the deadline.
+    ///
+    /// The WIRING is therefore verified by mutation, not by assertion:
+    /// dropping `task.cancel()` from arm 1 fails in 11.5 s with the
+    /// diagnostic "did not unwind within 1.0s" — the derived value, spelled
+    /// out in the message — where the same mutation on `main` gave 20.5 s and
+    /// "within 10.0s". Recorded here so the pair is legible together.
     func testUnwindBudgetIsDerivedFromTheHandshake() {
         XCTAssertEqual(
             HeldGate.unwindBudget(10), 10,
-            "default call sites must be byte-unchanged in behaviour")
+            "the default handshake must map to the 10 s every default call "
+                + "site has today — this is the arithmetic, not the wiring")
         XCTAssertEqual(HeldGate.unwindBudget(5), 5, "the not-held arm's site")
         XCTAssertEqual(
             HeldGate.unwindBudget(0.5), 1,
@@ -744,6 +756,10 @@ final class InferenceGateTests: XCTestCase {
             HeldGate.unwindBudget(0), 1, "the floor holds at the degenerate end")
     }
 
+    /// Arm 2 — the acquired-but-not-held arm, added by the #25 fold-in. A
+    /// disabled gate runs the body ungated, so the handshake succeeds while
+    /// `isHeld` is false.
+    ///
     /// Deliberately asymmetric with arm 1 and NOT covered by it: the body has
     /// provably entered here, so there is nothing queued to cancel.
     ///
