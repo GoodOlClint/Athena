@@ -907,17 +907,20 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         }
     }
 
-    /// MTP speculative path — greedy at temp == 0 (bit-identical to the
-    /// non-speculative greedy path) AND sampling-mode at temp > 0
-    /// (Leviathan/Chen; distributionally identical to non-speculative
-    /// sampling at the same temp/top_p/seed). Returns the full decoded
-    /// text, or nil to fall back to the unconstrained substrate stream.
-    /// A structured request (`schemaJSON`) ALWAYS takes a guided path
-    /// (greedy): the MTP speculative loop when eligible (faster), else
-    /// a plain guided-greedy loop. An unstructured request takes the
-    /// opt-in speculative path only; sampling-mode is unstructured-only
-    /// (the Guide masks to one valid token, so sampling has no meaning
-    /// there).
+    /// The masking / logit-capture decode path. Returns the full decoded text,
+    /// or nil to defer to the unconstrained substrate stream in
+    /// `beginGeneration`.
+    ///
+    /// Serves exactly the two cases the substrate stream cannot: a structured
+    /// request (`schemaJSON`), decoded under the Guide's mask, and a logprobs
+    /// request, which needs a logit-capture seam `beginGeneration` does not
+    /// have. See `DecodeDispatch` for the routing.
+    ///
+    /// The name is historical. This was the MTP speculative path, hosting an
+    /// in-closure greedy loop and an M40.2/M40.3 sampling-mode loop; publication
+    /// S0 removed both along with the Qwen3.5 vendored fork, and speculative now
+    /// means the ADR 032 separate-drafter overload inside `beginGeneration` —
+    /// i.e. on the path this function DEFERS to, not the one it runs.
     private func runSpeculative(
         messages: [ChatTurn], schemaJSON: String?,
         tools: [[String: any Sendable]]?, maxTokens: Int?,
@@ -936,75 +939,55 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         let logprobSink = logprobs.map { LogprobSink(topLogprobs: $0.topLogprobs) }
         // Per-request override (a downstream client's intent): if the caller
         // explicitly passes `speculative=true/false`, that wins for THIS
-        // request; if nil, fall back to the daemon's loaded default. An
-        // opt-in `speculative=true` without an explicit temperature
-        // stays implicitly greedy (temperature 0) so the older
-        // "speculative implies greedy" contract is preserved through
-        // M40.2; sampling-mode requires both `speculative=true` AND an
-        // explicit `temperature > 0`.
+        // request; if nil, fall back to the daemon's loaded default. Both
+        // values below exist ONLY to be logged — nothing routes on them.
         let effectiveSpec = requestSpeculative ?? params.speculative
-        let effectiveTemp: Double =
-            requestTemperature
-            ?? (requestSpeculative == true ? 0.0 : Double(params.temperature))
-        // M48.3 — temperature is INERT under a Guide: the schema mask
-        // collapses every position's distribution to its allowed set,
-        // and the greedy speculative loop (SpeculativeGeneration) picks
-        // the masked argmax regardless of the temp the caller asked for.
-        // So a structured request with `speculative: true` should engage
-        // the speculative loop whatever the temperature, not be forced
-        // into the non-speculative GuidedGreedy path just because the
-        // caller passed `temperature: 0.1`. Pre-M48.3 the gate was
-        // `effectiveSpec && effectiveTemp == 0`, which silently dropped
-        // every downstream-client-style request (`spec=true temp=0.1
-        // schema=true`) to GuidedGreedy and gave up M47.2's speculative
-        // win. The bit-identical-greedy contract is preserved — both
-        // paths produce the same masked-argmax sequence; only the speed
-        // changes.
-        let greedyEligible =
-            effectiveSpec
-            && (effectiveTemp == 0 || schemaJSON != nil)
-        // Sampling-mode speculative covers temp > 0 unstructured requests.
-        // Structured/guided is out of scope (the Guide masks to one valid
-        // token; sampling has no meaning), so `schemaJSON == nil` is the
-        // hard precondition; the guided path keeps using the greedy
-        // speculative loop above when eligible. M40.3.
-        let samplingEligible =
-            effectiveSpec && effectiveTemp > 0 && schemaJSON == nil
-        // C2: a logprobs request must NOT fall through to the substrate stream
-        // (beginGeneration has no logit-capture seam). Keep it on this path so
-        // the closure below routes it to GuidedGreedy/GuidedSubstrate capture.
-        if schemaJSON == nil && !greedyEligible && !samplingEligible
-            && logprobSink == nil
-        {
-            Self.log.debug(
-                """
-                dispatch path=substrate-stream spec=\(effectiveSpec) \
-                temp=\(effectiveTemp) schema=false
-                """,
-                metadata: ["function": "runSpeculative"])
-            return nil
-        }
-        // M48.2 — declare which internal generate path this request
-        // will take, BEFORE any model work begins. Lets operators
-        // (and downstream clients) see at a glance whether a structured
-        // request engaged the speculative loop or fell to the
-        // non-speculative GuidedGreedy/GuidedSubstrate path. The
-        // final architecture-dispatched branch (Qwen3.5 vendored vs
-        // any-other) is resolved inside container.perform; the
-        // selected path identity is correct either way because the
-        // any-other branch always lands at GuidedSubstrate when a
-        // schema is present.
-        let dispatchPath: String = {
-            if greedyEligible { return "speculative-greedy" }
-            if samplingEligible { return "speculative-sampling" }
-            return "guided-greedy-or-substrate"
-        }()
+        // The temperature the request will actually decode at. `speculative`
+        // used to coerce this to 0 ("speculative implies greedy", M40.2), which
+        // was true while an in-closure greedy loop served those requests.
+        // Publication S0 removed that loop, so the coercion reached nothing but
+        // this log line — where it lied, reporting `temp=0.0` for a request
+        // `beginGeneration` decodes at `params.temperature`. Report what the
+        // decode uses, matching `beginGeneration`'s own resolution.
+        let reportedTemp: Double =
+            requestTemperature.flatMap { $0 >= 0 ? $0 : nil }
+            ?? Double(params.temperature)
+        // M48.3 — temperature is INERT under a Guide: the schema mask collapses
+        // every position's distribution to its allowed set, so a structured
+        // request decodes the same masked-argmax sequence whatever temperature
+        // the caller passed. That is why the routing below can ignore
+        // temperature outright; both values survive only to be logged.
+        // M48.2 — declare which internal generate path this request will take,
+        // BEFORE any model work begins, so an operator can see at a glance
+        // which decode served a request.
+        //
+        // Routed on what the request needs (schema ⇒ mask, logprobs ⇒ capture),
+        // not on `speculative`/`temperature`. Those used to gate
+        // `greedyEligible`/`samplingEligible`, which named in-closure decode
+        // branches publication S0 deleted — so a speculative unstructured
+        // request was admitted past `container.prepare` below and then turned
+        // away by `guide == nil && logprobSink == nil`, having paid a full
+        // chat-template render + tokenize (and the substrate's
+        // `SerialAccessContainer` mutex) for nothing, while this line claimed a
+        // `speculative-greedy`/`speculative-sampling` path that no longer
+        // exists. Speculative is unaffected: its MTP drafter overload lives in
+        // `beginGeneration`, which is exactly where the deferral sends it.
+        let dispatch = DecodeDispatch.route(
+            hasSchema: schemaJSON != nil, hasLogprobSink: logprobSink != nil)
         Self.log.debug(
             """
-            dispatch path=\(dispatchPath) spec=\(effectiveSpec) \
-            temp=\(effectiveTemp) schema=\(schemaJSON != nil)
+            dispatch path=\(dispatch.rawValue) spec=\(effectiveSpec) \
+            temp=\(reportedTemp) schema=\(schemaJSON != nil)
             """,
             metadata: ["function": "runSpeculative"])
+        // C2: a logprobs request must NOT defer — `beginGeneration` has no
+        // logit-capture seam — so it stays here even with no schema.
+        //
+        // ADR 030: the prompt ceiling is NOT skipped by deferring.
+        // `beginGeneration` enforces it at its own `container.prepare`
+        // chokepoint (verified, not assumed), so both decode routes stay
+        // covered.
+        if dispatch.defersToSubstrateStream { return nil }
 
         let lmInput = try await container.prepare(
             input: UserInput(
