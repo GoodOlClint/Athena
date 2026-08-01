@@ -369,6 +369,106 @@ final class MLXLLMGenerationIntegrationTests: XCTestCase {
     }
 }
 
+/// M48.3 — temperature is inert under a Guide. Restored after #47 deleted the
+/// class it lived in (see below); the two siblings it shared that class with
+/// were genuinely vacuous, this one is not.
+///
+/// The contract: `GuidedSubstrate` decodes with a hardcoded `ArgMaxSampler()`
+/// (`GuidedSubstrate.swift`), so a schema request at temperature 0.1 must emit
+/// the byte-identical sequence a temperature-0 request does. The invariant is
+/// asserted in prose at `DecodeDispatch.effectiveTemperature` ("under a Guide
+/// the decode is masked-argmax and temperature is inert") — this is the only
+/// thing that would catch someone swapping a temperature-aware sampler in.
+///
+/// **The load-bearing variable is `temperature`, not `speculative`.** The arms
+/// also differ in the `speculative` flag, which is decode-irrelevant here:
+/// `DecodeDispatch.route(hasSchema: true, …)` sends both to `GuidedSubstrate`
+/// regardless. That confound is exactly what made the sibling
+/// `testStructuredGreedyParityAcrossSpeculative` vacuous — it varied ONLY the
+/// inert flag — and it is named here so this test is not mistaken for the same
+/// thing and deleted alongside it a second time. MTP speculative bit-identity
+/// is a separate contract with no gate at all; see #64.
+///
+/// Heavy: drives a real MLX model. Gated on ATHENA_RUN_MODEL_TESTS=1.
+final class GuidedTemperatureInertnessTests: XCTestCase {
+
+    private func skipUnlessEnabled() throws -> URL {
+        let env = ProcessInfo.processInfo.environment
+        guard env["ATHENA_RUN_MODEL_TESTS"] == "1" else {
+            throw XCTSkip("set ATHENA_RUN_MODEL_TESTS=1 to run (heavy)")
+        }
+        let modelURL = ModelStore().resolve(env["ATHENA_TEST_MODEL"])
+        guard
+            FileManager.default.fileExists(
+                atPath: modelURL.appendingPathComponent("config.json").path)
+        else {
+            throw XCTSkip("model not present at \(modelURL.path)")
+        }
+        return modelURL
+    }
+
+    func testTemperatureIsInertUnderGuide() async throws {
+        let modelURL = try skipUnlessEnabled()
+        let schema = """
+            {"type":"object",
+             "properties":{
+               "answer":{"type":"string","enum":["yes","no"]}
+             },
+             "required":["answer"]}
+            """
+        let messages = [
+            ChatTurn(
+                role: "user",
+                content:
+                    "Is the sky generally blue on a clear day? "
+                    + "Answer in JSON.")
+        ]
+        let atTemp = try await runOnce(
+            modelURL: modelURL, messages: messages,
+            schemaJSON: schema, speculative: true,
+            temperature: 0.1)
+        let greedyBaseline = try await runOnce(
+            modelURL: modelURL, messages: messages,
+            schemaJSON: schema, speculative: false,
+            temperature: 0)
+        XCTAssertFalse(atTemp.isEmpty, "temp>0 branch produced empty")
+        XCTAssertFalse(
+            greedyBaseline.isEmpty, "greedy baseline branch produced empty")
+        XCTAssertEqual(
+            atTemp, greedyBaseline,
+            "a structured request at temp>0 must emit the same "
+                + "byte-identical sequence as one at temp=0 — the Guide "
+                + "collapses both to masked-argmax, so temperature is inert. "
+                + "(M48.3 contract; enforced by GuidedSubstrate's hardcoded "
+                + "ArgMaxSampler.)")
+    }
+
+    private func runOnce(
+        modelURL: URL, messages: [ChatTurn],
+        schemaJSON: String, speculative: Bool,
+        temperature: Double = 0
+    ) async throws -> String {
+        let llm = MLXLLMModule(
+            modelDirectory: modelURL,
+            parameters: .init(
+                maxTokens: 64, temperature: Float(temperature),
+                speculative: speculative))
+        let gov = MemoryGovernor(totalBudgetBytes: Int(96) << 30)
+        await gov.register(llm, evictable: false)
+        try await gov.ensureLoaded(.llm)
+        var out = ""
+        let stream = llm.generateMetered(
+            messages: messages, schemaJSON: schemaJSON, tools: nil,
+            maxTokens: nil, temperature: temperature,
+            topP: nil, seed: nil,
+            speculative: speculative, chatTemplateKwargs: nil)
+        for await chunk in stream {
+            if case .text(let s) = chunk { out += s }
+        }
+        return out
+    }
+}
+
 /// C11 — seeded sampling reproducibility. A per-request seed must make a
 /// temperature>0 generation byte-identical across runs (and the same seed
 /// twice must agree). Heavy: drives a real MLX model at temp>0, so gated on

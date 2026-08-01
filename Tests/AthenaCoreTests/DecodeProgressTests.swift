@@ -99,11 +99,10 @@ final class DecodeProgressTaskLocalTests: XCTestCase {
 ///
 /// These pin the pure function, not a live path. No in-tree producer has
 /// published prefill counts since publication S0 (#47 removed the last
-/// vestiges of that plumbing), so every real caller now takes the defaulted
-/// `prefillTotal: 0` route and the `.prefill` arm is unreachable in the
-/// daemon. The arm is still worth pinning: `from` is public API of the
-/// `AthenaCore` library product and must stay correct for a caller that can
-/// supply the counts.
+/// vestiges of that plumbing), so the one live caller passes literal zeros
+/// and the `.prefill` arm is unreachable in the daemon. The arm is still
+/// worth pinning: `from` is public API of the `AthenaCore` library product
+/// and must stay correct for a caller that can supply the counts.
 final class DecodePhaseTests: XCTestCase {
 
     func testNoSignalIsSetup() {
