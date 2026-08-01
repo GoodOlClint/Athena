@@ -13,25 +13,13 @@ final class DecodeLoopControlTests: XCTestCase {
 
     /// A counter that reports cancelled once `tokens >= threshold` — models a
     /// disconnect/deadline firing partway through a generation.
-    private final class CancelAfterCounter:
-        @unchecked Sendable, DecodeProgressCounter
-    {
-        private let lock = NSLock()
-        private var n = 0
+    private final class CancelAfterCounter: DecodeProgressCounter {
+        private let n = Locked(0)
         private let threshold: Int
         init(cancelAfter: Int) { self.threshold = cancelAfter }
-        func incrementToken() {
-            lock.lock(); defer { lock.unlock() }
-            n += 1
-        }
-        var isCancelled: Bool {
-            lock.lock(); defer { lock.unlock() }
-            return n >= threshold
-        }
-        var tokens: Int {
-            lock.lock(); defer { lock.unlock() }
-            return n
-        }
+        func incrementToken() { n.mutate { $0 += 1 } }
+        var isCancelled: Bool { n.current >= threshold }
+        var tokens: Int { n.current }
     }
 
     /// No counter bound (the production default outside `collectMetered`):

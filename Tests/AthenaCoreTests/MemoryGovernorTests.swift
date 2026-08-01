@@ -206,20 +206,13 @@ final class MemoryGovernorTests: XCTestCase {
     /// NL4 — the `onUnloaded` hook fires from a DETACHED Task in
     /// `performEviction` (off-actor), while the test thread polls `n`. The
     /// previous unsynchronized `n += 1` / read was a genuine data race (TSan
-    /// would flag it); guard with an NSLock like the suite's other counters.
-    private final class Counter: @unchecked Sendable {
-        private let lock = NSLock()
-        private var _n = 0
-        var n: Int {
-            lock.lock()
-            defer { lock.unlock() }
-            return _n
-        }
-        func bump() {
-            lock.lock()
-            _n += 1
-            lock.unlock()
-        }
+    /// would flag it); it is guarded by the suite's shared `Locked` box, which
+    /// takes the increment as one `inout` mutation so it cannot be split back
+    /// into a racing read and write (#70).
+    private final class Counter: Sendable {
+        private let _n = Locked(0)
+        var n: Int { _n.current }
+        func bump() { _n.mutate { $0 += 1 } }
     }
 
     func testUnloadHookFiresOnEvictionAndExplicitUnload() async throws {

@@ -218,7 +218,7 @@ final class InferenceGateTests: XCTestCase {
             _ fail: FailureSink, _ file: StaticString, _ line: UInt,
             seconds: Double = 10
         ) async {
-            let done = Flag()
+            let done = Locked(false)
             // Deliberately not cancelled on exit: cancelling a task that is
             // awaiting `task.value` does not interrupt that await (the awaited
             // task is not itself cancelled), which is the same reason the
@@ -227,10 +227,10 @@ final class InferenceGateTests: XCTestCase {
             // `task`, never `self`, so it cannot keep the holder alive.
             _ = Task { [task] in
                 _ = try? await task.value
-                done.set()
+                done.mutate { $0 = true }
             }
             let deadline = ContinuousClock.now + .seconds(seconds)
-            while !done.isSet {
+            while !done.current {
                 if ContinuousClock.now > deadline {
                     fail(
                         "HeldGate bail did not unwind within \(seconds)s — "
@@ -240,22 +240,6 @@ final class InferenceGateTests: XCTestCase {
                     return
                 }
                 try? await Task.sleep(for: .milliseconds(1))
-            }
-        }
-
-        /// Minimal thread-safe boolean — the observer sets it off-actor.
-        private final class Flag: @unchecked Sendable {
-            private let lock = NSLock()
-            private var value = false
-            func set() {
-                lock.lock()
-                defer { lock.unlock() }
-                value = true
-            }
-            var isSet: Bool {
-                lock.lock()
-                defer { lock.unlock() }
-                return value
             }
         }
 
@@ -612,21 +596,13 @@ final class InferenceGateTests: XCTestCase {
 
     // MARK: - HeldGate failure arms (issue #23)
 
-    /// Thread-safe collector standing in for `XCTFail` so a failure arm can be
-    /// asserted on instead of failing the test that exercises it.
-    private final class FailureCollector: @unchecked Sendable {
-        private let lock = NSLock()
-        private var messages: [String] = []
-        func record(_ m: String) {
-            lock.lock()
-            defer { lock.unlock() }
-            messages.append(m)
-        }
-        var recorded: [String] {
-            lock.lock()
-            defer { lock.unlock() }
-            return messages
-        }
+    /// Collector standing in for `XCTFail` so a failure arm can be asserted on
+    /// instead of failing the test that exercises it. Backed by the suite's
+    /// shared `Locked` box (#70).
+    private final class FailureCollector: Sendable {
+        private let messages = Locked([String]())
+        func record(_ m: String) { messages.mutate { $0.append(m) } }
+        var recorded: [String] { messages.current }
     }
 
     /// Arm 1 — the deadline arm (`.timedOut`). A `HeldGate` built on a gate
