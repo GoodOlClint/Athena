@@ -241,6 +241,52 @@ final class LogFormatTests: XCTestCase {
         }
     }
 
+    /// #35: one predicate, two callers. If `escape` and `sanitizeMessage` ever
+    /// neutralize different sets, one sink grows a hole the other doesn't have.
+    func testBothPathsNeutralizeTheSameScalarSet() {
+        let structural: [Unicode.Scalar] = [
+            "\u{00}", "\u{01}", "\n", "\r", "\t", "\u{1F}", "\u{7F}", "\u{85}",
+            "\u{2028}", "\u{2029}",
+        ]
+        for scalar in structural {
+            let s = "a\(Character(scalar))b"
+            XCTAssertFalse(
+                LogFormat.sanitizeMessage(s).unicodeScalars.contains(scalar),
+                "message path let U+\(String(scalar.value, radix: 16)) through")
+            XCTAssertFalse(
+                LogFormat.escape(s).unicodeScalars.contains(scalar),
+                "value path let U+\(String(scalar.value, radix: 16)) through")
+        }
+        // And a scalar in neither set survives both, unchanged.
+        XCTAssertEqual(LogFormat.sanitizeMessage("naïve ✅"), "naïve ✅")
+        XCTAssertEqual(LogFormat.escape("naïve"), "naïve")
+    }
+
+    /// HONESTY BOUNDARY, pinned so it is not mistaken for a defect later.
+    ///
+    /// The message is unquoted and precedes the tail, so `principal=` text in a
+    /// message IS the first match on the line. `escape` prevents this for
+    /// metadata by quoting; the message cannot be treated the same way because
+    /// messages legitimately carry `key=value` text. The rule lives in
+    /// `docs/logging.md`: the message is untrusted text, the tail is the
+    /// structured record.
+    func testMessageDoesNotDefendAgainstFieldForgery() {
+        let merged = LogFormat.merge(
+            handler: [:], provided: ["principal": "u:alice"], event: nil,
+            function: "f")
+        let line = LogFormat.terminalText(
+            message: "denied principal=admin", merged: merged)
+        XCTAssertEqual(line, "denied principal=admin function=f principal=u:alice")
+        // The forged value precedes the real one — a reader taking the first
+        // match sees `admin`. Documented, not defended.
+        let first = line.range(of: "principal=")
+        XCTAssertNotNil(first)
+        XCTAssertTrue(
+            line[first!.upperBound...].hasPrefix("admin"),
+            "if this ever fails, the message path gained a defense the docs "
+                + "and the comment at sanitizeMessage both say it lacks")
+    }
+
     func testMessageControlCharactersNeutralized() {
         XCTAssertEqual(LogFormat.sanitizeMessage("a\rb"), #"a\rb"#)
         XCTAssertEqual(LogFormat.sanitizeMessage("a\u{0001}b"), #"a\u{0001}b"#)
