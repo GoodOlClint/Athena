@@ -45,13 +45,24 @@ public enum DecodeDispatch: String, Sendable, CaseIterable {
 
     /// The temperature a request decodes at: a non-negative per-request
     /// override wins (zero = explicit greedy), a negative override is
-    /// ignored, nil falls back to the loaded default. The ONE home for this
-    /// rule — `runSpeculative` logs it and `beginGeneration`/the batch path
-    /// decode at it, so on the substrate-stream path the `dispatch path=`
-    /// `temp=` field equals the decoded value by construction, not by
-    /// copy-paste agreement. Under a Guide the decode is masked-argmax and
+    /// ignored (one narrowing caveat below), nil falls back to the loaded
+    /// default. The ONE home for this rule — `runSpeculative` logs it and
+    /// `beginGeneration`/the batch path decode at it, so on the
+    /// substrate-stream path the `dispatch path=` `temp=` field equals the
+    /// decoded value by construction, not by copy-paste agreement. Under a
+    /// Guide the decode is masked-argmax and
     /// temperature is inert (M48.3) — the field then reports what the request
     /// *asked for*, not a knob the guided path consults.
+    ///
+    /// The caveat: the sign is tested after narrowing to `Float` (the decode's
+    /// own parameter type), so a negative that *underflows* — `-1e-60`, though
+    /// not `-1e-45`, which stays subnormal and is duly ignored — becomes
+    /// `-0.0`, passes `>= 0`, and is returned. That is equivalent to an
+    /// explicit `0` override, NOT to the fallback the ignore branch would have
+    /// applied: `-0.0` compares equal to zero, so sampler selection takes the
+    /// greedy arm and only the returned value's sign differs.
+    /// `testEffectiveTemperature` pins it, with the other narrowing edges
+    /// (`.nan` falls back, `1e60` saturates to `+inf`).
     public static func effectiveTemperature(
         _ override: Double?, _ fallback: Float
     ) -> Float {
