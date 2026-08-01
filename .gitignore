@@ -32,6 +32,7 @@ default.profraw
 # Local agent state stays untracked; committed skills are the exception.
 .claude/*
 !.claude/skills/
+!.claude/agents/
 
 # graphify: graphs live in the shared ~/.graph-index/ index, not in-repo.
 graphify-out/
