@@ -120,6 +120,103 @@ public enum AthenaLog {
     }
 }
 
+/// The pure part of both log handlers: metadata merge + the `key=value` tail.
+///
+/// Extracted so the emit path — the operator's whole diagnostic surface — is
+/// reachable from `swift test` without writing to stderr or `os.Logger`
+/// (ADR 008/009). The two sinks differ only in how they wrap the tail, and
+/// nothing else caught a regression in either shape.
+enum LogFormat {
+    /// Merge precedence, lowest to highest: handler-static → provider →
+    /// explicit event metadata. `function=` is always added, and participates
+    /// in the sort like any other key, so `function=loadModel` filters work
+    /// whether or not a request scope is bound.
+    static func merge(
+        handler: Logging.Logger.Metadata,
+        provided: Logging.Logger.Metadata?,
+        event: Logging.Logger.Metadata?,
+        function: String,
+        error: Error? = nil
+    ) -> Logging.Logger.Metadata {
+        var merged = handler
+        if let provided { merged.merge(provided) { _, new in new } }
+        if let event { merged.merge(event) { _, new in new } }
+        // PRIVACY DECISION (issue #12). swift-log 1.12's `LogEvent` carries an
+        // optional `error`; the handler owns the emit path, so an unread one
+        // would vanish from the log entirely. We keep it — an error's
+        // description is the diagnostic value, and redacting it to a type name
+        // would defeat the reason to log it at all.
+        //
+        // The constraint that comes with keeping it: this lands in the
+        // `.public` os_log field, so it is readable in Console and captured in
+        // sysdiagnose. Do not pass `error:` values whose description embeds a
+        // prompt, a bearer token, or a Keychain secret — the same rule the
+        // emit call in `OSUnifiedLogHandler` states for the message.
+        //
+        // `errorFieldLimit` bounds VOLUME, not sensitivity: it caps how much of
+        // an error that has swallowed a whole request body reaches the system
+        // log. It is not a redaction mechanism and must not be relied on as one
+        // — the first `errorFieldLimit` bytes of a secret are still a secret.
+        if let error {
+            merged["error"] = "\(Self.truncate("\(error)"))"
+        }
+        merged["function"] = "\(function)"
+        return merged
+    }
+
+    /// Upper bound on the rendered `error=` field, in **UTF-8 bytes**. See the
+    /// privacy note above: a volume bound, not a redaction.
+    static let errorFieldLimit = 256
+
+    /// Truncate to at most `limit` UTF-8 bytes (plus a one-character ellipsis).
+    ///
+    /// Counts bytes, not `Character`s. `String.count` measures extended
+    /// grapheme clusters, and a single cluster absorbs unboundedly many
+    /// combining scalars — `"e"` followed by 5 000 combining accents has
+    /// `count == 1` and 10 001 UTF-8 bytes, so a `count`-based limit would pass
+    /// it through untouched and the volume bound above would be a fiction.
+    ///
+    /// Cuts on a scalar boundary so the field can never carry a partial UTF-8
+    /// sequence; the result may therefore be a few bytes under `limit`, and it
+    /// may split a grapheme cluster (an accent detached from its base). Garbling
+    /// a diagnostic string at the cut is the acceptable cost of a hard bound.
+    static func truncate(_ s: String, limit: Int = errorFieldLimit) -> String {
+        guard s.utf8.count > limit else { return s }
+        var kept = String.UnicodeScalarView()
+        var used = 0
+        for scalar in s.unicodeScalars {
+            let width = String(scalar).utf8.count
+            if used + width > limit { break }
+            kept.append(scalar)
+            used += width
+        }
+        return String(kept) + "…"
+    }
+
+    /// Sorted `k=v k=v`. Empty metadata ⇒ empty string (callers omit the
+    /// separator entirely, so a plain line stays byte-unchanged).
+    static func pairs(_ merged: Logging.Logger.Metadata) -> String {
+        merged.sorted { $0.key < $1.key }
+            .map { "\($0.key)=\($0.value)" }
+            .joined(separator: " ")
+    }
+
+    /// Terminal body: `<msg> k=v k=v`.
+    static func terminalText(
+        message: String, merged: Logging.Logger.Metadata
+    ) -> String {
+        merged.isEmpty ? message : message + " " + pairs(merged)
+    }
+
+    /// Unified-log body: `<msg> {k=v k=v}` — deliberately a different shape
+    /// from the terminal sink; both are pinned so neither drifts.
+    static func unifiedText(
+        message: String, merged: Logging.Logger.Metadata
+    ) -> String {
+        merged.isEmpty ? message : message + " {\(pairs(merged))}"
+    }
+}
+
 /// swift-log `LogHandler` for foreground terminal output. ISO 8601
 /// UTC with millisecond precision so a redirected file (e.g.
 /// `athena load 2> log` or `athena start 2>&1 | tee log`) sorts
@@ -159,30 +256,14 @@ struct TerminalLogHandler: LogHandler {
     }
 
     func log(event: Logging.LogEvent) {
-        var merged = self.metadata
-        if let provided = metadataProvider?.get() {
-            merged.merge(provided) { _, new in new }
-        }
-        if let explicit = event.metadata {
-            merged.merge(explicit) { _, new in new }
-        }
-        // swift-log 1.12's `LogEvent` carries an optional `error` alongside the
-        // message. Surface it as a field — the handler owns the emit path now,
-        // so an unread `event.error` would vanish from the log entirely.
-        if let e = event.error { merged["error"] = "\(e)" }
-        // M45.3: per-emission `function=` field, sourced from
-        // swift-log's call-site capture. Always present, sorted with
-        // the rest so the in-merged-view filter (`function=loadModel`)
-        // works regardless of whether req/principal are bound.
-        merged["function"] = "\(event.function)"
-        var text = event.message.description
-        if !merged.isEmpty {
-            text +=
-                " "
-                + merged.sorted { $0.key < $1.key }
-                .map { "\($0.key)=\($0.value)" }
-                .joined(separator: " ")
-        }
+        // Merge + render live in `LogFormat` so both sinks share one
+        // implementation and the unit tier can pin it (issue #12).
+        let merged = LogFormat.merge(
+            handler: metadata, provided: metadataProvider?.get(),
+            event: event.metadata, function: "\(event.function)",
+            error: event.error)
+        let text = LogFormat.terminalText(
+            message: event.message.description, merged: merged)
         let stamp = Self.ts.string(from: Date())
         let out =
             "\(stamp) \(event.level.rawValue) \(category): \(text)\n"
@@ -210,27 +291,15 @@ struct OSUnifiedLogHandler: LogHandler {
     }
 
     func log(event: Logging.LogEvent) {
-        var merged = self.metadata
-        if let provided = metadataProvider?.get() {
-            merged.merge(provided) { _, new in new }
-        }
-        if let explicit = event.metadata {
-            merged.merge(explicit) { _, new in new }
-        }
-        // Same `error=` surfacing as TerminalLogHandler — see there.
-        if let e = event.error { merged["error"] = "\(e)" }
-        // M45.3: same per-emission `function=` field as
-        // TerminalLogHandler so a merged `log show` view filters
-        // identically by function across both sinks.
-        merged["function"] = "\(event.function)"
-
-        var text = event.message.description
-        if !merged.isEmpty {
-            let pairs = merged.sorted { $0.key < $1.key }
-                .map { "\($0.key)=\($0.value)" }
-                .joined(separator: " ")
-            text += " {\(pairs)}"
-        }
+        // Same merge as TerminalLogHandler, different tail shape — both in
+        // `LogFormat` so a merged `log show` view filters identically by
+        // function across sinks, and neither shape drifts unpinned.
+        let merged = LogFormat.merge(
+            handler: metadata, provided: metadataProvider?.get(),
+            event: event.metadata, function: "\(event.function)",
+            error: event.error)
+        let text = LogFormat.unifiedText(
+            message: event.message.description, merged: merged)
         // Server logs are kept readable in Console rather than
         // redacted as `<private>`. DO NOT interpolate user prompt
         // content, bearer-token strings, or Keychain secrets into the

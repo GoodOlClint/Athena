@@ -184,6 +184,26 @@ In some shells the bare `log` command is shadowed by a builtin
 (notably under nix or homebrew-overrides). The cheatsheet uses
 `/usr/bin/log` explicitly so the recipes work everywhere.
 
+## Writing logs: what must never reach a log line
+
+Everything Athena logs goes to the macOS unified log with `privacy: .public`,
+so it is readable in Console and captured in a sysdiagnose. Server logs are kept
+public deliberately — redacted `<private>` lines are useless to an operator — and
+that choice puts the burden on the call site.
+
+Never interpolate into a log message: user prompt or completion content, bearer
+tokens or any credential, Keychain secrets, or raw request bodies. The audit
+trail records `target=u:foo` / `t:hash[:8]`, never a raw token; follow the same
+pattern.
+
+This applies to swift-log's `error:` argument too — `log.error("…", error: e)`
+folds the error's *description* into that same public field. An error type that
+embeds the payload it failed on will publish that payload. The handler bounds
+the rendered `error=` field to 256 UTF-8 bytes, which caps how much lands there;
+it is not redaction, and the first 256 bytes of a secret are still a secret.
+The decision and its rationale live at `LogFormat.merge` in
+`Sources/AthenaServerKit/AthenaLogging.swift`.
+
 ## Reading logs through the daemon (remote / RBAC-gated)
 
 `athena logs` is a CLIENT of `GET /api/logs` (one-shot) and
