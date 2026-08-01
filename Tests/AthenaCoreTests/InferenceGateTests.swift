@@ -38,6 +38,17 @@ final class InferenceGateTests: XCTestCase {
         /// point at different bugs.
         private enum Handshake { case entered, neverAcquired, timedOut }
 
+        /// Where a failure arm reports. Defaults to `XCTFail`; issue #23
+        /// substitutes a collector so the arms themselves can be tested.
+        ///
+        /// `XCTExpectFailure` cannot express what these tests need: they must
+        /// assert the diagnostic *count* is exactly one (a second means the
+        /// bail arm itself leaked) AND match its text AND keep asserting
+        /// afterwards. Its scoped form is also synchronous, so it cannot
+        /// `await` the construction under test. Injecting the sink turns each
+        /// arm into an ordinary assertion.
+        typealias FailureSink = @Sendable (String, StaticString, UInt) -> Void
+
         /// Acquire `gate` and suspend inside the body until `release()`.
         /// Returns only after the body has provably entered (gate held) —
         /// verified by assertion, since a disabled gate runs bodies ungated.
@@ -56,8 +67,10 @@ final class InferenceGateTests: XCTestCase {
         /// noise pointing at the wrong thing. Call sites `guard let`.
         init?(
             _ gate: InferenceGate, seconds: Double = 10,
+            failureSink: FailureSink? = nil,
             file: StaticString = #filePath, line: UInt = #line
         ) async {
+            let fail = failureSink ?? { XCTFail($0, file: $1, line: $2) }
             let (entered, enteredC) = AsyncStream.makeStream(of: Void.self)
             let (release, releaseC) = AsyncStream.makeStream(of: Void.self)
             self.releaseC = releaseC
@@ -86,36 +99,97 @@ final class InferenceGateTests: XCTestCase {
                 return first
             }
             guard outcome == .entered else {
-                XCTFail(
+                fail(
                     outcome == .timedOut
                         ? "HeldGate acquisition did not complete within "
                             + "\(seconds)s — gate wedged or held elsewhere"
                         : "HeldGate never acquired the gate",
-                    file: file, line: line)
+                    file, line)
                 // Unwind both ways it could still be parked: queued inside
                 // `acquire()` (cancel drains it via `cancelWaiter`), or already
                 // in the body awaiting a release that now never comes.
                 task.cancel()
                 releaseC.finish()
-                // Join the unwind, like the waitUntil bail branches below: the
-                // initializer must not return with its own task mid-cancel.
-                // Bounded — `cancelWaiter` dequeues and throws regardless of
-                // `held`, and `releaseC.finish()` unblocks a body already past
-                // acquisition, so neither park outlives this await.
-                _ = try? await task.value
+                // Join the unwind: the initializer must not return with its
+                // own task mid-cancel. Bounded by a DEADLINE, not by argument
+                // (#23) — the reasoning "cancelWaiter dequeues, so the park
+                // cannot outlive this await" is only true while the
+                // `task.cancel()` above is present. Delete that line and an
+                // unbounded `await task.value` hangs to the CI job timeout
+                // with no diagnostic; verified by mutation. The deadline turns
+                // that regression into a named failure.
+                await joinUnwind(fail, file, line)
                 return nil
             }
             guard await gate.isHeld else {
                 // Acquired, but the gate is not held — a disabled gate runs the
                 // body ungated. Same cascade risk, so bail the same way.
-                XCTFail(
+                fail(
                     "HeldGate returned without holding the gate",
-                    file: file, line: line)
+                    file, line)
                 releaseC.finish()
-                _ = try? await task.value
+                await joinUnwind(fail, file, line)
                 return nil
             }
         }
+
+        /// Await the holder task's unwind, bounded. A bail arm that leaves
+        /// the task parked is a real defect in that arm — report it rather
+        /// than suspending the whole suite waiting for something that never
+        /// comes.
+        ///
+        /// Polls a flag set by a DETACHED observer rather than awaiting
+        /// `task.value` inside a task group. A group must drain its children,
+        /// and cancelling a child that is awaiting `task.value` does not
+        /// interrupt that await (the awaited task is not itself cancelled), so
+        /// the group-race version is exactly as unbounded as the plain await
+        /// it replaced — verified by mutation. The observer here is abandoned,
+        /// not joined, so this returns on the deadline no matter what.
+        private func joinUnwind(
+            _ fail: FailureSink, _ file: StaticString, _ line: UInt,
+            seconds: Double = 10
+        ) async {
+            let done = Flag()
+            // Deliberately not cancelled on exit: cancelling a task that is
+            // awaiting `task.value` does not interrupt that await (the awaited
+            // task is not itself cancelled), which is the same reason the
+            // task-group version below did not work. A cancel here would be
+            // theatre. The observer is abandoned; it retains only `done` and
+            // `task`, never `self`, so it cannot keep the holder alive.
+            _ = Task { [task] in
+                _ = try? await task.value
+                done.set()
+            }
+            let deadline = ContinuousClock.now + .seconds(seconds)
+            while !done.isSet {
+                if ContinuousClock.now > deadline {
+                    fail(
+                        "HeldGate bail did not unwind within \(seconds)s — "
+                            + "the holder task is still parked, so this "
+                            + "failure arm is missing a cancel or a release",
+                        file, line)
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(1))
+            }
+        }
+
+        /// Minimal thread-safe boolean — the observer sets it off-actor.
+        private final class Flag: @unchecked Sendable {
+            private let lock = NSLock()
+            private var value = false
+            func set() {
+                lock.lock()
+                defer { lock.unlock() }
+                value = true
+            }
+            var isSet: Bool {
+                lock.lock()
+                defer { lock.unlock() }
+                return value
+            }
+        }
+
         func release() { releaseC.finish() }
         // A skipped release() must not park the holder task forever.
         deinit { releaseC.finish() }
@@ -465,6 +539,132 @@ final class InferenceGateTests: XCTestCase {
         let gate = InferenceGate()
         let r = try await gate.withExclusiveExecution { 99 }
         XCTAssertEqual(r, 99)
+    }
+
+    // MARK: - HeldGate failure arms (issue #23)
+
+    /// Thread-safe collector standing in for `XCTFail` so a failure arm can be
+    /// asserted on instead of failing the test that exercises it.
+    private final class FailureCollector: @unchecked Sendable {
+        private let lock = NSLock()
+        private var messages: [String] = []
+        func record(_ m: String) {
+            lock.lock()
+            defer { lock.unlock() }
+            messages.append(m)
+        }
+        var recorded: [String] {
+            lock.lock()
+            defer { lock.unlock() }
+            return messages
+        }
+    }
+
+    /// Arm 1 — the deadline arm (`.timedOut`). A `HeldGate` built on a gate
+    /// someone else already holds can never enter its body, so the handshake
+    /// must expire, return nil, name the wedged-or-held-elsewhere cause, and
+    /// leave no waiter behind.
+    ///
+    /// The abandoned acquisition is the point: it is still queued inside
+    /// `acquire()` when the deadline fires, so only `task.cancel()` →
+    /// `cancelWaiter` dequeues it. Drop that cancel and `waiterCount` stays 1.
+    ///
+    /// CEILING (issue #23 asks for this to be stated when a hard bound is
+    /// impractical, and it is — SwiftPM exposes no per-test
+    /// `executionTimeAllowance`). The `seconds: 0.5` bound is delivered BY the
+    /// deadline race inside `HeldGate.init`. It bounds a regression in the
+    /// arm's *unwind* (verified: dropping `task.cancel()` fails in ~15 s), but
+    /// NOT a regression in the race that produces `outcome` — break that and
+    /// this test hangs to the 60-minute CI job timeout with no diagnostic.
+    /// Verified by mutation, not assumed. Pinning the race itself would need
+    /// the same construct under test to bound it, which is circular.
+    func testHeldGateDeadlineArmFailsAndDrains() async throws {
+        let gate = InferenceGate()
+        guard let holder = await HeldGate(gate) else { return }
+        defer { holder.release() }
+
+        let sink = FailureCollector()
+        let secondAttempt = await HeldGate(
+            gate, seconds: 0.5, failureSink: { m, _, _ in sink.record(m) })
+
+        XCTAssertNil(
+            secondAttempt,
+            "a HeldGate that never entered its body must not hand back a "
+                + "holder — the call site would rethrow CancellationError "
+                + "from holder.task.value and bury this diagnostic")
+        XCTAssertEqual(
+            sink.recorded.count, 1,
+            "one diagnostic, naming one cause. A second means the bail arm "
+                + "itself leaked — joinUnwind reports when the holder task is "
+                + "still parked. Got: \(sink.recorded)")
+        let msg = try XCTUnwrap(sink.recorded.first)
+        XCTAssertTrue(
+            msg.contains("did not complete within"),
+            "the deadline arm must name the timeout, not the "
+                + "never-acquired cause — they point at different bugs. "
+                + "Got: \(msg)")
+        await waitUntil("abandoned acquisition drains") {
+            await gate.waiterCount == 0
+        }
+        let stillHeld = await gate.isHeld
+        XCTAssertTrue(
+            stillHeld,
+            "the original holder still holds — the failed attempt must not "
+                + "have released someone else's gate")
+    }
+
+    /// Arm 2 — the acquired-but-not-held arm, added by the #25 fold-in. A
+    /// disabled gate runs the body ungated, so the handshake succeeds while
+    /// `isHeld` is false.
+    ///
+    /// Deliberately asymmetric with arm 1 and NOT covered by it: the body has
+    /// provably entered here, so there is nothing queued to cancel.
+    ///
+    /// Honest about what this pins. `deinit { releaseC.finish() }` also
+    /// unwinds the task — a failable class initializer that returns nil after
+    /// full initialization DOES run `deinit` (verified). So the arm's own
+    /// `releaseC.finish()` is not required for correctness; what it buys is
+    /// PROMPTNESS, because `joinUnwind` runs before `return nil` and therefore
+    /// before `deinit`. Drop it and the bail still unwinds, just 10 s later
+    /// and with a spurious second diagnostic. What this test genuinely pins is
+    /// the arm's contract — returns nil, names the not-held cause, exactly one
+    /// diagnostic — not a statement whose deletion would corrupt the gate.
+    ///
+    /// Contrast arm 1, where `task.cancel()` IS irreplaceable: `deinit` cannot
+    /// dequeue a waiter parked inside `acquire()`.
+    func testHeldGateNotHeldArmFailsAndDrains() async throws {
+        InferenceGate.enabled = false
+        defer { InferenceGate.enabled = true }
+        let gate = InferenceGate()
+
+        let sink = FailureCollector()
+        let attempt = await HeldGate(
+            gate, seconds: 5, failureSink: { m, _, _ in sink.record(m) })
+
+        XCTAssertNil(
+            attempt, "a holder that does not hold must not be handed back")
+        XCTAssertEqual(
+            sink.recorded.count, 1,
+            "one diagnostic, naming one cause. A second is joinUnwind "
+                + "reporting that the bail left the holder task parked past "
+                + "its deadline. Got: \(sink.recorded)")
+        let msg = try XCTUnwrap(sink.recorded.first)
+        XCTAssertTrue(
+            msg.contains("without holding the gate"),
+            "this arm must name the not-held cause, not the deadline. "
+                + "Got: \(msg)")
+        // Vacuous by construction, and kept only as a premise check: a
+        // disabled gate returns `try await work()` without calling `acquire()`
+        // (InferenceGate.swift), so nothing is ever enqueued and this cannot
+        // fail. The operator's "drains waiterCount to 0" criterion is pinned
+        // for real by the deadline-arm test above, which has an actual
+        // abandoned acquisition to drain. Said plainly so this is not read as
+        // parity between the two arms.
+        let waiters = await gate.waiterCount
+        XCTAssertEqual(
+            waiters, 0, "premise: a disabled gate enqueues nothing")
+        let held = await gate.isHeld
+        XCTAssertFalse(held)
     }
 
     // MARK: - MetalFaultLatch algebra
