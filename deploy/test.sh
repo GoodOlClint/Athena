@@ -37,8 +37,9 @@ if [ -z "${DEVELOPER_DIR:-}" ]; then
     *)
       if [ -d /Applications/Xcode.app/Contents/Developer ]; then
         export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+        # stderr: with --print-toolchain, stdout is a machine-read value.
         echo "test.sh: using DEVELOPER_DIR=$DEVELOPER_DIR" \
-             "(active xcode-select was '$active')"
+             "(active xcode-select was '$active')" >&2
       else
         echo "error: full Xcode required for XCTest but not found." \
              "Install Xcode, or run: sudo xcode-select -s" \
@@ -63,8 +64,10 @@ fi
 # Placed BEFORE the rust-shim build so identifying the toolchain never
 # triggers a cargo build as a side effect.
 if [ "${1:-}" = "--print-toolchain" ]; then
-  swift --version 2>&1
-  exit 0
+  # `exec`, and NOT `2>&1`: a broken DEVELOPER_DIR makes xcrun write to stderr
+  # and exit non-zero. Folding that onto stdout would let a caller hash the
+  # ERROR TEXT into a plausible-looking cache key while the step still passed.
+  exec swift --version
 fi
 
 # The AthenaStructured module links the Rust structured-output staticlib;
