@@ -939,16 +939,19 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         let logprobSink = logprobs.map { LogprobSink(topLogprobs: $0.topLogprobs) }
         // Per-request override (a downstream client's intent): if the caller
         // explicitly passes `speculative=true/false`, that wins for THIS
-        // request; if nil, fall back to the daemon's loaded default. An
-        // opt-in `speculative=true` without an explicit temperature
-        // stays implicitly greedy (temperature 0) so the older
-        // "speculative implies greedy" contract is preserved through
-        // M40.2; sampling-mode requires both `speculative=true` AND an
-        // explicit `temperature > 0`.
+        // request; if nil, fall back to the daemon's loaded default. Both
+        // values below exist ONLY to be logged — nothing routes on them.
         let effectiveSpec = requestSpeculative ?? params.speculative
-        let effectiveTemp: Double =
-            requestTemperature
-            ?? (requestSpeculative == true ? 0.0 : Double(params.temperature))
+        // The temperature the request will actually decode at. `speculative`
+        // used to coerce this to 0 ("speculative implies greedy", M40.2), which
+        // was true while an in-closure greedy loop served those requests.
+        // Publication S0 removed that loop, so the coercion reached nothing but
+        // this log line — where it lied, reporting `temp=0.0` for a request
+        // `beginGeneration` decodes at `params.temperature`. Report what the
+        // decode uses, matching `beginGeneration`'s own resolution.
+        let reportedTemp: Double =
+            requestTemperature.flatMap { $0 >= 0 ? $0 : nil }
+            ?? Double(params.temperature)
         // M48.3 — temperature is INERT under a Guide: the schema mask collapses
         // every position's distribution to its allowed set, so a structured
         // request decodes the same masked-argmax sequence whatever temperature
@@ -974,7 +977,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         Self.log.debug(
             """
             dispatch path=\(dispatch.rawValue) spec=\(effectiveSpec) \
-            temp=\(effectiveTemp) schema=\(schemaJSON != nil)
+            temp=\(reportedTemp) schema=\(schemaJSON != nil)
             """,
             metadata: ["function": "runSpeculative"])
         // C2: a logprobs request must NOT defer — `beginGeneration` has no

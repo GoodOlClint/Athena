@@ -57,8 +57,8 @@ final class DecodeDispatchTests: XCTestCase {
         XCTAssertEqual(Set(DecodeDispatch.allCases), Set(routes))
     }
 
-    /// The `path=` values are an operator-facing contract — they appear in
-    /// `dispatch path=` log lines and in `docs/logging.md` grep recipes.
+    /// The `path=` values are an operator-facing contract: they are what a
+    /// `dispatch path=` log line reports, so an operator greps for them.
     func testRawValuesAreTheLoggedNames() {
         XCTAssertEqual(DecodeDispatch.substrateStream.rawValue, "substrate-stream")
         XCTAssertEqual(DecodeDispatch.guidedSubstrate.rawValue, "guided-substrate")
