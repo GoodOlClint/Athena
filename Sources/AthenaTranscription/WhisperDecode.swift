@@ -182,7 +182,9 @@ public enum WhisperDecode {
             if produced >= limit { break }
             next = step([next.token], produced - 1)
             // Periodic allocator-pool flush — mirrors the LLM decode
-            // loops (SpeculativeGeneration.swift:217). Without it, the
+            // loop's per-256-token clearCache (M50.1; kept unconditional
+            // here — the LLM copy is gated on the ADR 023 G1
+            // unbounded-cache opt-out). Without it, the
             // per-step `cache.evalStep()` activations accumulate in
             // MLX's pool across long transcriptions (M50.1).
             if generated.count % 256 == 0 { MLX.Memory.clearCache() }

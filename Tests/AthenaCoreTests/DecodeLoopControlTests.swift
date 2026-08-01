@@ -3,9 +3,9 @@ import XCTest
 
 @testable import AthenaCore
 
-/// NC5 (M70.3) — the M60.5 cancellation early-break the four decode loops
-/// (SpeculativeGeneration / SpeculativeSamplingGenerate / GuidedGreedy /
-/// GuidedSubstrate) share is now `DecodeLoopControl.isCancelled()`. The real
+/// NC5 (M70.3) — the M60.5 cancellation early-break the AthenaLLM decode
+/// loops (today `GuidedSubstrate` and logprob capture; pre-S0 also the
+/// vendored speculative loops) share is now `DecodeLoopControl.isCancelled()`. The real
 /// loop bodies are MLX-bound, but the predicate they poll and the loop idiom
 /// itself are pure and pinned here with a stub counter whose flag flips
 /// mid-decode — so a refactor that drops or inverts the check fails CI.

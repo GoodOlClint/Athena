@@ -240,9 +240,10 @@ final class DecodeProgressPrefillTests: XCTestCase {
     }
 
     private nonisolated func simulatePrefill(promptCount: Int) {
-        // Mirror the GuidedGreedy / SpeculativeGeneration prefill
-        // arithmetic exactly so the test catches an off-by-one if
-        // the loop body diverges.
+        // Mirrors the prefill-chunk arithmetic of the S0-removed vendored
+        // loops. No in-tree producer calls recordPrefillChunk today —
+        // GuidedSubstrate hands prefill to the substrate TokenIterator —
+        // so this pins the idiom, not a live path (see issue #47's sweep).
         let head = promptCount - 1
         let chunkSize = 512
         let totalChunks = (head + chunkSize - 1) / chunkSize

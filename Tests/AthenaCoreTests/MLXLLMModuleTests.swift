@@ -378,10 +378,10 @@ final class MLXLLMGenerationIntegrationTests: XCTestCase {
 /// supposed to leave commits unchanged. This test exists to catch any
 /// regression in either direction.
 ///
-/// Heavy: drives a real MLX model with an MTP head through both branches
-/// of `MLXLLMModule.runSpeculative` (the `greedyEligible && hasMTPHead`
-/// branch with `speculative: true`, then the `guide != nil` GuidedGreedy
-/// branch with `speculative: false`). Same prompt, same schema, same
+/// Heavy: drives a real MLX model with an MTP head through both requests
+/// (`speculative: true`, then `speculative: false`). Post-S0 both carry a
+/// schema so both route to `GuidedSubstrate` (DecodeDispatch) — the flag is
+/// decode-irrelevant under a Guide. Same prompt, same schema, same
 /// maxTokens, same temperature 0 — only the per-request `speculative`
 /// flag toggles. Gated on ATHENA_RUN_MODEL_TESTS=1.
 final class StructuredSpeculativeParityTests: XCTestCase {
@@ -454,7 +454,7 @@ final class StructuredSpeculativeParityTests: XCTestCase {
     ///
     /// Pre-M48.3 the dispatch gate `greedyEligible = spec && temp == 0`
     /// silently routed `spec=true temp=0.1 schema=true` to the
-    /// non-speculative GuidedGreedy path, throwing away M47.2's
+    /// non-speculative guided path, throwing away M47.2's
     /// speculative win on every structured request that didn't
     /// explicitly pass `temperature: 0`.
     func testStructuredGreedyParityTempIneretUnderGuide() async throws {
@@ -473,13 +473,13 @@ final class StructuredSpeculativeParityTests: XCTestCase {
                     "Is the sky generally blue on a clear day? "
                     + "Answer in JSON.")
         ]
-        // spec=true + temp>0 + schema — pre-M48.3 fell to GuidedGreedy;
-        // post-M48.3 engages SpeculativeGeneration.
+        // spec=true + temp>0 + schema — today every schema request routes
+        // to GuidedSubstrate (DecodeDispatch); spec is inert under a Guide.
         let speculativeAtTemp = try await runOnce(
             modelURL: modelURL, messages: messages,
             schemaJSON: schema, speculative: true,
             temperature: 0.1)
-        // spec=false — always GuidedGreedy (masked-argmax baseline).
+        // spec=false — same route: the guided masked-argmax baseline.
         let greedyBaseline = try await runOnce(
             modelURL: modelURL, messages: messages,
             schemaJSON: schema, speculative: false,
@@ -568,11 +568,9 @@ final class StructuredSpeculativeParityTests: XCTestCase {
 /// C11 — seeded sampling reproducibility. A per-request seed must make a
 /// temperature>0 generation byte-identical across runs (and the same seed
 /// twice must agree). Heavy: drives a real MLX model at temp>0, so gated on
-/// ATHENA_RUN_MODEL_TESTS=1. NOTE: on an MTP model this exercises the
-/// SpeculativeSampling SamplingRNG path; on a NON-MTP model it exercises the
-/// substrate seeded sampler (GenerateParameters.seed) — both must honor the
-/// seed. Point ATHENA_TEST_MODEL at a non-MTP model to cover the substrate
-/// path specifically.
+/// ATHENA_RUN_MODEL_TESTS=1. NOTE: publication S0 removed the vendored
+/// sampling loop, so MTP and non-MTP models alike decode on the substrate
+/// stream and the seed rides `GenerateParameters.seed` in both cases.
 final class SeededSamplingReproducibilityTests: XCTestCase {
 
     func testSameSeedTempPositiveIsReproducible() async throws {
@@ -613,7 +611,7 @@ final class SeededSamplingReproducibilityTests: XCTestCase {
         XCTAssertEqual(
             a, b,
             "same seed + same prompt + temp>0 must reproduce byte-for-byte "
-                + "(C11: per-request GenerateParameters.seed / SamplingRNG)")
+                + "(C11: per-request GenerateParameters.seed)")
     }
 }
 

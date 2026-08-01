@@ -1,10 +1,12 @@
 import Foundation
 
-/// NC5 (M70.3) — the cancellation early-break predicate the four AthenaLLM
+/// NC5 (M70.3) — the cancellation early-break predicate the AthenaLLM
 /// decode loops poll.
 ///
-/// `SpeculativeGeneration`, `SpeculativeSamplingGenerate`, `GuidedGreedy`, and
-/// `GuidedSubstrate` each ran `if DecodeProgress.counter?.isCancelled == true {
+/// The synchronous in-closure decode loops (today just `GuidedSubstrate`,
+/// which also serves logprob capture; before publication S0 three more —
+/// the vendored guided-greedy and two speculative loops)
+/// each ran `if DecodeProgress.counter?.isCancelled == true {
 /// break }` at the top of their decode loop (M60.5) to free the GPU on a
 /// client disconnect / M33 deadline — the whole point of the milestone (the
 /// original M60 wedge symptom was decoding to `maxTokens` for a dead request).

@@ -42,4 +42,19 @@ public enum DecodeDispatch: String, Sendable, CaseIterable {
     /// True when `runSpeculative` should hand the request straight back so the
     /// substrate stream serves it — checked *before* any prompt preparation.
     public var defersToSubstrateStream: Bool { self == .substrateStream }
+
+    /// The temperature a request decodes at: a non-negative per-request
+    /// override wins (zero = explicit greedy), a negative override is
+    /// ignored, nil falls back to the loaded default. The ONE home for this
+    /// rule — `runSpeculative` logs it and `beginGeneration`/the batch path
+    /// decode at it, so on the substrate-stream path the `dispatch path=`
+    /// `temp=` field equals the decoded value by construction, not by
+    /// copy-paste agreement. Under a Guide the decode is masked-argmax and
+    /// temperature is inert (M48.3) — the field then reports what the request
+    /// *asked for*, not a knob the guided path consults.
+    public static func effectiveTemperature(
+        _ override: Double?, _ fallback: Float
+    ) -> Float {
+        override.map { Float($0) }.flatMap { $0 >= 0 ? $0 : nil } ?? fallback
+    }
 }

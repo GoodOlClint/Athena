@@ -536,8 +536,8 @@ extension AthenaServer {
     }
 
     /// M46.8 — also conforms to `AthenaCore.DecodeProgressCounter`, so
-    /// the synchronous decode loops (GuidedGreedy / GuidedSubstrate /
-    /// SpeculativeGeneration / SpeculativeSampling) can increment the
+    /// the synchronous decode loop (`GuidedSubstrate`, incl. logprob
+    /// capture) can increment the
     /// same counter via the `DecodeProgress.counter` TaskLocal. That
     /// gets a structured-output decode's per-iteration progress into
     /// the heartbeat without threading a callback through 5 layers of
@@ -665,7 +665,8 @@ extension AthenaServer {
     /// `tokens=0 tokens_per_sec=0.0` showed up forever even on a
     /// progressing decode. Diagnosed via process sample of a wedged
     /// daemon: worker thread was actively iterating in
-    /// `GuidedGreedy.generate` while the heartbeat reported nothing.
+    /// the (since-removed) vendored guided-greedy loop while the
+    /// heartbeat reported nothing.
     func collectMetered(
         seconds: Int,
         _ eventsBuilder: @escaping @Sendable () -> AsyncStream<GenChunk>
@@ -797,9 +798,8 @@ extension AthenaServer {
             defer { heartbeatTask.cancel() }
             var c = GenCollected()
             // M46.8 / M48.1 — bind the heartbeat counter on a TaskLocal
-            // so the synchronous decode loops (GuidedGreedy /
-            // GuidedSubstrate / SpeculativeGeneration /
-            // SpeculativeSampling) can increment it per internal commit.
+            // so the synchronous decode loop (GuidedSubstrate, incl.
+            // logprob capture) can increment it per internal commit.
             // The events thunk is invoked INSIDE this scope so the Task
             // it spawns (inside `AsyncStream { continuation in Task {} }`)
             // inherits the TaskLocal binding — without that, the

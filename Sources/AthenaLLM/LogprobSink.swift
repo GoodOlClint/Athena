@@ -52,7 +52,7 @@ public final class LogprobSink: @unchecked Sendable {
     }
 
     /// Drop the leading `i` entries to align with a structured response whose
-    /// IDLE (pre-JSON) prefix is stripped (mirrors `GuidedGreedy.result`).
+    /// IDLE (pre-JSON) prefix is stripped.
     public func sliceFrom(_ i: Int) {
         if i > 0 && i <= committed.count { committed = Array(committed[i...]) }
     }
