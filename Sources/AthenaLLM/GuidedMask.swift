@@ -6,19 +6,30 @@ import Foundation
 /// The guided path forces the next token into the Guide's currently
 /// allowed set: take the per-step allowed bitmask, build an
 /// additive logit mask (`0` for allowed ids, `-inf` for the rest), add it to
-/// the logits, and argmax. The pre-S0 vendored guided-greedy loop and
-/// `GuidedSubstrate.GuidedLogitProcessor.process` had their own copies of the
-/// bit-unpacking loop; this is the single source so they can't drift, and —
-/// being MLX-free — it makes the masking decision unit-testable with scripted
-/// off-schema logits (the audit's L5 fix: "scripted off-schema logits through
-/// the seam"). The `MLXArray` math (`logits + MLXArray(add)`, `argMax`) stays
-/// in the callers; only the pure bit→`[Float]` unpack and the equivalent
-/// argmax live here.
+/// the logits, and argmax. Extracted at M70.3 (52e15554) because
+/// `SpeculativeGeneration.guidedArgmax` and
+/// `GuidedSubstrate.GuidedLogitProcessor` each carried their own copy of the
+/// bit-unpacking loop, so they could drift.
+///
+/// **One production caller as of #49**: `GuidedSubstrate`'s
+/// `GuidedLogitProcessor.process`. `guidedArgmax` went at publication S0, and
+/// `GuidedDecoder` — which inherited its inlined body and was the second
+/// caller at HEAD, never a second copy of the loop — went with #49. The
+/// anti-drift rationale is therefore historical. What still earns this seam
+/// its place is the other half: being MLX-free, it makes the masking decision
+/// unit-testable with scripted off-schema logits (the audit's L5 fix), which
+/// no `MLXArray` path can be under `swift test` (ADR 009). Do not inline it
+/// back into its one caller.
+///
+/// Split of duties: `additiveMask` is the production seam — the caller does
+/// the `MLXArray` math (`logits + MLXArray(add)`, `argMax`) around it.
+/// `maskedArgmax` is a test-only mirror of that math with no production
+/// caller, and never had one.
 enum GuidedMask {
 
     /// Build the additive logit mask from a Guide allowed-bitmask: index `i`
     /// is `0` (kept) iff bit `i` of byte `i>>3` is set, else `-.infinity`
-    /// (suppressed). This is the exact array both MLX callers add to their
+    /// (suppressed). This is the exact array the MLX caller adds to its
     /// last-position logits slice, so it is the production seam.
     static func additiveMask(allowed mask: [UInt8], vocab: Int) -> [Float] {
         var add = [Float](repeating: -.infinity, count: vocab)

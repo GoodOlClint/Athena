@@ -6,8 +6,10 @@ import XCTest
 
 /// L5 (M70.3) — the schema-mask seam. Structured enforcement was only
 /// validated model-on (env-gated); there was no CI test that an off-schema
-/// logit is actually suppressed. `GuidedMask` is the MLX-free seam both
-/// guided greedy paths share, so scripted logits drive it directly.
+/// logit is actually suppressed. `GuidedMask` is the MLX-free seam the guided
+/// path uses, so scripted logits drive it directly. (It served two callers
+/// until #49 deleted the S0-orphaned `GuidedDecoder`; `GuidedSubstrate` is the
+/// live one.)
 final class GuidedMaskTests: XCTestCase {
 
     /// allowed bit set ⇒ 0 (kept); clear ⇒ -inf (suppressed).

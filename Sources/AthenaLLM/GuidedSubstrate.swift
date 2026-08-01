@@ -41,9 +41,11 @@ enum GuidedSubstrate {
             guard let guide else { return logits }
             var mask: [UInt8] = []
             _ = guide.allowedMask(into: &mask)
-            // M70.3 (L5): the shared MLX-free seam (`GuidedMask`) — one
-            // source for the bit→additive-mask unpack (the pre-S0 vendored
-            // guided loop shared it, so the paths couldn't drift).
+            // M70.3 (L5): the MLX-free seam (`GuidedMask`) for the
+            // bit→additive-mask unpack. It was extracted to stop two copies
+            // drifting; both siblings are now gone (publication S0, then #49),
+            // so this is its one production caller — see the seam's own doc
+            // for why it still lives out here rather than inlined.
             let add = GuidedMask.additiveMask(allowed: mask, vocab: vocab)
             // `logits` is the last-position slice, shape (1, vocab);
             // the (vocab,) additive mask broadcasts over it.

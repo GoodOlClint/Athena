@@ -3,8 +3,10 @@ import Foundation
 import MLX
 
 /// Accumulates per-token logprobs during a single (actor-confined) generation
-/// (ADR 013 §4 / C2). A reference type so the value-type `GuidedDecoder` and
-/// `LogitProcessor` structs all append to one instance. The numeric work reuses
+/// (ADR 013 §4 / C2). A reference type so the value-type
+/// `GuidedSubstrate.GuidedLogitProcessor` — the one conformance — can append
+/// to a single instance across its `process`/`didSample` calls. The numeric
+/// work reuses
 /// the unit-tested `LogprobMath`; token-id → string/bytes decode is deferred to
 /// the module (which owns the tokenizer), which reads `committed`.
 ///
@@ -25,14 +27,6 @@ public final class LogprobSink: @unchecked Sendable {
     public private(set) var committed: [Raw] = []
 
     public init(topLogprobs: Int) { self.topLogprobs = max(0, topLogprobs) }
-
-    /// One-shot capture from a `(1, vocab)` logits slice + the chosen token —
-    /// the greedy/guided pick paths know both at the selection site.
-    public func prepare(slice: MLXArray, chosen: Int) {
-        let r = LogprobMath.fromLogitRow(
-            slice.asArray(Float.self), chosen: chosen, topK: topLogprobs)
-        pending = Raw(chosen: chosen, logprob: r.logprob, top: r.top)
-    }
 
     /// Two-phase capture for the `LogitProcessor` path: stash the row at
     /// `process(logits:)`, finalize with the sampled token at `didSample`.
