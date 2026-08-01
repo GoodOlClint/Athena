@@ -1197,9 +1197,9 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         // `sending` UserInput/LMInput are constructed and consumed entirely
         // inside the closure so no non-Sendable value crosses its boundary.
         // M24.3: per-request max_tokens/temperature override the loaded
-        // defaults (a negative temperature override is ignored; zero is an
-        // explicit greedy request). Resolution lives in DecodeDispatch so the
-        // logged and decoded values cannot drift.
+        // defaults. Resolution lives in DecodeDispatch.effectiveTemperature,
+        // which documents the rule (including the narrowing caveat) so the
+        // logged and decoded values cannot drift — do not restate it here.
         let temp = DecodeDispatch.effectiveTemperature(
             temperature, params.temperature)
         // M31.3: per-request top_p overrides the loaded default; only the
