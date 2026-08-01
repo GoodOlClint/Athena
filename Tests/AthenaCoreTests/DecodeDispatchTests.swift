@@ -58,8 +58,12 @@ final class DecodeDispatchTests: XCTestCase {
     }
 
     /// Issue #42 — the effective-temperature rule has ONE home; these pin it.
-    /// Non-negative override wins (zero = explicit greedy), negative override
-    /// is ignored, nil falls back to the loaded default.
+    /// That home is `DecodeDispatch.effectiveTemperature`'s own doc comment,
+    /// including the narrowing caveat under which a negative override is NOT
+    /// ignored. Read the rule there — this header deliberately does not
+    /// restate it, so it cannot drift from it. Each message below describes
+    /// only the one input its own assertion passes, which is why the `-1`
+    /// case can say "ignored" flatly: for that input it is, no caveat.
     func testEffectiveTemperature() {
         XCTAssertEqual(DecodeDispatch.effectiveTemperature(nil, 0.7), 0.7)
         XCTAssertEqual(DecodeDispatch.effectiveTemperature(0.3, 0.7), 0.3)
@@ -76,7 +80,9 @@ final class DecodeDispatchTests: XCTestCase {
             "NaN fails >= 0 and falls back")
         XCTAssertEqual(
             DecodeDispatch.effectiveTemperature(-1e-60, 0.7).sign, .minus,
-            "tiny negative underflows to -0.0, which passes >= 0 (still greedy downstream: -0.0 > 0 is false)"
+            "tiny negative underflows to -0.0, which passes >= 0 (still greedy "
+                + "downstream: -0.0 compares equal to zero, and both samplers "
+                + "select on == 0 / <= 0)"
         )
         XCTAssertEqual(
             DecodeDispatch.effectiveTemperature(1e60, 0.7), .infinity,
