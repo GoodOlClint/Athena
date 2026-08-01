@@ -54,10 +54,12 @@ the substrate's `parked/dflash` / `parked/turboquant` branches + the upstream
   branch, governor byte accounting), the `dflash_enabled` config key +
   `ATHENA_DFLASH` env override, the 4 `DFlash*Tests` + parity fixture +
   `deploy/dflash/`. The per-request `speculative` override and the **MTP**
-  speculative path (M2/M40/M47) are **unaffected** — `speculative`,
-  `greedyEligible`, and the shared `SpeculativeStats` acceptance observer (the
-  last **deleted by #47** — publication S0 removed its publisher) all
-  stay (the observer is used by the MTP path too).
+  speculative path (M2/M40/M47) are **unaffected** — `speculative` and
+  `greedyEligible` stay. ~~The shared `SpeculativeStats` acceptance observer
+  stays too (it is used by the MTP path).~~ — **deleted by #47**: publication
+  S0 removed its publisher, and the MTP path does **not** use it; ADR 032 S4
+  speculative stats ride the substrate's aggregate `GenerateCompletionInfo`
+  counts instead.
 - **TurboQuant:** drop the `KVCompression.turboquant` enum case and its
   substrate-typed `generation` accessor (the dead `KVQuantizationScheme` seam).
   The `kv_compression` knob now accepts only `none` (default) and
