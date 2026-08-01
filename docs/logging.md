@@ -212,8 +212,11 @@ so no error description can forge an extra log line in a redirected file. A
 literal backslash is doubled (`\\`) on both paths too, so the escaped
 rendering is losslessly decodable: reading a line left to right, `\n` denotes
 a neutralized control character whenever it follows an even number of
-backslashes. (A naive substring search for `\n` can still match inside a run
-of literal backslashes — decode, don't grep, if you need to distinguish them.)
+backslashes. (A naive substring search for `\n` still gets false positives, and
+it takes only one backslash to get one: a message containing the two characters
+`\` `n` renders as `\\n`, whose last two characters are the substring `\n`.
+Count the backslashes or decode — don't grep — if you need to tell a literal
+`\n` from a neutralized newline.)
 
 **Field forgery is prevented in metadata values only.** Values (`req=`,
 `principal=`, `error=`, …) are rendered logfmt style — one containing a space,
