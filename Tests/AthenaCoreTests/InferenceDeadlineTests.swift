@@ -169,7 +169,7 @@ private func neverFinishing(_ n: Int) -> AsyncStream<Int> {
 /// Bool for test assertions that touch state across child tasks (the
 /// timer/pump closures inside deadlineBoundedNanos), backed by the suite's
 /// shared `Locked` box (#70).
-private final class TestFlag: @unchecked Sendable {
+private final class TestFlag: Sendable {
     private let fired = Locked(false)
     func set() { fired.mutate { $0 = true } }
     func value() -> Bool { fired.current }

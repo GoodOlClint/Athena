@@ -129,7 +129,7 @@ final class DecodePhaseTests: XCTestCase {
 
 /// Counter satisfying `DecodeProgressCounter`, backed by the suite's shared
 /// `Locked` box (#70). Tests assert against `tokens` after draining the stream.
-private final class TestCounter: @unchecked Sendable, DecodeProgressCounter {
+private final class TestCounter: DecodeProgressCounter {
     private let n = Locked(0)
     func incrementToken() { n.mutate { $0 += 1 } }
     var tokens: Int { n.current }

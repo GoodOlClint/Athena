@@ -599,7 +599,7 @@ final class InferenceGateTests: XCTestCase {
     /// Collector standing in for `XCTFail` so a failure arm can be asserted on
     /// instead of failing the test that exercises it. Backed by the suite's
     /// shared `Locked` box (#70).
-    private final class FailureCollector: @unchecked Sendable {
+    private final class FailureCollector: Sendable {
         private let messages = Locked([String]())
         func record(_ m: String) { messages.mutate { $0.append(m) } }
         var recorded: [String] { messages.current }

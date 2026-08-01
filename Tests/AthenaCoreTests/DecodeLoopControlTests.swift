@@ -13,9 +13,7 @@ final class DecodeLoopControlTests: XCTestCase {
 
     /// A counter that reports cancelled once `tokens >= threshold` — models a
     /// disconnect/deadline firing partway through a generation.
-    private final class CancelAfterCounter:
-        @unchecked Sendable, DecodeProgressCounter
-    {
+    private final class CancelAfterCounter: DecodeProgressCounter {
         private let n = Locked(0)
         private let threshold: Int
         init(cancelAfter: Int) { self.threshold = cancelAfter }

@@ -209,7 +209,7 @@ final class MemoryGovernorTests: XCTestCase {
     /// would flag it); it is guarded by the suite's shared `Locked` box, which
     /// takes the increment as one `inout` mutation so it cannot be split back
     /// into a racing read and write (#70).
-    private final class Counter: @unchecked Sendable {
+    private final class Counter: Sendable {
         private let _n = Locked(0)
         var n: Int { _n.current }
         func bump() { _n.mutate { $0 += 1 } }
