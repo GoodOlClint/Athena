@@ -125,6 +125,121 @@ final class LogFormatTests: XCTestCase {
         XCTAssertEqual(LogFormat.truncate("abcdef", limit: 3), "abc…")
     }
 
+    // MARK: - value escaping (issue #31)
+
+    /// Clean values render bare — every field bound today is whitespace-free,
+    /// so the `docs/logging.md` filter recipes stay byte-unchanged.
+    func testCleanValuesRenderBare() {
+        for v in ["abc123", "u:alice", "loadModel(id:)", "12", "a-b_c.d:e/f"] {
+            XCTAssertEqual(LogFormat.escape(v), v, "\(v) should not be quoted")
+        }
+    }
+
+    /// A space would otherwise split one value into two apparent pairs.
+    func testSpaceIsQuoted() {
+        XCTAssertEqual(
+            LogFormat.escape("boom: disk on fire"), "\"boom: disk on fire\"")
+    }
+
+    /// An `=` would otherwise look like a key/value boundary.
+    func testEqualsIsQuoted() {
+        XCTAssertEqual(LogFormat.escape("a=b"), "\"a=b\"")
+    }
+
+    /// The forgery case: `error` sorts ahead of `principal`, so an unescaped
+    /// description would inject a second, plausible `principal=` field before
+    /// the real one.
+    ///
+    /// What quoting buys, precisely: the spoofed text is confined inside one
+    /// field's value, so anything that parses the tail sees exactly two fields
+    /// and one `principal`. It does NOT remove the text — a naive
+    /// `grep principal=` still matches inside the quotes. Structure is
+    /// defended; substring search is not, and cannot be while the description
+    /// is kept at all.
+    func testFieldSpoofingIsConfinedToOneValue() {
+        let merged = LogFormat.merge(
+            handler: [:], provided: ["principal": "u:alice"], event: nil,
+            function: "f", error: Spoof())
+        let rendered = LogFormat.pairs(merged)
+        XCTAssertEqual(
+            rendered,
+            "error=\"denied principal=admin\" function=f principal=u:alice")
+        // Unquoted, the tail would have parsed as four fields with a forged
+        // `principal=admin` ahead of the real one; quoted, it is three.
+        XCTAssertEqual(splitLogfmt(rendered).count, 3)
+        XCTAssertEqual(splitLogfmt(rendered)["principal"], "u:alice")
+    }
+
+    /// Minimal logfmt reader: splits on spaces outside double quotes. Stands in
+    /// for any structure-aware consumer of the tail.
+    private func splitLogfmt(_ s: String) -> [String: String] {
+        var fields: [String] = []
+        var current = ""
+        var inQuotes = false
+        var escaped = false
+        for c in s {
+            if escaped { current.append(c); escaped = false; continue }
+            switch c {
+            case "\\" where inQuotes: current.append(c); escaped = true
+            case "\"": inQuotes.toggle(); current.append(c)
+            case " " where !inQuotes: fields.append(current); current = ""
+            default: current.append(c)
+            }
+        }
+        if !current.isEmpty { fields.append(current) }
+        return fields.reduce(into: [:]) { acc, f in
+            guard let eq = f.firstIndex(of: "=") else { return }
+            let key = String(f[f.startIndex ..< eq])
+            var value = String(f[f.index(after: eq)...])
+            if value.hasPrefix("\"") && value.hasSuffix("\"") {
+                value = String(value.dropFirst().dropLast())
+            }
+            acc[key] = value
+        }
+    }
+    struct Spoof: Error, CustomStringConvertible {
+        let description = "denied principal=admin"
+    }
+
+    /// The worst case for the terminal sink: it writes the body straight to
+    /// stderr, so a raw newline would forge an entire additional log line.
+    func testNewlineCannotForgeALine() {
+        let merged = LogFormat.merge(
+            handler: [:], provided: nil, event: nil, function: "f",
+            error: Multiline())
+        let text = LogFormat.terminalText(message: "failed", merged: merged)
+        XCTAssertFalse(
+            text.contains("\n"), "a newline in a value must not reach stderr")
+        XCTAssertTrue(text.contains(#"error="a\nb""#))
+    }
+    struct Multiline: Error, CustomStringConvertible {
+        let description = "a\nb"
+    }
+
+    func testCarriageReturnAndTabEscaped() {
+        XCTAssertEqual(LogFormat.escape("a\rb"), #""a\rb""#)
+        XCTAssertEqual(LogFormat.escape("a\tb"), #""a\tb""#)
+    }
+
+    /// Quotes and backslashes are escaped, so the quoted form stays parseable.
+    func testQuoteAndBackslashEscaped() {
+        XCTAssertEqual(LogFormat.escape(#"say "hi""#), #""say \"hi\"""#)
+        XCTAssertEqual(LogFormat.escape(#"a\b c"#), #""a\\b c""#)
+    }
+
+    /// Unicode line separators break a line-oriented reader just like `\n`.
+    func testUnicodeLineSeparatorsEscaped() {
+        for sep in ["\u{2028}", "\u{2029}", "\u{85}"] {
+            let out = LogFormat.escape("a\(sep)b")
+            XCTAssertTrue(out.hasPrefix("\""), "\(sep.unicodeScalars) unquoted")
+            XCTAssertFalse(out.unicodeScalars.contains { $0 > "\u{7E}" })
+        }
+    }
+
+    func testEmptyValueIsQuoted() {
+        XCTAssertEqual(LogFormat.escape(""), "\"\"")
+    }
+
     // MARK: - the two sink shapes
 
     /// Terminal: `<msg> k=v k=v`. Unified: `<msg> {k=v k=v}`. The shapes differ

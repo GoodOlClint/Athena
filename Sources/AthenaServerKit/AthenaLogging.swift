@@ -193,11 +193,56 @@ enum LogFormat {
         return String(kept) + "…"
     }
 
+    /// Render one value for the `k=v` tail, quoting only when it would
+    /// otherwise break the structure.
+    ///
+    /// Keeping the error description (see `merge`) makes `error=` the first
+    /// tail field carrying arbitrary, often remote-influenced text — and it
+    /// sorts *ahead* of `function`/`principal`/`req`. Unescaped, a description
+    /// containing `" principal=admin"` forges a plausible field ahead of the
+    /// real one in an operator's grep, and an embedded newline forges an entire
+    /// extra line, since `TerminalLogHandler` writes the body straight to
+    /// stderr. The 256-byte bound caps volume; it does nothing about structure.
+    ///
+    /// logfmt convention: clean values render bare, so every field bound today
+    /// (`req=`, `principal=`, `function=`) and every filter recipe in
+    /// `docs/logging.md` is byte-unchanged.
+    static func escape(_ value: String) -> String {
+        let needsQuoting =
+            value.isEmpty
+            || value.unicodeScalars.contains {
+                $0 == " " || $0 == "=" || $0 == "\"" || $0 == "\\"
+                    || $0.value < 0x20 || $0 == "\u{7F}" || $0 == "\u{85}"
+                    || $0 == "\u{2028}" || $0 == "\u{2029}"
+            }
+        guard needsQuoting else { return value }
+        var out = "\""
+        for scalar in value.unicodeScalars {
+            switch scalar {
+            case "\\": out += "\\\\"
+            case "\"": out += "\\\""
+            case "\n": out += "\\n"
+            case "\r": out += "\\r"
+            case "\t": out += "\\t"
+            default:
+                if scalar.value < 0x20 || scalar == "\u{7F}"
+                    || scalar == "\u{85}" || scalar == "\u{2028}"
+                    || scalar == "\u{2029}"
+                {
+                    out += String(format: "\\u{%04x}", scalar.value)
+                } else {
+                    out.unicodeScalars.append(scalar)
+                }
+            }
+        }
+        return out + "\""
+    }
+
     /// Sorted `k=v k=v`. Empty metadata ⇒ empty string (callers omit the
     /// separator entirely, so a plain line stays byte-unchanged).
     static func pairs(_ merged: Logging.Logger.Metadata) -> String {
         merged.sorted { $0.key < $1.key }
-            .map { "\($0.key)=\($0.value)" }
+            .map { "\($0.key)=\(escape("\($0.value)"))" }
             .joined(separator: " ")
     }
 
