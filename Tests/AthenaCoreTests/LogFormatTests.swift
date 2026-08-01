@@ -425,8 +425,9 @@ final class LogFormatTests: XCTestCase {
     ///   numeric arm has 100+ inhabitants. Collisions on the *other* structural
     ///   scalars (U+0085, U+2029, DEL, the rest of C0) are pinned instead by
     ///   the pairwise-distinctness check in
-    ///   `testBothPathsNeutralizeTheSameScalarSet`, which costs O(n²) string
-    ///   compares over ten scalars rather than an exponentially larger corpus.
+    ///   `testBothPathsNeutralizeTheSameScalarSet`, which costs 630 string
+    ///   compares over all 36 of them rather than an exponentially larger
+    ///   corpus.
     /// - `witnessAlphabet` (6 scalars) to length 5 — depth, for one witness.
     ///
     /// **Length 5 is load-bearing, not round-number.** The shortest witness
@@ -657,15 +658,31 @@ final class LogFormatTests: XCTestCase {
         // tier green before this check existed.
         //
         // Swept over the FULL structural set, not the sample above. A sample
-        // has exactly the defect it is here to prevent: with the 10-scalar
-        // list, `case "\u{07}": return "\\t"` still left the tier green,
-        // because 27 of the 32 C0 scalars appear in no corpus and no sample.
+        // has exactly the defect it is here to prevent: with a 10-scalar
+        // sample, `case "\u{07}": return "\\t"` still left the tier green,
+        // because 27 of the 32 C0 scalars appeared in no corpus and no sample.
         // 36 scalars is 630 compares of two short strings — the exhaustive
         // set costs nothing, so take it and let the claim be true as written.
         let everyStructural = Self.everyStructural
-        XCTAssertTrue(
-            everyStructural.allSatisfy(LogFormat.isLineStructural),
-            "premise: every scalar swept here is one the predicate accepts")
+        // Pinned to the predicate in BOTH directions, over the whole Unicode
+        // scalar space. `allSatisfy` + a count would only assert subset and
+        // size: widening `isLineStructural` by one scalar would leave both
+        // green and quietly demote this set back to a sample — the same
+        // "size, not content" hole this test closes for `hostileAlphabet`, one
+        // level up. Set equality makes that unrepresentable.
+        let declared = Set(everyStructural)
+        var mismatches: [String] = []
+        for value in UInt32(0) ... 0x10FFFF {
+            guard let scalar = Unicode.Scalar(value) else { continue }
+            if LogFormat.isLineStructural(scalar) != declared.contains(scalar) {
+                mismatches.append("U+\(String(value, radix: 16, uppercase: true))")
+                if mismatches.count >= 5 { break }
+            }
+        }
+        XCTAssertEqual(
+            mismatches, [],
+            "everyStructural no longer equals the set isLineStructural "
+                + "accepts, so the sweep below is a sample, not exhaustive")
         XCTAssertEqual(everyStructural.count, 36)
         for (i, a) in everyStructural.enumerated() {
             for b in everyStructural[everyStructural.index(after: i)...] {
