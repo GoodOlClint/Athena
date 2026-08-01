@@ -1,34 +1,86 @@
 # PR CI — the unit test tier. Runs on PRs, plus pushes to main (cache seeding —
-# see `on:`); the full Release build + heavy model-gated e2e stay manual
-# (real models + hardware).
+# see the `seed` job); the full Release build + heavy model-gated e2e stay
+# manual (real models + hardware).
 #
 # The MLX Metal shaders need the Metal Toolchain, which requires Xcode 26+ — the
 # hosted runner's DEFAULT Xcode is too old, so we select the newest installed
 # Xcode explicitly (validated on macos-15 during the 2026-07 soak).
+#
+# Cost shape (macOS minutes bill at 10x): docs/process-only PRs skip lint+unit
+# via the `changes` gate job — the jobs report "skipped", which satisfies
+# required status checks. If branch protection is ever enabled, add
+# "Classify diff" itself to the required checks: a FAILED gate job also skips
+# lint/unit, and skipped required checks read as passing. Pushes to main run
+# `seed` only: it exists solely to publish the SPM dependency cache to a
+# main-scoped key (PR-created caches are invisible to sibling PRs), so it
+# builds WITHOUT running tests — the PR head already passed the unit tier.
+# (That is true up to a stale base: with several PRs in flight, the squashed
+# tree on main can be a combination no CI run ever built. Accepted exposure —
+# the next PR's CI surfaces it; enable "require branches up to date" to close
+# it.) The seed exits in ~1 minute when the cache key already exists (no
+# dep-pin or toolchain change).
 name: CI
 
 # PRs + main. A push trigger on PR BRANCHES alongside pull_request double-runs
 # every PR head (different concurrency groups), burning macOS minutes — so
 # branches without a PR get CI by opening one. The main push trigger is the
 # exception, and it's load-bearing: GitHub scopes caches created on a PR to
-# that PR, so only a cache saved from main is visible to every PR. The
-# post-merge run on main is what seeds the shared SPM dependency cache.
+# that PR, so only a cache saved from main is visible to every PR.
 on:
   pull_request:
   push:
     branches: [main]
 
+# PR pushes supersede each other (cancel-in-progress). Main pushes must NOT
+# cancel each other: the seed run is now the ONLY producer of the shared SPM
+# cache, and cancelling a post-dep-bump seed leaves every PR rebuilding deps
+# until the next main push — so each main push gets a unique group.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: true
 
 jobs:
+  # Docs-only gate: lint and unit run only when the PR touches code. "Code" =
+  # anything OUTSIDE docs/, .claude/, and *.md — so workflow yml, Sources,
+  # Tests, deploy, Package.* all count as code. Runs on cheap ubuntu.
+  changes:
+    name: Classify diff
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      # The pull_request checkout is the PR merge commit; parent 1 is the base
+      # branch tip, so HEAD^1..HEAD is exactly what the PR introduces.
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+      - name: Detect code changes
+        id: diff
+        run: |
+          files=$(git -c core.quotePath=false diff --name-only HEAD^1 HEAD)
+          printf 'Changed files:\n%s\n' "$files"
+          # Docs = anything under docs/ or .claude/, root-level *.md (README…),
+          # or .github markdown (review prompts/guides). Deliberately NOT a
+          # global '\.md$': a .md fixture under Tests/ is code. Empty diff
+          # fails toward running CI.
+          if [ -z "$files" ] || printf '%s\n' "$files" | grep -qvE '^docs/|^\.claude/|^[^/]+\.md$|^\.github/.*\.md$'; then
+            code=true
+          else
+            code=false
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Diff classification::code=$code"
+
   # swift-format style gate. Runs on a Linux container — free/fast, no macOS
   # minutes. The container tag pins the EXACT swift-format version (issue #2:
   # formatter defaults drift across releases and would redden every open PR
   # at once); bump the tag deliberately, reformatting the tree in the same PR.
   lint:
     name: Lint (swift-format)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     container:
@@ -50,6 +102,8 @@ jobs:
 
   unit:
     name: Unit tier (swift test)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: macos-15
     timeout-minutes: 60
     steps:
@@ -62,6 +116,13 @@ jobs:
           sudo xcode-select -s "${latest:-/Applications/Xcode.app}/Contents/Developer"
           xcodebuild -version
           echo "version=$(xcodebuild -version | tr -d '\n ')" >> "$GITHUB_OUTPUT"
+          # Pin the toolchain for every later step. deploy/test.sh honors an
+          # explicit DEVELOPER_DIR but otherwise re-points at the runner's
+          # DEFAULT /Applications/Xcode.app (its CLT fallback matches the
+          # literal string "Xcode.app", which versioned Xcode_NN.app paths
+          # don't contain). unit and seed MUST compile with the same Swift —
+          # they share the SPM cache key — so both export the selection here.
+          echo "DEVELOPER_DIR=$(xcode-select -p)" >> "$GITHUB_ENV"
 
       - name: Download Metal Toolchain
         run: xcodebuild -downloadComponent MetalToolchain
@@ -94,7 +155,7 @@ jobs:
       # targets recompile every run (their objects ride along but the key
       # ignores source changes — an exact hit skips the save, so the cache is
       # only re-uploaded when the pins or toolchain move). NOTE: PR-created
-      # caches are invisible to sibling PRs; the push-to-main run is what
+      # caches are invisible to sibling PRs; the `seed` job on main is what
       # publishes the cache everyone restores.
       - name: Cache SPM build
         uses: actions/cache@v5
@@ -120,3 +181,83 @@ jobs:
             ~/Library/Logs/DiagnosticReports/*
           retention-days: 7
           if-no-files-found: ignore
+
+  # Post-merge cache seeding, build-only. The unit tier already ran on the PR
+  # head; re-running tests on the identical tree post-merge bought nothing at
+  # 10x macOS billing. This job's only product is the main-scoped SPM cache —
+  # and when the exact key already exists (the common case: no dep-pin or
+  # Xcode change), the lookup-only probe short-circuits the whole job.
+  seed:
+    name: Seed SPM cache (main)
+    if: github.event_name == 'push'
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Select newest Xcode (Metal Toolchain needs Xcode 26+)
+        id: xcode
+        run: |
+          latest=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
+          sudo xcode-select -s "${latest:-/Applications/Xcode.app}/Contents/Developer"
+          xcodebuild -version
+          echo "version=$(xcodebuild -version | tr -d '\n ')" >> "$GITHUB_OUTPUT"
+          # Pin the toolchain for every later step. deploy/test.sh honors an
+          # explicit DEVELOPER_DIR but otherwise re-points at the runner's
+          # DEFAULT /Applications/Xcode.app (its CLT fallback matches the
+          # literal string "Xcode.app", which versioned Xcode_NN.app paths
+          # don't contain). unit and seed MUST compile with the same Swift —
+          # they share the SPM cache key — so both export the selection here.
+          echo "DEVELOPER_DIR=$(xcode-select -p)" >> "$GITHUB_ENV"
+
+      - name: Check whether the cache already exists
+        id: probe
+        uses: actions/cache/restore@v5
+        with:
+          path: .build
+          key: ${{ runner.os }}-spm-${{ steps.xcode.outputs.version }}-${{ hashFiles('Package.resolved') }}
+          lookup-only: true
+
+      - name: Download Metal Toolchain
+        if: steps.probe.outputs.cache-hit != 'true'
+        run: xcodebuild -downloadComponent MetalToolchain
+
+      - name: Verify Metal Toolchain present
+        if: steps.probe.outputs.cache-hit != 'true'
+        run: xcodebuild -showComponent MetalToolchain
+
+      - name: Cache rust-shim build
+        if: steps.probe.outputs.cache-hit != 'true'
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust-shim/target
+          key: ${{ runner.os }}-rust-shim-${{ hashFiles('rust-shim/**') }}
+
+      - name: Build rust-shim (structured-output staticlib)
+        if: steps.probe.outputs.cache-hit != 'true'
+        run: ./rust-shim/build.sh
+
+      - name: Restore previous SPM cache (partial)
+        if: steps.probe.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v5
+        with:
+          path: .build
+          key: ${{ runner.os }}-spm-${{ steps.xcode.outputs.version }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-${{ steps.xcode.outputs.version }}-
+
+      # Build everything the unit tier builds (tests included) so the cache
+      # a PR restores is complete — but execute nothing.
+      - name: Build (no test execution)
+        if: steps.probe.outputs.cache-hit != 'true'
+        run: swift build --build-tests
+
+      - name: Save SPM cache
+        if: steps.probe.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: .build
+          key: ${{ runner.os }}-spm-${{ steps.xcode.outputs.version }}-${{ hashFiles('Package.resolved') }}
