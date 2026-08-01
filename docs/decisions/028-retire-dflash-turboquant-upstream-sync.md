@@ -55,7 +55,8 @@ the substrate's `parked/dflash` / `parked/turboquant` branches + the upstream
   `ATHENA_DFLASH` env override, the 4 `DFlash*Tests` + parity fixture +
   `deploy/dflash/`. The per-request `speculative` override and the **MTP**
   speculative path (M2/M40/M47) are **unaffected** — `speculative`,
-  `greedyEligible`, and the shared `SpeculativeStats` acceptance observer all
+  `greedyEligible`, and the shared `SpeculativeStats` acceptance observer (the
+  last **deleted by #47** — publication S0 removed its publisher) all
   stay (the observer is used by the MTP path too).
 - **TurboQuant:** drop the `KVCompression.turboquant` enum case and its
   substrate-typed `generation` accessor (the dead `KVQuantizationScheme` seam).
@@ -84,7 +85,7 @@ than silently falling back. The `e2e-rbac.sh` phase-12 gate asserts this.
   substrate ADR 0001). ADR 001 is superseded by this ADR.
 
 Decision logic is mechanical deletion; the surviving MLX-free decision seams
-(`KVCompression.resolve`, `servesArch`, MTP `SpeculativeStats`) stay unit-pinned
+(`KVCompression.resolve`, `servesArch`; ~~MTP `SpeculativeStats`~~ — **deleted #47**, no publisher survived publication S0) stay unit-pinned
 (ADR 008/009).
 
 ## TriAttention retire-tripwire (WP12, 2026-07-01)

@@ -31,24 +31,15 @@ public protocol DecodeProgressCounter: AnyObject, Sendable {
     /// per-token writer).
     func incrementToken()
 
-    /// M48.4 — publish prefill chunk progress so the heartbeat can
-    /// distinguish "stuck in prefill" from "stuck just-after-prefill"
-    /// from "decoding slowly." Decode loops should call this after
-    /// each prefill chunk has been submitted (not awaited — MLX's
-    /// asyncEval queues the work; this counts "submitted to the
-    /// scheduler"). `total` is the total chunk count for THIS
-    /// prefill; `completed` is how many have been submitted so far
-    /// (1-indexed at first call, equal to `total` at the last call).
-    /// Default: no-op so conformers that don't care about prefill
-    /// granularity stay valid.
-    func recordPrefillChunk(completed: Int, total: Int)
-
     /// M49.3 — annotate the current setup sub-stage so the heartbeat
     /// reports `phase=setup:<stage>` (e.g. `setup:compile-dfa`,
     /// `setup:build-vocab`) instead of just `phase=setup`. The setup
-    /// phase covers everything before the first prefill chunk lands:
-    /// chat prep, prompt tokenization, vocab-token build,
-    /// structured-index DFA compile, KV-cache init. A "stuck-in-setup"
+    /// phase covers chat prep, prompt tokenization, vocab-token build,
+    /// structured-index DFA compile, and KV-cache init — and, since #47,
+    /// **the prefill too**: no producer publishes prefill counts any more, so
+    /// `phase=setup` persists until the first committed token. Read a long
+    /// `phase=setup` as "still in setup OR prefilling", not as "stuck in the
+    /// DFA compile". A "stuck-in-setup"
     /// heartbeat is unactionable without knowing which sub-step is
     /// running — the DFA compile in particular can take minutes for a
     /// large schema on a cache miss. Pass nil to clear the annotation
@@ -69,7 +60,6 @@ public protocol DecodeProgressCounter: AnyObject, Sendable {
 }
 
 extension DecodeProgressCounter {
-    public func recordPrefillChunk(completed: Int, total: Int) {}
     public func setSetupStage(_ stage: String?) {}
     public func cancelGeneration() {}
     public var isCancelled: Bool { false }
@@ -86,41 +76,32 @@ public enum DecodeProgress {
 }
 
 /// M49.2 — coarse phase of a metered generation as observed by the
-/// heartbeat. Distinguishes the three operationally-interesting
-/// states: setup (waiting on request prep / DFA compile / vocab
-/// build), prefill (CPU+GPU on the prompt chunks), and decode
-/// (committing tokens). Lets `athena logs` answer "is it hung in
-/// setup or just running long?" at a glance, without inferring from
-/// "no prefill field yet."
+/// heartbeat. Two states: setup (request prep, DFA compile, vocab build —
+/// **and the prompt prefill**) and decode (committing tokens). Lets
+/// `athena logs` answer "is it hung or just running long?" at a glance.
 ///
-/// Derived from the counter snapshot (tokens + prefill completion);
-/// no separate state needed. Raw values match the log field
-/// convention (lowercase enum case).
-public enum DecodePhase: String, Sendable {
+/// There used to be a third, `.prefill`, fed by `recordPrefillChunk`.
+/// Publication S0 deleted the only producer, and #47 removed the rest:
+/// `GuidedSubstrate` hands prefill to the substrate's
+/// `TokenIterator(prefillStepSize:)`, which exposes no per-chunk callback, so
+/// there is nowhere to hook one. Checked against the mlx tracker on
+/// 2026-08-01 — no upstream work is scheduled that would restore a producer,
+/// so the case was deleted rather than kept as unreachable public API.
+/// Restoring `phase=prefill` (and the `prefill=n/m` heartbeat field) requires
+/// an upstream per-chunk hook first.
+///
+/// Consequence for reading a heartbeat: a long `phase=setup` means "still in
+/// setup OR prefilling". On a large prompt, prefill is the likely answer.
+///
+/// Raw values match the log field convention (lowercase enum case).
+public enum DecodePhase: String, Sendable, CaseIterable {
     case setup
-    case prefill
     case decode
 
-    /// Compute the current phase from a counter snapshot.
-    ///
-    /// - `tokens > 0` ⇒ `.decode` (at least one token has been
-    ///   committed; we're past prefill regardless of whether prefill
-    ///   was tracked).
-    /// - `prefillTotal > 0 && prefillCompleted < prefillTotal` ⇒
-    ///   `.prefill` (chunks submitted but not all done).
-    /// - `prefillTotal > 0 && prefillCompleted == prefillTotal` ⇒
-    ///   `.decode` (prefill done; decode loop about to commit or
-    ///   already between iterations — the transient window is
-    ///   sub-second in practice).
-    /// - everything else ⇒ `.setup`.
-    public static func from(
-        tokens: Int, prefillCompleted: Int, prefillTotal: Int
-    ) -> DecodePhase {
-        if tokens > 0 { return .decode }
-        if prefillTotal > 0 {
-            return prefillCompleted < prefillTotal
-                ? .prefill : .decode
-        }
-        return .setup
+    /// Compute the current phase from a counter snapshot: any committed
+    /// token means we are decoding; otherwise we are still in setup (which
+    /// now includes the prefill — see the type doc).
+    public static func from(tokens: Int) -> DecodePhase {
+        tokens > 0 ? .decode : .setup
     }
 }

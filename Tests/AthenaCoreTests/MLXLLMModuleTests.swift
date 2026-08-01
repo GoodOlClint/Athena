@@ -369,22 +369,28 @@ final class MLXLLMGenerationIntegrationTests: XCTestCase {
     }
 }
 
-/// M47.1 — bit-identical-greedy regression gate for structured speculative.
-/// The M2-era correctness contract: temperature-0 MTP speculative decoding
-/// MUST emit the same token sequence as non-speculative greedy of the same
-/// model + prompt + Guide state. The contract holds today (the verify gate
-/// commits the Guide-masked backbone argmax on every reject); M47.2 changes
-/// the *draft* selection from unmasked to Guide-masked argmax, which is
-/// supposed to leave commits unchanged. This test exists to catch any
-/// regression in either direction.
+/// M48.3 — temperature is inert under a Guide. Restored after #47 deleted the
+/// class it lived in (see below); the two siblings it shared that class with
+/// were genuinely vacuous, this one is not.
 ///
-/// Heavy: drives a real MLX model with an MTP head through both requests
-/// (`speculative: true`, then `speculative: false`). Post-S0 both carry a
-/// schema so both route to `GuidedSubstrate` (DecodeDispatch) — the flag is
-/// decode-irrelevant under a Guide. Same prompt, same schema, same
-/// maxTokens, same temperature 0 — only the per-request `speculative`
-/// flag toggles. Gated on ATHENA_RUN_MODEL_TESTS=1.
-final class StructuredSpeculativeParityTests: XCTestCase {
+/// The contract: `GuidedSubstrate` decodes with a hardcoded `ArgMaxSampler()`
+/// (`GuidedSubstrate.swift`), so a schema request at temperature 0.1 must emit
+/// the byte-identical sequence a temperature-0 request does. The invariant is
+/// asserted in prose at `DecodeDispatch.effectiveTemperature` ("under a Guide
+/// the decode is masked-argmax and temperature is inert") — this is the only
+/// thing that would catch someone swapping a temperature-aware sampler in.
+///
+/// **The load-bearing variable is `temperature`, not `speculative`.** The arms
+/// also differ in the `speculative` flag, which is decode-irrelevant here:
+/// `DecodeDispatch.route(hasSchema: true, …)` sends both to `GuidedSubstrate`
+/// regardless. That confound is exactly what made the sibling
+/// `testStructuredGreedyParityAcrossSpeculative` vacuous — it varied ONLY the
+/// inert flag — and it is named here so this test is not mistaken for the same
+/// thing and deleted alongside it a second time. MTP speculative bit-identity
+/// is a separate contract with no gate at all; see #64.
+///
+/// Heavy: drives a real MLX model. Gated on ATHENA_RUN_MODEL_TESTS=1.
+final class GuidedTemperatureInertnessTests: XCTestCase {
 
     private func skipUnlessEnabled() throws -> URL {
         let env = ProcessInfo.processInfo.environment
@@ -401,63 +407,7 @@ final class StructuredSpeculativeParityTests: XCTestCase {
         return modelURL
     }
 
-    /// Same chat turn, same JSON schema, same maxTokens, temperature 0 —
-    /// only `speculative` toggles. The two decoded strings must match
-    /// byte-for-byte. If they diverge, MTP speculative is breaking the
-    /// bit-identical-greedy contract (e.g. the GDN/Mamba recurrent
-    /// restore on reject is wrong, or the verify mask is mis-stated).
-    func testStructuredGreedyParityAcrossSpeculative() async throws {
-        let modelURL = try skipUnlessEnabled()
-        // Tight schema: an enum with two short string values. Most token
-        // positions have ≤2 allowed continuations, so the unmasked MTP
-        // draft (pre-M47.2) almost never matches the Guide-masked verify
-        // — exactly the failure mode under which the contract must still
-        // hold token-for-token.
-        let schema = """
-            {"type":"object",
-             "properties":{
-               "answer":{"type":"string","enum":["yes","no"]}
-             },
-             "required":["answer"]}
-            """
-        let messages = [
-            ChatTurn(
-                role: "user",
-                content:
-                    "Is the sky generally blue on a clear day? "
-                    + "Answer in JSON.")
-        ]
-        let speculativeText = try await runOnce(
-            modelURL: modelURL, messages: messages,
-            schemaJSON: schema, speculative: true)
-        let greedyText = try await runOnce(
-            modelURL: modelURL, messages: messages,
-            schemaJSON: schema, speculative: false)
-        XCTAssertFalse(
-            speculativeText.isEmpty, "speculative branch produced empty")
-        XCTAssertFalse(
-            greedyText.isEmpty, "greedy branch produced empty")
-        XCTAssertEqual(
-            speculativeText, greedyText,
-            "structured speculative (true) and structured greedy (false) "
-                + "must emit byte-identical strings under temp==0 — the "
-                + "M2-era bit-identical-greedy contract")
-    }
-
-    /// M48.3 — under a Guide, the temperature parameter is INERT
-    /// (the schema mask collapses each position's distribution to its
-    /// allowed set, and the greedy speculative loop picks the masked
-    /// argmax regardless of temp). So a structured request with
-    /// `speculative: true` and ANY temperature must produce the same
-    /// token sequence as `speculative: false` at temperature 0 — both
-    /// resolve to masked-argmax greedy under the same Guide.
-    ///
-    /// Pre-M48.3 the dispatch gate `greedyEligible = spec && temp == 0`
-    /// silently routed `spec=true temp=0.1 schema=true` to the
-    /// non-speculative guided path, throwing away M47.2's
-    /// speculative win on every structured request that didn't
-    /// explicitly pass `temperature: 0`.
-    func testStructuredGreedyParityTempIneretUnderGuide() async throws {
+    func testTemperatureIsInertUnderGuide() async throws {
         let modelURL = try skipUnlessEnabled()
         let schema = """
             {"type":"object",
@@ -473,70 +423,24 @@ final class StructuredSpeculativeParityTests: XCTestCase {
                     "Is the sky generally blue on a clear day? "
                     + "Answer in JSON.")
         ]
-        // spec=true + temp>0 + schema — today every schema request routes
-        // to GuidedSubstrate (DecodeDispatch); spec is inert under a Guide.
-        let speculativeAtTemp = try await runOnce(
+        let atTemp = try await runOnce(
             modelURL: modelURL, messages: messages,
             schemaJSON: schema, speculative: true,
             temperature: 0.1)
-        // spec=false — same route: the guided masked-argmax baseline.
         let greedyBaseline = try await runOnce(
             modelURL: modelURL, messages: messages,
             schemaJSON: schema, speculative: false,
             temperature: 0)
+        XCTAssertFalse(atTemp.isEmpty, "temp>0 branch produced empty")
         XCTAssertFalse(
-            speculativeAtTemp.isEmpty,
-            "speculative+temp>0 branch produced empty")
-        XCTAssertFalse(
-            greedyBaseline.isEmpty,
-            "greedy baseline branch produced empty")
+            greedyBaseline.isEmpty, "greedy baseline branch produced empty")
         XCTAssertEqual(
-            speculativeAtTemp, greedyBaseline,
-            "structured speculative at temp>0 must emit the same "
-                + "byte-identical sequence as structured greedy at "
-                + "temp=0 — the Guide collapses both to masked-argmax, "
-                + "so temp is inert. (M48.3 contract.)")
-    }
-
-    /// M47.2 acceptance-rate gate. Under the same tight enum schema, the
-    /// MTP speculative loop must accept its own draft at a non-trivial
-    /// rate — pre-M47.2 the unmasked argmax draft almost never matched
-    /// the Guide-masked verify so acceptance was ~0% and speculation
-    /// actively cost more than non-speculative greedy. The test sets a
-    /// 30% floor: realistic for a tight schema where the valid set is
-    /// small but MTP/backbone agreement within that set is high.
-    func testStructuredSpeculativeAcceptanceRate() async throws {
-        let modelURL = try skipUnlessEnabled()
-        let schema = """
-            {"type":"object",
-             "properties":{
-               "answer":{"type":"string","enum":["yes","no"]}
-             },
-             "required":["answer"]}
-            """
-        let messages = [
-            ChatTurn(
-                role: "user",
-                content:
-                    "Is the sky generally blue on a clear day? "
-                    + "Answer in JSON.")
-        ]
-        let counter = AcceptCounter()
-        try await SpeculativeStats.$observer.withValue(counter) {
-            _ = try await self.runOnce(
-                modelURL: modelURL, messages: messages,
-                schemaJSON: schema, speculative: true)
-        }
-        let stats = counter.stats
-        XCTAssertGreaterThan(
-            stats.total, 0,
-            "speculative loop must have run ≥1 iteration to be measurable")
-        let rate = Double(stats.accepts) / Double(stats.total)
-        XCTAssertGreaterThanOrEqual(
-            rate, 0.30,
-            "MTP-draft acceptance rate \(stats.accepts)/\(stats.total) = "
-                + "\(rate) — M47.2 Guide-masked drafts should keep this ≥30% "
-                + "under a realistic schema (pre-fix it was effectively 0%)")
+            atTemp, greedyBaseline,
+            "a structured request at temp>0 must emit the same "
+                + "byte-identical sequence as one at temp=0 — the Guide "
+                + "collapses both to masked-argmax, so temperature is inert. "
+                + "(M48.3 contract; enforced by GuidedSubstrate's hardcoded "
+                + "ArgMaxSampler.)")
     }
 
     private func runOnce(
@@ -612,26 +516,5 @@ final class SeededSamplingReproducibilityTests: XCTestCase {
             a, b,
             "same seed + same prompt + temp>0 must reproduce byte-for-byte "
                 + "(C11: per-request GenerateParameters.seed)")
-    }
-}
-
-/// NSLock-isolated accept/total counter for the M47.2 acceptance-rate
-/// test. The publish call (`recordIteration`) is on the synchronous
-/// decode loop — the reader (test assertion) runs after the stream
-/// completes, so the lock is uncontended in practice.
-private final class AcceptCounter:
-    @unchecked Sendable, SpeculativeAcceptanceObserver
-{
-    private let lock = NSLock()
-    private var accepts = 0
-    private var total = 0
-    func recordIteration(accepted: Bool) {
-        lock.lock(); defer { lock.unlock() }
-        total += 1
-        if accepted { accepts += 1 }
-    }
-    var stats: (accepts: Int, total: Int) {
-        lock.lock(); defer { lock.unlock() }
-        return (accepts, total)
     }
 }

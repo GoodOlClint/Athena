@@ -113,8 +113,16 @@ algebra, prefix-cache key/snapshot policy) stays unit-pinned (ADR 008/009).
 - **Amends ADR 032:** the `speculative` knob now drives the substrate drafter loop
   for **both** Gemma4 and Qwen3.5; the "Qwen3.5 fused-`mtp.*`-head byte-unchanged"
   framing is superseded.
-- **Supersedes** the Athena-owned MTP loop of M2/M40 for Qwen3.5 (the shared
-  `SpeculativeStats`/CI floor is re-pointed at substrate `MTPStatsCollecting`).
+- **Supersedes** the Athena-owned MTP loop of M2/M40 for Qwen3.5. ~~(the shared
+  `SpeculativeStats`/CI floor is re-pointed at substrate
+  `MTPStatsCollecting`)~~ — **stale as of 2026-08-01 (#47)**: there is no
+  `SpeculativeStats` floor left to re-point. Publication S0 removed the
+  vendored loop that published to its observer, and #47 deleted the seam and
+  both its tests. Substrate `MTPStatsCollecting` is aggregate-only, so nothing
+  bridges to the per-iteration granularity that observer had; the stats
+  surface is the `GenerateCompletionInfo` counts the `logMTPStats` line
+  already reports. This ADR is still Proposed, so treat the plan as: no CI
+  floor to migrate, and MTP speculative bit-identity is uncovered (#64).
 - Substrate is **not yet pristine upstream** — the MTP delta lives on the
   `integration` fork until `ml-explore` merges it (the ADR-028 "revival belongs
   upstream" staging ground); tracked in `~/Source/mlx/research/`.

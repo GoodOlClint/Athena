@@ -80,14 +80,14 @@ tier must not read as "the numerics are covered"):
 
 | Invariant | CI (this tier) | Gated / manual (unchanged) |
 |---|---|---|
-| **L2** acceptance-rate floor | `SpeculativeStats` observer + accept/reject algebra (already MLX-free) | real-model accept rate |
+| ~~**L2** acceptance-rate floor~~ | ~~`SpeculativeStats` observer + accept/reject algebra~~ — **row retired (#47)**: publication S0 removed the vendored decode loop that published to the observer, leaving no in-tree publisher. Both columns are deleted (`SpeculativeStatsTests` and the gated `testStructuredSpeculativeAcceptanceRate`). ADR 032 S4 speculative stats ride the substrate's aggregate `GenerateCompletionInfo` counts instead, which the per-iteration observer never bridged to. | ~~real-model accept rate~~ |
 | **L7 / C1** seeded sampling | `SpeculativeSampling` distribution/RNG/tie-break + multi-seed property (already MLX-free) | real-model sampled tokens |
 | **NC6** StructuredVocab | pure `build(vocabSize:eos:decode:)` core — C12 eos-sentinel, UTF-8 byte map | real tokenizer |
 | ~~**NC6** GuidedDecoder~~ | ~~IDLE→ENFORCING phase machine via a real `byteVocab` guide (`commit`/`forceEnforce`/idleBudget/jsonStart)~~ — **row retired (#49)**: publication S0 deleted the in-closure guided-greedy loop this pinned, orphaning `GuidedDecoder`; the live structured path is `GuidedSubstrate`, covered by the **L5** row below. The tier no longer owes this invariant. | ~~`pick` (MLX argmax)~~ |
 | **L5** schema mask | `maskedArgmax([Float],[UInt8])` seam — scripted off-schema logits | the `MLXArray` mask-add (delegates to the seam) |
 | **NC4** prefix cache | `scopeKey`/`commonPrefixLength`/eviction policy over scalar descriptors | KV-tensor clone/restore bit-identity |
 | **NC5** cancellation | `DecodeLoopControl.shouldStop` predicate the 4 loops consult | the live disconnect bridge (M68.4 A8, e2e) |
-| **L1** greedy parity | accept/commit algebra: committed-seq == greedy-seq property | real-model bit-identity (`ATHENA_RUN_MODEL_TESTS`) |
+| **L1** greedy parity | ~~accept/commit algebra: committed-seq == greedy-seq property~~ — **no longer pinned (#47)**: the algebra it described lived in the vendored decode loop publication S0 removed. | ~~real-model bit-identity (`ATHENA_RUN_MODEL_TESTS`)~~ — **gone (#47)**: `testStructuredGreedyParityAcrossSpeculative` stopped discriminating post-S0 (both arms carry a schema, so `DecodeDispatch` routes both to `GuidedSubstrate` and the `speculative` flag is decode-irrelevant) and was deleted rather than left as false coverage. **MTP speculative bit-identity now has no gate at all** — tracked in #64. |
 | **L8** stub vectors | model-distinguishable stub embedding (stub-only behavior tweak) | real embedding numerics |
 | **NF3** TriAttention | geometry/eviction already CI-tested (NF1/NF9) | compress/`gatedDeltaOps` numeric parity stays gated |
 
