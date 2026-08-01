@@ -92,7 +92,7 @@ Classify every finding into one of three severities:
 
 - **BLOCKER** — a hard-constraint violation or a correctness bug that makes the PR unsafe to merge.
 - **FOLLOW-UP** — a real problem but not one that should block this merge: a legitimate TODO, a missing test that should exist, a refactor opportunity directly created by this change.
-- **NIT** — pure style or naming preference with no effect on behavior, correctness, or maintainability. Drop these. This is a narrow category: anything that could cause incorrect behavior, a test failure, or a misleading result is a FOLLOW-UP at minimum.
+- **NIT** — pure style or naming preference with no effect on behavior, correctness, or maintainability. Drop these. This is a narrow category: anything that could cause incorrect behavior, a test failure, or a misleading result is a FOLLOW-UP at minimum. When a finding sits between NIT and FOLLOW-UP, treat it as a FOLLOW-UP — then route it by scope like any other (review body if in-scope, issue if out-of-scope).
 
 Route findings by severity:
 

@@ -1,6 +1,6 @@
 # Remediation-loop retro (cycle 2026-07-31 → 08-01)
 
-Scope: the 14 PRs (#1–#39) and 26 issues (#2–#42) of the issue-remediation loop, reviewed against the goals: less issue churn, less token burn, fewer runner minutes, same code quality.
+Scope: the 14 PRs (#1–#39) and 28 issues (#2–#42) of the issue-remediation loop, reviewed against the goals: less issue churn, less token burn, fewer runner minutes, same code quality. (Counts corrected 2026-08-01 after the PR #44 review audited them against the API.)
 
 ## Scoreboard
 
@@ -8,7 +8,7 @@ Scope: the 14 PRs (#1–#39) and 26 issues (#2–#42) of the issue-remediation l
 |---|---|
 | PRs merged | 14 in ~26 h; open→merge 9–24 min each |
 | Review-bot runs | 27 runs / 131 runner-min, 31 formal reviews — **~2 full reviews per PR** |
-| PRs needing ≥2 full review rounds | 10 of 14 |
+| PRs needing ≥2 full review rounds | 9 of 14 |
 | CI runs | 46 / 188 wall-min; macOS unit job in every one (10× billing multiplier — repo is private) |
 | Post-merge main CI runs (cache-seed) | 14 — each re-runs lint + full unit tier on a tree that just passed as the PR head |
 | Issues filed by the loop | 20 (vs 6 planned) — 2.5 filed per issue closed |
@@ -29,7 +29,7 @@ The cost is not any one policy; it's the interaction of two:
 1. `claude-code-review.yml` instructs (pre-move inline prompt; since relocated to `.github/review-prompt.md`): every FOLLOW-UP finding → `gh issue create`, and "when a finding sits between NIT and FOLLOW-UP, file the FOLLOW-UP" — a deliberate bias toward filing.
 2. `pr-merge-loop` instructs: on APPROVED, decide fold-in NOW; in-scope follow-ups fold into the open PR.
 
-Result: the bot **approves** a PR and files issues → the agent folds them → push → `synchronize` retriggers **both** a full macOS CI run and a full review-bot run → second APPROVED → merge. That second round happened on ~9 of 14 PRs, and the issues it was mediated through lived 5–21 minutes. GitHub issues were used as an IPC channel between two agents already looking at the same diff — each one costing a full spec body (tokens), a skipped claude.yml trigger, `Closes #N` bookkeeping, and once (PR #26) a wrong-issue auto-close via a negated closing keyword.
+Result: the bot **approves** a PR and files issues → the agent folds them → push → `synchronize` retriggers **both** a full macOS CI run and a full review-bot run → second APPROVED → merge. That pattern cost 9 post-approval rounds across 7 of 14 PRs, and the issues it was mediated through lived 5–21 minutes. GitHub issues were used as an IPC channel between two agents already looking at the same diff — each one costing a full spec body (tokens), a skipped claude.yml trigger, `Closes #N` bookkeeping, and once (PR #26) a wrong-issue auto-close via a negated closing keyword.
 
 ## Recommendations, ranked by savings
 
@@ -37,7 +37,7 @@ Result: the bot **approves** a PR and files issues → the agent folds them → 
 
 Edit `pr-merge-loop` APPROVED section: follow-ups filed with an approval go straight to end-of-cycle triage — no fold, no second round. The triage step already proved it works (this cycle's table is exactly that). If a follow-up is truly blocking, the reviewer should have said CHANGES_REQUESTED — trust the verdict.
 
-Saves: ~1 macOS CI run + ~1 review-bot run on ~9 of 14 PRs ≈ **–35% CI minutes, –40% review-bot runs/tokens**. Risk: minor items land one PR later. That's what a triage queue is for.
+Saves: the 9 post-approval rounds (each ~1 macOS CI run + ~1 review-bot run) spread over 7 of 14 PRs ≈ **–35% CI minutes, –40% review-bot runs/tokens**. Risk: minor items land one PR later. That's what a triage queue is for.
 
 ### 2. In-scope findings stay in the review body — issues are for out-of-scope only
 

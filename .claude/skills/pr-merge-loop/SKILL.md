@@ -20,7 +20,7 @@ Four checks on the working diff, before the first push — a defect caught here 
 
 ## Open the PR — merge is verdict-gated (policy 2026-07-31)
 
-- Push branch → `gh pr create` (base main). Do NOT arm auto-merge: merging is an explicit act so a COMMENTED deferral or a blocked merge can be triaged before anything lands.
+- Push branch → `gh pr create` (base main). Do NOT arm auto-merge: the loop's job doesn't end at merge — the post-merge harvest and doc reconciliation need the agent present at merge time, and auto-merge can land the squash while the loop is between polls.
 - The PR body carries `Closes #N` for every issue it resolves — never close issues by hand with `gh issue close`; the merge closes them.
 - Squash on merge: per-PR commits collapse to one curated commit on main, matching the house one-commit-per-slice history.
 - Never bump `Athena.appVersion` or touch `v*` tags in a PR — versions are release events (ADR 040 S8), cut by the operator via `/ship`.
@@ -33,14 +33,14 @@ The automated `claude-review` GitHub Action reviews on every push and submits ex
 ### CHANGES_REQUESTED
 
 - Fix every blocker.
-- In-scope follow-ups the reviewer wrote in the review body may be fixed in the same round as the blockers. Issues the reviewer filed are out-of-scope by construction (the review prompt files issues only for findings outside the diff) — they stay open for end-of-cycle triage. If the operator directs an issue fold-in anyway, add `Closes #N` to the PR body (`gh pr edit <N> --body`); never close issues by hand.
+- In-scope follow-ups the reviewer wrote in the review body may be fixed in the same round as the blockers. Issues the reviewer filed are out-of-scope by construction (the review prompt files issues only for findings outside the diff; if a legacy-prompt review files an in-scope issue anyway, it waits for end-of-cycle triage all the same) — they stay open for end-of-cycle triage. If the operator directs an issue fold-in anyway, add `Closes #N` to the PR body (`gh pr edit <N> --body`); never close issues by hand.
 - **Fold-ins spend the PR's single fold budget — one round per PR.** A PR that has already folded once has spent it: every later round fixes exactly what the reviewer flagged and nothing else. (Unconditional fold-in once spiraled a PR through three review rounds in a sibling repo — this cap is the lesson.)
 - Push; the reviewer re-reviews automatically. Loop.
 
 ### APPROVED
 
 - **Merge immediately**: `gh pr merge <N> --squash`. Then the post-merge harvest.
-- **Do NOT fold anything on an approval** (policy 2026-08-01). If a finding truly had to land before merge, the reviewer's verdict would have been CHANGES_REQUESTED — trust the verdict. Every post-approval push costs a full CI run plus a full re-review round; in the first remediation cycle the fold-after-APPROVED path doubled both on 9 of 14 PRs for items that could all have waited one PR.
+- **Do NOT fold anything on an approval** (policy 2026-08-01). If a finding truly had to land before merge, the reviewer's verdict would have been CHANGES_REQUESTED — trust the verdict. Every post-approval push costs a full CI run plus a full re-review round; in the first remediation cycle the fold-after-APPROVED path added 9 extra rounds across 7 of 14 PRs for items that could all have waited one PR.
 - Follow-ups the reviewer noted in the review body survive via the post-merge harvest; issues the reviewer filed stay open for **end-of-cycle triage, before starting the next plan item** — report each with a priority and when it will be resolved. Don't let them silently become backlog.
 
 ### COMMENTED (deferral)
