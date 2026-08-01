@@ -104,26 +104,35 @@ public actor InferenceGate {
         } catch {
             outcome = .failure(error)
         }
-        await release()
         // ADR 030 Part 2 — an async allocation fault fired on MLX's worker
         // thread during this span (the handler recorded it instead of aborting
         // the daemon). The eval barrier inside `work` has completed, so the
-        // latch is set by now; convert it to a classified 503 so the request
+        // latch is set by now; it becomes a classified 503 so the request
         // degrades and the process stays up.
         //
-        // Checked after the release on BOTH paths, and before surfacing the raw
-        // error, so a recorded allocation fault still wins over a thrown one —
-        // a throw is often a cascade artifact of the decode loop touching the
-        // invalid arrays before it broke on the latch.
-        try throwIfMetalFaulted()
+        // Consumed BEFORE the release, not after: `release()` hands the gate to
+        // the next waiter, whose first act is `MetalFaultLatch.shared.clear()`.
+        // Reading the latch afterwards races that clear, so our fault could be
+        // wiped before we see it — the request would return success (or a bare
+        // `work()` error) instead of degrading, and the fault would be charged
+        // to nobody. Taking it first makes the span's own fault unambiguously
+        // ours, which is what the `clear()` at the top of this function assumes.
+        let fault = takeMetalFault()
+        await release()
+        // Thrown after the release so the gate is provably free before we
+        // return, and before surfacing the stored error so a recorded
+        // allocation fault still wins over a thrown one — a throw is often a
+        // cascade artifact of the decode loop touching the invalid arrays
+        // before it broke on the latch.
+        if let fault { throw fault }
         return try outcome.get()
     }
 
-    /// ADR 030 Part 2 (WP2) — if a recognized MLX allocation fault was latched
-    /// during the just-finished span, consume it and throw a classified 503.
-    private nonisolated func throwIfMetalFaulted() throws {
-        if let fault = MetalFaultLatch.shared.take() {
-            throw AthenaError.metalOutOfMemory(module: nil, detail: fault)
+    /// ADR 030 Part 2 (WP2) — consume a recognized MLX allocation fault latched
+    /// during the just-finished span, as a classified 503.
+    private nonisolated func takeMetalFault() -> Error? {
+        MetalFaultLatch.shared.take().map {
+            AthenaError.metalOutOfMemory(module: nil, detail: $0)
         }
     }
 
