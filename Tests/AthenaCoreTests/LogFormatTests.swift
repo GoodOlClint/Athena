@@ -340,38 +340,61 @@ final class LogFormatTests: XCTestCase {
             alsoDecodeEscapedQuote: true)
     }
 
-    /// #53 — pin the *property*, not six examples of it.
+    /// Maximally hostile to the escape syntax: the escape character itself, the
+    /// letters that can follow it, the `\u{…}` delimiters, hex digits, the
+    /// quote `escape` escapes, and structural scalars from three escape arms
+    /// (`\n`/`\r`/`\t` readable, `\u{00}` and `\u{2028}` numeric, one non-C0).
     ///
-    /// `docs/logging.md` guarantees the escaped rendering is losslessly
-    /// decodable. Six concrete cases pin instances of that; uniqueness itself
-    /// was only ever brute-forced by hand pre-submit. This exhausts every
-    /// string of length ≤ 5 over an alphabet chosen to be maximally hostile to
-    /// the escape syntax — the escape character itself, the letters that follow
-    /// it (`n`, `u`), the `\u{…}` delimiters, hex digits, the quote `escape`
-    /// escapes, and structural scalars from three different escape arms (`\n`
-    /// readable, `\u{00}` and `\u{2028}` numeric, one of them non-C0).
+    /// `\r`, `\t` and the letters `r`, `t` are here per #58: without them the
+    /// corpus could not express ANY collision between `escapeControl`'s three
+    /// readable arms, which it reached through the `\n` arm alone.
     ///
-    /// **Length 5 is load-bearing, not round-number.** The shortest witness
-    /// separating a parity-aware reader from a parity-blind one is a fully
-    /// formed literal `\u{0}` — `\`, `u`, `{`, `0`, `}` — which at length 4
-    /// cannot be built. Verified: an encoder that skips doubling a backslash
-    /// followed by `u` (so a literal `\u{0000}` and a real NUL render
-    /// identically — #36 in a new form) passes a length-4 corpus and fails
-    /// this one. Do not lower the bound to save 0.3 s.
+    /// What that actually buys was measured, because #58's premise ("nothing
+    /// currently catches it") is too strong. A plain collision between two
+    /// readable arms — `escapeControl` returning `\n` for a carriage return —
+    /// IS already caught, by the example tests
+    /// `testCarriageReturnAndTabEscaped` and
+    /// `testMessageControlCharactersNeutralized`, which pin those renderings
+    /// concretely. (`testBothPathsNeutralizeTheSameScalarSet` did not cover it
+    /// either, asserting only that each structural scalar does not *survive* —
+    /// so #58 added the pairwise-distinctness sweep that now does, over every
+    /// structural scalar rather than the five this corpus can reach.)
     ///
-    /// Honesty boundary: this pins *value* decodability, not *field*
-    /// structure. Verified — dropping `escape`'s `\"` arm leaves this green,
-    /// because the outer delimiters still bracket the value; what that breaks
-    /// is the tail's field structure, pinned via `splitLogfmt` by
-    /// `testFieldSpoofingIsConfinedToOneValue`. The two are complements.
-    func testEscapedRenderingsAreUniquelyDecodable() {
-        let alphabet: [Unicode.Scalar] = [
-            "\\", "n", "u", "{", "}", "0", "f", "\"", "\n", "\u{00}", "\u{2028}",
-        ]
-        // Breadth-first by length so the total is obvious from the bounds.
+    /// What nothing caught is the interaction no example enumerates: parity
+    /// blindness on `r` — a backslash before `r` left undoubled, so literal
+    /// `\r` TEXT and a real carriage return render identically (#36 in a third
+    /// form). Mutating `sanitizeMessage` that way leaves the pre-#58 suite
+    /// entirely green — 783 tests, 0 failures — and fails this corpus as the
+    /// suite's ONLY failure. That is what the four scalars buy: the escape
+    /// character combined with the letters its own arms emit.
+    private static let hostileAlphabet: [Unicode.Scalar] = [
+        "\\", "n", "r", "t", "u", "{", "}", "0", "f", "\"",
+        "\n", "\r", "\t", "\u{00}", "\u{2028}",
+    ]
+
+    /// Every scalar `LogFormat.isLineStructural` accepts — all of C0, DEL, NEL
+    /// and the two Unicode separators. The EXHAUSTIVE set, deliberately: a
+    /// sample has exactly the defect the checks using it exist to prevent.
+    private static let everyStructural: [Unicode.Scalar] =
+        (0 ... 0x1F).compactMap { Unicode.Scalar($0) }
+        + ["\u{7F}", "\u{85}", "\u{2028}", "\u{2029}"]
+
+    /// Just enough to build a fully formed literal `\u{0}` and the real NUL it
+    /// would collide with. Separate from `hostileAlphabet` so length 5 costs
+    /// 6^5 rather than 15^5 — widening the alphabet and keeping the length-5
+    /// witness at full breadth would have been ~4.5x the runtime (#58).
+    private static let witnessAlphabet: [Unicode.Scalar] = [
+        "\\", "u", "{", "}", "0", "\u{00}",
+    ]
+
+    /// Every string of length ≤ `maxLength` over `alphabet`, breadth-first by
+    /// length so the total is obvious from the bounds. Includes `""`.
+    private static func exhaustive(
+        over alphabet: [Unicode.Scalar], upTo maxLength: Int
+    ) -> [String] {
         var corpus: [String] = [""]
         var frontier: [String] = [""]
-        for _ in 1 ... 5 {
+        for _ in 1 ... maxLength {
             var next: [String] = []
             next.reserveCapacity(frontier.count * alphabet.count)
             for prefix in frontier {
@@ -384,9 +407,62 @@ final class LogFormatTests: XCTestCase {
             corpus += next
             frontier = next
         }
+        return corpus
+    }
+
+    /// #53 — pin the *property*, not six examples of it.
+    ///
+    /// `docs/logging.md` guarantees the escaped rendering is losslessly
+    /// decodable. Six concrete cases pin instances of that; uniqueness itself
+    /// was only ever brute-forced by hand pre-submit. This exhausts TWO
+    /// corpora, because breadth and depth are needed for different defects and
+    /// paying for both at once is quadratic waste (#58):
+    ///
+    /// - `hostileAlphabet` (15 scalars) to length 4 — breadth. Each escape arm
+    ///   has a REPRESENTATIVE here, so an inter-arm collision on one of `\n`,
+    ///   `\r`, `\t`, NUL or U+2028 fails here. Note the narrowness: a corpus
+    ///   cannot cover a collision on a scalar it does not contain, and the
+    ///   numeric arm has 100+ inhabitants. Collisions on the *other* structural
+    ///   scalars (U+0085, U+2029, DEL, the rest of C0) are pinned instead by
+    ///   the pairwise-distinctness check in
+    ///   `testBothPathsNeutralizeTheSameScalarSet`, which costs 630 string
+    ///   compares over all 36 of them rather than an exponentially larger
+    ///   corpus.
+    /// - `witnessAlphabet` (6 scalars) to length 5 — depth, for one witness.
+    ///
+    /// **Length 5 is load-bearing, not round-number.** The shortest witness
+    /// separating a parity-aware reader from a parity-blind one is a fully
+    /// formed literal `\u{0}` — `\`, `u`, `{`, `0`, `}` — which at length 4
+    /// cannot be built. An encoder that skips doubling a backslash followed by
+    /// `u` (so a literal `\u{0000}` and a real NUL render identically — #36 in
+    /// a new form) passes a length-4 corpus and fails a length-5 one. That is
+    /// not asserted by hand here: `testWitnessCorpusCatchesParityBlindEncoder`
+    /// runs that exact decoy against `witnessAlphabet` and requires it to be
+    /// caught, so narrowing the witness alphabet cannot silently drop the
+    /// witness it exists to carry.
+    ///
+    /// Honesty boundary: this pins *value* decodability, not *field*
+    /// structure. Verified — dropping `escape`'s `\"` arm leaves this green,
+    /// because the outer delimiters still bracket the value. What catches that
+    /// drop is `testQuoteAndBackslashEscaped`. It is deliberately NOT
+    /// `testFieldSpoofingIsConfinedToOneValue`, which this comment used to
+    /// name: `Spoof.description` carries no quote, so that test never
+    /// exercises the `\"` arm and stays green when it is deleted (measured).
+    /// The field-structure break a quote-bearing value would cause is real but
+    /// currently unpinned — see #79.
+    func testEscapedRenderingsAreUniquelyDecodable() {
         // The empty string is not filler: it is the only input that trips
-        // `escape`'s `value.isEmpty` quoting arm.
-        XCTAssertEqual(corpus.count, 1 + 11 + 121 + 1331 + 14641 + 161_051)
+        // `escape`'s `value.isEmpty` quoting arm. It comes from the hostile
+        // sweep; `dropFirst` drops the witness sweep's copy of it. The two
+        // sweeps still overlap on 1,554 further strings (every witness string
+        // of length ≤ 4 is also a hostile one) — rendering those twice is
+        // cheaper than deduplicating 63k strings.
+        let corpus =
+            Self.exhaustive(over: Self.hostileAlphabet, upTo: 4)
+            + Self.exhaustive(over: Self.witnessAlphabet, upTo: 5).dropFirst()
+        XCTAssertEqual(
+            corpus.count,
+            (1 + 15 + 225 + 3375 + 50625) + (6 + 36 + 216 + 1296 + 7776))
 
         // docs/logging.md guarantees decodability on the message body AND on
         // metadata values, so pinning one path would leave the other exactly as
@@ -439,6 +515,120 @@ final class LogFormatTests: XCTestCase {
             file: file, line: line)
     }
 
+    /// #58 — the witness corpus must keep discriminating, not just exist.
+    ///
+    /// `testEscapedRenderingsAreUniquelyDecodable` narrowed its length-5 sweep
+    /// to `witnessAlphabet` to afford a wider length-4 sweep. That trade is
+    /// only sound while the narrow alphabet still builds the witness the depth
+    /// was bought for, and "verified once by hand" rots. So run the decoy the
+    /// doc comment names — an encoder that skips doubling a backslash followed
+    /// by `u`, collapsing a literal `\u{0000}` and a real NUL onto the same
+    /// rendering — and require the corpus to catch it.
+    ///
+    /// This is a test about a test. It fails if someone trims
+    /// `witnessAlphabet` or drops the bound to 4, which is exactly the edit
+    /// that would silently hollow out the round-trip property.
+    func testWitnessCorpusCatchesParityBlindEncoder() {
+        // `sanitizeMessage`, minus the parity rule: a backslash before `u` is
+        // passed through instead of doubled.
+        func parityBlindRender(_ s: String) -> String {
+            var out = ""
+            let scalars = Array(s.unicodeScalars)
+            for (i, scalar) in scalars.enumerated() {
+                if scalar == "\\" {
+                    // The defect: a backslash before `u` is passed through
+                    // instead of doubled. Everything else matches
+                    // `LogFormat.sanitizeMessage` exactly.
+                    out +=
+                        (i + 1 < scalars.count && scalars[i + 1] == "u")
+                        ? "\\" : "\\\\"
+                } else if LogFormat.isLineStructural(scalar) {
+                    out += LogFormat.escapeControl(scalar)
+                } else {
+                    out.unicodeScalars.append(scalar)
+                }
+            }
+            return out
+        }
+
+        let witness = Self.exhaustive(over: Self.witnessAlphabet, upTo: 5)
+        let caught = witness.contains { original in
+            decodeSanitized(parityBlindRender(original)) != original
+        }
+        XCTAssertTrue(
+            caught,
+            "the length-5 witness corpus no longer catches a parity-blind "
+                + "encoder — witnessAlphabet or its length bound was narrowed "
+                + "past the `\\u{0}` witness, so the round-trip property is "
+                + "weaker than its doc comment claims (#58)")
+
+        // And the same decoy IS missed at length 4 — which is why depth 5 is
+        // bought at all. If this ever fails, the witness got cheaper and the
+        // length-5 sweep can go.
+        let shallow = Self.exhaustive(over: Self.witnessAlphabet, upTo: 4)
+        XCTAssertFalse(
+            shallow.contains { decodeSanitized(parityBlindRender($0)) != $0 },
+            "a length-4 corpus now catches the parity-blind decoy, so the "
+                + "length-5 sweep is no longer load-bearing")
+
+        // Symmetric guard for the OTHER alphabet. The whole #58 gain rides on
+        // `hostileAlphabet` containing `\` together with the letters
+        // `escapeControl`'s readable arms emit — and the count assertion in
+        // the round-trip test pins that alphabet's SIZE, not its CONTENT, so
+        // swapping one letter out keeps the count at 15 and silently restores
+        // the pre-#58 blindness. Parity blindness on such a letter is the
+        // defect the widening exists to catch (measured: it leaves the pre-#58
+        // tier 783/0 green).
+        //
+        // Derived from `escapeControl`, not hardcoded, so this covers `n`, `r`
+        // and `t` today and any readable arm added later — a per-letter decoy
+        // would have to be remembered, and the thing being guarded against IS
+        // forgetting.
+        func parityBlind(on letter: Unicode.Scalar) -> (String) -> String {
+            { s in
+                var out = ""
+                let all = Array(s.unicodeScalars)
+                for (i, scalar) in all.enumerated() {
+                    if scalar == "\\" {
+                        out +=
+                            (i + 1 < all.count && all[i + 1] == letter)
+                            ? "\\" : "\\\\"
+                    } else if LogFormat.isLineStructural(scalar) {
+                        out += LogFormat.escapeControl(scalar)
+                    } else {
+                        out.unicodeScalars.append(scalar)
+                    }
+                }
+                return out
+            }
+        }
+        let hostile = Self.exhaustive(over: Self.hostileAlphabet, upTo: 4)
+        let readableArmLetters = Self.everyStructural.compactMap { scalar -> Unicode.Scalar? in
+            let rendered = Array(LogFormat.escapeControl(scalar).unicodeScalars)
+            // Readable arms are exactly `\<letter>`; the numeric arm is longer.
+            guard rendered.count == 2, rendered[0] == "\\" else { return nil }
+            return rendered[1]
+        }
+        XCTAssertEqual(
+            Set(readableArmLetters), Set(["n", "r", "t"] as [Unicode.Scalar]),
+            "escapeControl's readable arms changed — the guard below still "
+                + "adapts, but hostileAlphabet must be widened to match")
+        for letter in Set(readableArmLetters) {
+            XCTAssertTrue(
+                Self.hostileAlphabet.contains(letter),
+                "hostileAlphabet is missing `\(letter)`, a letter "
+                    + "escapeControl emits — a corpus without it cannot "
+                    + "express parity blindness on that arm (#58)")
+            let decoy = parityBlind(on: letter)
+            XCTAssertTrue(
+                hostile.contains { decodeSanitized(decoy($0)) != $0 },
+                "the hostile corpus no longer catches parity blindness on "
+                    + "`\(letter)` — the escape character and the letters its "
+                    + "arms emit must BOTH be in hostileAlphabet, which is the "
+                    + "entire point of widening it (#58)")
+        }
+    }
+
     /// #35: one predicate, two callers. If `escape` and `sanitizeMessage` ever
     /// neutralize different sets, one sink grows a hole the other doesn't have.
     func testBothPathsNeutralizeTheSameScalarSet() {
@@ -458,6 +648,52 @@ final class LogFormatTests: XCTestCase {
         // And a scalar in neither set survives both, unchanged.
         XCTAssertEqual(LogFormat.sanitizeMessage("naïve ✅"), "naïve ✅")
         XCTAssertEqual(LogFormat.escape("naïve"), "naïve")
+
+        // #58 — non-survival is not enough: two DISTINCT structural scalars
+        // must not render the SAME, or the rendering stops being decodable.
+        // The round-trip corpus can only cover collisions on scalars it
+        // contains (`\n`/`\r`/`\t`/NUL/U+2028), so a collision on any other
+        // structural scalar was caught by nothing. Verified: adding
+        // `case "\u{85}": return "\\n"` to `escapeControl` left the ENTIRE
+        // tier green before this check existed.
+        //
+        // Swept over the FULL structural set, not the sample above. A sample
+        // has exactly the defect it is here to prevent: with a 10-scalar
+        // sample, `case "\u{07}": return "\\t"` still left the tier green,
+        // because 27 of the 32 C0 scalars appeared in no corpus and no sample.
+        // 36 scalars is 630 compares of two short strings — the exhaustive
+        // set costs nothing, so take it and let the claim be true as written.
+        let everyStructural = Self.everyStructural
+        // Pinned to the predicate in BOTH directions, over the whole Unicode
+        // scalar space. `allSatisfy` + a count would only assert subset and
+        // size: widening `isLineStructural` by one scalar would leave both
+        // green and quietly demote this set back to a sample — the same
+        // "size, not content" hole this test closes for `hostileAlphabet`, one
+        // level up. Set equality makes that unrepresentable.
+        let declared = Set(everyStructural)
+        var mismatches: [String] = []
+        for value in UInt32(0) ... 0x10FFFF {
+            guard let scalar = Unicode.Scalar(value) else { continue }
+            if LogFormat.isLineStructural(scalar) != declared.contains(scalar) {
+                mismatches.append("U+\(String(value, radix: 16, uppercase: true))")
+                if mismatches.count >= 5 { break }
+            }
+        }
+        XCTAssertEqual(
+            mismatches, [],
+            "everyStructural no longer equals the set isLineStructural "
+                + "accepts, so the sweep below is a sample, not exhaustive")
+        XCTAssertEqual(everyStructural.count, 36)
+        for (i, a) in everyStructural.enumerated() {
+            for b in everyStructural[everyStructural.index(after: i)...] {
+                XCTAssertNotEqual(
+                    LogFormat.escapeControl(a), LogFormat.escapeControl(b),
+                    "U+\(String(a.value, radix: 16, uppercase: true)) and "
+                        + "U+\(String(b.value, radix: 16, uppercase: true)) "
+                        + "render identically — the escaped form is no longer "
+                        + "uniquely decodable")
+            }
+        }
     }
 
     /// HONESTY BOUNDARY, pinned so it is not mistaken for a defect later.
