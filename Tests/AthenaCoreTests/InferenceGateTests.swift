@@ -36,6 +36,30 @@ final class InferenceGateTests: XCTestCase {
         /// outstanding (a wedged or held-elsewhere gate), the second means the
         /// span exited without ever entering the body (acquire threw). They
         /// point at different bugs.
+        ///
+        /// KNOWN GAP (#69): only `.timedOut` is driven by a test. The
+        /// message-selection ternary is pinned in one direction — #68's
+        /// invert-the-check mutation catches a swap — so what is uncovered is
+        /// the `.neverAcquired` string itself.
+        ///
+        /// Measured rather than assumed, and the finding is worse than "hard
+        /// to reach". `acquire()` throws in exactly two places, both requiring
+        /// the HOLDER task to be cancelled (`Task.checkCancellation()` on
+        /// entry, or `cancelWaiter` on a queued continuation), and the init
+        /// owns that task and never exposes it before returning — so no test
+        /// using this API can make acquire throw. The arm IS reachable another
+        /// way: cancel the CALLER, and the task-group child observing
+        /// `entered` is cancelled with it, so `next()` returns nil and the
+        /// handshake reports `.neverAcquired`. A 40-iteration probe fired it
+        /// 3 times — and in all 3 the gate had `acquisitions > 0`, i.e. the
+        /// arm reported "never acquired the gate" about a gate it HAD
+        /// acquired.
+        ///
+        /// So a test driving this arm today would be 7.5%-flaky AND would pin
+        /// a misreport. Driving it honestly needs `acquire()` to throw on
+        /// demand, which means touching `Sources/AthenaCore/InferenceGate.swift`
+        /// — out of scope for #23 and #69. The misattribution is filed as
+        /// #81; do not "fix" this by asserting the current message.
         private enum Handshake { case entered, neverAcquired, timedOut }
 
         /// Where a failure arm reports. Defaults to `XCTFail`; issue #23
@@ -118,7 +142,7 @@ final class InferenceGateTests: XCTestCase {
                 // unbounded `await task.value` hangs to the CI job timeout
                 // with no diagnostic; verified by mutation. The deadline turns
                 // that regression into a named failure.
-                await joinUnwind(fail, file, line)
+                await joinUnwind(fail, file, line, seconds: Self.unwindBudget(seconds))
                 return nil
             }
             guard await gate.isHeld else {
@@ -128,7 +152,7 @@ final class InferenceGateTests: XCTestCase {
                     "HeldGate returned without holding the gate",
                     file, line)
                 releaseC.finish()
-                await joinUnwind(fail, file, line)
+                await joinUnwind(fail, file, line, seconds: Self.unwindBudget(seconds))
                 return nil
             }
         }
@@ -145,6 +169,23 @@ final class InferenceGateTests: XCTestCase {
         /// the group-race version is exactly as unbounded as the plain await
         /// it replaced — verified by mutation. The observer here is abandoned,
         /// not joined, so this returns on the deadline no matter what.
+        /// Unwind budget DERIVED from the init's handshake bound (#69), not a
+        /// fixed 10 s. A call site that deliberately picks a short bound to
+        /// fail fast — `testHeldGateDeadlineArmFailsAndDrains` uses 0.5 s —
+        /// would otherwise still pay the full 10 s on an unwind regression,
+        /// partly defeating the point of choosing it.
+        ///
+        /// The floor is what keeps this from being flaky rather than fast: the
+        /// span being bounded is `task.cancel()` + `releaseC.finish()` draining
+        /// a handful of actor hops, measured elsewhere in this repo at 2–14 ms
+        /// even under 2x CPU oversubscription (#28). 1 s is ~70x that, so a
+        /// 0.5 s call site fails in ~1 s instead of ~10 s with margin to spare,
+        /// while every default call site keeps exactly the 10 s it has today
+        /// (AsyncTestWait's suite-wide standard, raised 5 s → 10 s by #68).
+        static func unwindBudget(_ handshake: Double) -> Double {
+            max(handshake, 1)
+        }
+
         private func joinUnwind(
             _ fail: FailureSink, _ file: StaticString, _ line: UInt,
             seconds: Double = 10
@@ -573,9 +614,19 @@ final class InferenceGateTests: XCTestCase {
     /// impractical, and it is — SwiftPM exposes no per-test
     /// `executionTimeAllowance`). The `seconds: 0.5` bound is delivered BY the
     /// deadline race inside `HeldGate.init`. It bounds a regression in the
-    /// arm's *unwind* (verified: dropping `task.cancel()` fails in ~15 s), but
-    /// NOT a regression in the race that produces `outcome` — break that and
-    /// this test hangs to the 60-minute CI job timeout with no diagnostic.
+    /// arm's *unwind* — dropping `task.cancel()` fails in
+    /// `handshake + unwindBudget(handshake) + waitUntil`, i.e. 0.5 + 1 + 10
+    /// (measured 11.5 s; it was 20.5 s before #69 derived the middle term) —
+    /// but NOT a regression in the race that produces `outcome`: break that
+    /// and this test hangs to the 60-minute CI job timeout with no diagnostic.
+    ///
+    /// The ceiling is stated as its COMPONENTS rather than a single number
+    /// (#69). It previously read "~15 s", which was the arithmetic for a 5 s
+    /// unwind deadline and went stale the moment #68 raised that to 10 s —
+    /// and stale again when #69 derived it from the handshake. A reader would
+    /// try to reproduce the one figure in this comment, fail, and reasonably
+    /// doubt the "verified by mutation" claim the rest of it rests on. Naming
+    /// the three spans keeps it true when any of them moves.
     /// Verified by mutation, not assumed. Pinning the race itself would need
     /// the same construct under test to bound it, which is circular.
     func testHeldGateDeadlineArmFailsAndDrains() async throws {
