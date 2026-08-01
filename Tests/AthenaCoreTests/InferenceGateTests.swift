@@ -36,6 +36,38 @@ final class InferenceGateTests: XCTestCase {
         /// outstanding (a wedged or held-elsewhere gate), the second means the
         /// span exited without ever entering the body (acquire threw). They
         /// point at different bugs.
+        ///
+        /// Both arms are driven (#69): `.timedOut` by
+        /// `testHeldGateDeadlineArmFailsAndDrains`, `.neverAcquired` by
+        /// `testHeldGateNeverAcquiredArmFailsAndDrains` via the `failAcquire`
+        /// injection below.
+        ///
+        /// That took correcting a wrong premise, recorded so it is not
+        /// re-adopted. `acquire()` throws in only two places, both needing the
+        /// HOLDER task cancelled: `Task.checkCancellation()` on entry, or
+        /// `cancelWaiter` resuming a queued continuation. Tests DO reach the
+        /// second — arm 1's own `task.cancel()` drives it. What no test can do
+        /// is make `acquire()` throw BEFORE the handshake resolves, which is
+        /// what selecting `.neverAcquired` that way would require, since the
+        /// init owns the holder task and never exposes it beforehand.
+        ///
+        /// That narrower fact is still a different proposition from "no test
+        /// can drive this arm", which is what the gap note used to claim.
+        /// `.neverAcquired` is selected by the `entered` stream finishing
+        /// WITHOUT a yield, and ANY early exit of the holder body produces
+        /// that. Injecting one is deterministic (40/40), 0.003 s, and leaves
+        /// `Sources/` untouched.
+        ///
+        /// SEPARATE DEFECT, do not confuse the two: under CALLER cancellation
+        /// the handshake misreports. Both task-group children finish at once —
+        /// the `entered` observer is cancelled, and the sleeping sibling's
+        /// `try?` swallows `CancellationError` and returns `.timedOut` — so
+        /// `group.next()` is a coin flip between two wrong answers about a
+        /// gate that was acquired normally. Measured over 200 iterations:
+        /// `.neverAcquired` 16 (8%) and `.timedOut` 28 (14%), every one of the
+        /// 44 with `acquisitions == 1`. Tracked in #81; the test below drives
+        /// the arm through the honest path instead, and asserts
+        /// `acquisitions == 0` so it can never silently pin the misreport.
         private enum Handshake { case entered, neverAcquired, timedOut }
 
         /// Where a failure arm reports. Defaults to `XCTFail`; issue #23
@@ -67,7 +99,7 @@ final class InferenceGateTests: XCTestCase {
         /// noise pointing at the wrong thing. Call sites `guard let`.
         init?(
             _ gate: InferenceGate, seconds: Double = 10,
-            failureSink: FailureSink? = nil,
+            failureSink: FailureSink? = nil, failAcquire: Bool = false,
             file: StaticString = #filePath, line: UInt = #line
         ) async {
             let fail = failureSink ?? { XCTFail($0, file: $1, line: $2) }
@@ -79,6 +111,15 @@ final class InferenceGateTests: XCTestCase {
                 // a failed acquisition surfaces below immediately instead of
                 // waiting out the whole deadline.
                 defer { enteredC.finish() }
+                // #69 — drive the `.neverAcquired` arm. What selects that arm
+                // is the `entered` stream finishing WITHOUT a yield, which any
+                // early exit of this body produces; it does not have to be
+                // `acquire()` itself throwing. So the arm is reachable from
+                // the test helper, with `Sources/` untouched — same shape as
+                // the `failureSink` injection #23 added, and the same
+                // justification (ADR 009: the arm is decision logic, and an
+                // untested failure arm is not a failure arm).
+                if failAcquire { throw CancellationError() }
                 try await gate.withExclusiveExecution {
                     enteredC.yield()
                     var it = release.makeAsyncIterator()
@@ -118,7 +159,7 @@ final class InferenceGateTests: XCTestCase {
                 // unbounded `await task.value` hangs to the CI job timeout
                 // with no diagnostic; verified by mutation. The deadline turns
                 // that regression into a named failure.
-                await joinUnwind(fail, file, line)
+                await joinUnwind(fail, file, line, seconds: Self.unwindBudget(seconds))
                 return nil
             }
             guard await gate.isHeld else {
@@ -128,9 +169,37 @@ final class InferenceGateTests: XCTestCase {
                     "HeldGate returned without holding the gate",
                     file, line)
                 releaseC.finish()
-                await joinUnwind(fail, file, line)
+                await joinUnwind(fail, file, line, seconds: Self.unwindBudget(seconds))
                 return nil
             }
+        }
+
+        /// Unwind budget DERIVED from the init's handshake bound (#69), not a
+        /// fixed 10 s. A call site that deliberately picks a short bound to
+        /// fail fast — `testHeldGateDeadlineArmFailsAndDrains` uses 0.5 s —
+        /// would otherwise still pay the full 10 s on an unwind regression,
+        /// partly defeating the point of choosing it.
+        ///
+        /// The floor is what keeps this fast rather than flaky. The span being
+        /// bounded is `task.cancel()` + `releaseC.finish()` draining a handful
+        /// of actor hops, plus `joinUnwind`'s 1 ms poll tick. No direct
+        /// measurement of THIS span exists; the floor is justified by analogy
+        /// with a comparable one measured elsewhere in this repo — #28's
+        /// actor-hop span, 2–14 ms even under 2x CPU oversubscription. 1 s is
+        /// ~70x that, so a 0.5 s call site fails in ~1 s instead of ~10 s with
+        /// margin to spare.
+        ///
+        /// Two call sites move, both intentionally: the 0.5 s site 10 → 1, and
+        /// `testHeldGateNotHeldArmFailsAndDrains`'s 5 s site 10 → 5 (its
+        /// unwind is `releaseC.finish()` plus a task exit on a DISABLED gate,
+        /// sub-millisecond, so 5 s is four orders of margin). Every site
+        /// taking the default keeps exactly the 10 s it has today — #68 raised
+        /// `joinUnwind`'s own default 5 → 10 to match `waitUntil`, which has
+        /// been 10 s since AsyncTestWait.swift was created.
+        /// `testUnwindBudgetIsDerivedFromTheHandshake` pins this rather than
+        /// leaving it as prose.
+        static func unwindBudget(_ handshake: Double) -> Double {
+            max(handshake, 1)
         }
 
         /// Await the holder task's unwind, bounded. A bail arm that leaves
@@ -573,9 +642,19 @@ final class InferenceGateTests: XCTestCase {
     /// impractical, and it is — SwiftPM exposes no per-test
     /// `executionTimeAllowance`). The `seconds: 0.5` bound is delivered BY the
     /// deadline race inside `HeldGate.init`. It bounds a regression in the
-    /// arm's *unwind* (verified: dropping `task.cancel()` fails in ~15 s), but
-    /// NOT a regression in the race that produces `outcome` — break that and
-    /// this test hangs to the 60-minute CI job timeout with no diagnostic.
+    /// arm's *unwind* — dropping `task.cancel()` fails in
+    /// `handshake + unwindBudget(handshake) + waitUntil`, i.e. 0.5 + 1 + 10
+    /// (measured 11.5 s; it was 20.5 s before #69 derived the middle term) —
+    /// but NOT a regression in the race that produces `outcome`: break that
+    /// and this test hangs to the 60-minute CI job timeout with no diagnostic.
+    ///
+    /// The ceiling is stated as its COMPONENTS rather than a single number
+    /// (#69). It previously read "~15 s", which was the arithmetic for a 5 s
+    /// unwind deadline and went stale the moment #68 raised that to 10 s —
+    /// and stale again when #69 derived it from the handshake. A reader would
+    /// try to reproduce the one figure in this comment, fail, and reasonably
+    /// doubt the "verified by mutation" claim the rest of it rests on. Naming
+    /// the three spans keeps it true when any of them moves.
     /// Verified by mutation, not assumed. Pinning the race itself would need
     /// the same construct under test to bound it, which is circular.
     func testHeldGateDeadlineArmFailsAndDrains() async throws {
@@ -613,6 +692,70 @@ final class InferenceGateTests: XCTestCase {
                 + "have released someone else's gate")
     }
 
+    /// Arm 3 — the `.neverAcquired` arm. #69 first recorded this as a known
+    /// gap on the premise that driving it needed `acquire()` to throw, which
+    /// would mean a production change. The pre-submit review refuted that: the
+    /// arm is selected by the `entered` stream finishing WITHOUT a yield, and
+    /// any early exit of the holder body does that. `failAcquire` injects one.
+    ///
+    /// Asserts `acquisitions == 0` deliberately. Under CALLER cancellation
+    /// this same arm fires about a gate that WAS acquired (#81) — so without
+    /// that assertion, a test here could pass while pinning the misreport as
+    /// correct behaviour. It is the difference between covering the arm and
+    /// blessing a bug.
+    func testHeldGateNeverAcquiredArmFailsAndDrains() async throws {
+        let gate = InferenceGate()
+        let collector = FailureCollector()
+        let attempt = await HeldGate(
+            gate, seconds: 5,
+            failureSink: { m, f, l in collector.record(m) },
+            failAcquire: true)
+
+        XCTAssertNil(attempt, "a holder that never acquired must not be handed back")
+        XCTAssertEqual(
+            collector.recorded.count, 1,
+            "one diagnostic, naming one cause. A second means the bail arm "
+                + "itself leaked. Got: \(collector.recorded)")
+        XCTAssertEqual(
+            collector.recorded.first, "HeldGate never acquired the gate",
+            "the .neverAcquired arm must name acquisition, not the deadline")
+        let stats = await gate.stats()
+        XCTAssertEqual(
+            stats.acquisitions, 0,
+            "premise: the body never ran, so nothing was acquired. If this "
+                + "fires, the arm is reporting the #81 misreport and this "
+                + "test would be pinning it as correct")
+        XCTAssertFalse(stats.held, "the gate must be free")
+        XCTAssertEqual(stats.waiters, 0, "no waiter left behind")
+    }
+
+    /// #69 — the derived unwind budget's ARITHMETIC. Scoped deliberately, and
+    /// the scope is worth stating because the obvious overclaim is tempting:
+    /// this pins `unwindBudget` itself, NOT that either bail arm calls it.
+    /// Reverting both `joinUnwind(…, seconds:)` call sites to the bare form
+    /// leaves this test — and the whole suite — green, because on a healthy
+    /// path `joinUnwind` returns the moment the holder unwinds and never
+    /// consults its deadline. Only a broken unwind reaches the deadline.
+    ///
+    /// The WIRING is therefore verified by mutation, not by assertion:
+    /// dropping `task.cancel()` from arm 1 fails in 11.5 s with the
+    /// diagnostic "did not unwind within 1.0s" — the derived value, spelled
+    /// out in the message — where the same mutation on `main` gave 20.5 s and
+    /// "within 10.0s". Recorded here so the pair is legible together.
+    func testUnwindBudgetIsDerivedFromTheHandshake() {
+        XCTAssertEqual(
+            HeldGate.unwindBudget(10), 10,
+            "the default handshake must map to the 10 s every default call "
+                + "site has today — this is the arithmetic, not the wiring")
+        XCTAssertEqual(HeldGate.unwindBudget(5), 5, "the not-held arm's site")
+        XCTAssertEqual(
+            HeldGate.unwindBudget(0.5), 1,
+            "a fast-fail site is floored, not left at its raw handshake — the "
+                + "floor is what keeps a short bound from being flaky")
+        XCTAssertEqual(
+            HeldGate.unwindBudget(0), 1, "the floor holds at the degenerate end")
+    }
+
     /// Arm 2 — the acquired-but-not-held arm, added by the #25 fold-in. A
     /// disabled gate runs the body ungated, so the handshake succeeds while
     /// `isHeld` is false.
@@ -625,8 +768,13 @@ final class InferenceGateTests: XCTestCase {
     /// full initialization DOES run `deinit` (verified). So the arm's own
     /// `releaseC.finish()` is not required for correctness; what it buys is
     /// PROMPTNESS, because `joinUnwind` runs before `return nil` and therefore
-    /// before `deinit`. Drop it and the bail still unwinds, just 10 s later
-    /// and with a spurious second diagnostic. What this test genuinely pins is
+    /// before `deinit`. Drop it and the bail still unwinds, just
+    /// `unwindBudget(5)` = 5 s later and with a spurious second diagnostic
+    /// (measured 5.7 s; it was 10.8 s before #69 derived that budget from this
+    /// call site's own `seconds: 5`). Stated as the expression rather than a
+    /// bare number for the same reason arm 1's ceiling is — this figure had
+    /// ALREADY gone stale once, silently, when #69 fixed its sibling.
+    /// What this test genuinely pins is
     /// the arm's contract — returns nil, names the not-held cause, exactly one
     /// diagnostic — not a statement whose deletion would corrupt the gate.
     ///
