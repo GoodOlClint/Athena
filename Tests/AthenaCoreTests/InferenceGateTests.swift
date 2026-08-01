@@ -91,6 +91,12 @@ final class InferenceGateTests: XCTestCase {
                 // in the body awaiting a release that now never comes.
                 task.cancel()
                 releaseC.finish()
+                // Join the unwind, like the waitUntil bail branches below: the
+                // initializer must not return with its own task mid-cancel.
+                // Bounded — `cancelWaiter` dequeues and throws regardless of
+                // `held`, and `releaseC.finish()` unblocks a body already past
+                // acquisition, so neither park outlives this await.
+                _ = try? await task.value
                 return
             }
             let held = await gate.isHeld
