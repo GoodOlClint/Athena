@@ -369,9 +369,7 @@ final class MLXLLMGenerationIntegrationTests: XCTestCase {
     }
 }
 
-/// M48.3 — temperature is inert under a Guide. Restored after #47 deleted the
-/// class it lived in (see below); the two siblings it shared that class with
-/// were genuinely vacuous, this one is not.
+/// M48.3 — temperature is inert under a Guide.
 ///
 /// The contract: `GuidedSubstrate` decodes with a hardcoded `ArgMaxSampler()`
 /// (`GuidedSubstrate.swift`), so a schema request at temperature 0.1 must emit
@@ -380,14 +378,54 @@ final class MLXLLMGenerationIntegrationTests: XCTestCase {
 /// the decode is masked-argmax and temperature is inert") — this is the only
 /// thing that would catch someone swapping a temperature-aware sampler in.
 ///
-/// **The load-bearing variable is `temperature`, not `speculative`.** The arms
-/// also differ in the `speculative` flag, which is decode-irrelevant here:
-/// `DecodeDispatch.route(hasSchema: true, …)` sends both to `GuidedSubstrate`
-/// regardless. That confound is exactly what made the sibling
-/// `testStructuredGreedyParityAcrossSpeculative` vacuous — it varied ONLY the
-/// inert flag — and it is named here so this test is not mistaken for the same
-/// thing and deleted alongside it a second time. MTP speculative bit-identity
-/// is a separate contract with no gate at all; see #64.
+/// **Single variable: `temperature`.** `runOnce` hardcodes
+/// `speculative: false` and takes no parameter for it, so the arms cannot
+/// diverge on anything but temperature. They used to differ in that flag too.
+/// It is not a routing input at all — `DecodeDispatch.route`'s signature is
+/// `route(hasSchema:hasLogprobSink:)`, so a schema request reaches
+/// `GuidedSubstrate` without `speculative` ever being consulted. But the flag
+/// was only inert AT DECODE, not on load:
+/// `MLXLLMModule.loadMTPDrafterIfEligible` guards on `params.speculative`, so
+/// the old temp-0.1 arm tried to resolve and load a second (drafter) model
+/// that the temp-0 arm did not — extra residency and a soft dependency on the
+/// test model being MTP-paired. Pinning `false` removes a real asymmetry, not
+/// a cosmetic one.
+///
+/// If a drafter is ever wired into the guided path, the fix is a SECOND gate
+/// for speculative-guided inertness — do not flip this one to `true`, which
+/// would silently change which contract it covers while leaving its name and
+/// this doc unchanged.
+///
+/// This test shared a class with two siblings #47 deleted, and they died of
+/// DIFFERENT defects. Distinguished here so this one is not swept up as a
+/// third:
+///   - `testStructuredGreedyParityAcrossSpeculative` was **vacuous** — it
+///     varied ONLY `speculative`, so both arms drove the identical path and
+///     its PARITY assertion could not fail. (Its `isEmpty` assertions and the
+///     `ensureLoaded` throw could still fail; the parity claim could not.)
+///   - `testStructuredSpeculativeAcceptanceRate` was a **guaranteed failure
+///     whenever it actually ran**, not a vacuous one — it asserted
+///     `XCTAssertGreaterThan(stats.total, 0)` against an observer whose
+///     publisher publication S0 had already removed. Being model-gated, it
+///     skipped in CI exactly as its vacuous sibling did, so CI history shows
+///     no red for either.
+///
+/// MTP speculative bit-identity is a separate contract with no gate at all;
+/// see #64.
+///
+/// Provenance — this test is neither new nor restored. It landed with M48.3
+/// itself as `testStructuredGreedyParityTempIneretUnderGuide` (`033f1b15`,
+/// 2026-05-28) and has been in the tree continuously **on `main`** ever
+/// since; #47 renamed it in place and rehomed it out of the class whose other
+/// two tests it deleted.
+///
+/// The "restored" wording that used to open this comment was not invented: on
+/// the unmerged branch `fix/47-delete-speculative-stats`, `130ffa51` deleted
+/// all three tests and `d7da7277` ("fix: restore the temperature-inertness
+/// test") added this one back. Neither is an ancestor of `main`, so
+/// `git log --all -S testStructuredGreedyParityTempIneretUnderGuide` surfaces
+/// a commit that looks like it contradicts the paragraph above. It does not —
+/// that history is branch-local, and what landed is a net rename in place.
 ///
 /// Heavy: drives a real MLX model. Gated on ATHENA_RUN_MODEL_TESTS=1.
 final class GuidedTemperatureInertnessTests: XCTestCase {
@@ -423,14 +461,14 @@ final class GuidedTemperatureInertnessTests: XCTestCase {
                     "Is the sky generally blue on a clear day? "
                     + "Answer in JSON.")
         ]
+        // `temperature` is the ONLY difference between the arms; `runOnce`
+        // takes no `speculative` parameter, so it cannot become a second one.
         let atTemp = try await runOnce(
             modelURL: modelURL, messages: messages,
-            schemaJSON: schema, speculative: true,
-            temperature: 0.1)
+            schemaJSON: schema, temperature: 0.1)
         let greedyBaseline = try await runOnce(
             modelURL: modelURL, messages: messages,
-            schemaJSON: schema, speculative: false,
-            temperature: 0)
+            schemaJSON: schema, temperature: 0)
         XCTAssertFalse(atTemp.isEmpty, "temp>0 branch produced empty")
         XCTAssertFalse(
             greedyBaseline.isEmpty, "greedy baseline branch produced empty")
@@ -443,16 +481,20 @@ final class GuidedTemperatureInertnessTests: XCTestCase {
                 + "ArgMaxSampler.)")
     }
 
+    /// No `speculative` parameter BY DESIGN: this class's whole contract is
+    /// that `temperature` is the only variable, so the flag is not a knob a
+    /// call site can reach. Hardcoding it here makes divergence between the
+    /// arms unrepresentable rather than merely discouraged by the class doc.
     private func runOnce(
         modelURL: URL, messages: [ChatTurn],
-        schemaJSON: String, speculative: Bool,
+        schemaJSON: String,
         temperature: Double = 0
     ) async throws -> String {
         let llm = MLXLLMModule(
             modelDirectory: modelURL,
             parameters: .init(
                 maxTokens: 64, temperature: Float(temperature),
-                speculative: speculative))
+                speculative: false))
         let gov = MemoryGovernor(totalBudgetBytes: Int(96) << 30)
         await gov.register(llm, evictable: false)
         try await gov.ensureLoaded(.llm)
@@ -461,7 +503,7 @@ final class GuidedTemperatureInertnessTests: XCTestCase {
             messages: messages, schemaJSON: schemaJSON, tools: nil,
             maxTokens: nil, temperature: temperature,
             topP: nil, seed: nil,
-            speculative: speculative, chatTemplateKwargs: nil)
+            speculative: false, chatTemplateKwargs: nil)
         for await chunk in stream {
             if case .text(let s) = chunk { out += s }
         }
