@@ -262,6 +262,183 @@ final class LogFormatTests: XCTestCase {
         XCTAssertEqual(LogFormat.escape(#"a\b"#), #""a\\b""#)
     }
 
+    /// Test-local inverse of `sanitizeMessage`. Nothing in `Sources/` decodes a
+    /// log line — the point is that an inverse *can* be written, which is only
+    /// true while the escape alphabet stays a prefix code.
+    ///
+    /// Deliberately literal: it consumes `\\`, `\n`, `\r`, `\t` and `\u{…}` and
+    /// nothing else, so it inverts the escapes `escapeControl` actually emits
+    /// and no more. A future escape arm that emits something outside this set
+    /// fails the round trip rather than being quietly accommodated.
+    private func decodeSanitized(
+        _ s: String, alsoDecodeEscapedQuote: Bool = false
+    ) -> String {
+        let scalars = Array(s.unicodeScalars)
+        var out = String.UnicodeScalarView()
+        var i = 0
+        while i < scalars.count {
+            guard scalars[i] == "\\", i + 1 < scalars.count else {
+                out.append(scalars[i])
+                i += 1
+                continue
+            }
+            switch scalars[i + 1] {
+            case "\"" where alsoDecodeEscapedQuote: out.append("\""); i += 2
+            case "\\": out.append("\\"); i += 2
+            case "n": out.append("\n"); i += 2
+            case "r": out.append("\r"); i += 2
+            case "t": out.append("\t"); i += 2
+            case "u" where i + 2 < scalars.count && scalars[i + 2] == "{":
+                let digits = scalars[(i + 3)...].prefix { $0 != "}" }
+                // `UInt32(_:radix:)` alone would accept `+f`/`-0`, which
+                // `escapeControl` never emits; require bare hex so the decoder
+                // stays no looser than the grammar it claims to invert.
+                guard !digits.isEmpty,
+                    digits.allSatisfy({ $0.properties.isASCIIHexDigit }),
+                    let close = scalars[(i + 3)...].firstIndex(of: "}"),
+                    let value = UInt32(
+                        String(String.UnicodeScalarView(digits)), radix: 16),
+                    let decoded = Unicode.Scalar(value)
+                else {
+                    // Not an escape we emit — pass the backslash through
+                    // literally so a malformed run can't silently round-trip.
+                    out.append(scalars[i])
+                    i += 1
+                    continue
+                }
+                out.append(decoded)
+                i = close + 1
+            default:
+                out.append(scalars[i])
+                i += 1
+            }
+        }
+        return String(out)
+    }
+
+    /// Test-local inverse of `escape`. Same idea as `decodeSanitized`, plus the
+    /// quoting layer: a quoted value strips its delimiters and additionally
+    /// unescapes `\"`. `docs/logging.md` claims decodability on *both* paths,
+    /// so both get the property, not just the one #53 named.
+    private func decodeEscaped(_ s: String) -> String {
+        // Scalars, not Characters: a quoted value whose body opens with a
+        // combining mark grapheme-clusters that mark onto the opening quote,
+        // so `hasPrefix("\"")` is false and the rendering would be returned
+        // undecoded — a decoder bug that would report itself as an `escape`
+        // defect. Unreachable from this corpus, but not from the next one.
+        let scalars = Array(s.unicodeScalars)
+        guard scalars.count >= 2, scalars.first == "\"", scalars.last == "\""
+        else {
+            return s  // rendered bare — no escaping applied
+        }
+        // `\"` is the one escape `escape` emits that `sanitizeMessage` doesn't,
+        // so the shared decoder takes it as an extra alphabet member. (A
+        // pre-pass substitution would be wrong: the sentinel could collide with
+        // a scalar the input legitimately contains.)
+        return decodeSanitized(
+            String(String.UnicodeScalarView(scalars.dropFirst().dropLast())),
+            alsoDecodeEscapedQuote: true)
+    }
+
+    /// #53 — pin the *property*, not six examples of it.
+    ///
+    /// `docs/logging.md` guarantees the escaped rendering is losslessly
+    /// decodable. Six concrete cases pin instances of that; uniqueness itself
+    /// was only ever brute-forced by hand pre-submit. This exhausts every
+    /// string of length ≤ 5 over an alphabet chosen to be maximally hostile to
+    /// the escape syntax — the escape character itself, the letters that follow
+    /// it (`n`, `u`), the `\u{…}` delimiters, hex digits, the quote `escape`
+    /// escapes, and structural scalars from three different escape arms (`\n`
+    /// readable, `\u{00}` and `\u{2028}` numeric, one of them non-C0).
+    ///
+    /// **Length 5 is load-bearing, not round-number.** The shortest witness
+    /// separating a parity-aware reader from a parity-blind one is a fully
+    /// formed literal `\u{0}` — `\`, `u`, `{`, `0`, `}` — which at length 4
+    /// cannot be built. Verified: an encoder that skips doubling a backslash
+    /// followed by `u` (so a literal `\u{0000}` and a real NUL render
+    /// identically — #36 in a new form) passes a length-4 corpus and fails
+    /// this one. Do not lower the bound to save 0.3 s.
+    ///
+    /// Honesty boundary: this pins *value* decodability, not *field*
+    /// structure. Verified — dropping `escape`'s `\"` arm leaves this green,
+    /// because the outer delimiters still bracket the value; what that breaks
+    /// is the tail's field structure, pinned via `splitLogfmt` by
+    /// `testFieldSpoofingIsConfinedToOneValue`. The two are complements.
+    func testEscapedRenderingsAreUniquelyDecodable() {
+        let alphabet: [Unicode.Scalar] = [
+            "\\", "n", "u", "{", "}", "0", "f", "\"", "\n", "\u{00}", "\u{2028}",
+        ]
+        // Breadth-first by length so the total is obvious from the bounds.
+        var corpus: [String] = [""]
+        var frontier: [String] = [""]
+        for _ in 1 ... 5 {
+            var next: [String] = []
+            next.reserveCapacity(frontier.count * alphabet.count)
+            for prefix in frontier {
+                for scalar in alphabet {
+                    var s = prefix
+                    s.unicodeScalars.append(scalar)
+                    next.append(s)
+                }
+            }
+            corpus += next
+            frontier = next
+        }
+        // The empty string is not filler: it is the only input that trips
+        // `escape`'s `value.isEmpty` quoting arm.
+        XCTAssertEqual(corpus.count, 1 + 11 + 121 + 1331 + 14641 + 161_051)
+
+        // docs/logging.md guarantees decodability on the message body AND on
+        // metadata values, so pinning one path would leave the other exactly as
+        // unpinned as before.
+        assertRoundTrips(
+            corpus, path: "sanitizeMessage",
+            render: LogFormat.sanitizeMessage, decode: { self.decodeSanitized($0) })
+        assertRoundTrips(
+            corpus, path: "escape",
+            render: LogFormat.escape, decode: decodeEscaped)
+    }
+
+    /// One counterexample disproves the property, so report the first and stop.
+    /// Asserting per-string instead buries the useful line under thousands of
+    /// consequences of the same defect (reverting #36 produces 1,480 failures;
+    /// the first one already names the cause).
+    private func assertRoundTrips(
+        _ corpus: [String], path: String,
+        render: (String) -> String, decode: (String) -> String,
+        file: StaticString = #filePath, line: UInt = #line
+    ) {
+        var lossy: (input: String, rendered: String, decoded: String)?
+        var leaked: String?
+        for original in corpus {
+            let rendered = render(original)
+            if lossy == nil {
+                let decoded = decode(rendered)
+                if decoded != original {
+                    lossy = (original, rendered, decoded)
+                }
+            }
+            // The safety property the escaping exists for, over the same
+            // corpus: whatever it renders, it renders on one line.
+            if leaked == nil,
+                rendered.unicodeScalars.contains(where: LogFormat.isLineStructural)
+            {
+                leaked = rendered
+            }
+            if lossy != nil, leaked != nil { break }
+        }
+        XCTAssertNil(
+            lossy.map {
+                "\($0.input.debugDescription) rendered as "
+                    + "\($0.rendered.debugDescription), decoded back to "
+                    + "\($0.decoded.debugDescription)"
+            }, "\(path): rendering is not uniquely decodable",
+            file: file, line: line)
+        XCTAssertNil(
+            leaked.map { "\(path): structural scalar survived in \($0.debugDescription)" },
+            file: file, line: line)
+    }
+
     /// #35: one predicate, two callers. If `escape` and `sanitizeMessage` ever
     /// neutralize different sets, one sink grows a hole the other doesn't have.
     func testBothPathsNeutralizeTheSameScalarSet() {
