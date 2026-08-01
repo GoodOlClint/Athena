@@ -31,16 +31,34 @@ final class InferenceGateTests: XCTestCase {
     private final class HeldGate {
         let task: Task<Void, Error>
         private let releaseC: AsyncStream<Void>.Continuation
+        /// How the `entered` handshake finished. `timedOut` is distinct from
+        /// `neverAcquired` on purpose: the first means the acquisition is still
+        /// outstanding (a wedged or held-elsewhere gate), the second means the
+        /// span exited without ever entering the body (acquire threw). They
+        /// point at different bugs.
+        private enum Handshake { case entered, neverAcquired, timedOut }
+
         /// Acquire `gate` and suspend inside the body until `release()`.
         /// Returns only after the body has provably entered (gate held) —
         /// verified by assertion, since a disabled gate runs bodies ungated.
-        init(_ gate: InferenceGate) async {
+        ///
+        /// The handshake is bounded. Awaiting it outright is only safe when the
+        /// gate is fresh and unheld, so `acquire()` takes the uncontended fast
+        /// path — that is a property of the current call sites, not of this
+        /// helper. On a contended gate an acquisition that never completes would
+        /// suspend here until the CI job timeout, reporting nothing. A deadline
+        /// turns that into one named failure.
+        init(
+            _ gate: InferenceGate, seconds: Double = 10,
+            file: StaticString = #filePath, line: UInt = #line
+        ) async {
             let (entered, enteredC) = AsyncStream.makeStream(of: Void.self)
             let (release, releaseC) = AsyncStream.makeStream(of: Void.self)
             self.releaseC = releaseC
             self.task = Task {
                 // Terminate `entered` on EVERY exit (incl. acquire-throws), so
-                // a failed acquisition surfaces below instead of hanging init.
+                // a failed acquisition surfaces below immediately instead of
+                // waiting out the whole deadline.
                 defer { enteredC.finish() }
                 try await gate.withExclusiveExecution {
                     enteredC.yield()
@@ -48,13 +66,37 @@ final class InferenceGateTests: XCTestCase {
                     _ = await it.next()
                 }
             }
-            var it = entered.makeAsyncIterator()
-            guard await it.next() != nil else {
-                XCTFail("HeldGate never acquired the gate")
+            let outcome = await withTaskGroup(of: Handshake.self) { group in
+                group.addTask {
+                    var it = entered.makeAsyncIterator()
+                    return await it.next() == nil ? .neverAcquired : .entered
+                }
+                group.addTask {
+                    try? await Task.sleep(for: .seconds(seconds))
+                    return .timedOut
+                }
+                let first = await group.next() ?? .timedOut
+                group.cancelAll()
+                return first
+            }
+            guard outcome == .entered else {
+                XCTFail(
+                    outcome == .timedOut
+                        ? "HeldGate acquisition did not complete within "
+                            + "\(seconds)s — gate wedged or held elsewhere"
+                        : "HeldGate never acquired the gate",
+                    file: file, line: line)
+                // Unwind both ways it could still be parked: queued inside
+                // `acquire()` (cancel drains it via `cancelWaiter`), or already
+                // in the body awaiting a release that now never comes.
+                task.cancel()
+                releaseC.finish()
                 return
             }
             let held = await gate.isHeld
-            XCTAssertTrue(held, "HeldGate returned without holding the gate")
+            XCTAssertTrue(
+                held, "HeldGate returned without holding the gate",
+                file: file, line: line)
         }
         func release() { releaseC.finish() }
         // A skipped release() must not park the holder task forever.
@@ -137,7 +179,13 @@ final class InferenceGateTests: XCTestCase {
             try await gate.withExclusiveExecution { 1 }
         }
         guard await waitUntil("waiter enqueued", { await gate.waiterCount == 1 })
-        else { return }
+        else {
+            // Don't leave the waiter running past this method: cancel it and
+            // await the unwind, so the failure report isn't racing a live task.
+            waiter.cancel()
+            _ = try? await waiter.value
+            return
+        }
         waiter.cancel()
         do {
             _ = try await waiter.value
@@ -184,6 +232,7 @@ final class InferenceGateTests: XCTestCase {
                 { await gate.stats().acquisitions == 2 })
         else {
             reuse.cancel()
+            _ = try? await reuse.value
             return
         }
         let r = try await reuse.value
@@ -217,8 +266,14 @@ final class InferenceGateTests: XCTestCase {
         let waiters = (0 ..< 3).map { _ in
             Task { try await gate.withExclusiveExecution {} }
         }
-        guard await waitUntil("all three waiters enqueued", { await gate.waiterCount == 3 })
-        else { return }
+        guard
+            await waitUntil(
+                "all three waiters enqueued", { await gate.waiterCount == 3 })
+        else {
+            for w in waiters { w.cancel() }
+            for w in waiters { _ = try? await w.value }
+            return
+        }
         let mid = await gate.stats()
         XCTAssertTrue(mid.held)
         XCTAssertEqual(mid.waiters, 3, "expected 3 queued behind the holder")
