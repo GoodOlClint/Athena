@@ -96,6 +96,14 @@ final class DecodeProgressTaskLocalTests: XCTestCase {
 ///   request entry → setup (no prefill data, no commits)
 ///                 → prefill (chunks submitted, none committed)
 ///                 → decode (any token committed, or prefill complete)
+///
+/// These pin the pure function, not a live path. No in-tree producer has
+/// published prefill counts since publication S0 (#47 removed the last
+/// vestiges of that plumbing), so every real caller now takes the defaulted
+/// `prefillTotal: 0` route and the `.prefill` arm is unreachable in the
+/// daemon. The arm is still worth pinning: `from` is public API of the
+/// `AthenaCore` library product and must stay correct for a caller that can
+/// supply the counts.
 final class DecodePhaseTests: XCTestCase {
 
     func testNoSignalIsSetup() {
@@ -160,100 +168,12 @@ final class DecodePhaseTests: XCTestCase {
 private final class TestCounter: @unchecked Sendable, DecodeProgressCounter {
     private let lock = NSLock()
     private var n = 0
-    private var prefillCompleted = 0
-    private var prefillTotal = 0
     func incrementToken() {
         lock.lock(); defer { lock.unlock() }
         n += 1
     }
-    func recordPrefillChunk(completed: Int, total: Int) {
-        lock.lock(); defer { lock.unlock() }
-        self.prefillCompleted = completed
-        self.prefillTotal = total
-    }
     var tokens: Int {
         lock.lock(); defer { lock.unlock() }
         return n
-    }
-    var prefillState: (completed: Int, total: Int) {
-        lock.lock(); defer { lock.unlock() }
-        return (prefillCompleted, prefillTotal)
-    }
-}
-
-/// M48.4 — `recordPrefillChunk` default contract: the protocol
-/// extension provides a no-op default so existing conformers that
-/// don't care about prefill granularity stay valid. Counter-specific
-/// behavior is tested with an instance that overrides the default.
-final class DecodeProgressPrefillTests: XCTestCase {
-
-    func testDefaultRecordPrefillChunkIsNoOp() {
-        // A conformer that implements ONLY incrementToken picks up the
-        // protocol-extension defaults for the rest (recordPrefillChunk /
-        // setSetupStage / cancelGeneration / isCancelled), which is what
-        // HeartbeatCounter relied on before M48.4 shipped.
-        final class TokenOnly:
-            @unchecked Sendable, DecodeProgressCounter
-        {
-            private(set) var tokens = 0
-            func incrementToken() { tokens += 1 }
-        }
-        let c = TokenOnly()
-        // L11 (M70.3): observe the contract instead of `XCTAssertTrue(true)`.
-        // The defaults must be GENUINE no-ops: calling them mutates no
-        // observable state, and the default isCancelled is false (so a
-        // conformer that doesn't care about cancellation never spuriously
-        // aborts a decode).
-        c.recordPrefillChunk(completed: 5, total: 10)
-        c.setSetupStage("compile-dfa")
-        c.cancelGeneration()
-        XCTAssertEqual(c.tokens, 0, "no default touched the conformer's state")
-        XCTAssertFalse(c.isCancelled, "default isCancelled is false")
-        // The one method it DID implement still works, proving the object is
-        // live (not that the assertions above passed vacuously).
-        c.incrementToken()
-        XCTAssertEqual(c.tokens, 1)
-    }
-
-    func testRecordPrefillChunkPropagatesLatestValues() {
-        let counter = TestCounter()
-        counter.recordPrefillChunk(completed: 1, total: 38)
-        counter.recordPrefillChunk(completed: 14, total: 38)
-        counter.recordPrefillChunk(completed: 38, total: 38)
-        let s = counter.prefillState
-        XCTAssertEqual(s.completed, 38)
-        XCTAssertEqual(s.total, 38)
-    }
-
-    /// The decode-loop prefill block matches this idiom — total
-    /// chunks computed once with the ceiling-divide, then per-chunk
-    /// publish after asyncEval submits the work. Pinned here so a
-    /// future refactor that drops the publish call gets caught.
-    func testPrefillLoopIdiomPublishesEveryChunk() {
-        let counter = TestCounter()
-        DecodeProgress.$counter.withValue(counter) {
-            simulatePrefill(promptCount: 1500)  // 3 chunks at 512
-        }
-        let s = counter.prefillState
-        XCTAssertEqual(s.completed, 3)
-        XCTAssertEqual(s.total, 3)
-    }
-
-    private nonisolated func simulatePrefill(promptCount: Int) {
-        // Mirrors the prefill-chunk arithmetic of the S0-removed vendored
-        // loops. No in-tree producer calls recordPrefillChunk today —
-        // GuidedSubstrate hands prefill to the substrate TokenIterator —
-        // so this pins the idiom, not a live path (see issue #47's sweep).
-        let head = promptCount - 1
-        let chunkSize = 512
-        let totalChunks = (head + chunkSize - 1) / chunkSize
-        var i = 0
-        var done = 0
-        while i < head {
-            i += chunkSize
-            done += 1
-            DecodeProgress.counter?.recordPrefillChunk(
-                completed: done, total: totalChunks)
-        }
     }
 }

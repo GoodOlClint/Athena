@@ -549,12 +549,6 @@ extension AthenaServer {
             let tokens: Int
             let lastLoggedTokens: Int
             let lastLoggedAt: TimeInterval
-            /// M48.4 — last-submitted prefill chunk index (1-based).
-            /// 0 ⇒ prefill not started (or 1-token prompt — no chunks).
-            let prefillCompleted: Int
-            /// M48.4 — total prefill chunks for THIS request, or 0 if
-            /// the decode loop never published a prefill state.
-            let prefillTotal: Int
             /// M49.3 — current setup sub-stage (e.g. "compile-dfa",
             /// "build-vocab"). nil ⇒ either not in setup OR setup
             /// stage not annotated by the decode path.
@@ -564,8 +558,6 @@ extension AthenaServer {
         private var tokens = 0
         private var lastLoggedTokens = 0
         private var lastLoggedAt: TimeInterval = 0
-        private var prefillCompleted = 0
-        private var prefillTotal = 0
         private var setupStage: String? = nil
         /// M60.5 — set by the serve path's task-cancellation handler (client
         /// disconnect or deadline); polled by the decode loops to stop early.
@@ -589,13 +581,6 @@ extension AthenaServer {
             tokens += 1
         }
 
-        func recordPrefillChunk(completed: Int, total: Int) {
-            lock.lock()
-            defer { lock.unlock() }
-            self.prefillCompleted = completed
-            self.prefillTotal = total
-        }
-
         func setSetupStage(_ stage: String?) {
             lock.lock()
             defer { lock.unlock() }
@@ -609,8 +594,6 @@ extension AthenaServer {
                 tokens: tokens,
                 lastLoggedTokens: lastLoggedTokens,
                 lastLoggedAt: lastLoggedAt,
-                prefillCompleted: prefillCompleted,
-                prefillTotal: prefillTotal,
                 setupStage: setupStage)
         }
 
@@ -699,35 +682,24 @@ extension AthenaServer {
                     let tps =
                         Double(snap.tokens - snap.lastLoggedTokens)
                         / dt
-                    // M48.4 — include prefill state when known so the
-                    // operator can tell "stuck in prefill" (e.g.
-                    // prefill=14/38 tokens=0) apart from "decoding"
-                    // (e.g. prefill=38/38 tokens=124). The field is
-                    // dropped entirely when the decode path doesn't
-                    // publish prefill state (substrate-streamed
-                    // unstructured requests).
-                    let prefillField: String
-                    if snap.prefillTotal > 0 {
-                        prefillField =
-                            " prefill=\(snap.prefillCompleted)/"
-                            + "\(snap.prefillTotal)"
-                    } else {
-                        prefillField = ""
-                    }
-                    // M49.2 — phase label (setup / prefill / decode)
-                    // derived from the counter snapshot. Lets the
-                    // operator read the heartbeat line and answer
-                    // "is it hung in setup or just running long?"
-                    // without inferring from missing prefill fields.
+                    // M49.2 — phase label (setup / decode) derived from the
+                    // counter snapshot. Lets the operator read the heartbeat
+                    // line and answer "is it hung in setup or just running
+                    // long?". The M48.4 `prefill=` field is gone (#47): no
+                    // in-tree path publishes prefill progress since
+                    // publication S0, so it was permanently absent.
                     // M49.3 — append the setup sub-stage when set so
                     // a setup-bound heartbeat says e.g.
                     // `phase=setup:compile-dfa` instead of bare
                     // `phase=setup`. Decode paths annotate via
                     // `DecodeProgress.counter?.setSetupStage(...)`.
+                    // Zeros, not defaults: nothing has published prefill
+                    // counts since publication S0 (#47), so this is always
+                    // the setup/decode branch. Spelled out at the call site
+                    // so the deadness is visible here, not only in a doc.
                     let phase = DecodePhase.from(
-                        tokens: snap.tokens,
-                        prefillCompleted: snap.prefillCompleted,
-                        prefillTotal: snap.prefillTotal)
+                        tokens: snap.tokens, prefillCompleted: 0,
+                        prefillTotal: 0)
                     let phaseField: String
                     if phase == .setup, let stage = snap.setupStage {
                         phaseField = "setup:\(stage)"
@@ -777,8 +749,7 @@ extension AthenaServer {
                     Self.log.notice(
                         """
                         decode heartbeat elapsed=\(Int(elapsed))s \
-                        phase=\(phaseField)\
-                        \(prefillField) tokens=\(snap.tokens) \
+                        phase=\(phaseField) tokens=\(snap.tokens) \
                         tokens_per_sec=\
                         \(String(format: "%.1f", tps)) \
                         resident=\(residentField) \

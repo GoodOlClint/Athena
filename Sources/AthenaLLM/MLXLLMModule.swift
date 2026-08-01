@@ -1284,10 +1284,13 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     /// Log MTP acceptance for parity with the Qwen path's rate log. No-op unless
     /// the drafter ran. A non-nil `passthrough` means MTP degraded to
     /// single-token mid-stream (correctness kept, speedup dropped) — an operator
-    /// signal. ponytail: the substrate exposes AGGREGATE counts via `.info`,
-    /// while `SpeculativeStats`'s observer is per-iteration, so they don't bridge
-    /// cleanly; the log line is the operability surface (add an observer feed
-    /// only if a metrics consumer needs the structured stream).
+    /// signal. The substrate exposes AGGREGATE counts via `.info`, and this log
+    /// line is the operability surface for them. (#47 deleted the per-iteration
+    /// `SpeculativeStats` observer this comment used to weigh against: its
+    /// publisher went with publication S0's vendored decode loop, and the two
+    /// granularities never bridged cleanly anyway. A structured stream, if a
+    /// metrics consumer ever needs one, should be built on the substrate's
+    /// counts rather than revived from that seam.)
     private static func logMTPStats(_ info: GenerateCompletionInfo) {
         guard
             let rate = mtpAcceptanceRate(

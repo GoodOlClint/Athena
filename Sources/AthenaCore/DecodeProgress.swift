@@ -31,24 +31,15 @@ public protocol DecodeProgressCounter: AnyObject, Sendable {
     /// per-token writer).
     func incrementToken()
 
-    /// M48.4 — publish prefill chunk progress so the heartbeat can
-    /// distinguish "stuck in prefill" from "stuck just-after-prefill"
-    /// from "decoding slowly." Decode loops should call this after
-    /// each prefill chunk has been submitted (not awaited — MLX's
-    /// asyncEval queues the work; this counts "submitted to the
-    /// scheduler"). `total` is the total chunk count for THIS
-    /// prefill; `completed` is how many have been submitted so far
-    /// (1-indexed at first call, equal to `total` at the last call).
-    /// Default: no-op so conformers that don't care about prefill
-    /// granularity stay valid.
-    func recordPrefillChunk(completed: Int, total: Int)
-
     /// M49.3 — annotate the current setup sub-stage so the heartbeat
     /// reports `phase=setup:<stage>` (e.g. `setup:compile-dfa`,
     /// `setup:build-vocab`) instead of just `phase=setup`. The setup
-    /// phase covers everything before the first prefill chunk lands:
-    /// chat prep, prompt tokenization, vocab-token build,
-    /// structured-index DFA compile, KV-cache init. A "stuck-in-setup"
+    /// phase covers chat prep, prompt tokenization, vocab-token build,
+    /// structured-index DFA compile, and KV-cache init — and, since #47,
+    /// **the prefill too**: no producer publishes prefill counts any more, so
+    /// `phase=setup` persists until the first committed token. Read a long
+    /// `phase=setup` as "still in setup OR prefilling", not as "stuck in the
+    /// DFA compile". A "stuck-in-setup"
     /// heartbeat is unactionable without knowing which sub-step is
     /// running — the DFA compile in particular can take minutes for a
     /// large schema on a cache miss. Pass nil to clear the annotation
@@ -69,7 +60,6 @@ public protocol DecodeProgressCounter: AnyObject, Sendable {
 }
 
 extension DecodeProgressCounter {
-    public func recordPrefillChunk(completed: Int, total: Int) {}
     public func setSetupStage(_ stage: String?) {}
     public func cancelGeneration() {}
     public var isCancelled: Bool { false }
@@ -90,8 +80,14 @@ public enum DecodeProgress {
 /// states: setup (waiting on request prep / DFA compile / vocab
 /// build), prefill (CPU+GPU on the prompt chunks), and decode
 /// (committing tokens). Lets `athena logs` answer "is it hung in
-/// setup or just running long?" at a glance, without inferring from
-/// "no prefill field yet."
+/// setup or just running long?" at a glance.
+///
+/// `.prefill` is currently **unreachable in this daemon** — since publication
+/// S0 nothing publishes prefill counts, and #47 removed the last of that
+/// plumbing along with the heartbeat's `prefill=` field. In practice the
+/// heartbeat reports `setup` (covering prefill) then `decode`. The case is
+/// retained because this is public API of a library product and the algebra
+/// stays correct for a caller that can supply the counts.
 ///
 /// Derived from the counter snapshot (tokens + prefill completion);
 /// no separate state needed. Raw values match the log field
@@ -113,6 +109,14 @@ public enum DecodePhase: String, Sendable {
     ///   already between iterations — the transient window is
     ///   sub-second in practice).
     /// - everything else ⇒ `.setup`.
+    /// **No in-tree producer publishes prefill progress**, so the one live
+    /// caller passes literal zeros: publication S0 removed the
+    /// vendored decode loop that called `recordPrefillChunk`, and
+    /// `GuidedSubstrate` hands prefill to the substrate's
+    /// `TokenIterator(prefillStepSize:)`, which exposes no per-chunk callback.
+    /// The `.prefill` arm is therefore unreachable in this daemon today (#47).
+    /// It is kept — this is a pure, unit-pinned decision function in a library
+    /// product, and it stays correct for a caller that can supply the counts.
     public static func from(
         tokens: Int, prefillCompleted: Int, prefillTotal: Int
     ) -> DecodePhase {
