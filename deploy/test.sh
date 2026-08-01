@@ -23,6 +23,7 @@
 #   ./deploy/test.sh                          # whole logic tier
 #   ./deploy/test.sh --filter RBACTests       # one suite (args pass through)
 #   ATHENA_RUN_MODEL_TESTS=1 ./deploy/test.sh # + gated model tests
+#   ./deploy/test.sh --print-toolchain        # identify the compiler, run nothing
 #
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -46,6 +47,24 @@ if [ -z "${DEVELOPER_DIR:-}" ]; then
       fi
       ;;
   esac
+fi
+
+# --print-toolchain: emit the identity of the compiler THIS SCRIPT would
+# build with, then exit. Exists so CI can key its SPM cache on the compiler
+# that actually performs the build instead of on the Xcode it selected (#59).
+#
+# It has to live here rather than in the workflow because the resolution
+# above is the thing being reported: re-implementing that `case` in ci.yml
+# would be a second copy of the rule, free to drift from this one — and a
+# cache key derived from a drifted copy is exactly the #56 failure it is
+# meant to prevent. Same reason ci.yml calls the script rather than
+# open-coding `swift test`.
+#
+# Placed BEFORE the rust-shim build so identifying the toolchain never
+# triggers a cargo build as a side effect.
+if [ "${1:-}" = "--print-toolchain" ]; then
+  swift --version 2>&1
+  exit 0
 fi
 
 # The AthenaStructured module links the Rust structured-output staticlib;

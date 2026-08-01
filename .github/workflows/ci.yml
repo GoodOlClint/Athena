@@ -124,6 +124,30 @@ jobs:
           # they share the SPM cache key — so both export the selection here.
           echo "DEVELOPER_DIR=$(xcode-select -p)" >> "$GITHUB_ENV"
 
+      # #59 — key the SPM cache on the compiler that performs the build, not
+      # on the Xcode app the step above selected. Those two agree only BECAUSE
+      # of the DEVELOPER_DIR export: delete it and deploy/test.sh takes its CLT
+      # fallback to /Applications/Xcode.app (its `case` matches the literal
+      # "Xcode.app", which a versioned Xcode_NN.app path does not contain), so
+      # the cache is keyed as one toolchain and built by another — the #56
+      # state, silent and unable to self-heal (unit skips the save on an exact
+      # hit, seed short-circuits on the probe).
+      #
+      # This asks THE SCRIPT rather than re-deriving the rule: `test.sh
+      # --print-toolchain` runs the same resolution `test.sh` builds with, so
+      # deleting the export rotates the key by construction instead of
+      # poisoning it. Re-implementing that `case` here would be a second copy
+      # free to drift, and a key derived from a drifted copy is the very
+      # failure this closes. Runs as its OWN step so $GITHUB_ENV is live.
+      - name: Fingerprint the compiler that will build
+        id: swiftc
+        run: |
+          v="$(./deploy/test.sh --print-toolchain | tr -d '\n')"
+          echo "resolved compiler: $v"
+          test -n "$v" || { echo "::error::empty toolchain fingerprint"; exit 1; }
+          echo "fp=$(printf '%s' "$v" | shasum -a 256 | cut -c1-12)" \
+            >> "$GITHUB_OUTPUT"
+
       - name: Download Metal Toolchain
         run: xcodebuild -downloadComponent MetalToolchain
 
@@ -174,9 +198,9 @@ jobs:
         uses: actions/cache@v5
         with:
           path: .build
-          key: ${{ runner.os }}-spm-v2-${{ steps.xcode.outputs.version }}-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-spm-v2-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-${{ hashFiles('Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-spm-v2-${{ steps.xcode.outputs.version }}-
+            ${{ runner.os }}-spm-v2-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-
 
       - name: Unit tests
         run: ./deploy/test.sh
@@ -223,6 +247,30 @@ jobs:
           # they share the SPM cache key — so both export the selection here.
           echo "DEVELOPER_DIR=$(xcode-select -p)" >> "$GITHUB_ENV"
 
+      # #59 — key the SPM cache on the compiler that performs the build, not
+      # on the Xcode app the step above selected. Those two agree only BECAUSE
+      # of the DEVELOPER_DIR export: delete it and deploy/test.sh takes its CLT
+      # fallback to /Applications/Xcode.app (its `case` matches the literal
+      # "Xcode.app", which a versioned Xcode_NN.app path does not contain), so
+      # the cache is keyed as one toolchain and built by another — the #56
+      # state, silent and unable to self-heal (unit skips the save on an exact
+      # hit, seed short-circuits on the probe).
+      #
+      # This asks THE SCRIPT rather than re-deriving the rule: `test.sh
+      # --print-toolchain` runs the same resolution `test.sh` builds with, so
+      # deleting the export rotates the key by construction instead of
+      # poisoning it. Re-implementing that `case` here would be a second copy
+      # free to drift, and a key derived from a drifted copy is the very
+      # failure this closes. Runs as its OWN step so $GITHUB_ENV is live.
+      - name: Fingerprint the compiler that will build
+        id: swiftc
+        run: |
+          v="$(./deploy/test.sh --print-toolchain | tr -d '\n')"
+          echo "resolved compiler: $v"
+          test -n "$v" || { echo "::error::empty toolchain fingerprint"; exit 1; }
+          echo "fp=$(printf '%s' "$v" | shasum -a 256 | cut -c1-12)" \
+            >> "$GITHUB_OUTPUT"
+
       # All four SPM keys in this job must stay byte-identical to the `unit`
       # job's — seed publishes what unit restores, so a prefix bumped on one
       # side and not the other recreates the permanent-miss loop the `-v2-`
@@ -232,7 +280,7 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: .build
-          key: ${{ runner.os }}-spm-v2-${{ steps.xcode.outputs.version }}-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-spm-v2-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-${{ hashFiles('Package.resolved') }}
           lookup-only: true
 
       - name: Download Metal Toolchain
@@ -262,9 +310,9 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: .build
-          key: ${{ runner.os }}-spm-v2-${{ steps.xcode.outputs.version }}-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-spm-v2-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-${{ hashFiles('Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-spm-v2-${{ steps.xcode.outputs.version }}-
+            ${{ runner.os }}-spm-v2-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-
 
       # Build everything the unit tier builds (tests included) so the cache
       # a PR restores is complete — but execute nothing.
@@ -277,4 +325,4 @@ jobs:
         uses: actions/cache/save@v5
         with:
           path: .build
-          key: ${{ runner.os }}-spm-v2-${{ steps.xcode.outputs.version }}-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-spm-v2-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-${{ hashFiles('Package.resolved') }}
