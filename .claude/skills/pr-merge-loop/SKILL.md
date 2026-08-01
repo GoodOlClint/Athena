@@ -1,6 +1,6 @@
 ---
 name: pr-merge-loop
-description: Take a working diff to state=MERGED — pre-submit gate (sibling sweep + subagent review + premise-check), verdict-gated merge (fold-in decision after APPROVED, then merge), review-response policy (scoped fold-in, round cap), follow-up triage, inline-thread resolution, post-merge harvest. Invoke when code is ready to become a PR, and again whenever a review verdict or failed merge needs handling.
+description: Take a working diff to state=MERGED — pre-submit gate (sibling sweep + subagent review + premise-check), verdict-gated merge (APPROVED merges immediately; folds only on CHANGES_REQUESTED), review-response policy (scoped fold-in, round cap), follow-up triage, inline-thread resolution, post-merge harvest. Invoke when code is ready to become a PR, and again whenever a review verdict or failed merge needs handling.
 ---
 
 # PR merge loop
@@ -14,13 +14,13 @@ Opening a PR is the start of the job, not the end. Done means `state=MERGED`. Gr
 Four checks on the working diff, before the first push — a defect caught here costs one local fix; the same defect caught by CI costs a full round trip.
 
 1. **Sibling sweep — no tunnel vision.** The instance you were asked to fix is rarely the only one. Before finalizing, hunt for similar code the same defect or pattern lives in: code-intel MCP `search` (semantic — "where else does X happen") plus grep for the exact symbol/pattern, and graphify blast-radius ("what calls the function I changed") when the change alters behavior callers depend on. In-scope siblings get fixed in this PR; out-of-scope ones get a `gh issue create` before you open the PR.
-2. **Subagent pre-review.** Spawn a code-review subagent (correctness-reviewer, or /code-review when available) on the working diff and fix real findings before pushing. This is a quick pass, not the CI review — its job is catching what a fresh pair of eyes sees, not re-running the full constraint checklist.
+2. **Subagent pre-review.** Spawn a code-review subagent (correctness-reviewer, or /code-review when available) on the working diff and fix real findings before pushing. This is a quick pass, not the CI review — its job is catching what a fresh pair of eyes sees, not re-running the full constraint checklist. Prompt it to also attack the claims, not just the code: every invariant, bound, or defense asserted in the diff's comments, docs, and PR body must be *guaranteed* by the code — verifying the evidence is not enough (the first remediation cycle's four CI-caught misses were all prose claiming more than the code delivered).
 3. **Premise check — risk-class fixes only.** For a fix in a risk class (resource bound, cap/limit, security guard, concurrency) or one following an issue's prescribed mechanism, spawn one reviewer subagent to answer: what quantity does this fix bound and at what point in the flow; what quantity did the finding say was unbounded; do they match; and what concrete input or interleaving still evades the fix. A mismatch or working evasion is fixed before push. That sentence is the whole procedure — the operator's environment carries it as a `premise-check` skill, but no skill is required. (Lesson from a sibling repo: three follow-up fixes shipped with wrong premises — a body cap that didn't bound the parse, a per-request bound equated with a per-file one — and each cost a later merge cycle.)
 4. **Green gate — tests, last.** After all pre-submit fixes land (steps 1–3 can change code, so this runs last), run the tiers the diff touches: `./deploy/test.sh` (unit tier) always; `./deploy/build.sh Release` when the change affects the MLX-linked targets or deploy scripts; the relevant `deploy/e2e-*.sh` when an HTTP surface or store behavior changed (model-gated e2e needs real hardware — say so if skipped). A red result never gets pushed. Docs-only diffs may skip the run; say so explicitly.
 
 ## Open the PR — merge is verdict-gated (policy 2026-07-31)
 
-- Push branch → `gh pr create` (base main). Do NOT arm auto-merge: it merges the instant the review approves, before the fold-in decision below can run — the decision needs the verdict in hand while the PR is still open.
+- Push branch → `gh pr create` (base main). Do NOT arm auto-merge: the loop's job doesn't end at merge — the post-merge harvest and doc reconciliation need the agent present at merge time, and auto-merge can land the squash while the loop is between polls.
 - The PR body carries `Closes #N` for every issue it resolves — never close issues by hand with `gh issue close`; the merge closes them.
 - Squash on merge: per-PR commits collapse to one curated commit on main, matching the house one-commit-per-slice history.
 - Never bump `Athena.appVersion` or touch `v*` tags in a PR — versions are release events (ADR 040 S8), cut by the operator via `/ship`.
@@ -33,16 +33,15 @@ The automated `claude-review` GitHub Action reviews on every push and submits ex
 ### CHANGES_REQUESTED
 
 - Fix every blocker.
-- Fold a filed follow-up issue into the PR **only if it fits the PR's scope**: it touches code the PR already changes, or is required for the PR's stated `Closes #N` goal. Out-of-scope follow-ups stay open for end-of-cycle triage.
-- Every folded-in issue gets a `Closes #N` added to the PR body (`gh pr edit <N> --body`) — otherwise it stays open after merge and can't be hand-closed.
-- **Fold-ins spend the PR's single fold budget — one round per PR, shared with the APPROVED path below.** A PR that has already folded once, on either path, has spent it: every later round fixes exactly what the reviewer flagged and nothing else. (Unconditional fold-in once spiraled a PR through three review rounds in a sibling repo — this cap is the lesson.)
+- In-scope follow-ups the reviewer wrote in the review body may be fixed in the same round as the blockers. Issues the reviewer filed are out-of-scope by construction (the review prompt files issues only for findings outside the diff; if a legacy-prompt review files an in-scope issue anyway, it waits for end-of-cycle triage all the same) — they stay open for end-of-cycle triage. If the operator directs an issue fold-in anyway, add `Closes #N` to the PR body (`gh pr edit <N> --body`); never close issues by hand.
+- **Fold-ins spend the PR's single fold budget — one round per PR.** A PR that has already folded once has spent it: every later round fixes exactly what the reviewer flagged and nothing else. (Unconditional fold-in once spiraled a PR through three review rounds in a sibling repo — this cap is the lesson.)
 - Push; the reviewer re-reviews automatically. Loop.
 
 ### APPROVED
 
-- Follow-ups filed with the approval → decide fold-in NOW, while the PR is open. A follow-up folds in only if it fits the PR's scope: it touches lines this PR changed, or is required for the PR's stated `Closes #N` goal. Each fold-in gets a `Closes #N` added to the body; push and await re-review. **The fold budget is one round per PR, shared across verdicts**: a PR that already folded during a CHANGES_REQUESTED round has spent it, and a later APPROVED-with-follow-ups merges straight away; after any fold round's approval, merge without a second fold-in decision. If the fold round itself comes back CHANGES_REQUESTED, fix exactly those blockers and nothing else.
-- Out-of-scope follow-ups stay open: **triage at end of cycle, before starting the next plan item** — report each with a priority and when it will be resolved. Don't let them silently become backlog.
-- Nothing to fold (or the fold round re-approved) → merge: `gh pr merge <N> --squash`. Then the post-merge harvest.
+- **Merge immediately**: `gh pr merge <N> --squash`. Then the post-merge harvest.
+- **Do NOT fold anything on an approval** (policy 2026-08-01). If a finding truly had to land before merge, the reviewer's verdict would have been CHANGES_REQUESTED — trust the verdict. Every post-approval push costs a full CI run plus a full re-review round; in the first remediation cycle the fold-after-APPROVED path added 9 extra rounds across 7 of 14 PRs for items that could all have waited one PR.
+- Follow-ups the reviewer noted in the review body survive via the post-merge harvest; issues the reviewer filed stay open for **end-of-cycle triage, before starting the next plan item** — report each with a priority and when it will be resolved. Don't let them silently become backlog.
 
 ### COMMENTED (deferral)
 
