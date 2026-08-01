@@ -203,7 +203,12 @@ final class LogFormatTests: XCTestCase {
 
     /// The worst case for the terminal sink: it writes the body straight to
     /// stderr, so a raw newline would forge an entire additional log line.
-    func testNewlineCannotForgeALine() {
+    ///
+    /// Scoped to the metadata path — the message path is
+    /// `testNewlineInMessageCannotForgeALine` below. The original name here
+    /// read broader than what it pinned, which is how the message path stayed
+    /// open while the comment claimed the defense in general terms.
+    func testNewlineInMetadataCannotForgeALine() {
         let merged = LogFormat.merge(
             handler: [:], provided: nil, event: nil, function: "f",
             error: Multiline())
@@ -211,6 +216,105 @@ final class LogFormatTests: XCTestCase {
         XCTAssertFalse(
             text.contains("\n"), "a newline in a value must not reach stderr")
         XCTAssertTrue(text.contains(#"error="a\nb""#))
+    }
+
+    /// The path call sites actually use: an error interpolated into the message
+    /// rather than passed as `error:`. Both sinks must still emit one line.
+    func testNewlineInMessageCannotForgeALine() {
+        let merged = LogFormat.merge(
+            handler: [:], provided: nil, event: nil, function: "f")
+        let injected = "store op failed: oops\nnotice daemon: all clear"
+        let terminal = LogFormat.terminalText(message: injected, merged: merged)
+        let unified = LogFormat.unifiedText(message: injected, merged: merged)
+        XCTAssertFalse(terminal.contains("\n"), "forged a second stderr line")
+        XCTAssertFalse(unified.contains("\n"))
+        XCTAssertEqual(
+            terminal,
+            #"store op failed: oops\nnotice daemon: all clear function=f"#)
+    }
+
+    /// Ordinary messages are byte-unchanged — sanitizing only touches control
+    /// characters, and no log message in the repo contains one.
+    func testOrdinaryMessagesUnchanged() {
+        for m in ["daemon up", "loaded model id=x (4.2 GB)", "", "a=b c=d"] {
+            XCTAssertEqual(LogFormat.sanitizeMessage(m), m)
+        }
+    }
+
+    /// #35: one predicate, two callers. If `escape` and `sanitizeMessage` ever
+    /// neutralize different sets, one sink grows a hole the other doesn't have.
+    func testBothPathsNeutralizeTheSameScalarSet() {
+        let structural: [Unicode.Scalar] = [
+            "\u{00}", "\u{01}", "\n", "\r", "\t", "\u{1F}", "\u{7F}", "\u{85}",
+            "\u{2028}", "\u{2029}",
+        ]
+        for scalar in structural {
+            let s = "a\(Character(scalar))b"
+            XCTAssertFalse(
+                LogFormat.sanitizeMessage(s).unicodeScalars.contains(scalar),
+                "message path let U+\(String(scalar.value, radix: 16)) through")
+            XCTAssertFalse(
+                LogFormat.escape(s).unicodeScalars.contains(scalar),
+                "value path let U+\(String(scalar.value, radix: 16)) through")
+        }
+        // And a scalar in neither set survives both, unchanged.
+        XCTAssertEqual(LogFormat.sanitizeMessage("naïve ✅"), "naïve ✅")
+        XCTAssertEqual(LogFormat.escape("naïve"), "naïve")
+    }
+
+    /// HONESTY BOUNDARY, pinned so it is not mistaken for a defect later.
+    ///
+    /// The message is unquoted and precedes the tail, so `principal=` text in a
+    /// message IS the first match on the line. `escape` prevents this for
+    /// metadata by quoting; the message cannot be treated the same way because
+    /// messages legitimately carry `key=value` text. The rule lives in
+    /// `docs/logging.md`: the message is untrusted text, the tail is the
+    /// structured record.
+    func testMessageDoesNotDefendAgainstFieldForgery() {
+        let merged = LogFormat.merge(
+            handler: [:], provided: ["principal": "u:alice"], event: nil,
+            function: "f")
+        let line = LogFormat.terminalText(
+            message: "denied principal=admin", merged: merged)
+        XCTAssertEqual(line, "denied principal=admin function=f principal=u:alice")
+        // The forged value precedes the real one — a reader taking the first
+        // match sees `admin`. Documented, not defended.
+        let first = line.range(of: "principal=")
+        XCTAssertNotNil(first)
+        XCTAssertTrue(
+            line[first!.upperBound...].hasPrefix("admin"),
+            "if this ever fails, the message path gained a defense the docs "
+                + "and the comment at sanitizeMessage both say it lacks")
+    }
+
+    func testMessageControlCharactersNeutralized() {
+        XCTAssertEqual(LogFormat.sanitizeMessage("a\rb"), #"a\rb"#)
+        XCTAssertEqual(LogFormat.sanitizeMessage("a\u{0001}b"), #"a\u{0001}b"#)
+        XCTAssertEqual(
+            LogFormat.sanitizeMessage("a\u{2028}b"), #"a\u{2028}b"#)
+    }
+
+    /// #33: `errorFieldLimit` bounds the description, NOT the rendered field —
+    /// escaping runs afterwards and expands control characters ~8×. Pinned so
+    /// the comment and the code cannot drift apart again.
+    func testRenderedErrorFieldMayExceedTheDescriptionBound() {
+        struct Controls: Error, CustomStringConvertible {
+            let description = String(repeating: "\u{0001}", count: 5_000)
+        }
+        let merged = LogFormat.merge(
+            handler: [:], provided: nil, event: nil, function: "f",
+            error: Controls())
+        let description = "\(merged["error"] ?? "")"
+        XCTAssertLessThanOrEqual(
+            description.utf8.count, LogFormat.errorFieldLimit + 3,
+            "the description itself is bounded")
+
+        let rendered = LogFormat.pairs(merged)
+        XCTAssertGreaterThan(
+            rendered.utf8.count, LogFormat.errorFieldLimit,
+            "escaping expands past the description bound — this is the "
+                + "documented behaviour, not a regression")
+        XCTAssertLessThan(rendered.utf8.count, LogFormat.errorFieldLimit * 9)
     }
     struct Multiline: Error, CustomStringConvertible {
         let description = "a\nb"

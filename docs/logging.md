@@ -198,11 +198,42 @@ pattern.
 
 This applies to swift-log's `error:` argument too — `log.error("…", error: e)`
 folds the error's *description* into that same public field. An error type that
-embeds the payload it failed on will publish that payload. The handler bounds
-the rendered `error=` field to 256 UTF-8 bytes, which caps how much lands there;
-it is not redaction, and the first 256 bytes of a secret are still a secret.
-The decision and its rationale live at `LogFormat.merge` in
+embeds the payload it failed on will publish that payload. The handler truncates
+the error description to 256 UTF-8 bytes, which caps how much lands there; it is
+not redaction, and the first 256 bytes of a secret are still a secret. The
+decision and its rationale live at `LogFormat.merge` in
 `Sources/AthenaServerKit/AthenaLogging.swift`.
+
+### What the line format does and does not guarantee
+
+**Guaranteed on both paths: one log call is one line.** Control characters are
+neutralized (`\n`, `\r`, `\u{…}`) in the message body *and* in metadata values,
+so no error description can forge an extra log line in a redirected file.
+
+**Field forgery is prevented in metadata values only.** Values (`req=`,
+`principal=`, `error=`, …) are rendered logfmt style — one containing a space,
+`=`, a quote, or a control character is double-quoted with the delimiters
+escaped, so anything parsing the tail sees the real fields. Identifier-shaped
+values render bare, so `grep req=` and `grep function=` behave exactly as before.
+
+**The message body is not protected against field forgery.** It is free text,
+unquoted, and precedes the tail on the line. A message containing
+` principal=admin` — whether written that way or interpolated from an error —
+will be the first `principal=` match on that line. This is not fixed because it
+cannot be cheaply: messages legitimately contain `key=value` text
+(`decode heartbeat elapsed=…`), so escaping `=` in messages would mangle real
+output, and delimiting the message from the tail would break every recipe above.
+
+The practical rule: **treat the message as untrusted text and the tail as the
+structured record.** When a field must be trustworthy, pass it as metadata, not
+interpolated into the message.
+
+Neither mechanism removes text — a `grep principal=` still matches inside a
+quoted value. Structure is defended; substring search is not, and cannot be
+while error descriptions are logged at all.
+
+Note the 256-byte cap applies to the error description *before* escaping, so a
+pathological control-character-dense error renders longer than 256 bytes.
 
 ## Reading logs through the daemon (remote / RBAC-gated)
 

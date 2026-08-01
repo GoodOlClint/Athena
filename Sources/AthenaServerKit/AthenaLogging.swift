@@ -164,8 +164,16 @@ enum LogFormat {
         return merged
     }
 
-    /// Upper bound on the rendered `error=` field, in **UTF-8 bytes**. See the
-    /// privacy note above: a volume bound, not a redaction.
+    /// Upper bound on the error **description**, in UTF-8 bytes, applied before
+    /// escaping. See the privacy note above: a volume bound, not a redaction.
+    ///
+    /// Not the bound on the *rendered* field. `escape` runs after this and can
+    /// expand what it sees — worst case a C0 control character, 1 byte in,
+    /// `\u{0001}` (8 bytes) out — so a pathological all-control description
+    /// renders at roughly 8× this, plus quotes. Truncating after escaping was
+    /// rejected: it would cut an escape sequence in half and emit a broken
+    /// field. The cap that matters for the privacy story is on the description,
+    /// which is what carries user content.
     static let errorFieldLimit = 256
 
     /// Truncate to at most `limit` UTF-8 bytes (plus a one-character ellipsis).
@@ -212,8 +220,7 @@ enum LogFormat {
             value.isEmpty
             || value.unicodeScalars.contains {
                 $0 == " " || $0 == "=" || $0 == "\"" || $0 == "\\"
-                    || $0.value < 0x20 || $0 == "\u{7F}" || $0 == "\u{85}"
-                    || $0 == "\u{2028}" || $0 == "\u{2029}"
+                    || isLineStructural($0)
             }
         guard needsQuoting else { return value }
         var out = "\""
@@ -221,15 +228,9 @@ enum LogFormat {
             switch scalar {
             case "\\": out += "\\\\"
             case "\"": out += "\\\""
-            case "\n": out += "\\n"
-            case "\r": out += "\\r"
-            case "\t": out += "\\t"
             default:
-                if scalar.value < 0x20 || scalar == "\u{7F}"
-                    || scalar == "\u{85}" || scalar == "\u{2028}"
-                    || scalar == "\u{2029}"
-                {
-                    out += String(format: "\\u{%04x}", scalar.value)
+                if isLineStructural(scalar) {
+                    out += escapeControl(scalar)
                 } else {
                     out.unicodeScalars.append(scalar)
                 }
@@ -246,11 +247,80 @@ enum LogFormat {
             .joined(separator: " ")
     }
 
+    /// Make the message body safe to write to a line-oriented sink: one log
+    /// call must produce exactly one line.
+    ///
+    /// The tail escaping above defends the `error:` *argument* path, which no
+    /// call site uses. Call sites interpolate error descriptions straight into
+    /// the message instead (`log.warning("store op failed: \(err)")`), and the
+    /// message is written raw to stderr — so both forgeries the escaping was
+    /// added for stayed reachable through the path actually in use: an embedded
+    /// newline forges a whole extra line, and since the message *precedes* the
+    /// tail, an embedded ` principal=admin` forges a field ahead of the real
+    /// one for a reader taking the first match.
+    ///
+    /// Sanitizing here rather than at those call sites is deliberate: both
+    /// handlers funnel through this function, so a future interpolation is
+    /// covered without anyone having to remember. The message is free text by
+    /// design, so it is NOT quoted — only control characters are neutralized,
+    /// which leaves ordinary messages byte-unchanged (no log message in this
+    /// repo contains a literal newline).
+    ///
+    /// Honesty boundary — narrower than `escape`'s, deliberately. This closes
+    /// the *line* forgery only. It does NOT stop field forgery: the message is
+    /// unquoted and precedes the tail, so a message containing
+    /// ` principal=admin` is still the first `principal=` match on the line.
+    /// `escape` does prevent that for metadata, because it quotes.
+    ///
+    /// Not fixed here because it cannot be cheaply: messages legitimately carry
+    /// `key=value` text (`decode heartbeat elapsed=…`), so escaping `=` would
+    /// mangle real output, and delimiting the message from the tail would break
+    /// the documented `grep` recipes. The rule is stated in `docs/logging.md`
+    /// instead — the message is untrusted text, the tail is the structured
+    /// record; pass anything that must be trustworthy as metadata.
+    static func sanitizeMessage(_ s: String) -> String {
+        guard s.unicodeScalars.contains(where: isLineStructural) else {
+            return s
+        }
+        var out = ""
+        for scalar in s.unicodeScalars {
+            if isLineStructural(scalar) {
+                out += escapeControl(scalar)
+            } else {
+                out.unicodeScalars.append(scalar)
+            }
+        }
+        return out
+    }
+
+    /// Scalars that would break a line-oriented sink if emitted verbatim: C0
+    /// controls, DEL, and the Unicode line/paragraph separators a line reader
+    /// also splits on.
+    ///
+    /// One predicate, two callers (`escape` and `sanitizeMessage`) — it was
+    /// spelled out four times, which is four chances for the two paths to
+    /// neutralize different sets (#35).
+    static func isLineStructural(_ scalar: Unicode.Scalar) -> Bool {
+        scalar.value < 0x20 || scalar == "\u{7F}" || scalar == "\u{85}"
+            || scalar == "\u{2028}" || scalar == "\u{2029}"
+    }
+
+    /// Readable escape for the common control characters, `\u{…}` otherwise.
+    static func escapeControl(_ scalar: Unicode.Scalar) -> String {
+        switch scalar {
+        case "\n": return "\\n"
+        case "\r": return "\\r"
+        case "\t": return "\\t"
+        default: return String(format: "\\u{%04x}", scalar.value)
+        }
+    }
+
     /// Terminal body: `<msg> k=v k=v`.
     static func terminalText(
         message: String, merged: Logging.Logger.Metadata
     ) -> String {
-        merged.isEmpty ? message : message + " " + pairs(merged)
+        let msg = sanitizeMessage(message)
+        return merged.isEmpty ? msg : msg + " " + pairs(merged)
     }
 
     /// Unified-log body: `<msg> {k=v k=v}` — deliberately a different shape
@@ -258,7 +328,8 @@ enum LogFormat {
     static func unifiedText(
         message: String, merged: Logging.Logger.Metadata
     ) -> String {
-        merged.isEmpty ? message : message + " {\(pairs(merged))}"
+        let msg = sanitizeMessage(message)
+        return merged.isEmpty ? msg : msg + " {\(pairs(merged))}"
     }
 }
 
