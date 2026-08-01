@@ -83,7 +83,7 @@ tier must not read as "the numerics are covered"):
 | **L2** acceptance-rate floor | `SpeculativeStats` observer + accept/reject algebra (already MLX-free) | real-model accept rate |
 | **L7 / C1** seeded sampling | `SpeculativeSampling` distribution/RNG/tie-break + multi-seed property (already MLX-free) | real-model sampled tokens |
 | **NC6** StructuredVocab | pure `build(vocabSize:eos:decode:)` core — C12 eos-sentinel, UTF-8 byte map | real tokenizer |
-| **NC6** GuidedDecoder | IDLE→ENFORCING phase machine via a real `byteVocab` guide (`commit`/`forceEnforce`/idleBudget/jsonStart) | `pick` (MLX argmax) |
+| ~~**NC6** GuidedDecoder~~ | ~~IDLE→ENFORCING phase machine via a real `byteVocab` guide (`commit`/`forceEnforce`/idleBudget/jsonStart)~~ — **row retired (#49)**: publication S0 deleted the in-closure guided-greedy loop this pinned, orphaning `GuidedDecoder`; the live structured path is `GuidedSubstrate`, covered by the **L5** row below. The tier no longer owes this invariant. | ~~`pick` (MLX argmax)~~ |
 | **L5** schema mask | `maskedArgmax([Float],[UInt8])` seam — scripted off-schema logits | the `MLXArray` mask-add (delegates to the seam) |
 | **NC4** prefix cache | `scopeKey`/`commonPrefixLength`/eviction policy over scalar descriptors | KV-tensor clone/restore bit-identity |
 | **NC5** cancellation | `DecodeLoopControl.shouldStop` predicate the 4 loops consult | the live disconnect bridge (M68.4 A8, e2e) |
