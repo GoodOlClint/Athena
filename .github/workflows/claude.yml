@@ -22,10 +22,13 @@ on:
 
 jobs:
   claude:
-    # Body-only matching for issues, deliberately NOT the title: an issue
-    # ABOUT this workflow legitimately names the mention keyword in its title
-    # (issue #43 fired a run on itself exactly that way). A user addressing
-    # the bot writes the mention in the body.
+    # Body-only matching for issues, deliberately NOT the title. Narrow win,
+    # stated honestly: a `contains()` match cannot tell addressing the bot
+    # from *describing* it, so an issue whose body discusses the workflow
+    # still fires (issue #43 did — its body named the keyword four times).
+    # What this buys is the title-only case: an issue that merely NAMES the
+    # bot in its title no longer spins a run, and a user actually addressing
+    # the bot always writes the mention in the body.
     if: |
       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
@@ -53,7 +56,6 @@ jobs:
       # run the default-branch yml — the md and the yml flip atomically at
       # merge. Fail-closed: materialize failure fails the job.
       - name: Materialize instructions from the default branch (tamper-proof)
-        id: materialize
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |

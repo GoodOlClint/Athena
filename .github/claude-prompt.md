@@ -28,7 +28,7 @@ Body:
 Created from <PR/issue link> at @<user>'s request.
 ```
 
-Label with `bug` or `enhancement` as appropriate (stock label set). Reply on the original thread with the new issue number. Never put a closing keyword (`closes`/`fixes`/`resolves`) next to an issue number in the body — GitHub's matcher ignores negation.
+Label with `bug` or `enhancement` as appropriate (stock label set). Reply on the original thread with the new issue number.
 
 ## "Re-review"
 
