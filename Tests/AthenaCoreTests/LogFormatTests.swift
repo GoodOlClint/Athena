@@ -355,9 +355,10 @@ final class LogFormatTests: XCTestCase {
     /// IS already caught, by the example tests
     /// `testCarriageReturnAndTabEscaped` and
     /// `testMessageControlCharactersNeutralized`, which pin those renderings
-    /// concretely. (`testBothPathsNeutralizeTheSameScalarSet` genuinely does
-    /// not: it asserts each structural scalar does not *survive*, never that
-    /// two distinct scalars render *differently*.)
+    /// concretely. (`testBothPathsNeutralizeTheSameScalarSet` did not cover it
+    /// either, asserting only that each structural scalar does not *survive* —
+    /// so #58 added the pairwise-distinctness sweep that now does, over every
+    /// structural scalar rather than the five this corpus can reach.)
     ///
     /// What nothing caught is the interaction no example enumerates: parity
     /// blindness on `r` — a backslash before `r` left undoubled, so literal
@@ -370,6 +371,13 @@ final class LogFormatTests: XCTestCase {
         "\\", "n", "r", "t", "u", "{", "}", "0", "f", "\"",
         "\n", "\r", "\t", "\u{00}", "\u{2028}",
     ]
+
+    /// Every scalar `LogFormat.isLineStructural` accepts — all of C0, DEL, NEL
+    /// and the two Unicode separators. The EXHAUSTIVE set, deliberately: a
+    /// sample has exactly the defect the checks using it exist to prevent.
+    private static let everyStructural: [Unicode.Scalar] =
+        (0 ... 0x1F).compactMap { Unicode.Scalar($0) }
+        + ["\u{7F}", "\u{85}", "\u{2028}", "\u{2029}"]
 
     /// Just enough to build a fully formed literal `\u{0}` and the real NUL it
     /// would collide with. Separate from `hostileAlphabet` so length 5 costs
@@ -563,34 +571,61 @@ final class LogFormatTests: XCTestCase {
                 + "length-5 sweep is no longer load-bearing")
 
         // Symmetric guard for the OTHER alphabet. The whole #58 gain rides on
-        // `hostileAlphabet` containing `\` together with the letters `r`/`t`
-        // that `escapeControl`'s arms emit — and the count assertion in the
-        // round-trip test pins that alphabet's SIZE, not its CONTENT, so
-        // swapping `r` for another scalar would keep the count at 15 and
-        // silently restore the pre-#58 blindness. Parity blindness on `r` is
-        // the defect the widening exists to catch (measured: it leaves the
-        // pre-#58 tier 783/0 green), so require the hostile corpus to catch it.
-        func parityBlindOnR(_ s: String) -> String {
-            var out = ""
-            let all = Array(s.unicodeScalars)
-            for (i, scalar) in all.enumerated() {
-                if scalar == "\\" {
-                    out += (i + 1 < all.count && all[i + 1] == "r") ? "\\" : "\\\\"
-                } else if LogFormat.isLineStructural(scalar) {
-                    out += LogFormat.escapeControl(scalar)
-                } else {
-                    out.unicodeScalars.append(scalar)
+        // `hostileAlphabet` containing `\` together with the letters
+        // `escapeControl`'s readable arms emit — and the count assertion in
+        // the round-trip test pins that alphabet's SIZE, not its CONTENT, so
+        // swapping one letter out keeps the count at 15 and silently restores
+        // the pre-#58 blindness. Parity blindness on such a letter is the
+        // defect the widening exists to catch (measured: it leaves the pre-#58
+        // tier 783/0 green).
+        //
+        // Derived from `escapeControl`, not hardcoded, so this covers `n`, `r`
+        // and `t` today and any readable arm added later — a per-letter decoy
+        // would have to be remembered, and the thing being guarded against IS
+        // forgetting.
+        func parityBlind(on letter: Unicode.Scalar) -> (String) -> String {
+            { s in
+                var out = ""
+                let all = Array(s.unicodeScalars)
+                for (i, scalar) in all.enumerated() {
+                    if scalar == "\\" {
+                        out +=
+                            (i + 1 < all.count && all[i + 1] == letter)
+                            ? "\\" : "\\\\"
+                    } else if LogFormat.isLineStructural(scalar) {
+                        out += LogFormat.escapeControl(scalar)
+                    } else {
+                        out.unicodeScalars.append(scalar)
+                    }
                 }
+                return out
             }
-            return out
         }
         let hostile = Self.exhaustive(over: Self.hostileAlphabet, upTo: 4)
-        XCTAssertTrue(
-            hostile.contains { decodeSanitized(parityBlindOnR($0)) != $0 },
-            "the hostile corpus no longer catches parity blindness on `r` — "
-                + "the escape character and the letters its arms emit must "
-                + "BOTH be in hostileAlphabet, which is the entire point of "
-                + "widening it (#58)")
+        let readableArmLetters = Self.everyStructural.compactMap { scalar -> Unicode.Scalar? in
+            let rendered = Array(LogFormat.escapeControl(scalar).unicodeScalars)
+            // Readable arms are exactly `\<letter>`; the numeric arm is longer.
+            guard rendered.count == 2, rendered[0] == "\\" else { return nil }
+            return rendered[1]
+        }
+        XCTAssertEqual(
+            Set(readableArmLetters), Set(["n", "r", "t"] as [Unicode.Scalar]),
+            "escapeControl's readable arms changed — the guard below still "
+                + "adapts, but hostileAlphabet must be widened to match")
+        for letter in Set(readableArmLetters) {
+            XCTAssertTrue(
+                Self.hostileAlphabet.contains(letter),
+                "hostileAlphabet is missing `\(letter)`, a letter "
+                    + "escapeControl emits — a corpus without it cannot "
+                    + "express parity blindness on that arm (#58)")
+            let decoy = parityBlind(on: letter)
+            XCTAssertTrue(
+                hostile.contains { decodeSanitized(decoy($0)) != $0 },
+                "the hostile corpus no longer catches parity blindness on "
+                    + "`\(letter)` — the escape character and the letters its "
+                    + "arms emit must BOTH be in hostileAlphabet, which is the "
+                    + "entire point of widening it (#58)")
+        }
     }
 
     /// #35: one predicate, two callers. If `escape` and `sanitizeMessage` ever
@@ -616,14 +651,24 @@ final class LogFormatTests: XCTestCase {
         // #58 — non-survival is not enough: two DISTINCT structural scalars
         // must not render the SAME, or the rendering stops being decodable.
         // The round-trip corpus can only cover collisions on scalars it
-        // contains (`\n`/`\r`/`\t`/NUL/U+2028), and the numeric arm has 100+
-        // inhabitants — so a collision on U+0085, U+2029, DEL or any other C0
-        // scalar was caught by nothing. Verified: adding
+        // contains (`\n`/`\r`/`\t`/NUL/U+2028), so a collision on any other
+        // structural scalar was caught by nothing. Verified: adding
         // `case "\u{85}": return "\\n"` to `escapeControl` left the ENTIRE
-        // tier green before this check existed. O(n²) over ten scalars is
-        // cheaper than the corpus growth that would otherwise be needed.
-        for (i, a) in structural.enumerated() {
-            for b in structural[structural.index(after: i)...] {
+        // tier green before this check existed.
+        //
+        // Swept over the FULL structural set, not the sample above. A sample
+        // has exactly the defect it is here to prevent: with the 10-scalar
+        // list, `case "\u{07}": return "\\t"` still left the tier green,
+        // because 27 of the 32 C0 scalars appear in no corpus and no sample.
+        // 36 scalars is 630 compares of two short strings — the exhaustive
+        // set costs nothing, so take it and let the claim be true as written.
+        let everyStructural = Self.everyStructural
+        XCTAssertTrue(
+            everyStructural.allSatisfy(LogFormat.isLineStructural),
+            "premise: every scalar swept here is one the predicate accepts")
+        XCTAssertEqual(everyStructural.count, 36)
+        for (i, a) in everyStructural.enumerated() {
+            for b in everyStructural[everyStructural.index(after: i)...] {
                 XCTAssertNotEqual(
                     LogFormat.escapeControl(a), LogFormat.escapeControl(b),
                     "U+\(String(a.value, radix: 16, uppercase: true)) and "
