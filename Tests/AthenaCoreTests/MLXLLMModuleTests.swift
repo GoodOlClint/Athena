@@ -384,16 +384,17 @@ final class MLXLLMGenerationIntegrationTests: XCTestCase {
 /// It is not a routing input at all — `DecodeDispatch.route`'s signature is
 /// `route(hasSchema:hasLogprobSink:)`, so a schema request reaches
 /// `GuidedSubstrate` without `speculative` ever being consulted. But the flag
-/// was only inert AT DECODE, not on load: `MLXLLMModule.pairMTPDrafter` opens
-/// with `guard params.speculative else { return }`, so the old temp-0.1 arm
-/// tried to resolve and load a second (drafter) model that the temp-0 arm did
-/// not — extra residency and a soft dependency on the test model being
-/// MTP-paired. Pinning `false` removes a real asymmetry, not a cosmetic one.
+/// was only inert AT DECODE, not on load:
+/// `MLXLLMModule.loadMTPDrafterIfEligible` guards on `params.speculative`, so
+/// the old temp-0.1 arm tried to resolve and load a second (drafter) model
+/// that the temp-0 arm did not — extra residency and a soft dependency on the
+/// test model being MTP-paired. Pinning `false` removes a real asymmetry, not
+/// a cosmetic one.
 ///
-/// If ADR 033 ever wires the drafter into the guided path, the fix is a
-/// SECOND gate for speculative-guided inertness — do not flip this one to
-/// `true`, which would silently change which contract it covers while leaving
-/// its name and this doc unchanged.
+/// If a drafter is ever wired into the guided path, the fix is a SECOND gate
+/// for speculative-guided inertness — do not flip this one to `true`, which
+/// would silently change which contract it covers while leaving its name and
+/// this doc unchanged.
 ///
 /// This test shared a class with two siblings #47 deleted, and they died of
 /// DIFFERENT defects. Distinguished here so this one is not swept up as a
