@@ -464,31 +464,89 @@ final class MemoryGovernorTests: XCTestCase {
 
     // MARK: - M68.1 concurrency & lifecycle
 
-    /// A module with a deliberately SLOW `unload()`, so the teardown window
-    /// stays open while a concurrent reload runs — the NE1 race condition.
-    /// `isLoaded` is the ground truth the test asserts against: if `load()`
-    /// and the pending slow `unload()` race, the unload lands last and leaves
-    /// `isLoaded == false` while the governor records `.loaded`.
+    /// A module whose `unload()` parks until the test releases it, so the
+    /// teardown window the NE1 tests exercise stays open by construction.
+    ///
+    /// This used to be a fixed `unloadDelayNs` sleep, which was not a workload —
+    /// it *was* the race window. If the runner stalled past it, `markUnloaded`
+    /// had already cleared `teardown[id]`, the reload took a clean path, and
+    /// both NE1 tests passed with the fix reverted: a silent fail-open, worse
+    /// than a flake. The park removes that particular window — it ends only when
+    /// the test says so, never on a timer. It does **not** make the tests
+    /// deterministic: the caller still fires the park once its detection budget
+    /// expires, so the fail-open is bounded rather than eliminated. See `settle`
+    /// for exactly what is and is not guaranteed, and #28 for the residual.
+    ///
+    /// `loadRacedUnload` is the direct observation of the defect. Actor
+    /// isolation means `load()` can only run while `unload()` is suspended at
+    /// its park, so seeing `isUnloading` from inside `load()` *is* the NE1 race
+    /// — no timing inference required. `isLoaded` remains the ground truth for
+    /// the consequence: the trailing unload lands last and leaves the module
+    /// torn down while the governor records `.loaded`.
     private actor SlowUnloadModule: InferenceModule {
         nonisolated let id: ModuleID
         private let bytes: Int
-        private let unloadDelayNs: UInt64
+        /// `nil` ⇒ `unload()` completes immediately (for slots that are merely
+        /// collateral evictions, not the module under test).
+        private let park: Signal?
         private(set) var isLoaded = false
-        init(id: ModuleID, bytes: Int, unloadDelayNs: UInt64) {
+        private(set) var isUnloading = false
+        private(set) var loadRacedUnload = false
+        init(id: ModuleID, bytes: Int, park: Signal? = nil) {
             self.id = id
             self.bytes = bytes
-            self.unloadDelayNs = unloadDelayNs
+            self.park = park
         }
         var residentBytes: Int { isLoaded ? bytes : 0 }
         func memoryEstimate() -> Int { bytes }
         func load(reservation: MemoryReservation) async throws {
+            if isUnloading { loadRacedUnload = true }
             isLoaded = true
         }
         func unload() async {
-            try? await Task.sleep(nanoseconds: unloadDelayNs)
+            isUnloading = true
+            await park?.wait()
+            isUnloading = false
             isLoaded = false
         }
         func loaded() -> Bool { isLoaded }
+    }
+
+    /// Poll up to `seconds`, returning as soon as `condition` holds. Unlike
+    /// `waitUntil` this does NOT fail on expiry — expiry is the *expected*
+    /// outcome when the invariant under test holds, so it is a detection
+    /// budget, not an assertion.
+    ///
+    /// **What this buys, precisely.** The park makes the teardown window a
+    /// synchronization point rather than a duration, so the window never ends
+    /// on its own — but the caller fires that park immediately after this
+    /// returns, so an expired budget does close it, and a `load()` arriving
+    /// afterwards sees `isUnloading == false` and records nothing. So this
+    /// **bounds** the fail-open; it does not eliminate it. What changed is the
+    /// dependency: from "the runner must not outlast an 80 ms unload" to "a
+    /// task already on-CPU must reach `module.load()` within the budget".
+    /// Callers hand-shake the racing task on-CPU before starting the budget,
+    /// so scheduling latency is excluded from what it has to cover; the
+    /// remaining span is a handful of actor hops, measured at 2–14 ms even
+    /// under 2× CPU oversubscription.
+    ///
+    /// A fully deterministic version looks unreachable: releasing the park from
+    /// inside `load()` would deadlock the *fixed* path against `performLoad`'s
+    /// `await pending.value` — the very wait under test.
+    ///
+    /// Cost: with the invariant holding, callers pay the full budget on every
+    /// green run (~2 s each for the two NE1 tests), and the governor's teardown
+    /// span holds the process-global `InferenceGate` for that time. Deliberate —
+    /// this issue exists because the previous window was tuned short enough to
+    /// be outlasted, so margin is bought with wall clock on purpose.
+    private func settle(
+        _ seconds: Double, until condition: () async -> Bool
+    ) async {
+        let deadline = ContinuousClock.now + .seconds(seconds)
+        while ContinuousClock.now < deadline {
+            if await condition() { return }
+            try? await Task.sleep(for: .milliseconds(1))
+        }
     }
 
     /// NE1 — a slot re-requested DURING its eviction teardown must wait for
@@ -497,20 +555,55 @@ final class MemoryGovernorTests: XCTestCase {
     /// the governor records it `.loaded`.
     func testReloadDuringTeardownWaitsForUnloadNE1() async throws {
         let gov = MemoryGovernor(totalBudgetBytes: 100)
-        let a = SlowUnloadModule(
-            id: .transcription, bytes: 60, unloadDelayNs: 80_000_000)
-        let b = SlowUnloadModule(
-            id: .textEmbedding, bytes: 60, unloadDelayNs: 80_000_000)
+        let park = Signal()
+        let a = SlowUnloadModule(id: .transcription, bytes: 60, park: park)
+        // B is collateral (the reload evicts it to make room); its teardown must
+        // not park, or nothing would ever drain it.
+        let b = SlowUnloadModule(id: .textEmbedding, bytes: 60)
         await gov.register(a, evictable: true)
         await gov.register(b, evictable: true)
 
         try await gov.ensureLoaded(.transcription)  // A loaded (60)
-        try await gov.ensureLoaded(.textEmbedding)  // evicts A (slow), B loaded
-        // Re-request A while A's slow unload is still in flight. With the fix
-        // performLoad awaits A's teardown before A.load(); without it, A.load
-        // runs first and the trailing unload flips isLoaded back to false.
-        try await gov.ensureLoaded(.transcription)  // evicts B, reloads A
+        try await gov.ensureLoaded(.textEmbedding)  // evicts A, B loaded
 
+        // A's teardown is now provably open — held by the park, not by a sleep
+        // a slow runner can outlast.
+        guard await waitUntil("A's unload has parked", { await a.isUnloading })
+        else {
+            await park.fire()
+            // Drain A's teardown before returning: it was spawned detached by
+            // `evictSync` and holds the process-global InferenceGate, so
+            // leaving it in flight can cascade an opaque failure into the next
+            // test in this class.
+            await settle(2) {
+                await gov.snapshot().modules
+                    .first { $0.id == .transcription }?.state == .unloaded
+            }
+            return
+        }
+
+        // Re-request A mid-teardown. With the fix, performLoad awaits A's
+        // teardown before A.load(). Without it, A.load() runs against a module
+        // still inside unload(), and the trailing unload flips isLoaded back.
+        //
+        // The handshake puts the reload on-CPU before the budget starts, so the
+        // budget covers only the hops from here to `module.load()` — not task
+        // scheduling. See `settle` for what this bounds and what it doesn't.
+        let started = Signal()
+        let reload = Task {
+            await started.fire()
+            try await gov.ensureLoaded(.transcription)
+        }
+        await started.wait()
+        await settle(2) { await a.loadRacedUnload }
+        await park.fire()
+        try await reload.value
+
+        let raced = await a.loadRacedUnload
+        XCTAssertFalse(
+            raced,
+            "the reload called load() while unload() was still in flight — "
+                + "performLoad did not await the pending teardown")
         let aLoaded = await a.loaded()
         XCTAssertTrue(
             aLoaded,
@@ -528,28 +621,43 @@ final class MemoryGovernorTests: XCTestCase {
     /// unload teardown, then loads; the final state is `.loaded`.
     func testExplicitUnloadThenReloadEndsLoadedNE1() async throws {
         let gov = MemoryGovernor(totalBudgetBytes: 1_000)
-        let m = SlowUnloadModule(
-            id: .llm, bytes: 100, unloadDelayNs: 60_000_000)
+        let park = Signal()
+        let m = SlowUnloadModule(id: .llm, bytes: 100, park: park)
         await gov.register(m, evictable: false)
 
         try await gov.ensureLoaded(.llm)
-        // Kick the slow unload, then wait until the slot has actually entered
-        // its teardown (`.unloading`) before reloading — otherwise the reload
-        // could take the `.loaded` fast path and never exercise the drain.
+        // Kick the unload. `unload(_:)` awaits its own teardown task, so this
+        // stays outstanding until the park is released.
         async let unloadDone: Void = gov.unload(.llm)
-        // `!= .loaded` (not `== .unloading`) so the poll can't time out if the
-        // teardown races through to `.unloaded`; with a 60 ms unload it lands
-        // on `.unloading` in practice and the drain is exercised.
-        await waitUntil("the slot has entered teardown") {
-            await gov.snapshot().modules.first { $0.id == .llm }?.state
-                != .loaded
+        // Park entry is the ground truth that the teardown window is open —
+        // stronger than the old `state != .loaded` poll, which could be
+        // satisfied by a teardown that had already run to completion.
+        guard await waitUntil("the unload has parked", { await m.isUnloading })
+        else {
+            await park.fire()
+            _ = await unloadDone
+            return
         }
-        // Reload while the slow `unload()` is mid-flight: the reload must drain
-        // the teardown, then load — and the trailing markUnloaded must NOT
-        // clobber the freshly-loaded slot back to `.unloaded`.
-        try await gov.ensureLoaded(.llm)
+
+        // Reload while `unload()` is mid-flight: the reload must drain the
+        // teardown, then load — and the trailing markUnloaded must NOT clobber
+        // the freshly-loaded slot back to `.unloaded`.
+        let started = Signal()
+        let reload = Task {
+            await started.fire()
+            try await gov.ensureLoaded(.llm)
+        }
+        await started.wait()
+        await settle(2) { await m.loadRacedUnload }
+        await park.fire()
+        try await reload.value
         _ = await unloadDone
 
+        let raced = await m.loadRacedUnload
+        XCTAssertFalse(
+            raced,
+            "the reload called load() while unload() was still in flight — "
+                + "performLoad did not await the pending teardown")
         let mLoaded = await m.loaded()
         XCTAssertTrue(mLoaded, "reload must win the final state")
         let s = await gov.snapshot()
