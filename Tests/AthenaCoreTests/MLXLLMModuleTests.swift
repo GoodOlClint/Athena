@@ -369,9 +369,7 @@ final class MLXLLMGenerationIntegrationTests: XCTestCase {
     }
 }
 
-/// M48.3 — temperature is inert under a Guide. Restored after #47 deleted the
-/// class it lived in (see below); the two siblings it shared that class with
-/// were genuinely vacuous, this one is not.
+/// M48.3 — temperature is inert under a Guide.
 ///
 /// The contract: `GuidedSubstrate` decodes with a hardcoded `ArgMaxSampler()`
 /// (`GuidedSubstrate.swift`), so a schema request at temperature 0.1 must emit
@@ -380,14 +378,32 @@ final class MLXLLMGenerationIntegrationTests: XCTestCase {
 /// the decode is masked-argmax and temperature is inert") — this is the only
 /// thing that would catch someone swapping a temperature-aware sampler in.
 ///
-/// **The load-bearing variable is `temperature`, not `speculative`.** The arms
-/// also differ in the `speculative` flag, which is decode-irrelevant here:
-/// `DecodeDispatch.route(hasSchema: true, …)` sends both to `GuidedSubstrate`
-/// regardless. That confound is exactly what made the sibling
-/// `testStructuredGreedyParityAcrossSpeculative` vacuous — it varied ONLY the
-/// inert flag — and it is named here so this test is not mistaken for the same
-/// thing and deleted alongside it a second time. MTP speculative bit-identity
-/// is a separate contract with no gate at all; see #64.
+/// **Single variable: `temperature`.** Both arms pass `speculative: false`, so
+/// a failure here can only be temperature. The arms used to differ in that
+/// flag as well. That was not wrong — `DecodeDispatch.route(hasSchema: true,
+/// …)` returns `.guidedSubstrate` regardless, so the flag is decode-irrelevant
+/// on this path — but if ADR 033 ever wires the drafter into the guided path,
+/// a failure would become ambiguous in exactly the way a single-variable test
+/// exists to prevent (#67).
+///
+/// This test shared a class with two siblings #47 deleted, and they died of
+/// DIFFERENT defects. Distinguished here so this one is not swept up as a
+/// third:
+///   - `testStructuredGreedyParityAcrossSpeculative` was **vacuous** — it
+///     varied ONLY `speculative`, which the guided route ignores, so both arms
+///     drove the identical path and it could not fail.
+///   - `testStructuredSpeculativeAcceptanceRate` was a **guaranteed failure**,
+///     not a vacuous one — it asserted `XCTAssertGreaterThan(stats.total, 0)`
+///     against an observer whose publisher publication S0 had already removed.
+///
+/// MTP speculative bit-identity is a separate contract with no gate at all;
+/// see #64.
+///
+/// Provenance — this test is neither new nor restored, and was never absent.
+/// It landed with M48.3 itself as
+/// `testStructuredGreedyParityTempIneretUnderGuide` (`033f1b15`, 2026-05-28)
+/// and has been in the tree continuously since; #47 renamed it in place and
+/// rehomed it out of the class whose other two tests it deleted.
 ///
 /// Heavy: drives a real MLX model. Gated on ATHENA_RUN_MODEL_TESTS=1.
 final class GuidedTemperatureInertnessTests: XCTestCase {
@@ -423,9 +439,11 @@ final class GuidedTemperatureInertnessTests: XCTestCase {
                     "Is the sky generally blue on a clear day? "
                     + "Answer in JSON.")
         ]
+        // Both arms pin `speculative: false` — temperature is the ONLY thing
+        // that differs. See the class doc for why the flag used to vary.
         let atTemp = try await runOnce(
             modelURL: modelURL, messages: messages,
-            schemaJSON: schema, speculative: true,
+            schemaJSON: schema, speculative: false,
             temperature: 0.1)
         let greedyBaseline = try await runOnce(
             modelURL: modelURL, messages: messages,
