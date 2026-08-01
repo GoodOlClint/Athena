@@ -48,7 +48,13 @@ final class InferenceGateTests: XCTestCase {
         /// helper. On a contended gate an acquisition that never completes would
         /// suspend here until the CI job timeout, reporting nothing. A deadline
         /// turns that into one named failure.
-        init(
+        ///
+        /// Fails (returns nil) rather than handing back a holder that does not
+        /// hold: a failed acquisition leaves `task` cancelled, so a call site
+        /// that carried on would rethrow `CancellationError` from its later
+        /// `holder.task.value` and bury the named diagnostic under secondary
+        /// noise pointing at the wrong thing. Call sites `guard let`.
+        init?(
             _ gate: InferenceGate, seconds: Double = 10,
             file: StaticString = #filePath, line: UInt = #line
         ) async {
@@ -97,12 +103,18 @@ final class InferenceGateTests: XCTestCase {
                 // `held`, and `releaseC.finish()` unblocks a body already past
                 // acquisition, so neither park outlives this await.
                 _ = try? await task.value
-                return
+                return nil
             }
-            let held = await gate.isHeld
-            XCTAssertTrue(
-                held, "HeldGate returned without holding the gate",
-                file: file, line: line)
+            guard await gate.isHeld else {
+                // Acquired, but the gate is not held — a disabled gate runs the
+                // body ungated. Same cascade risk, so bail the same way.
+                XCTFail(
+                    "HeldGate returned without holding the gate",
+                    file: file, line: line)
+                releaseC.finish()
+                _ = try? await task.value
+                return nil
+            }
         }
         func release() { releaseC.finish() }
         // A skipped release() must not park the holder task forever.
@@ -179,7 +191,9 @@ final class InferenceGateTests: XCTestCase {
     /// `CancellationError` and never blocks the holder or the gate.
     func testCancelledWaiterThrowsAndDrains() async throws {
         let gate = InferenceGate()
-        let holder = await HeldGate(gate)  // returns with the gate provably held
+        // nil ⇒ acquisition already failed with its own named diagnostic;
+        // carrying on would bury it under a secondary CancellationError.
+        guard let holder = await HeldGate(gate) else { return }
         defer { holder.release() }
         let waiter = Task {
             try await gate.withExclusiveExecution { 1 }
@@ -216,7 +230,7 @@ final class InferenceGateTests: XCTestCase {
     /// hid it.
     func testReleaseSurvivesDisabledFlipMidSpan() async throws {
         let gate = InferenceGate()
-        let holder = await HeldGate(gate)  // acquired while enabled
+        guard let holder = await HeldGate(gate) else { return }  // while enabled
         defer { holder.release() }
         InferenceGate.enabled = false  // …flips while the span is in flight
         holder.release()
@@ -267,7 +281,9 @@ final class InferenceGateTests: XCTestCase {
     /// is not counted as contended.
     func testContentionAccounting() async throws {
         let gate = InferenceGate()
-        let holder = await HeldGate(gate)  // returns with the gate provably held
+        // nil ⇒ acquisition already failed with its own named diagnostic;
+        // carrying on would bury it under a secondary CancellationError.
+        guard let holder = await HeldGate(gate) else { return }
         defer { holder.release() }
         let waiters = (0 ..< 3).map { _ in
             Task { try await gate.withExclusiveExecution {} }
