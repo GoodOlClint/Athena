@@ -198,11 +198,32 @@ pattern.
 
 This applies to swift-log's `error:` argument too — `log.error("…", error: e)`
 folds the error's *description* into that same public field. An error type that
-embeds the payload it failed on will publish that payload. The handler bounds
-the rendered `error=` field to 256 UTF-8 bytes, which caps how much lands there;
-it is not redaction, and the first 256 bytes of a secret are still a secret.
-The decision and its rationale live at `LogFormat.merge` in
+embeds the payload it failed on will publish that payload. The handler truncates
+the error description to 256 UTF-8 bytes, which caps how much lands there; it is
+not redaction, and the first 256 bytes of a secret are still a secret. The
+decision and its rationale live at `LogFormat.merge` in
 `Sources/AthenaServerKit/AthenaLogging.swift`.
+
+### Line structure is defended; content is not
+
+One log call always produces exactly one line, whichever way an error reaches it:
+
+- **Metadata values** (`req=`, `principal=`, `error=`, …) are rendered logfmt
+  style — a value containing a space, `=`, a quote, or a control character is
+  double-quoted with the delimiters escaped. Identifier-shaped values render
+  bare, so `grep req=` and `grep function=` behave exactly as before.
+- **The message body** has its control characters neutralized (`\n`, `\r`,
+  `\u{…}`). It is not quoted, because it is free text by design.
+
+So an error description containing a newline cannot forge a second log line, and
+one containing ` principal=admin` cannot forge a field that a parser would read
+as real. What this does *not* do is stop such text from appearing at all — a
+`grep principal=` still matches inside the quotes. Structure is defended,
+substring search is not, and that is unavoidable while error descriptions are
+logged at all.
+
+Note the 256-byte cap applies to the description *before* escaping, so a
+pathological control-character-dense error renders longer than 256 bytes.
 
 ## Reading logs through the daemon (remote / RBAC-gated)
 

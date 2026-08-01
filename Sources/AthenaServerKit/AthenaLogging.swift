@@ -164,8 +164,16 @@ enum LogFormat {
         return merged
     }
 
-    /// Upper bound on the rendered `error=` field, in **UTF-8 bytes**. See the
-    /// privacy note above: a volume bound, not a redaction.
+    /// Upper bound on the error **description**, in UTF-8 bytes, applied before
+    /// escaping. See the privacy note above: a volume bound, not a redaction.
+    ///
+    /// Not the bound on the *rendered* field. `escape` runs after this and can
+    /// expand what it sees — worst case a C0 control character, 1 byte in,
+    /// `\u{0001}` (8 bytes) out — so a pathological all-control description
+    /// renders at roughly 8× this, plus quotes. Truncating after escaping was
+    /// rejected: it would cut an escape sequence in half and emit a broken
+    /// field. The cap that matters for the privacy story is on the description,
+    /// which is what carries user content.
     static let errorFieldLimit = 256
 
     /// Truncate to at most `limit` UTF-8 bytes (plus a one-character ellipsis).
@@ -246,11 +254,61 @@ enum LogFormat {
             .joined(separator: " ")
     }
 
+    /// Make the message body safe to write to a line-oriented sink: one log
+    /// call must produce exactly one line.
+    ///
+    /// The tail escaping above defends the `error:` *argument* path, which no
+    /// call site uses. Call sites interpolate error descriptions straight into
+    /// the message instead (`log.warning("store op failed: \(err)")`), and the
+    /// message is written raw to stderr — so both forgeries the escaping was
+    /// added for stayed reachable through the path actually in use: an embedded
+    /// newline forges a whole extra line, and since the message *precedes* the
+    /// tail, an embedded ` principal=admin` forges a field ahead of the real
+    /// one for a reader taking the first match.
+    ///
+    /// Sanitizing here rather than at those call sites is deliberate: both
+    /// handlers funnel through this function, so a future interpolation is
+    /// covered without anyone having to remember. The message is free text by
+    /// design, so it is NOT quoted — only control characters are neutralized,
+    /// which leaves ordinary messages byte-unchanged (no log message in this
+    /// repo contains a literal newline).
+    ///
+    /// Honesty boundary: this defends line and field *structure*. It does not
+    /// stop an interpolated description from containing misleading text — the
+    /// same limit `escape` has.
+    static func sanitizeMessage(_ s: String) -> String {
+        guard
+            s.unicodeScalars.contains(where: {
+                $0.value < 0x20 || $0 == "\u{7F}" || $0 == "\u{85}"
+                    || $0 == "\u{2028}" || $0 == "\u{2029}"
+            })
+        else { return s }
+        var out = ""
+        for scalar in s.unicodeScalars {
+            switch scalar {
+            case "\n": out += "\\n"
+            case "\r": out += "\\r"
+            case "\t": out += "\\t"
+            default:
+                if scalar.value < 0x20 || scalar == "\u{7F}"
+                    || scalar == "\u{85}" || scalar == "\u{2028}"
+                    || scalar == "\u{2029}"
+                {
+                    out += String(format: "\\u{%04x}", scalar.value)
+                } else {
+                    out.unicodeScalars.append(scalar)
+                }
+            }
+        }
+        return out
+    }
+
     /// Terminal body: `<msg> k=v k=v`.
     static func terminalText(
         message: String, merged: Logging.Logger.Metadata
     ) -> String {
-        merged.isEmpty ? message : message + " " + pairs(merged)
+        let msg = sanitizeMessage(message)
+        return merged.isEmpty ? msg : msg + " " + pairs(merged)
     }
 
     /// Unified-log body: `<msg> {k=v k=v}` — deliberately a different shape
@@ -258,7 +316,8 @@ enum LogFormat {
     static func unifiedText(
         message: String, merged: Logging.Logger.Metadata
     ) -> String {
-        merged.isEmpty ? message : message + " {\(pairs(merged))}"
+        let msg = sanitizeMessage(message)
+        return merged.isEmpty ? msg : msg + " {\(pairs(merged))}"
     }
 }
 

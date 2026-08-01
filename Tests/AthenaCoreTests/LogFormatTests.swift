@@ -203,7 +203,12 @@ final class LogFormatTests: XCTestCase {
 
     /// The worst case for the terminal sink: it writes the body straight to
     /// stderr, so a raw newline would forge an entire additional log line.
-    func testNewlineCannotForgeALine() {
+    ///
+    /// Scoped to the metadata path — the message path is
+    /// `testNewlineInMessageCannotForgeALine` below. The original name here
+    /// read broader than what it pinned, which is how the message path stayed
+    /// open while the comment claimed the defense in general terms.
+    func testNewlineInMetadataCannotForgeALine() {
         let merged = LogFormat.merge(
             handler: [:], provided: nil, event: nil, function: "f",
             error: Multiline())
@@ -211,6 +216,59 @@ final class LogFormatTests: XCTestCase {
         XCTAssertFalse(
             text.contains("\n"), "a newline in a value must not reach stderr")
         XCTAssertTrue(text.contains(#"error="a\nb""#))
+    }
+
+    /// The path call sites actually use: an error interpolated into the message
+    /// rather than passed as `error:`. Both sinks must still emit one line.
+    func testNewlineInMessageCannotForgeALine() {
+        let merged = LogFormat.merge(
+            handler: [:], provided: nil, event: nil, function: "f")
+        let injected = "store op failed: oops\nnotice daemon: all clear"
+        let terminal = LogFormat.terminalText(message: injected, merged: merged)
+        let unified = LogFormat.unifiedText(message: injected, merged: merged)
+        XCTAssertFalse(terminal.contains("\n"), "forged a second stderr line")
+        XCTAssertFalse(unified.contains("\n"))
+        XCTAssertEqual(
+            terminal,
+            #"store op failed: oops\nnotice daemon: all clear function=f"#)
+    }
+
+    /// Ordinary messages are byte-unchanged — sanitizing only touches control
+    /// characters, and no log message in the repo contains one.
+    func testOrdinaryMessagesUnchanged() {
+        for m in ["daemon up", "loaded model id=x (4.2 GB)", "", "a=b c=d"] {
+            XCTAssertEqual(LogFormat.sanitizeMessage(m), m)
+        }
+    }
+
+    func testMessageControlCharactersNeutralized() {
+        XCTAssertEqual(LogFormat.sanitizeMessage("a\rb"), #"a\rb"#)
+        XCTAssertEqual(LogFormat.sanitizeMessage("a\u{0001}b"), #"a\u{0001}b"#)
+        XCTAssertEqual(
+            LogFormat.sanitizeMessage("a\u{2028}b"), #"a\u{2028}b"#)
+    }
+
+    /// #33: `errorFieldLimit` bounds the description, NOT the rendered field —
+    /// escaping runs afterwards and expands control characters ~8×. Pinned so
+    /// the comment and the code cannot drift apart again.
+    func testRenderedErrorFieldMayExceedTheDescriptionBound() {
+        struct Controls: Error, CustomStringConvertible {
+            let description = String(repeating: "\u{0001}", count: 5_000)
+        }
+        let merged = LogFormat.merge(
+            handler: [:], provided: nil, event: nil, function: "f",
+            error: Controls())
+        let description = "\(merged["error"] ?? "")"
+        XCTAssertLessThanOrEqual(
+            description.utf8.count, LogFormat.errorFieldLimit + 3,
+            "the description itself is bounded")
+
+        let rendered = LogFormat.pairs(merged)
+        XCTAssertGreaterThan(
+            rendered.utf8.count, LogFormat.errorFieldLimit,
+            "escaping expands past the description bound — this is the "
+                + "documented behaviour, not a regression")
+        XCTAssertLessThan(rendered.utf8.count, LogFormat.errorFieldLimit * 9)
     }
     struct Multiline: Error, CustomStringConvertible {
         let description = "a\nb"
