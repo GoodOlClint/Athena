@@ -41,9 +41,9 @@ enum GuidedSubstrate {
             guard let guide else { return logits }
             var mask: [UInt8] = []
             _ = guide.allowedMask(into: &mask)
-            // M70.3 (L5): same shared MLX-free seam as
-            // SpeculativeGeneration.guidedArgmax — one source for the
-            // bit→additive-mask unpack so the two guided paths can't drift.
+            // M70.3 (L5): the shared MLX-free seam (`GuidedMask`) — one
+            // source for the bit→additive-mask unpack (the pre-S0 vendored
+            // guided loop shared it, so the paths couldn't drift).
             let add = GuidedMask.additiveMask(allowed: mask, vocab: vocab)
             // `logits` is the last-position slice, shape (1, vocab);
             // the (vocab,) additive mask broadcasts over it.
@@ -91,10 +91,9 @@ enum GuidedSubstrate {
             out.append(token)
             // C2: the token was emitted ⇒ promote its pending logprob capture.
             sink?.keep()
-            // M46.8 — per-iteration progress for the heartbeat. See the
-            // matching note in GuidedGreedy.generate: the substrate
-            // path here is also fully synchronous and only surfaces
-            // one `.text` event at completion.
+            // M46.8 — per-iteration progress for the heartbeat (see
+            // `DecodeProgress`): this path is fully synchronous and
+            // only surfaces one `.text` event at completion.
             DecodeProgress.counter?.incrementToken()
             // ADR 023 G1: skip the legacy flush when the serve path bounds the
             // MLX cache; keep it only under the unbounded operator opt-out.

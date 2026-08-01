@@ -948,10 +948,9 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         // Publication S0 removed that loop, so the coercion reached nothing but
         // this log line — where it lied, reporting `temp=0.0` for a request
         // `beginGeneration` decodes at `params.temperature`. Report what the
-        // decode uses, matching `beginGeneration`'s own resolution.
-        let reportedTemp: Double =
-            requestTemperature.flatMap { $0 >= 0 ? $0 : nil }
-            ?? Double(params.temperature)
+        // decode uses — the same resolver `beginGeneration` calls.
+        let reportedTemp = DecodeDispatch.effectiveTemperature(
+            requestTemperature, params.temperature)
         // M48.3 — temperature is INERT under a Guide: the schema mask collapses
         // every position's distribution to its allowed set, so a structured
         // request decodes the same masked-argmax sequence whatever temperature
@@ -1198,10 +1197,11 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         // `sending` UserInput/LMInput are constructed and consumed entirely
         // inside the closure so no non-Sendable value crosses its boundary.
         // M24.3: per-request max_tokens/temperature override the loaded
-        // defaults (a negative/zero temperature override is ignored).
-        let temp =
-            (temperature.map { Float($0) }).flatMap { $0 >= 0 ? $0 : nil }
-            ?? params.temperature
+        // defaults (a negative temperature override is ignored; zero is an
+        // explicit greedy request). Resolution lives in DecodeDispatch so the
+        // logged and decoded values cannot drift.
+        let temp = DecodeDispatch.effectiveTemperature(
+            temperature, params.temperature)
         // M31.3: per-request top_p overrides the loaded default; only the
         // (0,1) range engages nucleus sampling, and only when temp>0 (at
         // temp==0 the substrate uses argmax — top_p/seed are inert).
@@ -1410,9 +1410,8 @@ extension MLXLLMModule {
             try enforcePromptCeiling(tokenCount: promptTokens.count)
 
             let cap = Self.effectiveMaxTokens(maxTokens, params.maxTokens)
-            let temp =
-                (temperature.map { Float($0) }).flatMap { $0 >= 0 ? $0 : nil }
-                ?? params.temperature
+            let temp = DecodeDispatch.effectiveTemperature(
+                temperature, params.temperature)
             let tp =
                 topP.map { Float($0) }.flatMap { $0 > 0 && $0 < 1 ? $0 : nil }
                 ?? params.topP

@@ -57,6 +57,32 @@ final class DecodeDispatchTests: XCTestCase {
         XCTAssertEqual(Set(DecodeDispatch.allCases), Set(routes))
     }
 
+    /// Issue #42 — the effective-temperature rule has ONE home; these pin it.
+    /// Non-negative override wins (zero = explicit greedy), negative override
+    /// is ignored, nil falls back to the loaded default.
+    func testEffectiveTemperature() {
+        XCTAssertEqual(DecodeDispatch.effectiveTemperature(nil, 0.7), 0.7)
+        XCTAssertEqual(DecodeDispatch.effectiveTemperature(0.3, 0.7), 0.3)
+        XCTAssertEqual(
+            DecodeDispatch.effectiveTemperature(0, 0.7), 0,
+            "zero is an explicit greedy request, not an absent override")
+        XCTAssertEqual(
+            DecodeDispatch.effectiveTemperature(-1, 0.7), 0.7,
+            "negative override is ignored — the loaded default applies")
+        // Float-narrowing edges: the sign test runs AFTER Double→Float
+        // (matching the decode sites), so these pin the exact boundary.
+        XCTAssertEqual(
+            DecodeDispatch.effectiveTemperature(.nan, 0.7), 0.7,
+            "NaN fails >= 0 and falls back")
+        XCTAssertEqual(
+            DecodeDispatch.effectiveTemperature(-1e-60, 0.7).sign, .minus,
+            "tiny negative underflows to -0.0, which passes >= 0 (still greedy downstream: -0.0 > 0 is false)"
+        )
+        XCTAssertEqual(
+            DecodeDispatch.effectiveTemperature(1e60, 0.7), .infinity,
+            "overflow saturates to +inf, matching what the decode already used")
+    }
+
     /// The `path=` values are an operator-facing contract: they are what a
     /// `dispatch path=` log line reports, so an operator greps for them.
     func testRawValuesAreTheLoggedNames() {

@@ -23,7 +23,8 @@ public protocol SpeculativeAcceptanceObserver: AnyObject, Sendable {
 
 public enum SpeculativeStats {
     /// Set by an observer (test or metrics surface) for the lifetime of
-    /// one generation; read by `SpeculativeGeneration.generate`. nil ⇒
-    /// no one is listening, the publish call is a cheap no-op.
+    /// one generation; nil ⇒ no one is listening, a publish is a cheap
+    /// no-op. NOTE: publication S0 removed the vendored decode loop that
+    /// published here — no in-tree publisher remains (issue #47).
     @TaskLocal public static var observer: (any SpeculativeAcceptanceObserver)?
 }

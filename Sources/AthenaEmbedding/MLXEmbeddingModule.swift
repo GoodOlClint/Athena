@@ -451,8 +451,9 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
                 // weight footprint up to tens of GiB after a handful
                 // of mixed-length batches, eating budget the LLM needs
                 // and pushing total RSS into unified-memory-thrash
-                // territory. Mirrors the LLM decode loops' periodic
-                // clearCache (e.g. SpeculativeGeneration.swift:184) —
+                // territory. Mirrors the LLM decode loop's periodic
+                // per-256-token clearCache (M50.1; kept unconditional
+                // here, the LLM copy is ADR-023-G1-gated) —
                 // the activations are bucket-scoped, so a per-bucket
                 // clear is the embedding analog of "every 256 tokens."
                 // bucketVectors above is already a Swift [Float] copy

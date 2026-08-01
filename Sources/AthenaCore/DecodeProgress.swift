@@ -3,9 +3,9 @@ import Foundation
 /// M46.8 — per-token progress signal for decode loops that don't stream
 /// individual token events back to the serve path.
 ///
-/// The structured-output paths (GuidedGreedy, GuidedSubstrate) and the
-/// speculative paths (SpeculativeGeneration, SpeculativeSampling) run a
-/// fully synchronous internal loop inside `container.perform { ... }`,
+/// The structured-output path (`GuidedSubstrate`, which also serves
+/// logprob capture — and, pre-publication-S0, the vendored speculative
+/// loops) runs a fully synchronous internal loop inside `container.perform { ... }`,
 /// then emit ONE `.text` event at completion with the whole decoded
 /// string. From `collectMetered`'s point of view, no `.text` events
 /// arrive until the loop finishes — so the M46.1/M46.7 heartbeat sees
@@ -77,9 +77,9 @@ extension DecodeProgressCounter {
 
 public enum DecodeProgress {
     /// Set by `AthenaServer.collectMetered` for the lifetime of one
-    /// metered generation; read by the synchronous decode loops in
-    /// `AthenaLLM` (GuidedGreedy, GuidedSubstrate, SpeculativeGeneration,
-    /// SpeculativeSampling). nil ⇒ no counter is interested in
+    /// metered generation; read by the synchronous decode loop in
+    /// `AthenaLLM` (`GuidedSubstrate`, incl. logprob capture). nil ⇒ no
+    /// counter is interested in
     /// per-iteration progress (e.g. the substrate-streamed path is
     /// already incrementing via `.text` events).
     @TaskLocal public static var counter: (any DecodeProgressCounter)?

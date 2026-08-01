@@ -3,10 +3,10 @@ import Foundation
 
 /// L5 / NC6 (M70.3) — the schema-mask seam, MLX-free.
 ///
-/// Both guided greedy paths force the next token into the Guide's currently
-/// allowed set the same way: take the per-step allowed bitmask, build an
+/// The guided path forces the next token into the Guide's currently
+/// allowed set: take the per-step allowed bitmask, build an
 /// additive logit mask (`0` for allowed ids, `-inf` for the rest), add it to
-/// the logits, and argmax. `SpeculativeGeneration.guidedArgmax` and
+/// the logits, and argmax. The pre-S0 vendored guided-greedy loop and
 /// `GuidedSubstrate.GuidedLogitProcessor.process` had their own copies of the
 /// bit-unpacking loop; this is the single source so they can't drift, and —
 /// being MLX-free — it makes the masking decision unit-testable with scripted
