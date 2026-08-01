@@ -410,8 +410,15 @@ final class LogFormatTests: XCTestCase {
     /// corpora, because breadth and depth are needed for different defects and
     /// paying for both at once is quadratic waste (#58):
     ///
-    /// - `hostileAlphabet` (15 scalars) to length 4 — breadth. Every pair of
-    ///   escape arms is reachable, so an inter-arm collision fails here.
+    /// - `hostileAlphabet` (15 scalars) to length 4 — breadth. Each escape arm
+    ///   has a REPRESENTATIVE here, so an inter-arm collision on one of `\n`,
+    ///   `\r`, `\t`, NUL or U+2028 fails here. Note the narrowness: a corpus
+    ///   cannot cover a collision on a scalar it does not contain, and the
+    ///   numeric arm has 100+ inhabitants. Collisions on the *other* structural
+    ///   scalars (U+0085, U+2029, DEL, the rest of C0) are pinned instead by
+    ///   the pairwise-distinctness check in
+    ///   `testBothPathsNeutralizeTheSameScalarSet`, which costs O(n²) string
+    ///   compares over ten scalars rather than an exponentially larger corpus.
     /// - `witnessAlphabet` (6 scalars) to length 5 — depth, for one witness.
     ///
     /// **Length 5 is load-bearing, not round-number.** The shortest witness
@@ -427,13 +434,20 @@ final class LogFormatTests: XCTestCase {
     ///
     /// Honesty boundary: this pins *value* decodability, not *field*
     /// structure. Verified — dropping `escape`'s `\"` arm leaves this green,
-    /// because the outer delimiters still bracket the value; what that breaks
-    /// is the tail's field structure, pinned via `splitLogfmt` by
-    /// `testFieldSpoofingIsConfinedToOneValue`. The two are complements.
+    /// because the outer delimiters still bracket the value. What catches that
+    /// drop is `testQuoteAndBackslashEscaped`. It is deliberately NOT
+    /// `testFieldSpoofingIsConfinedToOneValue`, which this comment used to
+    /// name: `Spoof.description` carries no quote, so that test never
+    /// exercises the `\"` arm and stays green when it is deleted (measured).
+    /// The field-structure break a quote-bearing value would cause is real but
+    /// currently unpinned — see #79.
     func testEscapedRenderingsAreUniquelyDecodable() {
         // The empty string is not filler: it is the only input that trips
         // `escape`'s `value.isEmpty` quoting arm. It comes from the hostile
-        // sweep; `dropFirst` on the witness sweep drops the duplicate.
+        // sweep; `dropFirst` drops the witness sweep's copy of it. The two
+        // sweeps still overlap on 1,554 further strings (every witness string
+        // of length ≤ 4 is also a hostile one) — rendering those twice is
+        // cheaper than deduplicating 63k strings.
         let corpus =
             Self.exhaustive(over: Self.hostileAlphabet, upTo: 4)
             + Self.exhaustive(over: Self.witnessAlphabet, upTo: 5).dropFirst()
@@ -547,6 +561,36 @@ final class LogFormatTests: XCTestCase {
             shallow.contains { decodeSanitized(parityBlindRender($0)) != $0 },
             "a length-4 corpus now catches the parity-blind decoy, so the "
                 + "length-5 sweep is no longer load-bearing")
+
+        // Symmetric guard for the OTHER alphabet. The whole #58 gain rides on
+        // `hostileAlphabet` containing `\` together with the letters `r`/`t`
+        // that `escapeControl`'s arms emit — and the count assertion in the
+        // round-trip test pins that alphabet's SIZE, not its CONTENT, so
+        // swapping `r` for another scalar would keep the count at 15 and
+        // silently restore the pre-#58 blindness. Parity blindness on `r` is
+        // the defect the widening exists to catch (measured: it leaves the
+        // pre-#58 tier 783/0 green), so require the hostile corpus to catch it.
+        func parityBlindOnR(_ s: String) -> String {
+            var out = ""
+            let all = Array(s.unicodeScalars)
+            for (i, scalar) in all.enumerated() {
+                if scalar == "\\" {
+                    out += (i + 1 < all.count && all[i + 1] == "r") ? "\\" : "\\\\"
+                } else if LogFormat.isLineStructural(scalar) {
+                    out += LogFormat.escapeControl(scalar)
+                } else {
+                    out.unicodeScalars.append(scalar)
+                }
+            }
+            return out
+        }
+        let hostile = Self.exhaustive(over: Self.hostileAlphabet, upTo: 4)
+        XCTAssertTrue(
+            hostile.contains { decodeSanitized(parityBlindOnR($0)) != $0 },
+            "the hostile corpus no longer catches parity blindness on `r` — "
+                + "the escape character and the letters its arms emit must "
+                + "BOTH be in hostileAlphabet, which is the entire point of "
+                + "widening it (#58)")
     }
 
     /// #35: one predicate, two callers. If `escape` and `sanitizeMessage` ever
@@ -568,6 +612,26 @@ final class LogFormatTests: XCTestCase {
         // And a scalar in neither set survives both, unchanged.
         XCTAssertEqual(LogFormat.sanitizeMessage("naïve ✅"), "naïve ✅")
         XCTAssertEqual(LogFormat.escape("naïve"), "naïve")
+
+        // #58 — non-survival is not enough: two DISTINCT structural scalars
+        // must not render the SAME, or the rendering stops being decodable.
+        // The round-trip corpus can only cover collisions on scalars it
+        // contains (`\n`/`\r`/`\t`/NUL/U+2028), and the numeric arm has 100+
+        // inhabitants — so a collision on U+0085, U+2029, DEL or any other C0
+        // scalar was caught by nothing. Verified: adding
+        // `case "\u{85}": return "\\n"` to `escapeControl` left the ENTIRE
+        // tier green before this check existed. O(n²) over ten scalars is
+        // cheaper than the corpus growth that would otherwise be needed.
+        for (i, a) in structural.enumerated() {
+            for b in structural[structural.index(after: i)...] {
+                XCTAssertNotEqual(
+                    LogFormat.escapeControl(a), LogFormat.escapeControl(b),
+                    "U+\(String(a.value, radix: 16, uppercase: true)) and "
+                        + "U+\(String(b.value, radix: 16, uppercase: true)) "
+                        + "render identically — the escaped form is no longer "
+                        + "uniquely decodable")
+            }
+        }
     }
 
     /// HONESTY BOUNDARY, pinned so it is not mistaken for a defect later.
