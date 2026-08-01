@@ -157,13 +157,26 @@ jobs:
       # only re-uploaded when the pins or toolchain move). NOTE: PR-created
       # caches are invisible to sibling PRs; the `seed` job on main is what
       # publishes the cache everyone restores.
+      #
+      # The `-v2-` salt is deliberate — do NOT "clean it up" (#56). Before the
+      # DEVELOPER_DIR export in "Select newest Xcode" above landed (840895a3),
+      # deploy/test.sh's CLT fallback
+      # silently re-pointed builds at the runner's DEFAULT Xcode, so the cache
+      # entry was KEYED as one toolchain but BUILT by another. Post-fix, SPM
+      # sees foreign-compiler swiftmodules and rebuilds everything despite a
+      # cache hit — a ~6.5-10.5 min full compile on every PR. The entry cannot
+      # self-heal: unit skips the save on an exact hit, and seed's lookup-only
+      # probe short-circuits because the key exists. Salting forces one fresh
+      # seed build under the pinned toolchain; steady state is self-consistent
+      # thereafter, and a runner-image Xcode bump rotates the key naturally.
+      # Bump the salt again if that invariant is ever broken the same way.
       - name: Cache SPM build
         uses: actions/cache@v5
         with:
           path: .build
-          key: ${{ runner.os }}-spm-${{ steps.xcode.outputs.version }}-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-spm-v2-${{ steps.xcode.outputs.version }}-${{ hashFiles('Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-spm-${{ steps.xcode.outputs.version }}-
+            ${{ runner.os }}-spm-v2-${{ steps.xcode.outputs.version }}-
 
       - name: Unit tests
         run: ./deploy/test.sh
@@ -210,12 +223,16 @@ jobs:
           # they share the SPM cache key — so both export the selection here.
           echo "DEVELOPER_DIR=$(xcode-select -p)" >> "$GITHUB_ENV"
 
+      # All four SPM keys in this job must stay byte-identical to the `unit`
+      # job's — seed publishes what unit restores, so a prefix bumped on one
+      # side and not the other recreates the permanent-miss loop the `-v2-`
+      # salt exists to break. See the #56 note above the unit job's key.
       - name: Check whether the cache already exists
         id: probe
         uses: actions/cache/restore@v5
         with:
           path: .build
-          key: ${{ runner.os }}-spm-${{ steps.xcode.outputs.version }}-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-spm-v2-${{ steps.xcode.outputs.version }}-${{ hashFiles('Package.resolved') }}
           lookup-only: true
 
       - name: Download Metal Toolchain
@@ -245,9 +262,9 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: .build
-          key: ${{ runner.os }}-spm-${{ steps.xcode.outputs.version }}-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-spm-v2-${{ steps.xcode.outputs.version }}-${{ hashFiles('Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-spm-${{ steps.xcode.outputs.version }}-
+            ${{ runner.os }}-spm-v2-${{ steps.xcode.outputs.version }}-
 
       # Build everything the unit tier builds (tests included) so the cache
       # a PR restores is complete — but execute nothing.
@@ -260,4 +277,4 @@ jobs:
         uses: actions/cache/save@v5
         with:
           path: .build
-          key: ${{ runner.os }}-spm-${{ steps.xcode.outputs.version }}-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-spm-v2-${{ steps.xcode.outputs.version }}-${{ hashFiles('Package.resolved') }}
