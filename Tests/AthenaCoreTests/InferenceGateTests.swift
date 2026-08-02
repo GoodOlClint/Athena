@@ -58,17 +58,44 @@ final class InferenceGateTests: XCTestCase {
         /// that. Injecting one is deterministic (40/40), 0.003 s, and leaves
         /// `Sources/` untouched.
         ///
-        /// SEPARATE DEFECT, do not confuse the two: under CALLER cancellation
-        /// the handshake misreports. Both task-group children finish at once —
-        /// the `entered` observer is cancelled, and the sleeping sibling's
-        /// `try?` swallows `CancellationError` and returns `.timedOut` — so
-        /// `group.next()` is a coin flip between two wrong answers about a
-        /// gate that was acquired normally. Measured over 200 iterations:
-        /// `.neverAcquired` 16 (8%) and `.timedOut` 28 (14%), every one of the
-        /// 44 with `acquisitions == 1`. Tracked in #81; the test below drives
-        /// the arm through the honest path instead, and asserts
-        /// `acquisitions == 0` so it can never silently pin the misreport.
-        private enum Handshake { case entered, neverAcquired, timedOut }
+        /// FIXED in #81 — `.callerCancelled` is the third outcome, and it
+        /// exists because the other two were both wrong under one condition.
+        ///
+        /// Under CALLER cancellation both task-group children can finish at
+        /// once: the `entered` observer is cancelled, and if its stream ends
+        /// WITHOUT a yield that selects `.neverAcquired`, while the sleeping
+        /// sibling's `try?` swallows `CancellationError` and returns
+        /// `.timedOut`. So `group.next()` was a race between two wrong answers
+        /// about a gate that had been acquired normally. Measured over 200
+        /// iterations before the fix: `.neverAcquired` 16 (8%) and `.timedOut`
+        /// 28 (14%), every one of the 44 with `acquisitions == 1`. (The
+        /// remaining ~78% resolved `.entered` — the observer usually drains the
+        /// buffered yield before noticing cancellation — which is why the
+        /// defect presented as an intermittent flake.)
+        ///
+        /// Fixing one arm would have left the other half of the misreports
+        /// intact — and `.timedOut` was the WORSE half, since "gate wedged or
+        /// held elsewhere" sends a reader hunting a deadlock that does not
+        /// exist. So the fix is in the HANDSHAKE, not an arm: cancellation is
+        /// detected once, after the race resolves but BEFORE either result is
+        /// interpreted. Both original arms keep their documented meanings
+        /// exactly, and neither can now be reported about a cancelled caller.
+        ///
+        /// Two consequences, stated rather than glossed. Cancellation takes
+        /// PRECEDENCE: a genuine `.neverAcquired` or `.timedOut` occurring in a
+        /// cancelled caller is reported as `.callerCancelled`, so those arms'
+        /// reachability is narrowed even though their meanings are unchanged.
+        /// And the discarded-holder case is the DOMINANT one, not an edge —
+        /// ~80% of cancelled handshakes had already observed the yield and
+        /// would previously have returned a working holder. Both are the
+        /// intended trade: a cancelled caller is being torn down anyway, and
+        /// removing the timing dependence is the point.
+        ///
+        /// Driven by `testHeldGateCallerCancellationIsNotBlamedOnTheGate`,
+        /// which forces the condition rather than sampling it.
+        private enum Handshake {
+            case entered, neverAcquired, timedOut, callerCancelled
+        }
 
         /// Where a failure arm reports. Defaults to `XCTFail`; issue #23
         /// substitutes a collector so the arms themselves can be tested.
@@ -137,15 +164,41 @@ final class InferenceGateTests: XCTestCase {
                 }
                 let first = await group.next() ?? .timedOut
                 group.cancelAll()
-                return first
+                // #81 — decide cancellation ONCE, here, before either child's
+                // result is interpreted. Cancelling the caller cancels both
+                // children simultaneously, so `first` is a coin flip between
+                // two arms that would each assert a cause about the GATE that
+                // nothing has established. This closure runs in the caller's
+                // context, so `Task.isCancelled` is exactly that condition.
+                return Task.isCancelled ? .callerCancelled : first
             }
             guard outcome == .entered else {
-                fail(
-                    outcome == .timedOut
-                        ? "HeldGate acquisition did not complete within "
-                            + "\(seconds)s — gate wedged or held elsewhere"
-                        : "HeldGate never acquired the gate",
-                    file, line)
+                let cause: String
+                switch outcome {
+                case .timedOut:
+                    cause =
+                        "HeldGate acquisition did not complete within "
+                        + "\(seconds)s — gate wedged or held elsewhere"
+                case .neverAcquired:
+                    cause = "HeldGate never acquired the gate"
+                case .callerCancelled:
+                    // Deliberately says nothing about the gate: the gate may
+                    // well have been acquired healthily (#81 measured
+                    // acquisitions == 1 on every misreport).
+                    //
+                    // Still REPORTS rather than returning nil quietly. A
+                    // cancelled caller is not itself a defect, but every call
+                    // site is `guard let ... else { return }`, so a silent nil
+                    // would skip the rest of that test and pass vacuously.
+                    // Naming the cancellation is the safer failure mode.
+                    cause =
+                        "HeldGate handshake was abandoned because the CALLER "
+                        + "was cancelled — this reports nothing about the "
+                        + "gate, which may have been acquired normally"
+                case .entered:
+                    preconditionFailure("guarded above")
+                }
+                fail(cause, file, line)
                 // Unwind both ways it could still be parked: queued inside
                 // `acquire()` (cancel drains it via `cancelWaiter`), or already
                 // in the body awaiting a release that now never comes.
@@ -668,17 +721,166 @@ final class InferenceGateTests: XCTestCase {
                 + "have released someone else's gate")
     }
 
+    /// Arm 4 — `.callerCancelled` (#81). Before the fix, cancelling the caller
+    /// mid-handshake produced a coin flip between `.neverAcquired` ("never
+    /// acquired the gate") and `.timedOut` ("gate wedged or held elsewhere"),
+    /// both asserted about a gate that had been acquired normally — 8% / 14%
+    /// over 200 iterations, all 44 with `acquisitions == 1`.
+    ///
+    /// **What is forced is CALLER CANCELLATION, which is #81's requirement —
+    /// NOT the child race.** An earlier draft of this comment claimed the
+    /// construction left "no race" in the handshake; measurement refuted it, so
+    /// the true shape is recorded here instead. Probing `first` at the decision
+    /// point over 100 iterations: `.entered` 81, `.neverAcquired` 9,
+    /// `.timedOut` 10 (23/1/1 on a second 25-iteration sample). The observer
+    /// child, though born cancelled, usually drains the already-buffered
+    /// `enteredC.yield()` — `AsyncStream` returns pending elements before
+    /// reporting termination — so it answers `.entered` most of the time. The
+    /// #81 misreport condition is therefore SAMPLED at roughly 1 in 5.
+    ///
+    /// What IS deterministic is `Task.isCancelled == true` at the check
+    /// (100/100), and that is what makes the OUTCOME deterministic: the fix
+    /// collapses all three values of `first` to one. So the determinism belongs
+    /// to the fix, not to this construction — which is also why the loop below
+    /// is load-bearing rather than decorative.
+    ///
+    /// The construction rests on one Swift concurrency fact: an unstructured
+    /// `Task {}` does NOT inherit cancellation from the task that created it,
+    /// while `withTaskGroup` children DO. So building the `HeldGate` from an
+    /// ALREADY-cancelled caller puts the two in opposite states — the holder
+    /// task acquires the gate normally, the handshake children are born
+    /// cancelled.
+    ///
+    /// Getting the caller reliably cancelled BEFORE it reaches `HeldGate` is
+    /// the other half: it announces itself on-CPU, then parks on a stream
+    /// nobody ever feeds, so the only thing that can resume it is its own
+    /// cancellation. No sleeps, no windows. If that ever stopped holding, the
+    /// `guard Task.isCancelled` below fails loudly rather than silently
+    /// reverting this to a hopeful test (verified by mutation).
+    ///
+    /// Runs 25 iterations. Because the child race is sampled, a single pass
+    /// proves little: the PARTIAL fix #81 warns against (distinguishing only
+    /// `.neverAcquired`) survived iteration 1 in 8 of 9 runs, first failing at
+    /// iterations 4, 2, 3, 1, 2, 3, 3, 2, 3. The loop is what turns a ~1-in-5
+    /// detection into a reliable one.
+    ///
+    /// CEILING: `joinUnwind`'s poll paces on `try? await Task.sleep`, which
+    /// throws instantly in a cancelled task — so this is the first path that
+    /// reaches it busy-spinning, 25× per run. Measured harmless (0.002 s total,
+    /// unchanged under 2× CPU oversubscription). The flake shape if a runner
+    /// ever starves is specific and worth recognising: a SECOND diagnostic
+    /// ("bail did not unwind"), which trips the `recorded.count == 1`
+    /// assertion rather than any of the arm assertions.
+    func testHeldGateCallerCancellationIsNotBlamedOnTheGate() async throws {
+        // #81's premise is "the gate was acquired NORMALLY" — all 44 original
+        // misreports had `acquisitions == 1`. Without pinning that, this test
+        // cannot tell a cancelled-but-healthy handshake from one where the
+        // acquisition genuinely failed, and would pass with `failAcquire: true`
+        // (measured). Per-iteration `acquisitions == 1` is NOT deterministic —
+        // the bail's `task.cancel()` can beat the holder to `acquire()`'s
+        // `checkCancellation()` — so the deterministic facts are asserted every
+        // iteration and the premise itself is asserted once, over the loop.
+        var everAcquired = false
+        for iteration in 1 ... 25 {
+            let gate = InferenceGate()
+            let collector = FailureCollector()
+            let (onCPU, onCPUC) = AsyncStream.makeStream(of: Void.self)
+            let (park, parkC) = AsyncStream.makeStream(of: Void.self)
+
+            let caller = Task { () -> Bool in
+                onCPUC.yield()
+                var it = park.makeAsyncIterator()
+                // Resumes only via cancellation — AsyncStream iteration is
+                // cancellation-aware and nothing ever yields to `park`.
+                _ = await it.next()
+                // Belt-and-braces: what actually retains the continuation is
+                // the closure CAPTURE, established when this closure is formed
+                // — the post-await position does no work. Kept because a
+                // finished stream would resume this uncancelled, but that is
+                // NOT silent: the guard below fails loudly (verified by
+                // forcing `parkC.finish()`, which reddens at iteration 2).
+                withExtendedLifetime(parkC) {}
+                guard Task.isCancelled else { return false }
+                let attempt = await HeldGate(
+                    gate, seconds: 1,
+                    failureSink: { m, _, _ in collector.record(m) })
+                return attempt == nil
+            }
+
+            var started = onCPU.makeAsyncIterator()
+            _ = await started.next()  // the caller is on-CPU and about to park
+            caller.cancel()
+            let bailedWithoutHolder = await caller.value
+
+            XCTAssertTrue(
+                bailedWithoutHolder,
+                "iteration \(iteration): the caller must have been cancelled "
+                    + "before constructing HeldGate, and a HeldGate that never "
+                    + "completed its handshake must not hand back a holder")
+            XCTAssertEqual(
+                collector.recorded.count, 1,
+                "iteration \(iteration): one diagnostic, naming one cause. "
+                    + "Got: \(collector.recorded)")
+            let msg = try XCTUnwrap(collector.recorded.first)
+            XCTAssertTrue(
+                msg.contains("CALLER"),
+                "iteration \(iteration): must name caller cancellation. "
+                    + "Got: \(msg)")
+            // The two regressions this pins, stated as what must NOT be said.
+            // Fixing only `.neverAcquired` — the direction #81 was originally
+            // filed for — leaves the `.timedOut` half live, and that half is
+            // the worse one: it sends a reader hunting a deadlock.
+            XCTAssertFalse(
+                msg.contains("never acquired the gate"),
+                "iteration \(iteration): the caller being cancelled says "
+                    + "nothing about whether the gate was acquired. Got: \(msg)")
+            XCTAssertFalse(
+                msg.contains("wedged or held elsewhere"),
+                "iteration \(iteration): nothing established that the gate is "
+                    + "wedged — this arm is the majority half of the old "
+                    + "misreport. Got: \(msg)")
+
+            // Deterministic every iteration: whatever the holder did, the bail
+            // must leave nothing behind. Nothing else in this file pins the
+            // unwind on the cancelled-caller path.
+            let stats = await gate.stats()
+            XCTAssertFalse(
+                stats.held,
+                "iteration \(iteration): the bail must release the gate")
+            XCTAssertEqual(
+                stats.waiters, 0,
+                "iteration \(iteration): no waiter left behind")
+            if stats.acquisitions == 1 { everAcquired = true }
+        }
+        // The premise, asserted over the loop because it is not per-iteration
+        // deterministic. This is what pins the unstructured-`Task {}` fact the
+        // whole construction rests on: if the holder ever stopped acquiring
+        // (e.g. because it started inheriting the caller's cancellation), the
+        // test would still be green on every other assertion while no longer
+        // exercising #81's actual condition at all.
+        XCTAssertTrue(
+            everAcquired,
+            "no iteration observed acquisitions == 1, so none of them "
+                + "reproduced #81's condition — a cancelled caller whose gate "
+                + "was acquired NORMALLY. The construction depends on an "
+                + "unstructured Task {} not inheriting cancellation; if that "
+                + "stopped holding, every assertion above would still pass "
+                + "while testing nothing.")
+    }
+
     /// Arm 3 — the `.neverAcquired` arm. #69 first recorded this as a known
     /// gap on the premise that driving it needed `acquire()` to throw, which
     /// would mean a production change. The pre-submit review refuted that: the
     /// arm is selected by the `entered` stream finishing WITHOUT a yield, and
     /// any early exit of the holder body does that. `failAcquire` injects one.
     ///
-    /// Asserts `acquisitions == 0` deliberately. Under CALLER cancellation
-    /// this same arm fires about a gate that WAS acquired (#81) — so without
-    /// that assertion, a test here could pass while pinning the misreport as
-    /// correct behaviour. It is the difference between covering the arm and
-    /// blessing a bug.
+    /// Asserts `acquisitions == 0` deliberately, and the assertion is KEPT now
+    /// that #81 is fixed rather than retired with it. It was added because this
+    /// arm used to also fire under caller cancellation, about a gate that HAD
+    /// been acquired — so a test here could pass while pinning that misreport
+    /// as correct. `.callerCancelled` now takes that case, so the assertion
+    /// should never be what fails; it stays as the guard that would notice if
+    /// the two conditions ever merged again.
     func testHeldGateNeverAcquiredArmFailsAndDrains() async throws {
         let gate = InferenceGate()
         let collector = FailureCollector()
@@ -699,8 +901,10 @@ final class InferenceGateTests: XCTestCase {
         XCTAssertEqual(
             stats.acquisitions, 0,
             "premise: the body never ran, so nothing was acquired. If this "
-                + "fires, the arm is reporting the #81 misreport and this "
-                + "test would be pinning it as correct")
+                + "fires, this arm has started reporting about a gate that "
+                + "WAS acquired — the #81 misreport, fixed by the "
+                + ".callerCancelled outcome — and this test would be pinning "
+                + "it as correct")
         XCTAssertFalse(stats.held, "the gate must be free")
         XCTAssertEqual(stats.waiters, 0, "no waiter left behind")
     }
