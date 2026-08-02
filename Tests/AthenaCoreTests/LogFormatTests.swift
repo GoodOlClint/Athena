@@ -156,6 +156,19 @@ final class LogFormatTests: XCTestCase {
     /// `grep principal=` still matches inside the quotes. Structure is
     /// defended; substring search is not, and cannot be while the description
     /// is kept at all.
+    ///
+    /// **`Spoof.description` carries an ODD number of `"` on purpose (#79).**
+    /// This test is the field-structure pin for `escape`'s `\"` arm: delete
+    /// that arm and the value closes its own quoting early, so the tail parses
+    /// as 2 fields with `principal` forged. Measured both ways.
+    ///
+    /// **Odd is the whole condition** — brute-forced over `{a, space, "}` to
+    /// length 7: every odd-quote payload discriminates, every even-quote one
+    /// does not, 0 mismatches. So `denied "quoted" principal=admin`, which #79
+    /// proposed, pins NOTHING: two quotes leave the reader balanced, it still
+    /// sees 3 fields, and the test passes with the arm deleted (measured in
+    /// Swift, not modelled). A replacement payload needs an odd quote count;
+    /// where the quote sits does not matter.
     func testFieldSpoofingIsConfinedToOneValue() {
         let merged = LogFormat.merge(
             handler: [:], provided: ["principal": "u:alice"], event: nil,
@@ -163,16 +176,59 @@ final class LogFormatTests: XCTestCase {
         let rendered = LogFormat.pairs(merged)
         XCTAssertEqual(
             rendered,
-            "error=\"denied principal=admin\" function=f principal=u:alice")
-        // Unquoted, the tail would have parsed as four fields with a forged
-        // `principal=admin` ahead of the real one; quoted, it is three.
-        XCTAssertEqual(splitLogfmt(rendered).count, 3)
+            "error=\"denied\\\" principal=admin\" function=f principal=u:alice")
+        // Pin the FIELDS, not `splitLogfmt(_:).count`. That count is distinct
+        // dictionary KEYS after a last-wins reduce, which is a weak metric:
+        // with the pre-#79 payload it read 3 even when `escape` quoted nothing
+        // at all, which is how this gap stayed hidden. The array asserts the
+        // split itself.
+        XCTAssertEqual(
+            logfmtFields(rendered),
+            [
+                "error=\"denied\\\" principal=admin\"", "function=f",
+                "principal=u:alice",
+            ])
         XCTAssertEqual(splitLogfmt(rendered)["principal"], "u:alice")
     }
 
-    /// Minimal logfmt reader: splits on spaces outside double quotes. Stands in
-    /// for any structure-aware consumer of the tail.
-    private func splitLogfmt(_ s: String) -> [String: String] {
+    /// The same structural break through the other arm — #79's "worth checking
+    /// while there". A value ending in a backslash escapes its own closing
+    /// quote unless `escape` doubles it: `a\` would render `"a\"`, whose final
+    /// `"` a reader consumes as an escaped literal, so the value never closes
+    /// and it swallows every following field.
+    ///
+    /// Measured: deleting `escape`'s `\\` arm collapses this tail to ONE field
+    /// with no `principal` at all — a strictly worse break than the `\"` arm's,
+    /// since it eats the rest of the line rather than forging one field.
+    func testTrailingBackslashCannotEscapeTheClosingQuote() {
+        let merged = LogFormat.merge(
+            handler: [:], provided: ["principal": "u:alice"], event: nil,
+            function: "f", error: BackslashTail())
+        let rendered = LogFormat.pairs(merged)
+        XCTAssertEqual(
+            rendered, "error=\"a\\\\\" function=f principal=u:alice")
+        XCTAssertEqual(
+            logfmtFields(rendered),
+            ["error=\"a\\\\\"", "function=f", "principal=u:alice"])
+        XCTAssertEqual(splitLogfmt(rendered)["principal"], "u:alice")
+    }
+
+    /// Minimal logfmt reader: splits on spaces outside double quotes, treating
+    /// every unescaped `"` as toggling quotedness.
+    ///
+    /// **Honesty boundary: this is ONE structure-aware model, not every one.**
+    /// A go-logfmt-style reader treats a quote as significant only where a
+    /// value opens; under that model a `\"`-arm break parses into separate
+    /// pairs — the forgery is still there, ahead of the real field, but the
+    /// field count and a last-wins `principal` both still look correct, so the
+    /// tests below would NOT catch it. They pin the arm under this reader's
+    /// semantics, which is strictly more than the pre-#79 state (nothing) and
+    /// strictly less than "every consumer". A reader-model-independent metric
+    /// was tried and dropped: counting top-level `principal=` reads 1 under
+    /// both the fixed and the broken rendering here, because the unbalanced
+    /// quote pulls the REAL field inside a quoted region as it forges the
+    /// other. Recorded so the next person does not re-derive it.
+    private func logfmtFields(_ s: String) -> [String] {
         var fields: [String] = []
         var current = ""
         var inQuotes = false
@@ -187,7 +243,14 @@ final class LogFormatTests: XCTestCase {
             }
         }
         if !current.isEmpty { fields.append(current) }
-        return fields.reduce(into: [:]) { acc, f in
+        return fields
+    }
+
+    /// `k=v` map over `logfmtFields`. NOTE: last-wins, so `.count` is distinct
+    /// KEYS — see the caller comments for why that is too weak to be a
+    /// structural assertion on its own.
+    private func splitLogfmt(_ s: String) -> [String: String] {
+        logfmtFields(s).reduce(into: [:]) { acc, f in
             guard let eq = f.firstIndex(of: "=") else { return }
             let key = String(f[f.startIndex ..< eq])
             var value = String(f[f.index(after: eq)...])
@@ -197,8 +260,18 @@ final class LogFormatTests: XCTestCase {
             acc[key] = value
         }
     }
+
+    /// The `"` count is ODD on purpose. See
+    /// `testFieldSpoofingIsConfinedToOneValue` for why an even count — such as
+    /// the balanced pair #79 proposed — would pin nothing.
     struct Spoof: Error, CustomStringConvertible {
-        let description = "denied principal=admin"
+        let description = "denied\" principal=admin"
+    }
+
+    /// A description ending in a backslash, for
+    /// `testTrailingBackslashCannotEscapeTheClosingQuote`.
+    struct BackslashTail: Error, CustomStringConvertible {
+        let description = "a\\"
     }
 
     /// The worst case for the terminal sink: it writes the body straight to
@@ -443,13 +516,14 @@ final class LogFormatTests: XCTestCase {
     ///
     /// Honesty boundary: this pins *value* decodability, not *field*
     /// structure. Verified — dropping `escape`'s `\"` arm leaves this green,
-    /// because the outer delimiters still bracket the value. What catches that
-    /// drop is `testQuoteAndBackslashEscaped`. It is deliberately NOT
-    /// `testFieldSpoofingIsConfinedToOneValue`, which this comment used to
-    /// name: `Spoof.description` carries no quote, so that test never
-    /// exercises the `\"` arm and stays green when it is deleted (measured).
-    /// The field-structure break a quote-bearing value would cause is real but
-    /// currently unpinned — see #79.
+    /// because the outer delimiters still bracket the value.
+    ///
+    /// Field structure is pinned elsewhere, by two tests (#79):
+    /// `testFieldSpoofingIsConfinedToOneValue` for the `\"` arm and
+    /// `testTrailingBackslashCannotEscapeTheClosingQuote` for the `\\` arm.
+    /// Both drive `splitLogfmt` and fail on field count when their arm is
+    /// deleted, so the structural consequence is asserted rather than only the
+    /// byte-level rendering that `testQuoteAndBackslashEscaped` covers.
     func testEscapedRenderingsAreUniquelyDecodable() {
         // The empty string is not filler: it is the only input that trips
         // `escape`'s `value.isEmpty` quoting arm. It comes from the hostile
