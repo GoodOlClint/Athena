@@ -159,7 +159,12 @@ let package = Package(
             // manifest still declares `.upToNextMinor(from: "0.31.4")` — a
             // floor it does not itself compile against — so Athena states the
             // real requirement rather than leaving Package.resolved as the
-            // only thing holding it.
+            // only thing holding it. Note the toolchain floor this imposes
+            // is invisible in Athena's own `swift-tools-version: 6.1` header:
+            // mlx-swift 0.31.5+ ships a swift-tools-version 6.3 manifest, so
+            // building Athena needs Swift 6.3 (Xcode 26.4+) even though this
+            // manifest itself parses under 6.1 — an older toolchain fails at
+            // RESOLUTION with an error naming mlx-swift's tools version.
             .upToNextMinor(from: "0.31.6")),
         // swift-transformers (Jinja chat templates + tokenizers) and
         // swift-huggingface (Hub client) are NOT transitive deps of
