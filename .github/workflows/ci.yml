@@ -4,7 +4,10 @@
 #
 # The MLX Metal shaders need the Metal Toolchain, which requires Xcode 26+ — the
 # hosted runner's DEFAULT Xcode is too old, so we select the newest installed
-# Xcode explicitly (validated on macos-15 during the 2026-07 soak).
+# Xcode explicitly (validated on macos-15 during the 2026-07 soak; moved to
+# macos-26 for #93 — mlx-swift >= 0.31.5 ships a swift-tools-version 6.3
+# manifest, and macos-15's newest Xcode (26.3, Swift 6.2.4) cannot parse it,
+# failing resolution before any build).
 #
 # Cost shape (macOS minutes bill at 10x): docs/process-only PRs skip lint+unit
 # via the `changes` gate job — the jobs report "skipped", which satisfies
@@ -104,7 +107,7 @@ jobs:
     name: Unit tier (swift test)
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
@@ -275,7 +278,7 @@ jobs:
   seed:
     name: Seed SPM cache (main)
     if: github.event_name == 'push'
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6

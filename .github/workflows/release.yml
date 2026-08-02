@@ -25,7 +25,7 @@ jobs:
     # Guard: forks that push tags must not attempt a release build (no
     # secrets there — it would publish an unsigned artifact under their fork).
     if: github.repository == 'GoodOlClint/Athena'
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 120
     env:
       # Presence of a secret flips the matching guarded step ON. Absent ⇒ that
