@@ -216,7 +216,15 @@ jobs:
       # caches are invisible to sibling PRs; the `seed` job on main is what
       # publishes the cache everyone restores.
       #
-      # The `-v2-` salt is deliberate — do NOT "clean it up" (#56). Before the
+      # The `-v3-` salt is deliberate — do NOT "clean it up". It has been
+      # bumped for two distinct reasons, so "the invariant" is broader than
+      # either: (v2, #56) a toolchain-key mismatch, below; (v3, ADR 044 / #93)
+      # every v2 entry holds a pre-traits substrate checkout, and SwiftPM
+      # validates `traits: []` against the CHECKED-OUT manifest before
+      # re-resolving, so a restored stale checkout hard-fails resolution —
+      # and stickily, since a failed build never saves a replacement entry.
+      # Bump the salt whenever a restored .build can poison resolution or
+      # keying, whatever the mechanism. The v2 story (#56): before the
       # DEVELOPER_DIR export in "Select newest Xcode" above landed (840895a3),
       # deploy/test.sh's CLT fallback
       # silently re-pointed builds at the runner's DEFAULT Xcode, so the cache
@@ -227,7 +235,6 @@ jobs:
       # probe short-circuits because the key exists. Salting forces one fresh
       # seed build under the pinned toolchain; steady state is self-consistent
       # thereafter, and a runner-image Xcode bump rotates the key naturally.
-      # Bump the salt again if that invariant is ever broken the same way.
       #
       # The `steps.swiftc.outputs.fp` component below is LOAD-BEARING, not
       # decoration (#59): it is what makes the key name the compiler rather
@@ -348,8 +355,8 @@ jobs:
 
       # All four SPM keys in this job must stay byte-identical to the `unit`
       # job's — seed publishes what unit restores, so a prefix bumped on one
-      # side and not the other recreates the permanent-miss loop the `-v2-`
-      # salt exists to break. See the #56 note above the unit job's key.
+      # side and not the other recreates the permanent-miss loop the salt
+      # exists to break. See the salt-history note above the unit job's key.
       - name: Check whether the cache already exists
         id: probe
         uses: actions/cache/restore@v5
