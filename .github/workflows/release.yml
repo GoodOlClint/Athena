@@ -44,8 +44,50 @@ jobs:
       - name: Select newest Xcode (Metal Toolchain needs Xcode 26+)
         run: |
           latest=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
-          sudo xcode-select -s "${latest:-/Applications/Xcode.app}/Contents/Developer"
+          # Fail rather than fall back: an empty `latest` selects the runner's
+          # DEFAULT Xcode, which is the #84 outcome with every guard below
+          # reporting success. A release must not be built by whatever the
+          # image happens to default to.
+          [ -n "$latest" ] || { echo "::error::no /Applications/Xcode_*.app found"; exit 1; }
+          sudo xcode-select -s "$latest/Contents/Developer"
           xcodebuild -version
+          # Pin the selection for every later step (#84), exactly as ci.yml
+          # does. Selecting alone is not enough: deploy/build.sh AND
+          # deploy/test.sh both fall back to /Applications/Xcode.app unless
+          # DEVELOPER_DIR is set, and their `case` matches the literal string
+          # "Xcode.app", which a versioned /Applications/Xcode_NN.app path
+          # does not contain. Without this line the release is BUILT and
+          # GATED by the runner's default Xcode, not the one chosen above.
+          echo "DEVELOPER_DIR=$(xcode-select -p)" >> "$GITHUB_ENV"
+
+      # Its own step so $GITHUB_ENV from the select above is live. Mirrors the
+      # assertion ci.yml's fingerprint step carries (#59): an export that
+      # silently stops happening is invisible, and #84 is what that looks like
+      # — a green release job validated by an unintended compiler.
+      #
+      # It catches two distinct regressions, and only the first is what #84
+      # itself was: DEVELOPER_DIR going UNSET (the export deleted), and
+      # DEVELOPER_DIR being set to something OTHER than the selection (e.g.
+      # hard-coded back to /Applications/Xcode.app, or a CommandLineTools
+      # path). The second needs `env -u DEVELOPER_DIR` — see below.
+      #
+      # #87 hoists this pair and ci.yml's two copies into one composite action.
+      - name: Verify the build toolchain is the selected one
+        run: |
+          # `env -u DEVELOPER_DIR` is load-bearing: plain `xcode-select -p`
+          # RETURNS $DEVELOPER_DIR when it is set (man xcode-select), so
+          # comparing the two compares the variable with a copy of itself and
+          # the equality arm can never fire. Unsetting it for this one call is
+          # what makes `selected` the system-wide selection made above.
+          selected="$(env -u DEVELOPER_DIR xcode-select -p)"
+          if [ -z "${DEVELOPER_DIR:-}" ] || [ "$DEVELOPER_DIR" != "$selected" ]; then
+            echo "::error::DEVELOPER_DIR is '${DEVELOPER_DIR:-<unset>}' but the" \
+                 "selected toolchain is '$selected'. The release build and its" \
+                 "unit gate must run under the Xcode this workflow chose (#84)."
+            exit 1
+          fi
+          echo "toolchain that will build and gate this release:"
+          ./deploy/test.sh --print-toolchain
 
       - name: Download Metal Toolchain
         run: xcodebuild -downloadComponent MetalToolchain
