@@ -77,7 +77,15 @@ final class MTPSpeculativeParityTests: XCTestCase {
             maxTokens: 64, temperature: 0, topP: nil, seed: nil,
             speculative: speculative, chatTemplateKwargs: nil)
         {
-            if case .text(let t) = chunk { out += t }
+            switch chunk {
+            case .text(let t): out += t
+            case .error(let e):
+                // A classified failure must fail loudly with its cause, not
+                // surface downstream as "produced empty" with the cause
+                // discarded — this gate's diagnostics matter most when red.
+                XCTFail("generation error (speculative=\(speculative)): \(e)")
+            default: break
+            }
         }
         let counts = await llm.lastMTPDraftCounts
         return Arm(text: out, proposed: counts?.proposed)

@@ -25,7 +25,10 @@ let athenaLocalDev = Context.environment["ATHENA_LOCAL_DEV"] == "1"
 // Athena uses neither: no FoundationModels surface exists in the daemon, and
 // structured output is the rust-shim llguidance engine (M53). Disable the
 // trait on BOTH the SCM and local-dev declarations so the daemon's build/link
-// surface stays what its ADRs describe.
+// surface stays what its ADRs describe. Effective for OSS SwiftPM builds
+// only: xcodebuild ignores `.when(traits:)` at build planning, so the shipped
+// Release binary still links the trait's targets as dead code — see ADR
+// 044's honesty boundary (symbol-count tripwire per Xcode major).
 let substrateTraits: Set<Package.Dependency.Trait> = []
 let substrateDep: Package.Dependency =
     athenaLocalDev
@@ -138,8 +141,10 @@ let package = Package(
         // ATHENA_LOCAL_DEV=1 swaps to ../mlx/mlx-swift-lm — see `substrateDep`.
         substrateDep,
         // Direct mlx-swift dep: the inference modules need the MLX/MLXNN
-        // modules (products of mlx-swift, not mlx-swift-lm).
-        // Same range mlx-swift-lm pins, so SwiftPM unifies the version.
+        // modules (products of mlx-swift, not mlx-swift-lm). Same MINOR as
+        // the substrate's own declaration (0.31.x either way, so SwiftPM
+        // unifies on one version) but a deliberately HIGHER floor — see
+        // below; the ranges are not identical.
         .package(
             url: "https://github.com/ml-explore/mlx-swift",
             // Floor is 0.31.6, not 0.31.3: the substrate at
