@@ -47,8 +47,9 @@ substrate_pin_guard() {
     #
     # Filtered to the pins that can silently change what we ship: the two
     # GoodOlClint forks and mlx-swift (whose version gates substrate APIs —
-    # #86 shipped a 0.31.4/0.31.6 mismatch). Printing all 35 resolved pins
-    # would bloat the tag annotation and bury exactly these.
+    # the #91 bump's first attempt failed on a 0.31.4-vs-0.31.6 resolve
+    # mismatch that read like a substrate bug). Printing all 35 resolved
+    # pins would bloat the tag annotation and bury exactly these.
     #
     # NO `|| true`, and the emission is asserted. The bug this replaced was a
     # silent no-match; falling back to a silent failure on a missing python3
