@@ -159,9 +159,12 @@ jobs:
       #
       # Deliberate consequence: selecting a toolchain by DEVELOPER_DIR ALONE
       # (the usual sudo-free way, and what a future Xcode matrix would reach
-      # for) now fails this step. The cache key is only truthful while the
+      # for) fails this step. The cache key is only truthful while the
       # selection and the environment agree, so requiring both is the point —
-      # a matrix must `xcode-select` as well.
+      # a matrix must `xcode-select` as well. (That was ASSERTED here from
+      # #59 but not true until #84: the comparison read `xcode-select -p`,
+      # which echoes DEVELOPER_DIR back when set, so DEVELOPER_DIR-alone
+      # passed and a CLT path passed while reporting a different compiler.)
       #
       # Runs as its OWN step so $GITHUB_ENV is live.
       - name: Fingerprint the compiler that will build
@@ -171,7 +174,12 @@ jobs:
         # `tr`'s exit status while `test.sh` fails.
         shell: bash
         run: |
-          selected="$(xcode-select -p)"
+          # `env -u DEVELOPER_DIR` is load-bearing: plain `xcode-select -p`
+          # RETURNS $DEVELOPER_DIR when it is set, so comparing the two
+          # compares the variable with a copy of itself and the equality arm
+          # can never fire. Unsetting it for this one call is what makes
+          # `selected` the system-wide selection the step above made.
+          selected="$(env -u DEVELOPER_DIR xcode-select -p)"
           if [ -z "${DEVELOPER_DIR:-}" ] || [ "$DEVELOPER_DIR" != "$selected" ]; then
             echo "::error::DEVELOPER_DIR is '${DEVELOPER_DIR:-<unset>}' but the" \
                  "selected toolchain is '$selected'. The SPM cache key names the" \
@@ -330,9 +338,12 @@ jobs:
       #
       # Deliberate consequence: selecting a toolchain by DEVELOPER_DIR ALONE
       # (the usual sudo-free way, and what a future Xcode matrix would reach
-      # for) now fails this step. The cache key is only truthful while the
+      # for) fails this step. The cache key is only truthful while the
       # selection and the environment agree, so requiring both is the point —
-      # a matrix must `xcode-select` as well.
+      # a matrix must `xcode-select` as well. (That was ASSERTED here from
+      # #59 but not true until #84: the comparison read `xcode-select -p`,
+      # which echoes DEVELOPER_DIR back when set, so DEVELOPER_DIR-alone
+      # passed and a CLT path passed while reporting a different compiler.)
       #
       # Runs as its OWN step so $GITHUB_ENV is live.
       - name: Fingerprint the compiler that will build
@@ -342,7 +353,12 @@ jobs:
         # `tr`'s exit status while `test.sh` fails.
         shell: bash
         run: |
-          selected="$(xcode-select -p)"
+          # `env -u DEVELOPER_DIR` is load-bearing: plain `xcode-select -p`
+          # RETURNS $DEVELOPER_DIR when it is set, so comparing the two
+          # compares the variable with a copy of itself and the equality arm
+          # can never fire. Unsetting it for this one call is what makes
+          # `selected` the system-wide selection the step above made.
+          selected="$(env -u DEVELOPER_DIR xcode-select -p)"
           if [ -z "${DEVELOPER_DIR:-}" ] || [ "$DEVELOPER_DIR" != "$selected" ]; then
             echo "::error::DEVELOPER_DIR is '${DEVELOPER_DIR:-<unset>}' but the" \
                  "selected toolchain is '$selected'. The SPM cache key names the" \
