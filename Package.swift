@@ -24,7 +24,41 @@ let substrateDep: Package.Dependency =
     ? .package(path: "../mlx/mlx-swift-lm")
     : .package(
         url: "https://github.com/GoodOlClint/mlx-swift-lm.git",
-        revision: "751aaede94982e5597408e01f33dbf6fe33f3cea")  // integration — TriAttention (MLXLMCommon) + Qwen3.5 MTP separate-drafter landed upstream (publication S0 de-vendor)
+        // Pinned to an immutable `integration-YYYY-MM-DD` TAG, never a bare
+        // hash and never the `integration` branch. This is the substrate
+        // fork's documented consumer contract (`~/Source/mlx/CLAUDE.md`
+        // "Discipline"), and it exists because of THIS incident: `integration`
+        // is force-pushed on every rebuild, which orphaned Athena's `751aaed`
+        // pin on 2026-07-31. An unreferenced commit is fetchable only by
+        // explicit SHA while SPM fetches refs, so every COLD build failed
+        // while CI stayed green on cache warmth alone (#86).
+        //
+        // This names the SAME COMMIT main already pinned (751aaede) via the
+        // tag that rescued it — an availability fix with zero semantic
+        // change, nothing to re-verify. Moving FORWARD to a newer dated tag
+        // is deliberately separate work; see #91.
+        //
+        // The tags are date-stamped precisely so they are never moved — a
+        // rebuild publishes a NEW tag (`rebuild-integration.sh -p` tags the
+        // outgoing head before overwriting, then tags the new one). So "don't
+        // move a tag" is the fork's invariant, not a hope on our side.
+        //
+        // Belt-and-braces regardless: Package.resolved records the resolved
+        // SHA, so even a moved tag forces 751aaede or fails loudly under
+        // `swift build` / `swift test` — it never silently follows. Verified
+        // by reproducing #86 in a scratch repo (force-move + GC ⇒ hard error,
+        // never silent drift).
+        //
+        // The exception, since it would otherwise read wider than it is:
+        // `swift package update` DOES re-resolve a non-SHA `revision:` to the
+        // tag's new target. A bare-SHA pin could not move at all. So the
+        // guarantee is "no accidental drift", not "immovable".
+        //
+        // Note SPM writes this as `"branch": "integration-2026-07-31"` in
+        // Package.resolved — its pin state for any non-SHA `revision:`. It is
+        // a tag, not a branch; the reproducibility guarantee comes from the
+        // sibling `"revision"` field.
+        revision: "integration-2026-07-07")  // 751aaed — the SAME commit as before, now named by its tag; TriAttention (MLXLMCommon) + Qwen3.5 MTP separate-drafter (publication S0 de-vendor)
 let hubDep: Package.Dependency =
     athenaLocalDev
     ? .package(path: "../swift-huggingface")
