@@ -144,14 +144,17 @@ let package = Package(
             url: "https://github.com/ml-explore/mlx-swift",
             // Floor is 0.31.6, not 0.31.3: the substrate at
             // integration-2026-07-31 calls `MLXArray.maskFill` and
-            // `DType.greatestFiniteMagnitudeArray`, neither of which exists
-            // before 0.31.6. The substrate's OWN manifest still declares
-            // `.upToNextMinor(from: "0.31.4")` — a floor it does not itself
-            // compile against — so Athena states the real requirement rather
-            // than leaving Package.resolved as the only thing holding it.
-            // Without this, any fresh or partially-restored resolve can land
-            // on 0.31.4 and fail with two missing-member errors that look
-            // like a substrate bug (#86 CI, run 30724316996).
+            // `DType.greatestFiniteMagnitudeArray`, which land in mlx-swift
+            // 0.31.5 (bb0399d, #429) — 0.31.4 fails with two missing-member
+            // errors that look like a substrate bug (#86 CI, run
+            // 30724316996). The floor is 0.31.6 rather than the minimal
+            // 0.31.5 because 0.31.6 is what the #91 bump was actually built
+            // and verified against (and what Package.resolved pins); relax to
+            // 0.31.5 only with a re-verification. The substrate's OWN
+            // manifest still declares `.upToNextMinor(from: "0.31.4")` — a
+            // floor it does not itself compile against — so Athena states the
+            // real requirement rather than leaving Package.resolved as the
+            // only thing holding it.
             .upToNextMinor(from: "0.31.6")),
         // swift-transformers (Jinja chat templates + tokenizers) and
         // swift-huggingface (Hub client) are NOT transitive deps of

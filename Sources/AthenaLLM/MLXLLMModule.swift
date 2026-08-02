@@ -140,11 +140,13 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     }
     private var mtpDrafterModel: DrafterBox?
     private var mtpDrafterName: String?
-    /// #64 — the last completion record's MTP draft counts. `proposed` is nil
-    /// (or the tuple itself is nil) when the drafter did not run. The log line
-    /// in `logMTPStats` is the operator surface for these counts; this is the
-    /// assertable one, so the speculative-parity gate can PROVE the drafter
-    /// engaged instead of vacuously passing on an inert flag.
+    /// #64 — the MTP draft counts from the last SUBSTRATE-STREAM completion
+    /// (`beginGeneration`'s `.info`; a structured/GuidedSubstrate request does
+    /// not update them). `proposed` is nil (or the tuple itself is nil) when
+    /// the drafter did not run. The log line in `logMTPStats` is the operator
+    /// surface for these counts; this is the assertable one, so the
+    /// speculative-parity gate can PROVE the drafter engaged instead of
+    /// vacuously passing on an inert flag.
     private(set) var lastMTPDraftCounts: (proposed: Int?, accepted: Int?)?
     func recordMTPDraftCounts(proposed: Int?, accepted: Int?) {
         lastMTPDraftCounts = (proposed, accepted)

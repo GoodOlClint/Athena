@@ -25,14 +25,17 @@ import XCTest
 /// Heavy: gated on ATHENA_RUN_MODEL_TESTS=1 and a checkpoint whose MTP drafter
 /// actually pairs. Default target is the Gemma 4 pair (ADR 032) — the drafter
 /// (`gemma4_assistant`) must be in the store. The Qwen3.5 fused-head path
-/// cannot currently pair at all: `-mtp` checkpoints converted from the VLM
-/// repo carry `language_model.mtp.*` keys while `qwenMTPSanitizeWeights`
+/// cannot currently pair at all (#92): `-mtp` checkpoints converted from the
+/// VLM repo carry `language_model.mtp.*` keys while `qwenMTPSanitizeWeights`
 /// filters bare `mtp.*`, so the drafter load fails (keyNotFound) and
-/// speculative falls back to single-token — at BOTH the 751aaed and
-/// 5b892140 pins (whole chain byte-identical across them), i.e. pre-existing,
-/// not a #91 regression. Skips cleanly with a stated reason otherwise. This
-/// is also ADR 032's heavy E2E DoD, and the gate ADR 028's bit-identity
-/// claim rides across substrate bumps.
+/// speculative falls back to single-token — at BOTH the 751aaed and 5b892140
+/// pins (the pairing/load chain is byte-identical across them), i.e.
+/// pre-existing, not a #91 regression. Skips cleanly with a stated reason
+/// otherwise. Known boundary: a drafter that PAIRS but proposes nothing
+/// fails the test; a drafter that fails to PAIR skips it — so a bump that
+/// breaks pairing itself shows up as a skip a human must notice, not a red
+/// test (#92 is the live example). This is also ADR 032's heavy E2E DoD, and
+/// the gate ADR 028's bit-identity claim rides across substrate bumps.
 final class MTPSpeculativeParityTests: XCTestCase {
 
     private func skipUnlessEnabled() throws -> URL {
