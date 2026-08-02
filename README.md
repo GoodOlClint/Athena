@@ -83,8 +83,11 @@ All errors share one envelope:
 ## Requirements
 
 - macOS on Apple Silicon (the daemon is Apple/MLX-only).
-- A **full Xcode** install to build — MLX Metal shaders cannot be built
-  by the Command-Line Tools alone.
+- A **full Xcode** install to build, **Xcode 26.4 or newer (Swift 6.3)** —
+  MLX Metal shaders cannot be built by the Command-Line Tools alone, and
+  `mlx-swift` 0.31.5+ ships a Swift 6.3 manifest, so an older Xcode fails
+  at dependency *resolution* (an error naming mlx-swift's tools version),
+  before any build starts.
 
 The `athena` **client** CLI is cross-platform (Linux/Windows build the
 same command from a standalone package); only the daemon is Apple-bound.

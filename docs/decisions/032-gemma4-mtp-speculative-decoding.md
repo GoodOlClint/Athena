@@ -11,7 +11,11 @@ drafter (46/46, passthrough=none), lossless, dense 1.52× on prose. **E-series
 (KV-layer-sharing) loader bug, independent of MTP (`speculative=false` fails
 identically; failing layer == `num_layers − num_kv_shared_layers`). Fix is
 upstream; Athena's MTP wiring is target-agnostic and needs no change. See
-`docs/gemma4-mtp-plan.md`.
+`docs/gemma4-mtp-plan.md`. **Automated lossless gate (#64, landed with the #91
+substrate bump):** `MTPSpeculativeParityTests.testUnstructuredGreedyParityAcrossSpeculative`
+(`ATHENA_RUN_MODEL_TESTS=1`) pins temp-0 speculative == non-speculative greedy
+byte-for-byte on the unstructured `beginGeneration` path, and fails — not
+skips — if the drafter did not actually propose tokens.
 **Date:** 2026-06-30
 **Milestone:** M83
 **Relates to:** ADR 011 (governor / never compose at inference), ADR 013 (`/v1`

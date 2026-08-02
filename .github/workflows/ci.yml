@@ -4,7 +4,10 @@
 #
 # The MLX Metal shaders need the Metal Toolchain, which requires Xcode 26+ — the
 # hosted runner's DEFAULT Xcode is too old, so we select the newest installed
-# Xcode explicitly (validated on macos-15 during the 2026-07 soak).
+# Xcode explicitly (validated on macos-15 during the 2026-07 soak; moved to
+# macos-26 for #93 — mlx-swift >= 0.31.5 ships a swift-tools-version 6.3
+# manifest, and macos-15's newest Xcode (26.3, Swift 6.2.4) cannot parse it,
+# failing resolution before any build).
 #
 # Cost shape (macOS minutes bill at 10x): docs/process-only PRs skip lint+unit
 # via the `changes` gate job — the jobs report "skipped", which satisfies
@@ -104,7 +107,7 @@ jobs:
     name: Unit tier (swift test)
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
@@ -216,7 +219,15 @@ jobs:
       # caches are invisible to sibling PRs; the `seed` job on main is what
       # publishes the cache everyone restores.
       #
-      # The `-v2-` salt is deliberate — do NOT "clean it up" (#56). Before the
+      # The `-v3-` salt is deliberate — do NOT "clean it up". It has been
+      # bumped for two distinct reasons, so "the invariant" is broader than
+      # either: (v2, #56) a toolchain-key mismatch, below; (v3, ADR 044 / #93)
+      # every v2 entry holds a pre-traits substrate checkout, and SwiftPM
+      # validates `traits: []` against the CHECKED-OUT manifest before
+      # re-resolving, so a restored stale checkout hard-fails resolution —
+      # and stickily, since a failed build never saves a replacement entry.
+      # Bump the salt whenever a restored .build can poison resolution or
+      # keying, whatever the mechanism. The v2 story (#56): before the
       # DEVELOPER_DIR export in "Select newest Xcode" above landed (840895a3),
       # deploy/test.sh's CLT fallback
       # silently re-pointed builds at the runner's DEFAULT Xcode, so the cache
@@ -227,7 +238,6 @@ jobs:
       # probe short-circuits because the key exists. Salting forces one fresh
       # seed build under the pinned toolchain; steady state is self-consistent
       # thereafter, and a runner-image Xcode bump rotates the key naturally.
-      # Bump the salt again if that invariant is ever broken the same way.
       #
       # The `steps.swiftc.outputs.fp` component below is LOAD-BEARING, not
       # decoration (#59): it is what makes the key name the compiler rather
@@ -239,9 +249,9 @@ jobs:
         uses: actions/cache@v5
         with:
           path: .build
-          key: ${{ runner.os }}-spm-v2-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-spm-v3-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-${{ hashFiles('Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-spm-v2-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-
+            ${{ runner.os }}-spm-v3-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-
 
       - name: Unit tests
         run: ./deploy/test.sh
@@ -268,7 +278,7 @@ jobs:
   seed:
     name: Seed SPM cache (main)
     if: github.event_name == 'push'
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
@@ -348,14 +358,14 @@ jobs:
 
       # All four SPM keys in this job must stay byte-identical to the `unit`
       # job's — seed publishes what unit restores, so a prefix bumped on one
-      # side and not the other recreates the permanent-miss loop the `-v2-`
-      # salt exists to break. See the #56 note above the unit job's key.
+      # side and not the other recreates the permanent-miss loop the salt
+      # exists to break. See the salt-history note above the unit job's key.
       - name: Check whether the cache already exists
         id: probe
         uses: actions/cache/restore@v5
         with:
           path: .build
-          key: ${{ runner.os }}-spm-v2-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-spm-v3-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-${{ hashFiles('Package.resolved') }}
           lookup-only: true
 
       - name: Download Metal Toolchain
@@ -385,9 +395,9 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: .build
-          key: ${{ runner.os }}-spm-v2-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-spm-v3-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-${{ hashFiles('Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-spm-v2-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-
+            ${{ runner.os }}-spm-v3-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-
 
       # Build everything the unit tier builds (tests included) so the cache
       # a PR restores is complete — but execute nothing.
@@ -400,4 +410,4 @@ jobs:
         uses: actions/cache/save@v5
         with:
           path: .build
-          key: ${{ runner.os }}-spm-v2-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-spm-v3-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-${{ hashFiles('Package.resolved') }}

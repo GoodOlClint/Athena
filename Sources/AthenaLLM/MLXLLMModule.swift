@@ -140,6 +140,19 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     }
     private var mtpDrafterModel: DrafterBox?
     private var mtpDrafterName: String?
+    /// #64 — the MTP draft counts from the last SUBSTRATE-STREAM completion
+    /// (`beginGeneration`'s `.info`; a structured/GuidedSubstrate request does
+    /// not update them). `proposed` is nil (or the tuple itself is nil) when
+    /// the drafter did not run. The log line in `logMTPStats` is the operator
+    /// surface for these counts; this is the assertable one, so the
+    /// speculative-parity gate can PROVE the drafter engaged instead of
+    /// vacuously passing on an inert flag.
+    private(set) var lastMTPDraftCounts: (proposed: Int?, accepted: Int?)?
+    func recordMTPDraftCounts(proposed: Int?, accepted: Int?) {
+        lastMTPDraftCounts = (proposed, accepted)
+    }
+    /// #64 — whether an MTP drafter is resident and paired to the target.
+    var mtpDrafterResident: Bool { mtpDrafterModel != nil }
     /// M71.2 — true when the resident container was loaded via the substrate's
     /// `VLMModelFactory` (a vision checkpoint with an image tower). Drives the
     /// `servesVision` capability.
@@ -869,6 +882,9 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                                         // a non-nil passthroughReason means MTP
                                         // silently fell back to single-token.
                                         Self.logMTPStats(info)
+                                        await self.recordMTPDraftCounts(
+                                            proposed: info.proposedDraftTokens,
+                                            accepted: info.acceptedDraftTokens)
                                     @unknown default:
                                         break
                                     }
@@ -1221,11 +1237,19 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         let requestSeed: UInt64? = seed.flatMap {
             $0 >= 0 ? UInt64($0) : nil
         }
+        // #88 — the substrate's prefillStepSize default became `nil`
+        // (model-chosen) at integration-2026-07-31. Pin 512 explicitly so the
+        // prefill chunk — the window over which the O(seq²) score buffer ADR
+        // 030's prompt ceiling reasons about is materialised — is chosen by
+        // Athena, not inherited, and so this path agrees with
+        // GuidedSubstrate's literal 512. Adopting a model-chosen window is
+        // #88 direction 2 and requires the peak-prefill-memory measurement.
         let gp = GenerateParameters(
             maxTokens: Self.effectiveMaxTokens(maxTokens, params.maxTokens),
             kvScheme: params.kvCompression.kvScheme,
             temperature: temp,
             topP: tp,
+            prefillStepSize: 512,
             seed: requestSeed)
         // Publication S0 — TriAttention eviction now rides the substrate's
         // `kvScheme` hook on `gp` (upstream `applyKVScheme` swaps each

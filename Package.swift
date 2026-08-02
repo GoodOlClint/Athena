@@ -19,9 +19,20 @@ import PackageDescription
 // so every `.product(package:)` reference below is unchanged.
 // deploy/build.sh Release asserts the local-dev branches + records both HEADs.
 let athenaLocalDev = Context.environment["ATHENA_LOCAL_DEV"] == "1"
+// ADR 044 — the substrate's `FoundationModelsIntegration` trait is default-ON
+// upstream and pulls Apple FoundationModels adapter code plus ~30k lines of
+// vendored xgrammar C++ (MLXGuidedGeneration/MLXCXGrammar) into every consumer.
+// Athena uses neither: no FoundationModels surface exists in the daemon, and
+// structured output is the rust-shim llguidance engine (M53). Disable the
+// trait on BOTH the SCM and local-dev declarations so the daemon's build/link
+// surface stays what its ADRs describe. Effective for OSS SwiftPM builds
+// only: xcodebuild ignores `.when(traits:)` at build planning, so the shipped
+// Release binary still links the trait's targets as dead code — see ADR
+// 044's honesty boundary (symbol-count tripwire per Xcode major).
+let substrateTraits: Set<Package.Dependency.Trait> = []
 let substrateDep: Package.Dependency =
     athenaLocalDev
-    ? .package(path: "../mlx/mlx-swift-lm")
+    ? .package(path: "../mlx/mlx-swift-lm", traits: substrateTraits)
     : .package(
         url: "https://github.com/GoodOlClint/mlx-swift-lm.git",
         // Pinned to an immutable `integration-YYYY-MM-DD` TAG, never a bare
@@ -33,18 +44,12 @@ let substrateDep: Package.Dependency =
         // explicit SHA while SPM fetches refs, so every COLD build failed
         // while CI stayed green on cache warmth alone (#86).
         //
-        // This names the SAME COMMIT main already pinned (751aaede) via the
-        // tag that rescued it — an availability fix with zero semantic
-        // change, nothing to re-verify. Moving FORWARD to a newer dated tag
-        // is deliberately separate work; see #91.
-        //
-        // The tags are date-stamped precisely so they are never moved — a
-        // rebuild publishes a NEW tag (`rebuild-integration.sh -p` tags the
-        // outgoing head before overwriting, then tags the new one). So "don't
-        // move a tag" is the fork's invariant, not a hope on our side.
+        // The tags are date-stamped so they are never moved — that is the
+        // fork's stated intent (a rebuild publishes a NEW tag rather than
+        // moving an old one). The verified guarantee is the paragraph below.
         //
         // Belt-and-braces regardless: Package.resolved records the resolved
-        // SHA, so even a moved tag forces 751aaede or fails loudly under
+        // SHA, so even a moved tag forces 5b892140 or fails loudly under
         // `swift build` / `swift test` — it never silently follows. Verified
         // by reproducing #86 in a scratch repo (force-move + GC ⇒ hard error,
         // never silent drift).
@@ -58,7 +63,8 @@ let substrateDep: Package.Dependency =
         // Package.resolved — its pin state for any non-SHA `revision:`. It is
         // a tag, not a branch; the reproducibility guarantee comes from the
         // sibling `"revision"` field.
-        revision: "integration-2026-07-07")  // 751aaed — the SAME commit as before, now named by its tag; TriAttention (MLXLMCommon) + Qwen3.5 MTP separate-drafter (publication S0 de-vendor)
+        revision: "integration-2026-07-31",  // 5b892140 — successor to 751aaed (integration force-pushed); TriAttention (MLXLMCommon) + Qwen3.5 MTP separate-drafter
+        traits: substrateTraits)
 let hubDep: Package.Dependency =
     athenaLocalDev
     ? .package(path: "../swift-huggingface")
@@ -135,11 +141,31 @@ let package = Package(
         // ATHENA_LOCAL_DEV=1 swaps to ../mlx/mlx-swift-lm — see `substrateDep`.
         substrateDep,
         // Direct mlx-swift dep: the inference modules need the MLX/MLXNN
-        // modules (products of mlx-swift, not mlx-swift-lm).
-        // Same range mlx-swift-lm pins, so SwiftPM unifies the version.
+        // modules (products of mlx-swift, not mlx-swift-lm). Same MINOR as
+        // the substrate's own declaration (0.31.x either way, so SwiftPM
+        // unifies on one version) but a deliberately HIGHER floor — see
+        // below; the ranges are not identical.
         .package(
             url: "https://github.com/ml-explore/mlx-swift",
-            .upToNextMinor(from: "0.31.3")),
+            // Floor is 0.31.6, not 0.31.3: the substrate at
+            // integration-2026-07-31 calls `MLXArray.maskFill` and
+            // `DType.greatestFiniteMagnitudeArray`, which land in mlx-swift
+            // 0.31.5 (bb0399d, #429) — 0.31.4 fails with two missing-member
+            // errors that look like a substrate bug (#86 CI, run
+            // 30724316996). The floor is 0.31.6 rather than the minimal
+            // 0.31.5 because 0.31.6 is what the #91 bump was actually built
+            // and verified against (and what Package.resolved pins); relax to
+            // 0.31.5 only with a re-verification. The substrate's OWN
+            // manifest still declares `.upToNextMinor(from: "0.31.4")` — a
+            // floor it does not itself compile against — so Athena states the
+            // real requirement rather than leaving Package.resolved as the
+            // only thing holding it. Note the toolchain floor this imposes
+            // is invisible in Athena's own `swift-tools-version: 6.1` header:
+            // mlx-swift 0.31.5+ ships a swift-tools-version 6.3 manifest, so
+            // building Athena needs Swift 6.3 (Xcode 26.4+) even though this
+            // manifest itself parses under 6.1 — an older toolchain fails at
+            // RESOLUTION with an error naming mlx-swift's tools version.
+            .upToNextMinor(from: "0.31.6")),
         // swift-transformers (Jinja chat templates + tokenizers) and
         // swift-huggingface (Hub client) are NOT transitive deps of
         // mlx-swift-lm — the MLXHuggingFace macros expand into code that
