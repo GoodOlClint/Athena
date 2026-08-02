@@ -431,6 +431,18 @@ code 400 POST /v1/chat/completions "$ALICE_TOK" \
 # logprobs on a sampling request (temperature>0, no schema) ⇒ 400 (no capture seam).
 code 400 POST /v1/chat/completions "$ALICE_TOK" \
   '{"model":"Qwen3.5-27B-4bit-mtp","messages":[{"role":"user","content":"hi"}],"temperature":0.7,"logprobs":true}'
+# #72 — the decode/admission divergence, at the layer where it is observable.
+# -1e-60 DECODES greedily (it narrows to -0.0, which passes the sign test and
+# takes the greedy sampler arm) but is ADMISSION-nonzero, because the C2 gate
+# tests the raw Double. So this 400s while the identical body at temperature 0
+# is a 200 two lines below. The unit test pins the predicate; only this pins
+# the WIRING — that the server hands the gate an un-narrowed Double. Narrowing
+# at the call site (#72 direction 2, rejected) turns this 400 into a 200 and is
+# invisible to the unit tier.
+code 400 POST /v1/chat/completions "$ALICE_TOK" \
+  '{"model":"Qwen3.5-27B-4bit-mtp","messages":[{"role":"user","content":"hi"}],"temperature":-1e-60,"logprobs":true}'
+code 200 POST /v1/chat/completions "$ALICE_TOK" \
+  '{"model":"Qwen3.5-27B-4bit-mtp","messages":[{"role":"user","content":"hi"}],"temperature":0,"logprobs":true}'
 # M46.4 — case-insensitive model resolution. The allowlist stores the
 # canonical id `Qwen3.5-27B-4bit-mtp` (mixed case); requesting it
 # fully lowercased must still resolve and serve. The truthful served-

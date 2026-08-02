@@ -59,9 +59,16 @@ final class DecodeDispatchTests: XCTestCase {
 
     /// Issue #42 — the effective-temperature rule has ONE home; these pin it.
     /// That home is `DecodeDispatch.effectiveTemperature`'s own doc comment,
-    /// including the narrowing caveat under which a negative override is NOT
-    /// ignored. Read the rule there — this header deliberately does not
-    /// restate it, so it cannot drift from it. Each message below describes
+    /// including the caveats documented there. Read the rule there — this
+    /// header deliberately does not restate them, so it cannot drift from them.
+    ///
+    /// (#74: the signpost says only that caveats exist, not what they say. The
+    /// earlier wording — "the caveat under which a negative override is NOT
+    /// ignored" — carried a normative fragment that a fix to the narrowing
+    /// would have falsified, which is the drift this header exists to avoid.
+    /// #74 prescribed "a narrowing caveat", but that phrasing is still
+    /// falsified by a fix that removes the caveat entirely, so this goes one
+    /// step further and is caveat-count-neutral.) Each message below describes
     /// only the one input its own assertion passes, which is why the `-1`
     /// case can say "ignored" flatly: for that input it is, no caveat.
     func testEffectiveTemperature() {
@@ -79,6 +86,12 @@ final class DecodeDispatchTests: XCTestCase {
             DecodeDispatch.effectiveTemperature(.nan, 0.7), 0.7,
             "NaN fails >= 0 and falls back")
         XCTAssertEqual(
+            DecodeDispatch.effectiveTemperature(-1e-45, 0.7), 0.7,
+            "the OTHER side of the documented boundary: -1e-45 narrows to a "
+                + "subnormal Float that is still negative, so it fails >= 0 and "
+                + "is duly ignored. Without this, a shift in the underflow "
+                + "threshold would only be caught on the -1e-60 side (#74)")
+        XCTAssertEqual(
             DecodeDispatch.effectiveTemperature(-1e-60, 0.7).sign, .minus,
             "tiny negative underflows to -0.0, which passes >= 0 (still greedy "
                 + "downstream: -0.0 compares equal to zero, and both samplers "
@@ -87,6 +100,75 @@ final class DecodeDispatchTests: XCTestCase {
         XCTAssertEqual(
             DecodeDispatch.effectiveTemperature(1e60, 0.7), .infinity,
             "overflow saturates to +inf, matching what the decode already used")
+    }
+
+    /// Issue #72 — the decode rule and the admission rule DISAGREE, and the
+    /// disagreement is observable as a status code, not a sign.
+    ///
+    /// `effectiveTemperature` narrows to `Float` before testing the sign, so
+    /// `-1e-60` becomes `-0.0`, passes `>= 0`, and decodes greedily — the same
+    /// arm an explicit `0` takes. `decodesDeterministically` tests the raw
+    /// `Double`, where `-1e-60 != 0`. So a `logprobs` request at `-1e-60` is
+    /// refused 400 `logprobs_requires_deterministic` while the identical body
+    /// at `0` is accepted, even though both would have decoded identically.
+    ///
+    /// This is the pin for the doc correction: the ADR-013 §4 C2 gate is what
+    /// the disagreement flows into, and the equivalence `effectiveTemperature`
+    /// documents is scoped to decode alone.
+    ///
+    /// **What this test does and does not guard.** It fails if the narrowing
+    /// moves INTO `decodesDeterministically`. It does NOT catch #72 direction 2
+    /// implemented where the issue actually locates it — at the call site,
+    /// narrowing `body.temperature` before handing it over — because the
+    /// predicate would then still be given a Double that is literally 0. That
+    /// wiring is unpinnable from here: `ChatCompletionRequest` is internal to
+    /// the executable module. `deploy/e2e-rbac.sh` carries the status-code pin
+    /// for it (a `-1e-60` + logprobs 400 beside a `temperature:0` 200), which
+    /// is #72's acceptance criterion at the HTTP layer. That gate is
+    /// operator-run, not CI, which is why this unit pin exists as well rather
+    /// than instead.
+    func testUnderflowingNegativeIsNotAdmissionZero() {
+        // Decode: indistinguishable from an explicit 0 — both greedy.
+        XCTAssertEqual(DecodeDispatch.effectiveTemperature(-1e-60, 0.7), 0)
+        XCTAssertEqual(DecodeDispatch.effectiveTemperature(0, 0.7), 0)
+
+        // Admission: NOT indistinguishable. This is the whole finding.
+        XCTAssertFalse(
+            DecodeDispatch.decodesDeterministically(
+                rawTemperature: -1e-60, hasSchema: false),
+            "raw Double: -1e-60 != 0, so a logprobs request here is a 400")
+
+        // The class is "narrows to ±0 without being literally 0", so the
+        // POSITIVE underflows diverge identically. Pinned because the doc now
+        // says so, and because a reader given only the negative case would
+        // reasonably assume the sign is what matters.
+        XCTAssertEqual(DecodeDispatch.effectiveTemperature(1e-60, 0.7), 0)
+        XCTAssertFalse(
+            DecodeDispatch.decodesDeterministically(
+                rawTemperature: 1e-60, hasSchema: false),
+            "positive underflow decodes greedy but is admission-nonzero too")
+        XCTAssertFalse(
+            DecodeDispatch.decodesDeterministically(
+                rawTemperature: 5e-324, hasSchema: false),
+            "the smallest subnormal Double narrows to +0.0, same divergence")
+        XCTAssertTrue(
+            DecodeDispatch.decodesDeterministically(
+                rawTemperature: 0, hasSchema: false),
+            "the identical body at temperature 0 is admitted")
+
+        // A schema admits regardless of temperature — inert under a Guide.
+        XCTAssertTrue(
+            DecodeDispatch.decodesDeterministically(
+                rawTemperature: 0.9, hasSchema: true))
+        XCTAssertFalse(
+            DecodeDispatch.decodesDeterministically(
+                rawTemperature: 0.9, hasSchema: false))
+        // Absent override is not zero: it means "use the loaded default",
+        // which may well be a sampling temperature.
+        XCTAssertFalse(
+            DecodeDispatch.decodesDeterministically(
+                rawTemperature: nil, hasSchema: false),
+            "nil is an absent override, not an explicit greedy request")
     }
 
     /// The `path=` values are an operator-facing contract: they are what a

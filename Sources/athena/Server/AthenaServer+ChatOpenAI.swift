@@ -214,7 +214,11 @@ extension AthenaServer {
         // (greedy temp==0, or structured where temperature is inert); 400 on a
         // sampling request, whose path has no logit-capture seam. Resolved here
         // so BOTH the streamed and non-streamed branches share the verdict.
-        let deterministic = (body.temperature == 0) || (schemaJSON != nil)
+        // Deliberately the RAW Double, not the narrowed decode temperature —
+        // the two disagree for an underflowing negative and the divergence is
+        // observable as a status code. See `decodesDeterministically` (#72).
+        let deterministic = DecodeDispatch.decodesDeterministically(
+            rawTemperature: body.temperature, hasSchema: schemaJSON != nil)
         if let (msg, code) = body.logprobsValidationError(
             deterministic: deterministic)
         {
