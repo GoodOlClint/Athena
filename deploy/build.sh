@@ -37,8 +37,40 @@ substrate_pin_guard() {
     _assert_dep "$hub" "athena/pr-50-download-progress" "swift-huggingface"
   else
     echo "  manifest: SCM pins (GoodOlClint forks — reproducible)"
-    grep -E 'revision: "[0-9a-f]{40}"' Package.swift \
-      | sed -E 's/^[[:space:]]*/  Package.swift pin: /' || true
+    # Report the RESOLVED revisions from Package.resolved, not the manifest
+    # strings. `revision:` may name a tag rather than a 40-hex SHA (#86 pins
+    # the substrate by tag so the commit stays ref-reachable), and the old
+    # `[0-9a-f]{40}` grep silently matched nothing in that case — dropping the
+    # substrate line from the very log the ship ritual copies into the tag
+    # annotation. Package.resolved is also the honest source: it is what the
+    # build actually used, tag or not.
+    #
+    # Filtered to the pins that can silently change what we ship: the two
+    # GoodOlClint forks and mlx-swift (whose version gates substrate APIs —
+    # #86 shipped a 0.31.4/0.31.6 mismatch). Printing all 35 resolved pins
+    # would bloat the tag annotation and bury exactly these.
+    #
+    # NO `|| true`, and the emission is asserted. The bug this replaced was a
+    # silent no-match; falling back to a silent failure on a missing python3
+    # or a malformed Package.resolved would be the same defect in a new coat.
+    local pins
+    pins="$(python3 - <<'PIN'
+import json, sys
+want = {"mlx-swift-lm", "swift-huggingface", "mlx-swift"}
+out = []
+for p in json.load(open("Package.resolved"))["pins"]:
+    if p["identity"] not in want:
+        continue
+    st = p.get("state", {})
+    ver = st.get("version") or st.get("branch")
+    out.append(f"  resolved pin: {p['identity']} {st.get('revision', '?')}"
+               + (f" ({ver})" if ver else ""))
+if not any("mlx-swift-lm" in line for line in out):
+    sys.exit("substrate pin (mlx-swift-lm) missing from Package.resolved")
+print("\n".join(out))
+PIN
+)" || { echo "build.sh: FATAL — could not read resolved pins" >&2; exit 1; }
+    echo "$pins"
   fi
 }
 # _assert_dep <path> <expected-branch> <label>: on the expected branch, clean,

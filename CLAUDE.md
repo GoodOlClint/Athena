@@ -65,6 +65,7 @@ OpenAI-compatible drop-in, **[native]** = Athena extension under `/v1`):
 ## Dependencies (consumed by this repo)
 
 - Hugging Face — model weight fetches only. No other outbound dependencies.
+- **MLX substrate (`GoodOlClint/mlx-swift-lm`) — pin an immutable `integration-YYYY-MM-DD` TAG, never a bare commit hash and never the `integration` branch.** That branch is force-pushed on every rebuild, which orphans whatever commit a consumer pinned; because SPM fetches refs (an orphaned commit is reachable only by explicit SHA), a bare-hash pin breaks every COLD build while CI stays green on cache warmth alone. This is the fork's documented consumer contract (`~/Source/mlx/CLAUDE.md` "Discipline") and it is written from Athena's own 2026-07-31 outage — pin `751aaed` went unreachable mid-session, recovered by tagging the orphan as `integration-2026-07-07` (#86). A substrate bump means moving to a newer dated tag, never re-pointing at a branch.
 
 ## ADRs
 
