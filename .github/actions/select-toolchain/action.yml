@@ -1,0 +1,141 @@
+name: Select Xcode toolchain
+description: >
+  Select the newest installed Xcode, pin it for every later step via
+  DEVELOPER_DIR, assert the two agree, and fingerprint the compiler that will
+  actually build. One definition for every job that compiles Swift (#87).
+
+outputs:
+  xcode-version:
+    description: >
+      `xcodebuild -version`, whitespace-stripped. An SPM cache-key component:
+      names the Xcode APP that was selected.
+    value: ${{ steps.xcode.outputs.version }}
+  fingerprint:
+    description: >
+      12 hex chars of sha256 over `deploy/test.sh --print-toolchain`. The other
+      SPM cache-key component, and the LOAD-BEARING one (#59): it names the
+      COMPILER that performs the build rather than the app that was selected.
+      Callers that do not cache may ignore it — computing it costs one
+      `swift --version` and keeps the assertion above it running everywhere.
+    value: ${{ steps.swiftc.outputs.fp }}
+
+runs:
+  using: composite
+  steps:
+    # Consolidated from three copies — ci.yml's `unit` and `seed` jobs and
+    # release.yml (#87). The two ci.yml copies were byte-identical; the
+    # release.yml one was PARTIAL (no fingerprint step, no `shell: bash`, and
+    # already fail-closed), which is where the three reconciled divergences
+    # below come from. The two ci.yml copies were REQUIRED to
+    # stay identical (seed publishes the SPM cache unit restores, so a prefix
+    # bumped on one side and not the other recreates the permanent-miss loop
+    # the salt exists to break, #56), and nothing enforced it beyond a comment
+    # asking future authors to remember. Now it is structural.
+    #
+    # Three divergences were reconciled on the way in, all toward the stricter
+    # form (surfaced by the #97 review):
+    #   1. fail-closed when no versioned Xcode is found — ci.yml's copies fell
+    #      back to `${latest:-/Applications/Xcode.app}`, i.e. the runner
+    #      DEFAULT, which is the #84 outcome with every guard still green;
+    #   2. export the path DIRECTLY rather than re-deriving it through
+    #      `xcode-select -p`, which removes the last place that command's
+    #      echo-back semantics could matter;
+    #   3. `shell: bash` everywhere. A composite `run` must declare a shell,
+    #      and `bash` here means `-eo pipefail`, so the fingerprint pipeline
+    #      below cannot pass on `tr`'s exit status while `test.sh` fails.
+    #      ci.yml's copies set this deliberately; release.yml's did not.
+    - name: Select newest Xcode (Metal Toolchain needs Xcode 26+)
+      id: xcode
+      shell: bash
+      run: |
+        # `|| true` so an unmatched glob reaches the `if` below with a
+        # message, rather than being killed by `-e`/`pipefail` first. A
+        # composite `run` gets `-eo pipefail` (unlike a workflow's default
+        # `bash -e`), so without this the failure is still fail-closed but
+        # silent — the annotation the next line exists to print never renders.
+        latest=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1) || true
+        if [ -z "$latest" ]; then
+          echo "::error::no /Applications/Xcode_*.app found. Falling back to" \
+               "the runner default would build under an unintended toolchain" \
+               "with every downstream guard still reporting success (#84)."
+          exit 1
+        fi
+        sudo xcode-select -s "$latest/Contents/Developer"
+        xcodebuild -version
+        ver="$(xcodebuild -version | tr -d '\n ')"
+        # Symmetric with the fingerprint's `test -n` below, and for the same
+        # reason: an empty component shortens the cache key IDENTICALLY in both
+        # jobs, so the keys still agree and CI stays green while the key stops
+        # naming what it claims to name (#59). `-e` already covers a non-zero
+        # `xcodebuild`; this covers exit-0-with-empty-stdout, the narrow gap
+        # that stays silent.
+        test -n "$ver" || { echo "::error::empty Xcode version"; exit 1; }
+        echo "version=$ver" >> "$GITHUB_OUTPUT"
+        # Pin the toolchain for every later step, in this action and in the
+        # calling job. Selecting alone is NOT enough: deploy/build.sh and
+        # deploy/test.sh both fall back to /Applications/Xcode.app unless
+        # DEVELOPER_DIR is set, and their `case` matches the literal string
+        # "Xcode.app", which a versioned /Applications/Xcode_NN.app path does
+        # not contain. Without this the job selects one toolchain and compiles
+        # with another — silently, because an older-but-compatible Xcode
+        # builds cleanly (#56 for the cache, #84 for the release).
+        echo "DEVELOPER_DIR=$latest/Contents/Developer" >> "$GITHUB_ENV"
+
+    # Its OWN step so $GITHUB_ENV from the select above is live — a value
+    # written to $GITHUB_ENV applies to SUBSEQUENT steps, never the writing one.
+    #
+    # #59 — key the SPM cache on the COMPILER, not on the Xcode app selected
+    # above. #56 was the state where the two diverged: keyed as one toolchain,
+    # built by another, silent and unable to self-heal (unit skips the save on
+    # an exact hit, seed short-circuits on the probe).
+    #
+    # The two ci.yml jobs resolve their toolchain DIFFERENTLY — `unit` builds
+    # via `deploy/test.sh` (whose CLT fallback re-points at the DEFAULT Xcode),
+    # while `seed` builds with bare `swift build`, which just follows
+    # `xcode-select -p`. One fingerprint cannot describe two resolvers, so the
+    # export is ENFORCED rather than fingerprinted around: with DEVELOPER_DIR
+    # set and equal to the selection, test.sh's fallback cannot fire and bare
+    # `swift build` uses the same directory, so both jobs provably compile with
+    # the compiler named below.
+    #
+    # Deleting or reordering the export therefore fails loudly instead of
+    # poisoning the cache — stronger than #59's stated criterion ("changes the
+    # key"), and the only form that holds when the export is dropped from BOTH
+    # jobs, where keys would still agree and a key-rotation scheme could not
+    # see it.
+    #
+    # Deliberate consequence: selecting a toolchain by DEVELOPER_DIR ALONE (the
+    # sudo-free way, and what a future Xcode matrix would reach for) fails this
+    # step. The cache key is only truthful while the selection and the
+    # environment agree, so requiring both is the point — a matrix must
+    # `xcode-select` as well. (That was asserted from #59 but only became true
+    # in #84: the comparison read plain `xcode-select -p`, which echoes
+    # DEVELOPER_DIR back when set, so DEVELOPER_DIR-alone passed and a
+    # CommandLineTools path passed while reporting a different compiler.)
+    - name: Fingerprint the compiler that will build
+      id: swiftc
+      shell: bash
+      run: |
+        # `env -u DEVELOPER_DIR` is load-bearing: plain `xcode-select -p`
+        # RETURNS $DEVELOPER_DIR when it is set, so comparing the two compares
+        # the variable with a copy of itself and the equality arm can never
+        # fire. Unsetting it for this one call is what makes `selected` the
+        # system-wide selection the step above made.
+        selected="$(env -u DEVELOPER_DIR xcode-select -p)"
+        if [ -z "${DEVELOPER_DIR:-}" ] || [ "$DEVELOPER_DIR" != "$selected" ]; then
+          echo "::error::DEVELOPER_DIR is '${DEVELOPER_DIR:-<unset>}' but the" \
+               "selected toolchain is '$selected'. Everything downstream — the" \
+               "SPM cache key that names the compiler, and the release gate —" \
+               "only holds while the two agree (#59, #84)."
+          exit 1
+        fi
+        # Asks THE SCRIPT rather than running `swift --version` inline, so the
+        # reported compiler is the one that script would build with. With the
+        # assertion above that is belt-and-braces, not load-bearing; kept
+        # because it costs nothing and stays correct if the assertion is ever
+        # relaxed.
+        v="$(./deploy/test.sh --print-toolchain | tr -d '\n')"
+        echo "resolved compiler: $v"
+        test -n "$v" || { echo "::error::empty toolchain fingerprint"; exit 1; }
+        echo "fp=$(printf '%s' "$v" | shasum -a 256 | cut -c1-12)" \
+          >> "$GITHUB_OUTPUT"

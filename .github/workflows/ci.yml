@@ -112,86 +112,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Select newest Xcode (Metal Toolchain needs Xcode 26+)
-        id: xcode
-        run: |
-          latest=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
-          sudo xcode-select -s "${latest:-/Applications/Xcode.app}/Contents/Developer"
-          xcodebuild -version
-          echo "version=$(xcodebuild -version | tr -d '\n ')" >> "$GITHUB_OUTPUT"
-          # Pin the toolchain for every later step. deploy/test.sh honors an
-          # explicit DEVELOPER_DIR but otherwise re-points at the runner's
-          # DEFAULT /Applications/Xcode.app (its CLT fallback matches the
-          # literal string "Xcode.app", which versioned Xcode_NN.app paths
-          # don't contain). unit and seed MUST compile with the same Swift —
-          # they share the SPM cache key — so both export the selection here.
-          echo "DEVELOPER_DIR=$(xcode-select -p)" >> "$GITHUB_ENV"
-
-      # #59 — key the SPM cache on the COMPILER, not on the Xcode app the step
-      # above selected. #56 was the state where the two diverged: keyed as one
-      # toolchain, built by another, silent and unable to self-heal (unit skips
-      # the save on an exact hit, seed short-circuits on the probe).
-      #
-      # The two jobs resolve their toolchain DIFFERENTLY — `unit` builds via
-      # `deploy/test.sh` (whose CLT fallback matches the literal "Xcode.app",
-      # which a versioned Xcode_NN.app path does not contain, so it silently
-      # re-points at the DEFAULT Xcode), while `seed` builds with bare
-      # `swift build`, which just follows `xcode-select -p`. One fingerprint
-      # cannot describe two resolvers, so the export is ENFORCED rather than
-      # fingerprinted around: with DEVELOPER_DIR set and equal to the
-      # selection, test.sh's fallback cannot fire and bare `swift build` uses
-      # the same directory, so both jobs provably compile with the compiler
-      # named below.
-      #
-      # Deleting or reordering the export therefore fails this step loudly
-      # instead of poisoning the cache — which is stronger than #59's stated
-      # criterion ("changes the key"), and is the only form that holds when
-      # the export is dropped from BOTH jobs (keys would still agree, so a
-      # key-rotation scheme alone cannot see it).
-      #
-      # The fingerprint asks THE SCRIPT (`--print-toolchain`) rather than
-      # running `swift --version` inline. Note what that is and is not worth:
-      # the assertion below guarantees DEVELOPER_DIR is set, so test.sh's
-      # `case` never executes and the two are provably identical here. The
-      # indirection is therefore belt-and-braces, NOT load-bearing — kept
-      # because it costs nothing and stays correct if the assertion is ever
-      # relaxed, not because a drifting second copy is currently possible.
-      #
-      # Deliberate consequence: selecting a toolchain by DEVELOPER_DIR ALONE
-      # (the usual sudo-free way, and what a future Xcode matrix would reach
-      # for) fails this step. The cache key is only truthful while the
-      # selection and the environment agree, so requiring both is the point —
-      # a matrix must `xcode-select` as well. (That was ASSERTED here from
-      # #59 but not true until #84: the comparison read `xcode-select -p`,
-      # which echoes DEVELOPER_DIR back when set, so DEVELOPER_DIR-alone
-      # passed and a CLT path passed while reporting a different compiler.)
-      #
-      # Runs as its OWN step so $GITHUB_ENV is live.
-      - name: Fingerprint the compiler that will build
-        id: swiftc
-        # `shell: bash` is what supplies pipefail (GitHub's DEFAULT shell is
-        # `bash -e {0}` — no pipefail), so the pipeline below cannot pass on
-        # `tr`'s exit status while `test.sh` fails.
-        shell: bash
-        run: |
-          # `env -u DEVELOPER_DIR` is load-bearing: plain `xcode-select -p`
-          # RETURNS $DEVELOPER_DIR when it is set, so comparing the two
-          # compares the variable with a copy of itself and the equality arm
-          # can never fire. Unsetting it for this one call is what makes
-          # `selected` the system-wide selection the step above made.
-          selected="$(env -u DEVELOPER_DIR xcode-select -p)"
-          if [ -z "${DEVELOPER_DIR:-}" ] || [ "$DEVELOPER_DIR" != "$selected" ]; then
-            echo "::error::DEVELOPER_DIR is '${DEVELOPER_DIR:-<unset>}' but the" \
-                 "selected toolchain is '$selected'. The SPM cache key names the" \
-                 "compiler that builds; that only holds while the Select-Xcode" \
-                 "step exports DEVELOPER_DIR and runs BEFORE this one (#59)."
-            exit 1
-          fi
-          v="$(./deploy/test.sh --print-toolchain | tr -d '\n')"
-          echo "resolved compiler: $v"
-          test -n "$v" || { echo "::error::empty toolchain fingerprint"; exit 1; }
-          echo "fp=$(printf '%s' "$v" | shasum -a 256 | cut -c1-12)" \
-            >> "$GITHUB_OUTPUT"
+      # Toolchain selection, the DEVELOPER_DIR pin, the agreement assertion
+      # and the compiler fingerprint live in ONE place (#87). Both jobs call
+      # it, so the "these two blocks must stay byte-identical" rule that
+      # governed the SPM key is now structural instead of a comment.
+      - name: Select Xcode toolchain
+        id: toolchain
+        uses: ./.github/actions/select-toolchain
 
       - name: Download Metal Toolchain
         run: xcodebuild -downloadComponent MetalToolchain
@@ -236,8 +163,9 @@ jobs:
       # and stickily, since a failed build never saves a replacement entry.
       # Bump the salt whenever a restored .build can poison resolution or
       # keying, whatever the mechanism. The v2 story (#56): before the
-      # DEVELOPER_DIR export in "Select newest Xcode" above landed (840895a3),
-      # deploy/test.sh's CLT fallback
+      # DEVELOPER_DIR export landed (840895a3) — it now lives in the
+      # `select-toolchain` composite action, `.github/actions/select-toolchain`
+      # (#87) — deploy/test.sh's CLT fallback
       # silently re-pointed builds at the runner's DEFAULT Xcode, so the cache
       # entry was KEYED as one toolchain but BUILT by another. Post-fix, SPM
       # sees foreign-compiler swiftmodules and rebuilds everything despite a
@@ -247,19 +175,19 @@ jobs:
       # seed build under the pinned toolchain; steady state is self-consistent
       # thereafter, and a runner-image Xcode bump rotates the key naturally.
       #
-      # The `steps.swiftc.outputs.fp` component below is LOAD-BEARING, not
-      # decoration (#59): it is what makes the key name the compiler rather
-      # than the Xcode app. Dropping it from one job only produces a permanent
-      # miss; dropping it from both silently restores the pre-#59 shape. The
-      # Fingerprint step's DEVELOPER_DIR assertion is what stops either from
-      # happening quietly.
+      # The `steps.toolchain.outputs.fingerprint` component below is
+      # LOAD-BEARING, not decoration (#59): it is what makes the key name the
+      # compiler rather than the Xcode app. Dropping it from one job only
+      # produces a permanent miss; dropping it from both silently restores the
+      # pre-#59 shape. The DEVELOPER_DIR assertion inside the composite action
+      # is what stops either from happening quietly.
       - name: Cache SPM build
         uses: actions/cache@v5
         with:
           path: .build
-          key: ${{ runner.os }}-spm-v3-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-spm-v3-${{ steps.toolchain.outputs.xcode-version }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-spm-v3-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-
+            ${{ runner.os }}-spm-v3-${{ steps.toolchain.outputs.xcode-version }}-${{ steps.toolchain.outputs.fingerprint }}-
 
       - name: Unit tests
         run: ./deploy/test.sh
@@ -291,97 +219,33 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Select newest Xcode (Metal Toolchain needs Xcode 26+)
-        id: xcode
-        run: |
-          latest=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
-          sudo xcode-select -s "${latest:-/Applications/Xcode.app}/Contents/Developer"
-          xcodebuild -version
-          echo "version=$(xcodebuild -version | tr -d '\n ')" >> "$GITHUB_OUTPUT"
-          # Pin the toolchain for every later step. deploy/test.sh honors an
-          # explicit DEVELOPER_DIR but otherwise re-points at the runner's
-          # DEFAULT /Applications/Xcode.app (its CLT fallback matches the
-          # literal string "Xcode.app", which versioned Xcode_NN.app paths
-          # don't contain). unit and seed MUST compile with the same Swift —
-          # they share the SPM cache key — so both export the selection here.
-          echo "DEVELOPER_DIR=$(xcode-select -p)" >> "$GITHUB_ENV"
-
-      # #59 — key the SPM cache on the COMPILER, not on the Xcode app the step
-      # above selected. #56 was the state where the two diverged: keyed as one
-      # toolchain, built by another, silent and unable to self-heal (unit skips
-      # the save on an exact hit, seed short-circuits on the probe).
-      #
-      # The two jobs resolve their toolchain DIFFERENTLY — `unit` builds via
-      # `deploy/test.sh` (whose CLT fallback matches the literal "Xcode.app",
-      # which a versioned Xcode_NN.app path does not contain, so it silently
-      # re-points at the DEFAULT Xcode), while `seed` builds with bare
-      # `swift build`, which just follows `xcode-select -p`. One fingerprint
-      # cannot describe two resolvers, so the export is ENFORCED rather than
-      # fingerprinted around: with DEVELOPER_DIR set and equal to the
-      # selection, test.sh's fallback cannot fire and bare `swift build` uses
-      # the same directory, so both jobs provably compile with the compiler
-      # named below.
-      #
-      # Deleting or reordering the export therefore fails this step loudly
-      # instead of poisoning the cache — which is stronger than #59's stated
-      # criterion ("changes the key"), and is the only form that holds when
-      # the export is dropped from BOTH jobs (keys would still agree, so a
-      # key-rotation scheme alone cannot see it).
-      #
-      # The fingerprint asks THE SCRIPT (`--print-toolchain`) rather than
-      # running `swift --version` inline. Note what that is and is not worth:
-      # the assertion below guarantees DEVELOPER_DIR is set, so test.sh's
-      # `case` never executes and the two are provably identical here. The
-      # indirection is therefore belt-and-braces, NOT load-bearing — kept
-      # because it costs nothing and stays correct if the assertion is ever
-      # relaxed, not because a drifting second copy is currently possible.
-      #
-      # Deliberate consequence: selecting a toolchain by DEVELOPER_DIR ALONE
-      # (the usual sudo-free way, and what a future Xcode matrix would reach
-      # for) fails this step. The cache key is only truthful while the
-      # selection and the environment agree, so requiring both is the point —
-      # a matrix must `xcode-select` as well. (That was ASSERTED here from
-      # #59 but not true until #84: the comparison read `xcode-select -p`,
-      # which echoes DEVELOPER_DIR back when set, so DEVELOPER_DIR-alone
-      # passed and a CLT path passed while reporting a different compiler.)
-      #
-      # Runs as its OWN step so $GITHUB_ENV is live.
-      - name: Fingerprint the compiler that will build
-        id: swiftc
-        # `shell: bash` is what supplies pipefail (GitHub's DEFAULT shell is
-        # `bash -e {0}` — no pipefail), so the pipeline below cannot pass on
-        # `tr`'s exit status while `test.sh` fails.
-        shell: bash
-        run: |
-          # `env -u DEVELOPER_DIR` is load-bearing: plain `xcode-select -p`
-          # RETURNS $DEVELOPER_DIR when it is set, so comparing the two
-          # compares the variable with a copy of itself and the equality arm
-          # can never fire. Unsetting it for this one call is what makes
-          # `selected` the system-wide selection the step above made.
-          selected="$(env -u DEVELOPER_DIR xcode-select -p)"
-          if [ -z "${DEVELOPER_DIR:-}" ] || [ "$DEVELOPER_DIR" != "$selected" ]; then
-            echo "::error::DEVELOPER_DIR is '${DEVELOPER_DIR:-<unset>}' but the" \
-                 "selected toolchain is '$selected'. The SPM cache key names the" \
-                 "compiler that builds; that only holds while the Select-Xcode" \
-                 "step exports DEVELOPER_DIR and runs BEFORE this one (#59)."
-            exit 1
-          fi
-          v="$(./deploy/test.sh --print-toolchain | tr -d '\n')"
-          echo "resolved compiler: $v"
-          test -n "$v" || { echo "::error::empty toolchain fingerprint"; exit 1; }
-          echo "fp=$(printf '%s' "$v" | shasum -a 256 | cut -c1-12)" \
-            >> "$GITHUB_OUTPUT"
+      # Toolchain selection, the DEVELOPER_DIR pin, the agreement assertion
+      # and the compiler fingerprint live in ONE place (#87). Both jobs call
+      # it, so the "these two blocks must stay byte-identical" rule that
+      # governed the SPM key is now structural instead of a comment.
+      - name: Select Xcode toolchain
+        id: toolchain
+        uses: ./.github/actions/select-toolchain
 
       # All four SPM keys in this job must stay byte-identical to the `unit`
       # job's — seed publishes what unit restores, so a prefix bumped on one
       # side and not the other recreates the permanent-miss loop the salt
       # exists to break. See the salt-history note above the unit job's key.
+      #
+      # The two toolchain components of that key are now produced by ONE
+      # definition (`.github/actions/select-toolchain`, #87), so they cannot
+      # drift TEXTUALLY. That is weaker than "cannot drift": the action
+      # guarantees both jobs compute the components the same WAY, not that
+      # they yield the same VALUE — if `unit` and `seed` ever run on different
+      # images the two differ and #56's permanent-miss loop returns with the
+      # action in place and no signal. Still hand-maintained per job:
+      # `runs-on` (duplicated), the `-v3-` salt, and the `hashFiles` term.
       - name: Check whether the cache already exists
         id: probe
         uses: actions/cache/restore@v5
         with:
           path: .build
-          key: ${{ runner.os }}-spm-v3-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-spm-v3-${{ steps.toolchain.outputs.xcode-version }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('Package.resolved') }}
           lookup-only: true
 
       - name: Download Metal Toolchain
@@ -411,9 +275,9 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: .build
-          key: ${{ runner.os }}-spm-v3-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-spm-v3-${{ steps.toolchain.outputs.xcode-version }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-spm-v3-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-
+            ${{ runner.os }}-spm-v3-${{ steps.toolchain.outputs.xcode-version }}-${{ steps.toolchain.outputs.fingerprint }}-
 
       # Build everything the unit tier builds (tests included) so the cache
       # a PR restores is complete — but execute nothing.
@@ -426,4 +290,4 @@ jobs:
         uses: actions/cache/save@v5
         with:
           path: .build
-          key: ${{ runner.os }}-spm-v3-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-spm-v3-${{ steps.toolchain.outputs.xcode-version }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('Package.resolved') }}
