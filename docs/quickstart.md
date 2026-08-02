@@ -7,11 +7,12 @@ inbound requests (see the [README](../README.md)).
 ## 1. Requirements
 
 - macOS on Apple Silicon.
-- A **full Xcode** install (not just the Command-Line Tools), **Xcode 26.4
+- A **full Xcode** install (not just the Command-Line Tools), **Xcode 26.5
   or newer (Swift 6.3)** — MLX builds Metal shaders that the CLT cannot,
   and `mlx-swift` 0.31.5+ ships a Swift 6.3 manifest: an older Xcode fails
   at dependency *resolution* with an error naming mlx-swift's tools
-  version, before any build starts.
+  version, before any build starts. (26.5 is the verified floor; 26.3's
+  Swift 6.2.4 fails, 26.4 is untested.)
 
 ## 2. Build
 

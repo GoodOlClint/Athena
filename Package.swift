@@ -162,7 +162,7 @@ let package = Package(
             // only thing holding it. Note the toolchain floor this imposes
             // is invisible in Athena's own `swift-tools-version: 6.1` header:
             // mlx-swift 0.31.5+ ships a swift-tools-version 6.3 manifest, so
-            // building Athena needs Swift 6.3 (Xcode 26.4+) even though this
+            // building Athena needs Swift 6.3 (Xcode 26.5+, the verified floor) even though this
             // manifest itself parses under 6.1 — an older toolchain fails at
             // RESOLUTION with an error naming mlx-swift's tools version.
             .upToNextMinor(from: "0.31.6")),

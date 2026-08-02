@@ -9,7 +9,7 @@ Athena is built primarily by autonomous AI agents (Anthropic's Claude) under hum
 ## Build prerequisites
 
 - **macOS on Apple Silicon.** The daemon is Apple/MLX-only. (The `clients/` package is cross-platform, but the daemon is not.)
-- **Full Xcode** — not just the Command-Line Tools. MLX's Metal shaders cannot be compiled by CLT alone.
+- **Full Xcode, 26.5 or newer (Swift 6.3)** — not just the Command-Line Tools. MLX's Metal shaders cannot be compiled by CLT alone, and `mlx-swift` 0.31.5+ ships a Swift 6.3 manifest: an older Xcode fails at dependency *resolution* with an error naming mlx-swift's tools version. (26.5 is the verified floor; 26.3 fails, 26.4 is untested.)
 - **The Metal Toolchain component**, downloaded once:
   ```sh
   xcodebuild -downloadComponent MetalToolchain

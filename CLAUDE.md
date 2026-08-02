@@ -4,7 +4,7 @@ Single native macOS/MLX daemon providing LLM chat, text embeddings, and audio/vi
 
 ## Architecture
 
-- Swift package (`Package.swift`, `Sources/`) targeting macOS on Apple Silicon. Build requires full Xcode (Command-Line Tools alone cannot compile the MLX Metal shaders).
+- Swift package (`Package.swift`, `Sources/`) targeting macOS on Apple Silicon. Build requires full Xcode 26.5+ / Swift 6.3 (Command-Line Tools alone cannot compile the MLX Metal shaders; mlx-swift 0.31.5+ ships a Swift 6.3 manifest, so an older Xcode fails at dependency resolution).
 - HTTP daemon on `127.0.0.1:7447` by default. Bearer-token RBAC; auth disabled in loopback dev mode.
 - Modules: `AthenaLLM`, `AthenaEmbedding`, `AthenaTranscription` (each in `Sources/`).
 - Cross-platform client CLI lives under `clients/` (Swift package, builds on Linux/Windows).
@@ -65,7 +65,7 @@ OpenAI-compatible drop-in, **[native]** = Athena extension under `/v1`):
 ## Dependencies (consumed by this repo)
 
 - Hugging Face — model weight fetches only. No other outbound dependencies.
-- **MLX substrate (`GoodOlClint/mlx-swift-lm`) — pin an immutable `integration-YYYY-MM-DD` TAG, never a bare commit hash and never the `integration` branch.** That branch is force-pushed on every rebuild, which orphans whatever commit a consumer pinned; because SPM fetches refs (an orphaned commit is reachable only by explicit SHA), a bare-hash pin breaks every COLD build while CI stays green on cache warmth alone. This is the fork's documented consumer contract (`~/Source/mlx/CLAUDE.md` "Discipline") and it is written from Athena's own 2026-07-31 outage — pin `751aaed` went unreachable mid-session, recovered by tagging the orphan as `integration-2026-07-07` (#86). A substrate bump means moving to a newer dated tag, never re-pointing at a branch.
+- **MLX substrate (`GoodOlClint/mlx-swift-lm`) — pin an immutable `integration-YYYY-MM-DD` TAG, never a bare commit hash and never the `integration` branch.** That branch is force-pushed on every rebuild, which orphans whatever commit a consumer pinned; because SPM fetches refs (an orphaned commit is reachable only by explicit SHA), a bare-hash pin breaks every COLD build while CI stays green on cache warmth alone. This is the fork's documented consumer contract (`~/Source/mlx/CLAUDE.md` "Discipline") and it is written from Athena's own 2026-07-31 outage — pin `751aaed` went unreachable mid-session, recovered by tagging the orphan as `integration-2026-07-07` (#86). A substrate bump means moving to a newer dated tag, never re-pointing at a branch — and it is a measurement exercise, not a version edit: follow [`docs/substrate-bump-runbook.md`](docs/substrate-bump-runbook.md) (blast-radius inventory, mlx-swift floor coupling, stale-checkout/cache poison, the gate battery incl. the #64 parity gate, per-pin ADR 028 re-stamping).
 
 ## ADRs
 
