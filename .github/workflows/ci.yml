@@ -239,9 +239,9 @@ jobs:
         uses: actions/cache@v5
         with:
           path: .build
-          key: ${{ runner.os }}-spm-v2-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-spm-v3-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-${{ hashFiles('Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-spm-v2-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-
+            ${{ runner.os }}-spm-v3-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-
 
       - name: Unit tests
         run: ./deploy/test.sh
@@ -355,7 +355,7 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: .build
-          key: ${{ runner.os }}-spm-v2-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-spm-v3-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-${{ hashFiles('Package.resolved') }}
           lookup-only: true
 
       - name: Download Metal Toolchain
@@ -385,9 +385,9 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: .build
-          key: ${{ runner.os }}-spm-v2-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-spm-v3-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-${{ hashFiles('Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-spm-v2-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-
+            ${{ runner.os }}-spm-v3-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-
 
       # Build everything the unit tier builds (tests included) so the cache
       # a PR restores is complete — but execute nothing.
@@ -400,4 +400,4 @@ jobs:
         uses: actions/cache/save@v5
         with:
           path: .build
-          key: ${{ runner.os }}-spm-v2-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-spm-v3-${{ steps.xcode.outputs.version }}-${{ steps.swiftc.outputs.fp }}-${{ hashFiles('Package.resolved') }}
