@@ -23,6 +23,7 @@
 #   ./deploy/test.sh                          # whole logic tier
 #   ./deploy/test.sh --filter RBACTests       # one suite (args pass through)
 #   ATHENA_RUN_MODEL_TESTS=1 ./deploy/test.sh # + gated model tests
+#   ./deploy/test.sh --print-toolchain        # identify the compiler, run nothing
 #
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -36,8 +37,9 @@ if [ -z "${DEVELOPER_DIR:-}" ]; then
     *)
       if [ -d /Applications/Xcode.app/Contents/Developer ]; then
         export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+        # stderr: with --print-toolchain, stdout is a machine-read value.
         echo "test.sh: using DEVELOPER_DIR=$DEVELOPER_DIR" \
-             "(active xcode-select was '$active')"
+             "(active xcode-select was '$active')" >&2
       else
         echo "error: full Xcode required for XCTest but not found." \
              "Install Xcode, or run: sudo xcode-select -s" \
@@ -46,6 +48,26 @@ if [ -z "${DEVELOPER_DIR:-}" ]; then
       fi
       ;;
   esac
+fi
+
+# --print-toolchain: emit the identity of the compiler THIS SCRIPT would
+# build with, then exit. Exists so CI can key its SPM cache on the compiler
+# that actually performs the build instead of on the Xcode it selected (#59).
+#
+# It lives here rather than in the workflow so the reported compiler is the
+# one THIS script would build with, whatever the resolution above decides.
+# In CI that is currently belt-and-braces — the workflow asserts
+# DEVELOPER_DIR is set, so the `case` never runs and an inline
+# `swift --version` would agree — but it keeps the two tied together for any
+# caller that has not made that guarantee.
+#
+# Placed BEFORE the rust-shim build so identifying the toolchain never
+# triggers a cargo build as a side effect.
+if [ "${1:-}" = "--print-toolchain" ]; then
+  # `exec`, and NOT `2>&1`: a broken DEVELOPER_DIR makes xcrun write to stderr
+  # and exit non-zero. Folding that onto stdout would let a caller hash the
+  # ERROR TEXT into a plausible-looking cache key while the step still passed.
+  exec swift --version
 fi
 
 # The AthenaStructured module links the Rust structured-output staticlib;
