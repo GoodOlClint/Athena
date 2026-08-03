@@ -76,6 +76,38 @@ jobs:
           echo "code=$code" >> "$GITHUB_OUTPUT"
           echo "::notice title=Diff classification::code=$code"
 
+      # Review-capacity ceiling. Defect detection collapses above ~400-450
+      # reviewed LOC/hour (Cisco/SmartBear, 2500 reviews / 3.2M LOC), and that
+      # study's own working recommendation is 100-300 LOC per sitting. A solo
+      # operator has no second reviewer to absorb overflow, so an oversized PR
+      # is not reviewed -- it is skimmed, and the review becomes theatre by
+      # arithmetic. Generated and vendored files are excluded: nobody reads
+      # them line by line and counting them would make the gate meaningless.
+      # Advisory-with-explicit-override, not a hard block: some changes are
+      # legitimately large (a rename sweep, a regenerated spec). The
+      # `oversized-ok` label says you accept the review burden; the gate then
+      # passes with the number recorded in the log.
+      - name: PR size ceiling
+        env:
+          LIMIT: '400'
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          stat=$(git -c core.quotePath=false diff --numstat HEAD^1 HEAD \
+            | grep -vE '(\t|/)(Package\.resolved|[^/]*\.lock|[^/]*\.pbxproj|[^/]*\.snap)$' || true)
+          total=$(printf '%s\n' "$stat" | awk 'NF{a+=$1; d+=$2} END{print a+d+0}')
+          echo "Reviewable churn (added+removed, generated/vendored excluded): $total"
+          if [ "$total" -le "$LIMIT" ]; then
+            echo "::notice title=PR size::$total reviewable lines (limit $LIMIT)"
+            exit 0
+          fi
+          case ",$LABELS," in
+            *,oversized-ok,*)
+              echo "::warning title=PR size override::$total reviewable lines exceeds $LIMIT; passing on the oversized-ok label. Review burden accepted explicitly."
+              exit 0 ;;
+          esac
+          echo "::error title=PR too large to review properly::$total reviewable lines exceeds the $LIMIT ceiling. Split it, or add the 'oversized-ok' label to accept the review burden deliberately. Detection rates collapse past this size -- a review that cannot happen is worse than no gate."
+          exit 1
+
   # swift-format style gate. Runs on a Linux container — free/fast, no macOS
   # minutes. The container tag pins the EXACT swift-format version (issue #2:
   # formatter defaults drift across releases and would redden every open PR
