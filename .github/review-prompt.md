@@ -41,7 +41,7 @@ When any of these apply, do NOT submit --approve or --request-changes. Submit `-
 - **The passive-oracle boundary** in any direction, including "just one small outbound call".
 - **New dependencies** (license/supply-chain), not minor version bumps of existing ones.
 - **Release/versioning anything.**
-- **Changes to AGENTS.md, the review workflow or its prompt files (.github/review-prompt.md, .github/review-guides/), or CI gating.**
+- **Changes to AGENTS.md or CLAUDE.md (the canonical doc and its import stub — either can move the rules), the review workflow or its prompt files (.github/review-prompt.md, .github/review-guides/), or CI gating.**
 
 ### Rule of thumb
 
