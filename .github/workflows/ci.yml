@@ -79,47 +79,90 @@ jobs:
           echo "code=$code" >> "$GITHUB_OUTPUT"
           echo "::notice title=Diff classification::code=$code"
 
-      # Review-capacity ceiling. Defect detection collapses above ~400-450
-      # reviewed LOC/hour (Cisco/SmartBear, 2500 reviews / 3.2M LOC), and that
-      # study's own working recommendation is 100-300 LOC per sitting. A solo
-      # operator has no second reviewer to absorb overflow, so an oversized PR
-      # is not reviewed -- it is skimmed, and the review becomes theatre by
-      # arithmetic. Generated and vendored files are excluded: nobody reads
-      # them line by line and counting them would make the gate meaningless.
-      # Advisory-with-explicit-override, not a hard block: some changes are
-      # legitimately large (a rename sweep, a regenerated spec). The
-      # `oversized-ok` label says you accept the review burden; the gate then
-      # passes with the number recorded in the log.
-      - name: PR size ceiling
+  # Review-capacity ceiling. Defect detection collapses above ~400-450 reviewed
+  # LOC/hour (Cisco/SmartBear, 2500 reviews / 3.2M LOC); that study's working
+  # recommendation is 100-300 LOC per sitting. A solo operator has no second
+  # reviewer to absorb overflow, so an oversized PR is skimmed, not reviewed.
+  #
+  # SEPARATE JOB on purpose: it lived inside `changes`, and lint/unit are
+  # `needs: changes` with no `always()`, so a red size gate SKIPPED both tiers
+  # -- and this file's own header records that skipped required checks read as
+  # passing. An oversized PR got zero style/test signal. Now the tiers run
+  # regardless and only this check goes red.
+  size:
+    name: PR size ceiling
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read   # reads labels live; see below
+    env:
+      # POSIX class, not `\t`: ERE does not define `\t`, two reviewers
+      # disagreed about whether GNU grep accepts it, and the local shell shims
+      # grep to ugrep (which does) -- so local testing proved nothing about the
+      # runner. `[[:blank:]]` is unambiguous in GNU, BSD and ugrep. The
+      # self-test step below pins it under THIS runner's grep, which is the
+      # only check that would have caught the original bug.
+      EXCLUDE_RE: '([[:blank:]]|/)(Package\.resolved|[^/]*\.lock|[^/]*\.pbxproj|[^/]*\.snap)$'
+      LIMIT: '400'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+
+      - name: Self-test the exclusion regex under this runner's grep
+        run: |
+          printf '320\t10\tPackage.resolved\n'        >  /tmp/fx
+          printf '5\t5\tclients/Package.resolved\n'   >> /tmp/fx
+          printf '9\t9\tSources/Mutex.lock.swift\n'   >> /tmp/fx
+          printf '7\t3\tSources/A.swift\n'            >> /tmp/fx
+          kept=$(grep -vE "$EXCLUDE_RE" /tmp/fx | awk 'NF{a+=$1;d+=$2} END{print a+d+0}')
+          # Sources/Mutex.lock.swift (18) + Sources/A.swift (10) = 28.
+          # Both Package.resolved entries -- root AND nested -- must be excluded.
+          if [ "$kept" -ne 28 ]; then
+            echo "::error title=Exclusion regex broken on this runner::expected 28 reviewable lines from the fixture, got $kept. The generated-file exclusions are not firing as intended; fix EXCLUDE_RE before trusting the gate."
+            grep -vE "$EXCLUDE_RE" /tmp/fx
+            exit 1
+          fi
+          echo "::notice title=Exclusion regex verified::fixture yields $kept reviewable lines as expected"
+
+      - name: Measure reviewable churn
         env:
-          LIMIT: '400'
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
         run: |
-          # Labels are read LIVE, not from the event payload. `pull_request:` uses
-          # GitHub's default activity types, which exclude `labeled`, so adding
-          # oversized-ok after a failure neither re-triggers this workflow nor
-          # changes the payload on a re-run -- the advertised escape hatch would
-          # never clear the check. Adding `labeled` to the trigger would instead
-          # re-run all of CI on every label change; fetching is cheaper and also
-          # fixes the re-run case.
-          LABELS=$(gh api "repos/$REPO/issues/$PR/labels" --jq '[.[].name]|join(",")' || echo '')
-          echo "Labels at check time: ${LABELS:-<none>}"
+          # Labels read LIVE, not from the event payload: `pull_request:` uses
+          # GitHub's default activity types, which exclude `labeled`, so a label
+          # added after a failure neither re-triggers this workflow nor changes
+          # a re-run's payload -- the escape hatch would never clear the check.
+          # Failure is loud: a transient 5xx must not masquerade as "unlabelled",
+          # which would be unfalsifiable from the log.
+          if ! override=$(gh api "repos/$REPO/issues/$PR/labels" --jq 'any(.[].name; . == "oversized-ok")'); then
+            echo "::error title=Could not read PR labels::the label API call failed, so the oversized-ok override cannot be evaluated. Re-run this job."
+            exit 1
+          fi
+          echo "oversized-ok present: $override"
+
+          # `git diff --numstat` renders a rename as `dir/{old => new}.ext`,
+          # which the $-anchored exclusions would miss; normalise to the new
+          # path first so a renamed generated file is still excluded.
           stat=$(git -c core.quotePath=false diff --numstat HEAD^1 HEAD \
-            | grep -vE '(\t|/)(Package\.resolved|[^/]*\.lock|[^/]*\.pbxproj|[^/]*\.snap)$' || true)
+            | sed -E 's/\{[^}]* => ([^}]*)\}/\1/g' \
+            | grep -vE "$EXCLUDE_RE" || true)
           total=$(printf '%s\n' "$stat" | awk 'NF{a+=$1; d+=$2} END{print a+d+0}')
           echo "Reviewable churn (added+removed, generated/vendored excluded): $total"
+
           if [ "$total" -le "$LIMIT" ]; then
             echo "::notice title=PR size::$total reviewable lines (limit $LIMIT)"
             exit 0
           fi
-          case ",$LABELS," in
-            *,oversized-ok,*)
-              echo "::warning title=PR size override::$total reviewable lines exceeds $LIMIT; passing on the oversized-ok label. Review burden accepted explicitly."
-              exit 0 ;;
-          esac
-          echo "::error title=PR too large to review properly::$total reviewable lines exceeds the $LIMIT ceiling. Split it, or add the 'oversized-ok' label to accept the review burden deliberately. Detection rates collapse past this size -- a review that cannot happen is worse than no gate."
+          if [ "$override" = "true" ]; then
+            echo "::warning title=PR size override::$total reviewable lines exceeds $LIMIT; passing on the oversized-ok label. Review burden accepted explicitly."
+            exit 0
+          fi
+          echo "::error title=PR too large to review properly::$total reviewable lines exceeds the $LIMIT ceiling. Split it, or add the 'oversized-ok' label to accept the review burden deliberately."
           exit 1
 
   # swift-format style gate. Runs on a Linux container — free/fast, no macOS
