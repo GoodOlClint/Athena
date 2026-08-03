@@ -14,7 +14,23 @@ Opening a PR is the start of the job, not the end. Done means `state=MERGED`. Gr
 Four checks on the working diff, before the first push — a defect caught here costs one local fix; the same defect caught by CI costs a full round trip.
 
 1. **Sibling sweep — no tunnel vision.** The instance you were asked to fix is rarely the only one. Before finalizing, hunt for similar code the same defect or pattern lives in: code-intel MCP `search` (semantic — "where else does X happen") plus grep for the exact symbol/pattern, and graphify blast-radius ("what calls the function I changed") when the change alters behavior callers depend on. In-scope siblings get fixed in this PR; out-of-scope ones get a `gh issue create` before you open the PR.
-2. **Subagent pre-review.** Spawn the repo's **`athena-pre-reviewer`** agent (`.claude/agents/athena-pre-reviewer.md`; fall back to correctness-reviewer or /code-review where it's unavailable) on the working diff and fix real findings before pushing. Its definition carries the house instructions — correctness pass, attack-the-claims, the mutation check on test-pinning claims, and the premise check — so don't re-derive them in the spawn prompt; just point it at the diff and name the issues it implements.
+2. **Adversarial pre-review — two models, not one.** This gate is deliberately cross-model: the measured gain from a second reviewer comes from *context separation*, and a different vendor buys different blind spots (ADR-referenced research, 2026-08-03).
+
+   **(a) House reviewer.** Spawn the repo's **`athena-pre-reviewer`** agent (`.claude/agents/athena-pre-reviewer.md`; fall back to correctness-reviewer or /code-review where unavailable) on the working diff. Its definition carries the house instructions — correctness pass, attack-the-claims, the mutation check on test-pinning claims, and the premise check — so don't re-derive them in the spawn prompt; just point it at the diff and name the issues it implements.
+
+   **(b) Cross-model reviewer.** Run Codex over the same diff:
+
+   ```
+   codex exec review --base <default-branch> < /dev/null     # work is committed on a branch
+   codex exec review --uncommitted < /dev/null               # work is still in the working tree
+   ```
+
+   Codex has **no house context** — it has not read the ADRs or the canonical-pipelines rules — so treat its output as a generic-correctness second opinion, not an authority on repo constraints. That asymmetry is the point: (a) covers what the repo requires, (b) covers what a fresh reader sees. Typical cost is well under a minute.
+
+   **Reconcile before pushing.** Merge both finding sets, drop duplicates, and fix what is real. Where the two disagree, the house reviewer wins on repo-constraint questions and Codex wins on nothing automatically — adjudicate it yourself and say which you followed. Codex is advisory here and holds **no approval authority**; it never gates the merge.
+
+   **Never skip it silently.** If Codex is unavailable, unauthenticated, or errors, say so in your response ("cross-model gate down: <error>") and proceed with (a) alone — the same discipline as the semantic-lane rule. A silent skip hides a broken gate.
+
 3. **Premise check — risk-class fixes only.** Covered by `athena-pre-reviewer` (its pass 3) when the diff is risk-class (resource bound, cap/limit, security guard, concurrency, escaping) — make sure the spawn prompt says the diff is risk-class so the pass runs. Where the agent is unavailable, the one-sentence procedure: what quantity does this fix bound and at what point in the flow; what quantity did the finding say was unbounded; do they match; and what concrete input or interleaving still evades the fix. A mismatch or working evasion is fixed before push. (Lesson from a sibling repo: three follow-up fixes shipped with wrong premises, and each cost a later merge cycle.)
 4. **Green gate — tests, last.** After all pre-submit fixes land (steps 1–3 can change code, so this runs last), run the tiers the diff touches: `./deploy/test.sh` (unit tier) always; `./deploy/build.sh Release` when the change affects the MLX-linked targets or deploy scripts; the relevant `deploy/e2e-*.sh` when an HTTP surface or store behavior changed (model-gated e2e needs real hardware — say so if skipped). A red result never gets pushed. Docs-only diffs may skip the run; say so explicitly.
 
