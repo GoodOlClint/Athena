@@ -25,7 +25,7 @@ Four checks on the working diff, before the first push — a defect caught here 
    codex exec review --uncommitted < /dev/null               # work is still in the working tree
    ```
 
-   Codex has **no house context** — it has not read the ADRs or the canonical-pipelines rules — so treat its output as a generic-correctness second opinion, not an authority on repo constraints. That asymmetry is the point: (a) covers what the repo requires, (b) covers what a fresh reader sees. Typical cost is well under a minute.
+   **What the separation actually is.** Codex *does* read `AGENTS.md` — it auto-discovers project instructions, so it sees the same house rules (a) does. The separation this gate buys is therefore (i) a **fresh process with no working-session context** — it has not watched you write the diff, argue yourself into an approach, or accumulate the reasoning that makes a mistake feel settled — and (ii) a **different model family**, with different blind spots. That is the measured effect: cross-*context* review beat same-session self-review with the same model. Do not claim a fresh-reader asymmetry the tool does not provide. Typical cost is well under a minute.
 
    **Reconcile before pushing.** Merge both finding sets, drop duplicates, and fix what is real. Where the two disagree, the house reviewer wins on repo-constraint questions and Codex wins on nothing automatically — adjudicate it yourself and say which you followed. Codex is advisory here and holds **no approval authority**; it never gates the merge.
 
