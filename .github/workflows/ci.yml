@@ -48,6 +48,9 @@ jobs:
   # Tests, deploy, Package.* all count as code. Runs on cheap ubuntu.
   changes:
     name: Classify diff
+    permissions:
+      contents: read
+      pull-requests: read   # size gate reads labels live
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -90,8 +93,19 @@ jobs:
       - name: PR size ceiling
         env:
           LIMIT: '400'
-          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
         run: |
+          # Labels are read LIVE, not from the event payload. `pull_request:` uses
+          # GitHub's default activity types, which exclude `labeled`, so adding
+          # oversized-ok after a failure neither re-triggers this workflow nor
+          # changes the payload on a re-run -- the advertised escape hatch would
+          # never clear the check. Adding `labeled` to the trigger would instead
+          # re-run all of CI on every label change; fetching is cheaper and also
+          # fixes the re-run case.
+          LABELS=$(gh api "repos/$REPO/issues/$PR/labels" --jq '[.[].name]|join(",")' || echo '')
+          echo "Labels at check time: ${LABELS:-<none>}"
           stat=$(git -c core.quotePath=false diff --numstat HEAD^1 HEAD \
             | grep -vE '(\t|/)(Package\.resolved|[^/]*\.lock|[^/]*\.pbxproj|[^/]*\.snap)$' || true)
           total=$(printf '%s\n' "$stat" | awk 'NF{a+=$1; d+=$2} END{print a+d+0}')
