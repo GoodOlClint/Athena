@@ -6,7 +6,7 @@ The worked example behind each step: issue #91 (blast-radius inventory), PR #93 
 
 ## 0. Preconditions
 
-- **Target must be an immutable dated tag** (`integration-YYYY-MM-DD`), never the `integration` branch and never a bare commit SHA. The branch is force-pushed on every rebuild, which orphans whatever a consumer pinned; SPM fetches refs, so an orphaned SHA breaks every cold build while CI stays green on cache warmth (#86, the founding incident). This is the fork's consumer contract and Athena's CLAUDE.md "Dependencies" rule.
+- **Target must be an immutable dated tag** (`integration-YYYY-MM-DD`), never the `integration` branch and never a bare commit SHA. The branch is force-pushed on every rebuild, which orphans whatever a consumer pinned; SPM fetches refs, so an orphaned SHA breaks every cold build while CI stays green on cache warmth (#86, the founding incident). This is the fork's consumer contract and Athena's AGENTS.md "Dependencies" rule.
 - Have the substrate checkout (`~/Source/mlx/mlx-swift-lm`) fetched with tags so old→new diffs are cheap.
 
 ## 1. Measure the blast radius before touching anything
@@ -58,7 +58,7 @@ Heavy gates need xcodebuild (metallib; ADR 009 — they crash under bare `swift 
 
 - **ADR 028's bit-identity claim is per-pin evidence.** It does not survive a bump. Re-run the parity gate at the new pin and re-stamp the ADR (revision, model pair, proposed/accepted counts) — or explicitly re-scope the claim to the revision it was measured on. Never leave it silently pointing at the old pin.
 - A new ADR for any §1 class-4 decision (trait, vendored surface) — ADR 044 is the template, including its measured honesty boundary (xcodebuild ignores `.when(traits:)` at build planning; `nm -gU athena | grep -c xgrammar` tripwire per Xcode major).
-- CLAUDE.md: ADR index entry; the Dependencies bullet if the discipline itself changed.
+- AGENTS.md: ADR index entry; the Dependencies bullet if the discipline itself changed.
 - Toolchain-floor docs (§2) if the floor moved. State only **measured** versions — "26.4+" was flagged in review precisely because the evidence bracketed 26.3-bad/26.5-good without testing 26.4.
 
 ## 7. Delivery

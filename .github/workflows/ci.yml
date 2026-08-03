@@ -68,7 +68,7 @@ jobs:
           # or .github markdown (review prompts/guides). Deliberately NOT a
           # global '\.md$': a .md fixture under Tests/ is code. Empty diff
           # fails toward running CI.
-          if [ -z "$files" ] || printf '%s\n' "$files" | grep -qvE '^docs/|^\.claude/|^[^/]+\.md$|^\.github/.*\.md$'; then
+          if [ -z "$files" ] || printf '%s\n' "$files" | grep -qvE '^docs/|^\.claude/|^\.agents/|^\.codex/|^[^/]+\.md$|^\.github/.*\.md$'; then
             code=true
           else
             code=false
