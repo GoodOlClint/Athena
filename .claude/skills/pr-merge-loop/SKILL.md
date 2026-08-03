@@ -21,13 +21,18 @@ Four checks on the working diff, before the first push — a defect caught here 
    **(b) Cross-model reviewer.** Run Codex over the same diff:
 
    ```
-   codex exec review --base <default-branch> < /dev/null     # work is committed on a branch
-   codex exec review --uncommitted < /dev/null               # work is still in the working tree
+   codex exec review --base <default-branch> -c mcp_servers.code-intel.enabled=false < /dev/null
    ```
+
+   `-c mcp_servers.code-intel.enabled=false` is not optional: in non-interactive `codex exec` there is nobody to approve an MCP tool call, so the code-intel call is auto-cancelled ("user cancelled MCP tool call") and the review **dies silently — exit 0, no verdict**. Without the flag the gate looks like it passed when it never ran.
+
+   **Commit first — the tree must be clean.** `--base` reviews commits only and `--uncommitted` reviews the working tree only, so on a branch holding both, *neither* sees the whole proposed change and the gate silently reviews a fraction of it. Commit everything before running this (you are about to push anyway). Use `--uncommitted` only when the work is deliberately not yet committed, and then re-run with `--base` after committing.
 
    **What the separation actually is.** Codex *does* read `AGENTS.md` — it auto-discovers project instructions, so it sees the same house rules (a) does. The separation this gate buys is therefore (i) a **fresh process with no working-session context** — it has not watched you write the diff, argue yourself into an approach, or accumulate the reasoning that makes a mistake feel settled — and (ii) a **different model family**, with different blind spots. That is the measured effect: cross-*context* review beat same-session self-review with the same model. Do not claim a fresh-reader asymmetry the tool does not provide. Typical cost is well under a minute.
 
    **Reconcile before pushing.** Merge both finding sets, drop duplicates, and fix what is real. Where the two disagree, the house reviewer wins on repo-constraint questions and Codex wins on nothing automatically — adjudicate it yourself and say which you followed. Codex is advisory here and holds **no approval authority**; it never gates the merge.
+
+   **Then commit again.** Fixes made during reconciliation land in the working tree, and step 4's green gate would test a tree the PR does not contain — the push would carry only the earlier, defective commit. Commit the reconciliation fixes and confirm `git status --porcelain` is empty before step 4 runs.
 
    **Never skip it silently.** If Codex is unavailable, unauthenticated, or errors, say so in your response ("cross-model gate down: <error>") and proceed with (a) alone — the same discipline as the semantic-lane rule. A silent skip hides a broken gate.
 
