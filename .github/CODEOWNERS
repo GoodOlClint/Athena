@@ -1,0 +1,37 @@
+# CODEOWNERS — narrow ownership for policy-sensitive paths only.
+#
+# NO blanket `* @GoodOlClint` line, deliberately. Code-level review is
+# claude-bot's job via .github/workflows/claude-code-review.yml; a blanket
+# owner would require operator approval on every PR, which makes that review
+# advisory in practice and puts the human back in the loop for routine work.
+# The sibling repo removed its blanket line on 2026-04-19 for exactly this
+# reason.
+#
+# The paths below are NOT arbitrary: they are the review prompt's own
+# "You defer to @GoodOlClint" list (.github/review-prompt.md), expressed as
+# ownership so the deferral is ENFORCED rather than requested. The reviewer
+# is instructed to defer on these; CODEOWNERS makes it structural. Keep the
+# two lists in sync — if one grows, so does the other.
+
+# --- Architecture: the decision is the operator's, even when the code is fine
+/docs/decisions/                            @GoodOlClint
+/Sources/athena/Server/OpenAPISpec.swift    @GoodOlClint
+/Sources/athena/Server/NativeAPIDTO.swift   @GoodOlClint
+
+# --- Substrate pins and dependency surface (license / supply-chain)
+/Package.swift                              @GoodOlClint
+/Package.resolved                           @GoodOlClint
+
+# --- Security posture: auth/RBAC, at-rest encryption, signing/notarization
+/Sources/AthenaServerKit/Auth.swift         @GoodOlClint
+/Sources/AthenaStore/                       @GoodOlClint
+/deploy/                                    @GoodOlClint
+
+# --- Release / versioning: appVersion is the SSOT and bumps only in a release
+/Sources/athena/Athena.swift                @GoodOlClint
+
+# --- The rules themselves, and the machinery that enforces them.
+# Highest-privilege files in the repo: whoever edits these edits the reviewer.
+/AGENTS.md                                  @GoodOlClint
+/CLAUDE.md                                  @GoodOlClint
+/.github/                                   @GoodOlClint
