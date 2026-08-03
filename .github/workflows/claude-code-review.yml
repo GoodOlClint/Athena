@@ -86,10 +86,19 @@ jobs:
       # copy of this workflow file differs from the default branch — its
       # anti-tampering gate. `execution_file` is only set once Claude actually
       # ran, so an empty value is the reliable "did not run" signal.
-      - name: Note review skipped (workflow file differs from default branch)
+      # FAIL-CLOSED. claude-code-action self-skips (exit 0) when the PR's copy of
+      # this workflow differs from the default branch — its anti-tamper gate.
+      # This step used to emit a notice and PASS, which meant the required
+      # `claude-review` check went GREEN with no review performed. A PR that
+      # edits the reviewer therefore reviewed itself by not being reviewed.
+      # Now it fails: a PR touching this workflow needs human review by
+      # definition (review-prompt.md already lists it as defer-to-operator),
+      # so the red check is the correct signal, not an inconvenience.
+      - name: Fail closed — review did not run (workflow file differs from default branch)
         if: always() && steps.materialize.outcome == 'success' && steps.claude-review.outputs.execution_file == ''
         run: |
-          echo "::notice title=Claude review skipped::claude-code-action did not run — this PR modifies .github/workflows/, so the action's workflow-validation gate skips it. The review will run on PRs opened after this one merges."
+          echo "::error title=Claude review did NOT run::claude-code-action self-skipped because this PR modifies .github/workflows/. No automated review was performed, so this check cannot pass. This PR requires operator review before merge; merge it only after reading the diff yourself."
+          exit 1
 
       - name: Verify formal review was submitted
         if: always() && steps.claude-review.outputs.execution_file != ''
