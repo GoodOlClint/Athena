@@ -32,9 +32,9 @@ jobs:
       # branch via `git show`, never from the PR's checkout — the review
       # INSTRUCTIONS always come from main (this step lives in the yml, which
       # the action's own anti-tamper gate already covers). Scope of that
-      # guarantee: it covers the instruction files only — the diff under
-      # review and the auto-loaded repo CLAUDE.md remain PR-authored content
-      # the reviewer reads. Fail-closed: if materialization fails, the job
+      # guarantee: it covers the instruction files and the auto-loaded
+      # AGENTS.md; the diff under review remains PR-authored content the
+      # reviewer reads. Fail-closed: if materialization fails, the job
       # fails and no review runs against missing/stale instructions.
       # BOOTSTRAP ORDERING: a file referenced here must already EXIST on the
       # default branch before the yml referencing it lands — add new guide
@@ -48,6 +48,14 @@ jobs:
           mkdir -p /tmp/review-guides
           git show "origin/${DEFAULT_BRANCH}:.github/review-prompt.md" > /tmp/review-guides/review-prompt.md
           git show "origin/${DEFAULT_BRANCH}:.github/review-guides/followup-issues.md" > /tmp/review-guides/followup-issues.md
+          # AGENTS.md is AUTO-LOADED by the action from the workspace, so it is
+          # not enough to copy it to /tmp — the workspace copy must be replaced.
+          # claude-code-action restores a hardcoded list of config paths from the
+          # base branch (CLAUDE.md, .claude/, .mcp.json, ...) but AGENTS.md is NOT
+          # on that list, and since ADR 0007 it holds the real instructions while
+          # CLAUDE.md is only "@AGENTS.md". Without this, a PR that edits
+          # AGENTS.md injects attacker-controlled text into the reviewer.
+          git show "origin/${DEFAULT_BRANCH}:AGENTS.md" > AGENTS.md
 
       - name: Run Claude Code Review
         id: claude-review
