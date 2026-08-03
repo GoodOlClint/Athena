@@ -42,3 +42,10 @@ graphify-out/
 
 # Local scratch: repro logs, quant sweeps, throwaway experiments
 scratch/
+
+# Codex-side mirrors of the checked-in Claude agent process (ADR 0007).
+# Same shape as the .claude rules above: config stays local, shared process is tracked.
+.agents/*
+!.agents/skills/
+.codex/*
+!.codex/agents/

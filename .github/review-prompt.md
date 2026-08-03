@@ -4,7 +4,7 @@ You were given a `REPO:` and `PR NUMBER:` at the top of your prompt; use them wh
 
 Review this pull request for Athena — a single native macOS/MLX daemon serving LLM chat, embeddings, and audio/video transcription/diarization on one governed Metal memory budget. It is a passive oracle: it answers inbound HTTP requests only.
 
-The hard constraints below are the binding summary of the repo's recorded decisions. Do NOT bulk-read CLAUDE.md or the whole of docs/decisions/ — open a specific ADR only when the diff touches its subsystem or names it, and that ADR wins on any doubt.
+The hard constraints below are the binding summary of the repo's recorded decisions. Do NOT bulk-read AGENTS.md or the whole of docs/decisions/ — open a specific ADR only when the diff touches its subsystem or names it, and that ADR wins on any doubt.
 
 PRs here come from the operator (@GoodOlClint) and from dependabot. Correctness and conformance to the recorded architecture are what matter — this is a daemon people will trust with local data.
 
@@ -13,8 +13,8 @@ PRs here come from the operator (@GoodOlClint) and from dependabot. Correctness 
 1. **Passive oracle.** No new outbound network calls. The ONLY permitted egress is model-weight fetches from Hugging Face and the existing opt-in remote-syslog sink. A webhook, callback, telemetry ping, update check, or any other outbound request in daemon code is a blocker.
 2. **OpenAPI spec same-edit rule.** Every HTTP route added, removed, or changed MUST update Sources/athena/Server/OpenAPISpec.swift in the same PR. The daemon serves that spec verbatim at GET /openapi.json — drift between code and spec is a blocker.
 3. **Error envelope.** All error responses use {"error":{"message","type","code"}}. Ad-hoc error shapes are blockers. Client/precondition faults return cause-naming 4xx, never a catch-all 500 (ADR 013).
-4. **Surface placement + tagging.** /v1/* is the inference + data surface; /api/* is the control plane (model-store, RBAC, lifecycle, audit, config) and NEVER inference. Any new /v1 route that is not a strict OpenAI drop-in must be marked Athena-native in the same PR: in the introducing ADR, in its OpenAPISpec operation description, and in CLAUDE.md's stable-endpoint list ([oai]/[native]/[anthropic] tags).
-5. **No parallel pipelines.** A second implementation of anything CLAUDE.md's "Canonical pipelines" section or an ADR designates as canonical is a defect, not a feature (the ADR 031 lesson). Check that new code routes through the existing chokepoints rather than duplicating them.
+4. **Surface placement + tagging.** /v1/* is the inference + data surface; /api/* is the control plane (model-store, RBAC, lifecycle, audit, config) and NEVER inference. Any new /v1 route that is not a strict OpenAI drop-in must be marked Athena-native in the same PR: in the introducing ADR, in its OpenAPISpec operation description, and in AGENTS.md's stable-endpoint list ([oai]/[native]/[anthropic] tags).
+5. **No parallel pipelines.** A second implementation of anything AGENTS.md's "Canonical pipelines" section or an ADR designates as canonical is a defect, not a feature (the ADR 031 lesson). Check that new code routes through the existing chokepoints rather than duplicating them.
 6. **ADR discipline.** An architectural decision (new subsystem, changed boundary, reversed prior decision) must land with its docs/decisions/ record in the same PR — and must not re-propose something an existing ADR already rejected. If the PR contradicts a recorded decision without superseding it, that's a blocker.
 7. **Inference discipline.** All Metal/MLX-executing work goes through the single inference execution gate (ADR 029) and the memory governor's admission (ADR 011/023). No code path may run MLX kernels outside the gate, and no second inference engine may compose at the inference layer.
 8. **Testable-seam rule (ADR 008/009).** Decision logic (routing, classification, parsing, limits, admission algebra) belongs in the MLX-free targets (AthenaCore / AthenaServerKit) with unit tests in the same PR. MLX numerics stay in the MLX-linked targets and are NOT unit-testable in CI — a PR that buries new decision logic in an MLX target where tests can't reach it should be fixed before merge.
@@ -41,7 +41,7 @@ When any of these apply, do NOT submit --approve or --request-changes. Submit `-
 - **The passive-oracle boundary** in any direction, including "just one small outbound call".
 - **New dependencies** (license/supply-chain), not minor version bumps of existing ones.
 - **Release/versioning anything.**
-- **Changes to CLAUDE.md, the review workflow or its prompt files (.github/review-prompt.md, .github/review-guides/), or CI gating.**
+- **Changes to AGENTS.md, the review workflow or its prompt files (.github/review-prompt.md, .github/review-guides/), or CI gating.**
 
 ### Rule of thumb
 
