@@ -207,17 +207,22 @@ jobs:
   #
   # Read the condition as "run unless we positively know this tier is not
   # wanted", which matches the classifier's own "empty diff fails toward
-  # running CI" rule. It is written to cover the gate job's OTHER non-success
-  # results too, not just `failure`: `outputs.code` is empty whenever the gate
-  # did not publish one, so `!= 'false'` admits failure and cancellation alike,
-  # while `result != 'skipped'` is what keeps both tiers OFF on a push to main
-  # (the gate is pull_request-only there, and `seed` owns that path).
+  # running CI" rule. Term by term: `outputs.code` is empty whenever the gate
+  # did not publish one, so `!= 'false'` admits a FAILED gate job, while
+  # `result != 'skipped'` is what keeps both tiers OFF on a push to main (the
+  # gate is pull_request-only there, and `seed` owns that path). `!cancelled()`
+  # is a status-check function, which is what suppresses the implicit
+  # `success()` GitHub would otherwise inject on a `needs:` job -- without it
+  # the other two terms could never be reached on a failed gate.
   #
   # Honesty boundary: this is NOT equivalent to adding `Classify diff` to the
-  # required checks. If the whole RUN is cancelled, `!cancelled()` is false and
-  # both tiers conclude `skipped`, which per #77 reads as passing -- whereas a
-  # required gate job would conclude `cancelled` and block. What this closes is
-  # the failed-classifier hole; the cancelled-run hole needs branch protection.
+  # required checks. Cancellation is NOT covered, despite `outputs.code` being
+  # empty there too -- a `needs` job concludes `cancelled` only when the whole
+  # run is cancelled, and in that case `!cancelled()` has already made this
+  # condition false, so both tiers conclude `skipped`, which per #77 reads as
+  # passing. A required gate job would conclude `cancelled` and block. What
+  # this closes is the failed-classifier hole; the cancelled-run hole needs a
+  # branch-protection change.
   lint:
     name: Lint (swift-format)
     needs: changes

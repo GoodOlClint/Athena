@@ -13,10 +13,15 @@
 # first genuinely cold resolve in a long time. The cold resolve that actually
 # diagnosed #86 was run by hand, locally. This job is that run, on a schedule.
 #
-# What it would have caught, and still will: the dated substrate tags being
-# pruned or the fork re-created, and `GoodOlClint/swift-huggingface` losing
-# `athena/pr-50-download-progress`, whose branch tip is what the current
-# `727df097` pin resolves through.
+# What it would have caught, and still will: a pin whose object is no longer
+# FETCHABLE — #86's orphaned commit, the fork being re-created, or
+# `GoodOlClint/swift-huggingface` losing `athena/pr-50-download-progress`,
+# whose branch tip is what the current `727df097` pin resolves through.
+#
+# Stated as reachability rather than as "a pruned tag" on purpose: deleting a
+# dated tag whose commit is still reachable from another ref leaves the pin
+# resolvable, and this job passes. That is the right answer — the object is
+# still there — but it is a weaker guarantee than "the tags still exist".
 #
 # What it does NOT catch, so nobody reads more into a green run than it means:
 # this job tests REACHABILITY, never pin FORM. A bare-hash pin that happens to
@@ -110,8 +115,24 @@ jobs:
           fi
           echo "::notice title=All pins reachable::cold resolve succeeded"
 
+      # A successful resolve is not the same as an accurate lockfile. SPM
+      # REGENERATES an out-of-date Package.resolved and exits 0, so a PR that
+      # edits Package.swift without committing the regenerated lockfile would
+      # get a green "All pins reachable" here — and the summary step below would
+      # print pins the repository does not actually contain, defeating its
+      # stated purpose as a last-known-good record. Assert the resolve was a
+      # no-op against what is committed.
+      - name: Assert Package.resolved is what the resolve produced
+        run: |
+          if ! git diff --exit-code -- Package.resolved; then
+            echo "::error title=Package.resolved is out of date::The cold resolve REGENERATED the lockfile, so what is committed does not match what Package.swift resolves to. Commit the regenerated Package.resolved. Until then the pins recorded in this repo are not the pins a build gets."
+            exit 1
+          fi
+          echo "::notice title=Lockfile accurate::Package.resolved matches the resolved graph"
+
       # Report what actually resolved, so a run that goes red later has a
-      # last-known-good record in its predecessor's log.
+      # last-known-good record in its predecessor's log. Trustworthy only
+      # because the step above proved this is the committed lockfile.
       - name: Record resolved revisions
         run: |
           if [ -f Package.resolved ]; then
@@ -120,3 +141,53 @@ jobs:
             cat Package.resolved >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
           fi
+
+  # A red SCHEDULED run is attached to no PR, so nothing surfaces it but
+  # GitHub's default email to the last committer — and this job's entire value
+  # is noticing BEFORE an unreferenced object is garbage-collected. File an
+  # issue instead. PR runs need none of this: there the red check sits on the
+  # PR, which is why this is gated to `schedule`.
+  #
+  # A SEPARATE job, not a step in `resolve`, for one practical reason: `resolve`
+  # runs inside the Swift container, which has no `gh`. The hosted runner image
+  # does. It also keeps `issues: write` off the job that resolves untrusted
+  # dependency manifests.
+  #
+  # Known gap, not worth machinery: GitHub disables scheduled workflows after
+  # 60 days of repository inactivity, and a disabled workflow files nothing.
+  notify:
+    name: File an issue on a failed scheduled run
+    needs: resolve
+    if: ${{ failure() && github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Open or update the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title='Cold resolve failed: a pinned revision is unreachable'
+          # Deduped by exact title so a persistent failure does not open one
+          # issue per week; a still-failing run leaves a dated comment instead.
+          existing=$(gh issue list --repo "$REPO" --state open \
+            --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$REPO" \
+              --body "Still failing — $RUN_URL"
+            echo "::notice title=Existing issue updated::#$existing"
+            exit 0
+          fi
+          gh issue create --repo "$REPO" --title "$title" --label bug --body \
+          "The weekly cold resolve failed: a revision pinned in \`Package.swift\` / \`Package.resolved\` could not be fetched from its remote.
+
+          Run: $RUN_URL
+
+          **Why this is urgent.** Cached CI builds keep passing — that is the whole reason this job exists (#86, where an orphaned pin stayed invisible for months). An unreferenced object can be garbage-collected and become permanently unrecoverable, so the window to recover it by tagging the orphan is finite.
+
+          **Where to start:** the failing step's log names the pin. See AGENTS.md (pin an immutable \`integration-YYYY-MM-DD\` tag, never a bare hash or a branch) and \`docs/substrate-bump-runbook.md\`.
+
+          Filed automatically by \`.github/workflows/cold-resolve.yml\`."
