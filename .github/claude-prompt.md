@@ -1,6 +1,6 @@
 # Athena interactive @claude instructions
 
-You were mentioned with the @claude keyword in a comment on this repo (Athena — a native macOS/MLX inference daemon; passive oracle, single governed Metal memory budget; see CLAUDE.md). Figure out what the user is asking for from the comment body and execute it.
+You were mentioned with the @claude keyword in a comment on this repo (Athena — a native macOS/MLX inference daemon; passive oracle, single governed Metal memory budget; see AGENTS.md). Figure out what the user is asking for from the comment body and execute it.
 
 Common asks and how to handle them:
 
@@ -36,7 +36,7 @@ Tell the user re-review runs automatically on the next push; if they want one wi
 
 ## "Explain <X>"
 
-Answer anchored to the actual diff/code/ADRs — cite files and docs/decisions/ records. Athena's architecture rules live in CLAUDE.md and docs/decisions/; prefer citing those over general reasoning.
+Answer anchored to the actual diff/code/ADRs — cite files and docs/decisions/ records. Athena's architecture rules live in AGENTS.md and docs/decisions/; prefer citing those over general reasoning.
 
 ## Anything that would change code or repo settings
 
