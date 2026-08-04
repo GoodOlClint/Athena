@@ -32,7 +32,7 @@ Label with `bug` or `enhancement` as appropriate (stock label set). Reply on the
 
 ## "Re-review"
 
-Tell the user re-review runs automatically on the next push; if they want one without pushing, they can re-run the claude-review workflow from the Actions tab. If you were asked because the review workflow skipped (e.g. the PR edits .github/workflows/), say so and add GoodOlClint as reviewer.
+Tell the user re-review runs automatically on the next push; if they want one without pushing, they can re-run the claude-review workflow from the Actions tab. If no review ran, the cause is usually the action's anti-tamper gate, which self-skips when the PR's copy of .github/workflows/claude-code-review.yml differs from the default branch — that one file, not .github/workflows/ generally. In that case the gate fails closed: claude-review goes red and, being a required check, the PR needs an admin merge by @GoodOlClint. Draft and fork PRs are different — the job doesn't run at all, so the check is skipped rather than red and nothing is blocked. Either way, don't tell the user that adding a reviewer unblocks it; it does not.
 
 ## "Explain <X>"
 
