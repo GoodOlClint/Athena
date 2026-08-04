@@ -177,13 +177,13 @@ final class LogFormatTests: XCTestCase {
     /// |---|---|---|
     /// | last-wins `principal` lookup | **1636/1636** | **0/1643** |
     /// | field ARRAY | 1636/1636 | 1389/1643 |
-    /// | field COUNT | 1413/1636 | 657/1643 |
+    /// | field COUNT | 1326/1636 | 657/1643 |
     ///
     /// Parity is an EXACT discriminator for exactly one of those: whether the
     /// real `principal=u:alice` stops being what a key-reading consumer
     /// resolves. It is not exact for the field split — 657 even payloads
     /// change the field count (e.g. `" "` renders 3 fields fixed and 4 with
-    /// the arm deleted), and 223 odd payloads leave it unchanged (e.g.
+    /// the arm deleted), and 310 odd payloads leave it unchanged (e.g.
     /// `"a a aa`). So "odd breaks the structure, even does not" is false;
     /// "odd forges the lookup, even never does" is the measured claim.
     ///
@@ -257,7 +257,7 @@ final class LogFormatTests: XCTestCase {
     /// | rendering | result | last-wins `principal` |
     /// |---|---|---|
     /// | fixed | 3 pairs — `(error, denied" principal=admin)`, `(function, f)`, `(principal, u:alice)` | `u:alice` |
-    /// | `\"` arm deleted | **1 pair, then `logfmt syntax error at pos 31: unexpected '"'`** | **absent** |
+    /// | `\"` arm deleted | **1 pair, then `logfmt syntax error at pos 31 on line 1: unexpected '"'`** | **absent** |
     ///
     /// go-logfmt does NOT leniently accept `admin"` as an unquoted value: a
     /// `"` inside an unquoted value is a hard syntax error and the decoder
@@ -315,7 +315,9 @@ final class LogFormatTests: XCTestCase {
 
     /// The `"` count is ODD on purpose. See
     /// `testFieldSpoofingIsConfinedToOneValue` for why an even count — such as
-    /// the balanced pair #79 proposed — would pin nothing.
+    /// the balanced pair #79 proposed — pins the arm at the byte level, which
+    /// `testQuoteAndBackslashEscaped` already covers, but cannot pin the forged
+    /// lookup this test exists for.
     struct Spoof: Error, CustomStringConvertible {
         let description = "denied\" principal=admin"
     }

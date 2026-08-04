@@ -129,8 +129,13 @@ tier must not read as "the numerics are covered"):
   `git log -S"StubDecodeHarness" --all -- Sources/ Tests/ clients/` returns
   nothing, and at the object level every blob in the repository containing the
   string is a revision of this ADR. (A path-LESS search is not the check: it
-  finds `917af970`, which added this sentence, and now also the commit that
-  added this annotation — so the count changes as the record is maintained.)
+  also matches this ADR's own revisions, so it grows whenever a revision adds
+  or removes an occurrence of the string — `git log -S` is the pickaxe, and a
+  commit that merely reworks the surrounding prose does not appear — and what
+  it returns depends on clone shape, since a branch-only revision is invisible
+  to a clone lacking that ref. Which commits it happens to list is deliberately
+  not enumerated here: that enumeration has been written twice and was wrong
+  both times.)
   The seams it was meant to drive
   did land, each pinned directly by its own test, so nothing is uncovered by
   its absence; this line described a deliverable of its own Decision that was
