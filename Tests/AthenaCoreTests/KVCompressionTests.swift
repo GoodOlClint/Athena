@@ -4,9 +4,18 @@ import XCTest
 @testable import AthenaLLM  // the MLX-coupled .kvScheme/.servesArch extension
 
 /// The shared `kv_compression` knob: precedence (env > TOML > none),
-/// fail-closed validation, and the eviction seam. Pure logic — no MLX,
-/// always runs in CI. M20.2 introduced this contract; M21 added the
-/// `triattention` case (the M20 `turboquant` case has since been retired).
+/// normalization (case-folding and trimming), fail-closed validation, and the
+/// `kvScheme` accessor the MLX-coupled extension exposes — the seven tests
+/// below, in that order. Pure logic — no MLX, always runs in CI. M20.2 introduced
+/// this contract; M21 added the `triattention` case (the M20 `turboquant` case
+/// has since been retired).
+///
+/// **Not covered here: the eviction seam.** This header used to claim it, and
+/// none of the seven tests below touches eviction — they are knob resolution
+/// and one accessor. TriAttention's geometry and eviction behaviour are MLX
+/// numerics and are out of reach of this tier (ADR 009: a control-flow tier,
+/// not a numeric one). The mirror-image claim in ADR 009's NF3 row was struck
+/// by #100; this is the same claim in the file it was made about (#101).
 final class KVCompressionTests: XCTestCase {
 
     func testDefaultsToNoneWhenUnsetOrBlank() throws {
