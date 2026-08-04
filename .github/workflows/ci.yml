@@ -11,9 +11,17 @@
 #
 # Cost shape (macOS minutes bill at 10x): docs/process-only PRs skip lint+unit
 # via the `changes` gate job — the jobs report "skipped", which satisfies
-# required status checks. If branch protection is ever enabled, add
-# "Classify diff" itself to the required checks: a FAILED gate job also skips
-# lint/unit, and skipped required checks read as passing. Pushes to main run
+# required status checks (verified in #77, which was filed on the opposite
+# belief and closed as invalid: a docs-only PR merges with both skipped).
+# That property is load-bearing and also the hazard, so the gate job is now
+# defended on both sides (#119): it ASSERTS the checkout really is the merge
+# ref before classifying, and lint+unit run anyway when it FAILS — because
+# "Classify diff" is not itself a required check, so a red gate job that
+# skipped both tiers would read as a clean pass. The alternative fix the old
+# version of this comment proposed — adding "Classify diff" to the required
+# checks — needs a branch-protection change; the `if:` conditions on those two
+# jobs close the failed-classifier case inside the repo, but not a cancelled
+# run (see the note above `lint`). Pushes to main run
 # `seed` only: it exists solely to publish the SPM dependency cache to a
 # main-scoped key (PR-created caches are invisible to sibling PRs), so it
 # builds WITHOUT running tests — the PR head already passed the unit tier.
@@ -65,6 +73,19 @@ jobs:
       - name: Detect code changes
         id: diff
         run: |
+          # Assert the base-vs-merge-result assumption rather than trusting it
+          # (#119), exactly as the `size` job does -- same failure class, and
+          # this job is the one that decides whether lint+unit run at all.
+          # HEAD^1 RESOLVING is not the same as HEAD^1 being the base: under a
+          # non-merge-ref checkout (`ref: …head.sha`, a reusable-workflow
+          # refactor) HEAD^1..HEAD is just the PR's last commit, so a PR whose
+          # final commit touched only docs/ would classify code=false and skip
+          # both required tiers -- which this file's header records as reading
+          # like a pass. Refuse to classify rather than classify wrongly.
+          if ! git rev-parse --verify --quiet HEAD^2 >/dev/null; then
+            echo "::error title=Cannot classify diff::HEAD is not a merge commit, so HEAD^1 is not the base branch. The checkout is not the pull_request merge ref. Refusing to classify a diff that would be wrong -- lint and the unit tier must not be skipped on a bad classification."
+            exit 1
+          fi
           files=$(git -c core.quotePath=false diff --name-only HEAD^1 HEAD)
           printf 'Changed files:\n%s\n' "$files"
           # Docs = anything under docs/ or .claude/, root-level *.md (README…),
@@ -178,10 +199,29 @@ jobs:
   # minutes. The container tag pins the EXACT swift-format version (issue #2:
   # formatter defaults drift across releases and would redden every open PR
   # at once); bump the tag deliberately, reformatting the tree in the same PR.
+  # The gate job FAILING must not skip this tier. `Classify diff` is not a
+  # required check, and a skipped required check reads as passing (header), so
+  # `needs.changes.outputs.code == 'true'` alone would turn a broken classifier
+  # into a green mergeable PR with no style or test signal -- the exact hole
+  # #119's assertion exists to close, one job downstream.
+  #
+  # Read the condition as "run unless we positively know this tier is not
+  # wanted", which matches the classifier's own "empty diff fails toward
+  # running CI" rule. It is written to cover the gate job's OTHER non-success
+  # results too, not just `failure`: `outputs.code` is empty whenever the gate
+  # did not publish one, so `!= 'false'` admits failure and cancellation alike,
+  # while `result != 'skipped'` is what keeps both tiers OFF on a push to main
+  # (the gate is pull_request-only there, and `seed` owns that path).
+  #
+  # Honesty boundary: this is NOT equivalent to adding `Classify diff` to the
+  # required checks. If the whole RUN is cancelled, `!cancelled()` is false and
+  # both tiers conclude `skipped`, which per #77 reads as passing -- whereas a
+  # required gate job would conclude `cancelled` and block. What this closes is
+  # the failed-classifier hole; the cancelled-run hole needs branch protection.
   lint:
     name: Lint (swift-format)
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: ${{ !cancelled() && needs.changes.result != 'skipped' && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     container:
@@ -201,10 +241,11 @@ jobs:
           git diff --exit-code \
             || { echo "::error::Style check failed — run: swift format --in-place --configuration .swift-format --recursive Sources Tests clients Package.swift and commit the diff (shown above)"; exit 1; }
 
+  # Same fail-toward-running rule as `lint` above (#119).
   unit:
     name: Unit tier (swift test)
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: ${{ !cancelled() && needs.changes.result != 'skipped' && needs.changes.outputs.code != 'false' }}
     runs-on: macos-26
     timeout-minutes: 60
     steps:
@@ -286,6 +327,50 @@ jobs:
           key: ${{ runner.os }}-spm-v3-${{ steps.toolchain.outputs.xcode-version }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('Package.resolved') }}
           restore-keys: |
             ${{ runner.os }}-spm-v3-${{ steps.toolchain.outputs.xcode-version }}-${{ steps.toolchain.outputs.fingerprint }}-
+
+      # Self-healing stale checkout (#96). A restored `.build` can carry a
+      # dependency checkout whose MANIFEST is incompatible with what the
+      # current Package.swift asks for -- SwiftPM validates against the
+      # CHECKED-OUT manifest before re-resolving, so resolution hard-fails, and
+      # it STICKS: a failed build never saves a replacement entry. The standing
+      # remedy is a hand-authored salt bump (`-v2-` -> `-v3-` above), authored
+      # only after someone reads a confusing red build.
+      #
+      # What this step actually buys, stated precisely: it converts a HARD
+      # FAILURE into a slow success. It does NOT repair the cache. Actions
+      # cache entries are immutable and `actions/cache` skips its post-save on
+      # an exact key hit, so when the poisoned entry's key does not rotate --
+      # a dependency-shape change in Package.swift with Package.resolved
+      # unchanged, e.g. a future trait flip -- EVERY run restores the same bad
+      # entry, heals locally, and pays a full cold dependency build, forever,
+      # announced only by the warning below. (#93's real case bumped the pin,
+      # so `hashFiles('Package.resolved')` rotated the key and the entry
+      # self-replaced -- which is why this shape has not bitten yet.) The salt
+      # is therefore still required for two distinct cases: poison a re-resolve
+      # cannot fix at all (a mis-KEYED entry, the #56 story), AND re-resolvable
+      # poison whose key does not rotate. A recurring warning here IS the
+      # signal to bump it.
+      #
+      # Resolve EXPLICITLY rather than pattern-matching `swift build` output for
+      # resolution errors: a log grep would be prose asserting more than it
+      # checks, and this repo keeps filing that defect. `swift package resolve`
+      # failing IS the condition, with no inference.
+      #
+      # Cannot mask #90's unreachable-pin signal: clearing local state does not
+      # make a missing remote object appear, so the retry fails too and the job
+      # goes red. Verified on a scratch branch, not reasoned -- see the PR.
+      #
+      # Scope: `.build` only, which is what `swift test` uses. The xcodebuild
+      # `SourcePackages` variant of this poison (ADR 044) is a local
+      # `deploy/build.sh Release` concern; no CI job runs xcodebuild.
+      - name: Resolve dependencies (self-heals a stale restored checkout)
+        run: |
+          if swift package resolve; then
+            exit 0
+          fi
+          echo "::warning title=Resolution failed -- retrying from cold::Clearing the restored .build and resolving once more. If this is routine rather than a one-off after a dependency-shape change, the cache key is wrong and the salt needs a bump -- the retry is a backstop, not the fix."
+          rm -rf .build
+          swift package resolve
 
       - name: Unit tests
         run: ./deploy/test.sh
@@ -376,6 +461,23 @@ jobs:
           key: ${{ runner.os }}-spm-v3-${{ steps.toolchain.outputs.xcode-version }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('Package.resolved') }}
           restore-keys: |
             ${{ runner.os }}-spm-v3-${{ steps.toolchain.outputs.xcode-version }}-${{ steps.toolchain.outputs.fingerprint }}-
+
+      # Same self-healing resolve as the unit job (#96) — deliberately inlined
+      # rather than extracted into a composite action like `select-toolchain`
+      # (#87): that extraction paid for itself over ~45 lines of key-critical
+      # logic, and this is a five-line guard whose two copies have no shared
+      # invariant to drift out of. seed needs it because the partial restore
+      # directly above is exactly how a stale checkout arrives here, and a
+      # poisoned seed publishes nothing — leaving every PR to rebuild deps.
+      - name: Resolve dependencies (self-heals a stale restored checkout)
+        if: steps.probe.outputs.cache-hit != 'true'
+        run: |
+          if swift package resolve; then
+            exit 0
+          fi
+          echo "::warning title=Resolution failed -- retrying from cold::Clearing the restored .build and resolving once more. If this is routine rather than a one-off after a dependency-shape change, the cache key is wrong and the salt needs a bump -- the retry is a backstop, not the fix."
+          rm -rf .build
+          swift package resolve
 
       # Build everything the unit tier builds (tests included) so the cache
       # a PR restores is complete — but execute nothing.

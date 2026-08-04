@@ -1,0 +1,122 @@
+# Cold dependency resolve — the signal that a pinned revision is still
+# fetchable from its remote (#90).
+#
+# Why this exists as its own workflow rather than a job in ci.yml: the whole
+# point is to have NO cache and NO restored `.build`. The `unit` job caches
+# `.build`, which carries SPM's bare mirrors under `repositories/` plus
+# `checkouts/`; when the required revision is already in a restored mirror SPM
+# never contacts the remote, so remote unreachability is unobservable. That is
+# exactly why #86 sat green while every cold build failed — the pin `751aaed`
+# had been orphaned by a force-push to the substrate's `integration` branch,
+# and CI stayed green on cache warmth alone. It surfaced only when an unrelated
+# compiler-fingerprint change (#85) rotated the cache prefix and forced the
+# first genuinely cold resolve in a long time. The cold resolve that actually
+# diagnosed #86 was run by hand, locally. This job is that run, on a schedule.
+#
+# What it would have caught, and still will: the dated substrate tags being
+# pruned or the fork re-created, and `GoodOlClint/swift-huggingface` losing
+# `athena/pr-50-download-progress`, whose branch tip is what the current
+# `727df097` pin resolves through.
+#
+# What it does NOT catch, so nobody reads more into a green run than it means:
+# this job tests REACHABILITY, never pin FORM. A bare-hash pin that happens to
+# be reachable passes forever — and one is live right now: `Package.swift`'s
+# `hubDep` pins the 40-hex `727df097…`, which is the TIP of a branch, i.e.
+# exactly the #86 shape, one force-push away from orphaned. This job would
+# report that only AFTER the object was orphaned, which is the moment its own
+# error text calls urgent. Enforcing the AGENTS.md dated-tag rule is a separate
+# check nobody has written.
+#
+# Deliberately cheap so it can be routine: free Linux, resolve only. No
+# compile, no Metal Toolchain download, no macOS minutes (which bill at 10x).
+# Resolution is a manifest+remote operation — nothing here is platform-specific
+# even though the daemon itself is macOS-only. Verified rather than assumed:
+# a cold resolve of this exact graph inside this container image succeeds on
+# Linux (~31s on arm64; ~38s measured on macOS), despite the root manifest
+# being tools-version 6.1, declaring macOS-only `platforms:`, and passing
+# `traits: []` to a substrate whose own manifest is 6.3.
+name: Cold resolve
+
+on:
+  schedule:
+    # Mondays 07:00 UTC. Weekly is the cadence the risk deserves: the failure
+    # mode is a remote object going away, and the cost of noticing late is that
+    # it may be GC-ed and unrecoverable — the deadline #86 itself names.
+    - cron: '0 7 * * 1'
+  workflow_dispatch:
+  # Also on any change to the pins themselves, where a bad pin is most likely
+  # to be introduced and where the feedback is worth having immediately.
+  pull_request:
+    paths:
+      - 'Package.swift'
+      - 'Package.resolved'
+      - '.github/workflows/cold-resolve.yml'
+
+concurrency:
+  group: cold-resolve-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    name: Resolve pins with no cache
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # The substrate ships a swift-tools-version 6.3 manifest (mlx-swift >=
+    # 0.31.5), so the resolver must be able to PARSE it — an older Swift fails
+    # resolution before reaching the network and would look like a pin failure.
+    # Same container the lint job pins, for the same reason: an exact version,
+    # bumped deliberately.
+    container:
+      image: swift:6.3.3-rhel-ubi9
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Mark workspace safe for git-in-container
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      # No actions/cache step anywhere in this job, on purpose. Do not add one
+      # "to speed it up" — a warm cache is precisely the masking mechanism this
+      # job exists to defeat, and adding it would leave the workflow green and
+      # meaningless.
+      - name: Assert no restored build state
+        run: |
+          if [ -e .build ]; then
+            echo "::error title=Cold resolve is not cold::.build exists before resolution, so SPM may serve the pins from a local mirror and never contact the remote. This job's entire signal depends on starting with no build state."
+            exit 1
+          fi
+          echo "::notice title=Starting cold::no .build present"
+
+      # No pipe, no `tee`, no captured status: SPM's own exit code is the whole
+      # signal, and the job log already records its output. An earlier draft
+      # piped through `tee` and read `PIPESTATUS` — which the command inside
+      # the `if` body would have clobbered, making the job green on exactly the
+      # failure it exists to catch. Keeping it a bare command removes the class.
+      # `--cache-path` at a fresh per-run directory, so "cold" is a property of
+      # the command rather than an assumption about the runner image. `.build`
+      # being absent is not sufficient on its own: SPM also keeps a SHARED
+      # dependency cache outside the workspace, and it will serve a pin from
+      # there — measured locally, where a second resolve after `rm -rf .build`
+      # reported "Fetched … from cache". An ephemeral container starts with no
+      # such cache today; this flag means the signal does not depend on that
+      # staying true. Measured cost of a genuine cold resolve: ~38s.
+      - name: Resolve dependency graph
+        run: |
+          if ! swift package resolve --cache-path "$RUNNER_TEMP/spm-cold-cache"; then
+            echo "::error title=A pinned revision is unreachable::swift package resolve failed from cold. A pin in Package.swift/Package.resolved cannot be fetched from its remote — most likely an orphaned commit (force-pushed branch), a pruned tag, or a deleted branch. Cached CI builds will keep passing until the cache rotates, so treat this as urgent: an unreferenced object can be garbage-collected and become unrecoverable. See AGENTS.md (pin an immutable integration-YYYY-MM-DD TAG) and docs/substrate-bump-runbook.md."
+            exit 1
+          fi
+          echo "::notice title=All pins reachable::cold resolve succeeded"
+
+      # Report what actually resolved, so a run that goes red later has a
+      # last-known-good record in its predecessor's log.
+      - name: Record resolved revisions
+        run: |
+          if [ -f Package.resolved ]; then
+            echo "### Resolved pins" >> "$GITHUB_STEP_SUMMARY"
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat Package.resolved >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi

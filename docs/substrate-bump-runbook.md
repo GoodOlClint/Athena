@@ -63,7 +63,7 @@ Heavy gates need xcodebuild (metallib; ADR 009 — they crash under bare `swift 
 
 ## 7. Delivery
 
-One PR, base main, `Closes` the bump issue and every issue it resolves (grep the body for closing keywords next to issues that must stay open — GitHub ignores negation). The PR's CI run is the **on-CI cold-resolve demonstration** only when the cache genuinely cannot serve it (fresh salt namespace or a rotated runner image); otherwise `restore-keys` silently defeats it — #90 tracks the standing gap. Expect the review loop to attack the claims; every number in the PR body should have a log behind it.
+One PR, base main, `Closes` the bump issue and every issue it resolves (grep the body for closing keywords next to issues that must stay open — GitHub ignores negation). The PR's CI run gives you a **genuine on-CI cold-resolve demonstration**: `cold-resolve.yml` triggers on any change to `Package.swift`/`Package.resolved`, and resolves with no cache and no `.build`, so a bump PR always exercises the new pin against the real remote. (The `unit` job's own run proves nothing about reachability — `restore-keys` silently serves the pins from a restored mirror, which is exactly how #86 stayed green.) Expect the review loop to attack the claims; every number in the PR body should have a log behind it.
 
 ## Failure signatures → cause
 
