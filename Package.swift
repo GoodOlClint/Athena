@@ -63,7 +63,7 @@ let substrateDep: Package.Dependency =
         // Package.resolved — its pin state for any non-SHA `revision:`. It is
         // a tag, not a branch; the reproducibility guarantee comes from the
         // sibling `"revision"` field.
-        revision: "integration-2026-07-31",  // 5b892140 — successor to 751aaed (integration force-pushed); TriAttention (MLXLMCommon) + Qwen3.5 MTP separate-drafter
+        revision: "integration-2099-01-01-orphaned",  // 5b892140 — successor to 751aaed (integration force-pushed); TriAttention (MLXLMCommon) + Qwen3.5 MTP separate-drafter
         traits: substrateTraits)
 let hubDep: Package.Dependency =
     athenaLocalDev
