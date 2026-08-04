@@ -396,8 +396,6 @@ echo "== phase 2.2: OpenAI sampling params — stop/seed/top_p + 400s (M31.3) ==
 code 400 POST /v1/chat/completions "$ALICE_TOK" \
   '{"model":"Qwen3.5-27B-4bit-mtp","messages":[{"role":"user","content":"hi"}],"n":2}'
 code 400 POST /v1/chat/completions "$ALICE_TOK" \
-  '{"model":"Qwen3.5-27B-4bit-mtp","messages":[{"role":"user","content":"hi"}],"logprobs":true}'
-code 400 POST /v1/chat/completions "$ALICE_TOK" \
   '{"model":"Qwen3.5-27B-4bit-mtp","messages":[{"role":"user","content":"hi"}],"logit_bias":{"50256":-100}}'
 # n:1 is the supported single-decode case ⇒ 200.
 code 200 POST /v1/chat/completions "$ALICE_TOK" \
@@ -431,6 +429,16 @@ code 400 POST /v1/chat/completions "$ALICE_TOK" \
 # logprobs on a sampling request (temperature>0, no schema) ⇒ 400 (no capture seam).
 code 400 POST /v1/chat/completions "$ALICE_TOK" \
   '{"model":"Qwen3.5-27B-4bit-mtp","messages":[{"role":"user","content":"hi"}],"temperature":0.7,"logprobs":true}'
+# #105 — logprobs with temperature OMITTED ⇒ 400, the case a real client hits.
+# The gate is `(rawTemperature == 0) || hasSchema` on an Optional, so a missing
+# temperature is nil, not zero: an absent override means "apply the loaded
+# sampling default", which is a sampling request. This assertion lived up in
+# phase 2.2 among the n>1/logit_bias rejections, where it read as "logprobs is
+# unconditionally 400" and nothing named the condition; it belongs here in the
+# logprobs cluster, among the other temperature-vs-logprobs verdicts. The
+# OpenAPI descriptions used to predict a 200 for this body (#105).
+code 400 POST /v1/chat/completions "$ALICE_TOK" \
+  '{"model":"Qwen3.5-27B-4bit-mtp","messages":[{"role":"user","content":"hi"}],"logprobs":true}'
 # #72 — the decode/admission divergence, at the layer where it is observable.
 # -1e-60 DECODES greedily (it narrows to -0.0, which passes the sign test and
 # takes the greedy sampler arm) but is ADMISSION-nonzero, because the C2 gate
