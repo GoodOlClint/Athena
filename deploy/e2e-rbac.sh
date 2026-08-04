@@ -434,8 +434,8 @@ code 400 POST /v1/chat/completions "$ALICE_TOK" \
 # temperature is nil, not zero: an absent override means "apply the loaded
 # sampling default", which is a sampling request. This assertion lived up in
 # phase 2.2 among the n>1/logit_bias rejections, where it read as "logprobs is
-# unconditionally 400" and nothing named the condition; it belongs here, beside
-# the temperature-0 200 and the temperature-0.7 400 it sits between. The
+# unconditionally 400" and nothing named the condition; it belongs here in the
+# logprobs cluster, among the other temperature-vs-logprobs verdicts. The
 # OpenAPI descriptions used to predict a 200 for this body (#105).
 code 400 POST /v1/chat/completions "$ALICE_TOK" \
   '{"model":"Qwen3.5-27B-4bit-mtp","messages":[{"role":"user","content":"hi"}],"logprobs":true}'
