@@ -7,7 +7,7 @@ demuxing its audio track and transcribing it with the same engine as
 > **Athena-native, NOT OpenAI-compatible.** OpenAI has no video API. The route
 > reuses the OpenAI transcript *response shape* for consumer convenience, but it
 > is an Athena extension under the `/v1` namespace (marked `[native]` in the
-> CLAUDE.md endpoint list and in `/openapi.json`).
+> AGENTS.md endpoint list and in `/openapi.json`).
 
 ## Request
 

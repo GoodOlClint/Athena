@@ -614,7 +614,7 @@ struct OpenAIModel: Codable {
     let owned_by: String
     /// ADR 042 — **Athena-native extensions** on an `[oai]` route (the `/v1`
     /// compatibility rule: marked here, in the spec description, and in the
-    /// CLAUDE.md endpoint list). Both omitted when nil, so a model whose
+    /// AGENTS.md endpoint list). Both omitted when nil, so a model whose
     /// config lacks the field — or an unbounded prefill opt-out — encodes
     /// byte-identically to the pre-ADR-042 object.
     ///
