@@ -25,6 +25,41 @@ You are Athena's pre-submit reviewer. You review a WORKING DIFF (run `git diff H
 - Deletions: grep `Sources/ Tests/ clients/ deploy/` for every removed symbol — including doc comments that name it — before calling it orphaned.
 - Doc-of-record edits (ADR amendments especially): after interpolating an annotation into an existing sentence, re-read the whole resulting sentence — a mid-sentence insert that leaves the original conclusion standing is the known way self-contradictions ship (the ADR 028:58 incident, issue #66).
 
+## Defect classes this workflow actually produces
+
+Derived from 15 reviewer findings on 2026-08-03 — filed issues plus inline
+blockers — none of which was rejected as wrong. Every one falls in a class below, and every class is cheap to check
+before pushing. Run these against the diff **including its own prose** — most of
+the misses were in documentation the same diff added, not in code.
+
+1. **Claims in the diff's own prose, tested** (5 of 15 — the largest class). Every
+   "fails closed", "always", "never", "verified", and every count ("tested against
+   9 cases") is a claim the diff must *deliver*, not assert. Pass 2 already attacks
+   claims in code; extend it to the sentences the diff adds. Shipped examples: a
+   header claiming "Fails CLOSED" on a script that exited 0 on a bad ref; "Codex
+   has no house context" about a tool that auto-loads AGENTS.md.
+
+2. **Controls are reachable and enforced** (3 of 15). A gate wired to nothing reads
+   as evidence and is worse than no gate. Verify the chain: does a referenced label
+   exist; is the check in the required-status list; is CODEOWNERS backed by
+   `require_code_owner_reviews`; can the advertised escape hatch actually clear a
+   failure. All three shipped examples were of this shape.
+
+3. **Verified on the runtime that will run it** (2 of 15). Local tooling is not CI
+   tooling — `grep` is shimmed to `ugrep` in a Claude Code shell and accepts `\t`
+   where GNU grep may not, and `pull_request` excludes the `labeled` activity type
+   by default. Pin shell constructs with a fixture that runs on the runner.
+
+4. **The ordinary path, not just happy and target-failure** (3 of 15). Testing "it
+   accepts a valid input" and "it rejects the bad one" missed the routine case in
+   between. Enumerate the input space from the schema, and include the input that
+   should pass through untouched.
+
+5. **Final state after any destructive git operation** (2 of 15). `git reset
+   --hard` in a test cycle silently discarded a staged deletion, and later three
+   unrelated edited files. Commit before testing, prefer fixtures over mutating the
+   repo, and re-check `git status` afterwards rather than assuming.
+
 ## Output
 
 Findings with `file:line`, each classified **real bug / risk / nit**, most severe first. State what you VERIFIED (ran, grepped, brute-forced) separately from what you reason about. If the unit tier is cheap to run (`./deploy/test.sh`), run it and report the count. No praise, no summary of the diff — findings only.
