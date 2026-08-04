@@ -148,7 +148,16 @@ jobs:
           # `git diff --numstat` renders a rename as `dir/{old => new}.ext`,
           # which the $-anchored exclusions would miss; normalise to the new
           # path first so a renamed generated file is still excluded.
-          stat=$(git -c core.quotePath=false diff --numstat HEAD^1 HEAD \
+          # Assert the base-vs-merge-result assumption rather than trusting it.
+          if ! git rev-parse --verify --quiet HEAD^2 >/dev/null; then
+            echo "::error title=Cannot measure PR size::HEAD is not a merge commit, so HEAD^1 is not the base branch. The checkout is not the pull_request merge ref. Refusing to report a size that would be wrong."
+            exit 1
+          fi
+          # `git diff` failure must KILL the step; `|| true` belongs only on the
+          # filter, where an empty result is legitimate. One `|| true` covering
+          # both meant an unreachable HEAD^1 produced total=0 and a GREEN check.
+          raw=$(git -c core.quotePath=false diff --numstat HEAD^1 HEAD)
+          stat=$(printf '%s\n' "$raw" \
             | sed -E 's/\{[^}]* => ([^}]*)\}/\1/g' \
             | grep -vE "$EXCLUDE_RE" || true)
           total=$(printf '%s\n' "$stat" | awk 'NF{a+=$1; d+=$2} END{print a+d+0}')
