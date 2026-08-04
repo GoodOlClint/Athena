@@ -72,7 +72,11 @@ The automated `claude-review` GitHub Action reviews on every push and submits ex
 
 ### No review arrives
 
-- The action self-skips PRs that modify `.github/workflows/` (its anti-tamper gate), draft PRs, and fork PRs (no secrets). No automated verdict will come — request review from the operator (`gh pr edit <N> --add-reviewer GoodOlClint`), report why, and stop the loop.
+- The action self-skips when the PR's copy of **`.github/workflows/claude-code-review.yml`** differs from the default branch (its anti-tamper gate) — that one file, not `.github/workflows/` broadly; a PR touching an unrelated workflow is still reviewed. It also skips draft PRs and fork PRs (no secrets).
+- The three causes do **not** behave alike, so name which one you hit:
+  - **Anti-tamper** — the job runs and fails closed, so `claude-review` goes **red**. Being a required check, the PR then needs an operator **admin merge**. Say that plainly rather than reporting "no review arrived": the red check, not the missing review, is what blocks the merge.
+  - **Draft or fork** — the job's own `if:` is false, so `claude-review` is **skipped**, which reads as passing (#77) and blocks nothing. Do not report a red check here; there isn't one.
+- No automated verdict will come, so report why and stop the loop. Requesting review from the operator (`gh pr edit <N> --add-reviewer GoodOlClint`) is a courtesy signal, not the control: `.github/` is CODEOWNERS-owned so the request is usually automatic, `require_code_owner_reviews` is off so it blocks nothing, and GitHub refuses the request outright when the operator is the PR author.
 
 ## Inline threads
 
