@@ -18,13 +18,17 @@ Four checks on the working diff, before the first push — a defect caught here 
 
    **(a) House reviewer.** Spawn the repo's **`athena-pre-reviewer`** agent (`.claude/agents/athena-pre-reviewer.md`; fall back to correctness-reviewer or /code-review where unavailable) on the working diff. Its definition carries the house instructions — correctness pass, attack-the-claims, the mutation check on test-pinning claims, and the premise check — so don't re-derive them in the spawn prompt; just point it at the diff and name the issues it implements.
 
-   **(b) Cross-model reviewer.** Run Codex over the same diff:
+   **(b) Cross-model reviewer.** Hand the same diff to Codex through the plugin's own runtime:
 
    ```
-   codex exec review --base <default-branch> -c mcp_servers.code-intel.enabled=false < /dev/null
+   node "$(ls -d ~/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs | sort -V | tail -1)" \
+     review --wait --base origin/main
    ```
 
-   `-c mcp_servers.code-intel.enabled=false` is not optional: in non-interactive `codex exec` there is nobody to approve an MCP tool call, so the code-intel call is auto-cancelled ("user cancelled MCP tool call") and the review **dies silently — exit 0, no verdict**. Without the flag the gate looks like it passed when it never ran.
+   **Use this, not a hand-rolled `codex exec review`.** That is the whole lesson of this step's history. Shelling out directly hits a hard limitation: an MCP tool call in non-interactive `codex exec` is auto-cancelled because nothing can approve it, so the review **hangs, or exits 0 with no verdict**. Nothing lifts it — not `approval_policy` at any value, not a blanket auto-approve `PreToolUse` hook, not `--dangerously-bypass-hook-trust`. Two separate PRs were then spent arguing about a `-c mcp_servers` flag, and one shipped a form that never worked at all. The plugin runtime does not take that path and needs no flags. Verified on a real code diff: exit 0, zero MCP calls attempted, real verdict.
+
+   `/codex:review` and `/codex:adversarial-review` are the same runtime and are the right entry point when the OPERATOR is driving. Both are `disable-model-invocation`, so an agent must call the companion script directly, as above. For a risk-class diff swap `review` for `adversarial-review` — it challenges the approach and its assumptions rather than hunting defects, which is where the highest-value findings have come from.
+
 
    **Commit first — the intended diff must be committed.** `--base` reviews commits only and `--uncommitted` reviews the working tree only, so on a branch holding both, *neither* sees the whole proposed change and the gate silently reviews a fraction of it. Commit **the intended diff** before running this (you are about to push anyway) — not `git add -A`. Unrelated staged, unstaged, or untracked work in the checkout must be left alone or stashed first; sweeping it in to satisfy the commit-first rule contaminates the PR with work the operator did not intend to ship. Verify with `git status --porcelain` that what remains uncommitted is only that unrelated work, and say so when you report the gate result.
 
