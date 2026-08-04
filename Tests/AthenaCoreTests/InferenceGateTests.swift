@@ -119,16 +119,22 @@ final class InferenceGateTests: XCTestCase {
         ///
         /// The handshake is bounded. Awaiting it outright is only safe when the
         /// gate is fresh and unheld, so `acquire()` takes the uncontended fast
-        /// path — that is a property of the current call sites, not of this
-        /// helper. On a contended gate an acquisition that never completes would
-        /// suspend here until the CI job timeout, reporting nothing. A deadline
-        /// turns that into one named failure.
+        /// path — and that is NOT true everywhere: the deadline-arm test
+        /// deliberately builds on a gate it already holds, so its acquisition
+        /// is still queued inside `acquire()` when the deadline fires. That is
+        /// precisely why the handshake carries a deadline instead of trusting
+        /// the assumption; without one, an acquisition that never completes
+        /// would suspend here until the CI job timeout, reporting nothing.
         ///
         /// Fails (returns nil) rather than handing back a holder that does not
-        /// hold: a failed acquisition leaves `task` cancelled, so a call site
-        /// that carried on would rethrow `CancellationError` from its later
-        /// `holder.task.value` and bury the named diagnostic under secondary
-        /// noise pointing at the wrong thing. Call sites `guard let`.
+        /// hold. Where the acquisition genuinely failed, `task` is left
+        /// cancelled, so carrying on would rethrow `CancellationError` from a
+        /// later `holder.task.value` and bury the named diagnostic under
+        /// secondary noise pointing at the wrong thing. (That reasoning covers
+        /// the `.timedOut`/`.neverAcquired` arms; `.callerCancelled` is the
+        /// arm where the gate may have been acquired perfectly well — see the
+        /// note on that arm.) A nil result means no holder was obtained; a
+        /// caller must not proceed as though it had one.
         init?(
             _ gate: InferenceGate, seconds: Double = 10,
             failureSink: FailureSink? = nil, failAcquire: Bool = false,
@@ -191,16 +197,21 @@ final class InferenceGateTests: XCTestCase {
                     // well have been acquired healthily (#81 measured
                     // acquisitions == 1 on every misreport).
                     //
-                    // Still REPORTS rather than returning nil quietly. A
-                    // cancelled caller is not itself a defect, but at the call
-                    // sites that EXPECT a holder — the
-                    // `guard let ... else { return }` ones — a silent nil would
-                    // skip the rest of that test and pass vacuously. The
-                    // remaining sites bind the result and assert nil
-                    // deliberately, so they are unaffected either way. Stated
-                    // as two classes rather than a count of each, because a
-                    // count in prose goes silently false the day someone adds
-                    // a ninth call site.
+                    // Still REPORTS rather than returning nil quietly, and the
+                    // reason is a property of THIS HELPER, not of any inventory
+                    // of its callers: once the handshake result is discarded
+                    // the cause is unrecoverable — nothing downstream can
+                    // reconstruct why nil came back — so the helper is the only
+                    // place that can name it.
+                    //
+                    // Deliberately not justified by classifying call sites.
+                    // Three previous versions of this comment tried that ("every
+                    // call site is `guard let`", then "the remaining sites are
+                    // unaffected either way", then an exhaustive two-shape
+                    // split) and each was falsified by a site that did not fit.
+                    // Any claim quantified over the caller inventory decays
+                    // silently the moment someone adds a caller; the contract
+                    // above does not.
                     cause =
                         "HeldGate handshake was abandoned because the CALLER "
                         + "was cancelled — this reports nothing about the "
