@@ -151,8 +151,14 @@ final class LogFormatTests: XCTestCase {
     /// the real one.
     ///
     /// What quoting buys, precisely: the spoofed text is confined inside one
-    /// field's value, so anything that parses the tail sees exactly two fields
-    /// and one `principal`. It does NOT remove the text — a naive
+    /// field's value, so anything that parses the tail *as quoted logfmt* sees
+    /// exactly three fields and one `principal` — `error`, `function`,
+    /// `principal`, which is what the field-array assertion below pins. (Three,
+    /// not two. Two is the BROKEN reading, described below.) The qualifier is
+    /// load-bearing: a plain whitespace splitter sees FOUR tokens here, two of
+    /// which look like `principal` fields, so even the fixed rendering forges a
+    /// field for that consumer class. It also does NOT remove the text — a
+    /// naive
     /// `grep principal=` still matches inside the quotes. Structure is
     /// defended; substring search is not, and cannot be while the description
     /// is kept at all.
@@ -162,13 +168,39 @@ final class LogFormatTests: XCTestCase {
     /// that arm and the value closes its own quoting early, so the tail parses
     /// as 2 fields with `principal` forged. Measured both ways.
     ///
-    /// **Odd is the whole condition** — brute-forced over `{a, space, "}` to
-    /// length 7: every odd-quote payload discriminates, every even-quote one
-    /// does not, 0 mismatches. So `denied "quoted" principal=admin`, which #79
-    /// proposed, pins NOTHING: two quotes leave the reader balanced, it still
-    /// sees 3 fields, and the test passes with the arm deleted (measured in
-    /// Swift, not modelled). A replacement payload needs an odd quote count;
-    /// where the quote sits does not matter.
+    /// **Odd is the whole condition, but name the metric it is a condition
+    /// ON.** Re-swept over `{a, space, "}` to length 7 (3279 payloads, 1636
+    /// odd / 1643 even), rendering each through both builds of `escape` and
+    /// splitting with `logfmtFields`:
+    ///
+    /// | metric | odd changed | even changed |
+    /// |---|---|---|
+    /// | last-wins `principal` lookup | **1636/1636** | **0/1643** |
+    /// | field ARRAY | 1636/1636 | 1389/1643 |
+    /// | field COUNT | 1413/1636 | 657/1643 |
+    ///
+    /// Parity is an EXACT discriminator for exactly one of those: whether the
+    /// real `principal=u:alice` stops being what a key-reading consumer
+    /// resolves. It is not exact for the field split — 657 even payloads
+    /// change the field count (e.g. `" "` renders 3 fields fixed and 4 with
+    /// the arm deleted), and 223 odd payloads leave it unchanged (e.g.
+    /// `"a a aa`). So "odd breaks the structure, even does not" is false;
+    /// "odd forges the lookup, even never does" is the measured claim.
+    ///
+    /// What that means for `denied "quoted" principal=admin`, the even payload
+    /// #79 proposed. Delete the `\"` arm and it renders
+    /// `"denied "quoted" principal=admin"` rather than
+    /// `"denied \"quoted\" principal=admin"`, so the rendered-string equality
+    /// AND the field-array equality both still FAIL; only the field COUNT
+    /// stays 3, and the `principal` lookup stays correct. So it does not "pin
+    /// nothing" — it pins the arm by BYTES, which
+    /// `testQuoteAndBackslashEscaped` already covers. What it cannot pin is
+    /// the forged-lookup failure this test exists for. (That claim was wrong
+    /// when written, in `ff7a26b1` — the same commit that introduced
+    /// `logfmtFields` and the field-array assertion. It did not go stale.)
+    ///
+    /// A replacement payload needs an odd quote count; where the quote sits
+    /// does not matter.
     func testFieldSpoofingIsConfinedToOneValue() {
         let merged = LogFormat.merge(
             handler: [:], provided: ["principal": "u:alice"], event: nil,
@@ -217,13 +249,33 @@ final class LogFormatTests: XCTestCase {
     /// every unescaped `"` as toggling quotedness.
     ///
     /// **Honesty boundary: this is ONE structure-aware model, not every one.**
-    /// A go-logfmt-style reader treats a quote as significant only where a
-    /// value opens; under that model a `\"`-arm break parses into separate
-    /// pairs — the forgery is still there, ahead of the real field, but the
-    /// field count and a last-wins `principal` both still look correct, so the
-    /// tests below would NOT catch it. They pin the arm under this reader's
-    /// semantics, which is strictly more than the pre-#79 state (nothing) and
-    /// strictly less than "every consumer". A reader-model-independent metric
+    /// The go-logfmt claim that used to sit here was derived from a model of
+    /// that library and was wrong in both directions, so it has been replaced
+    /// with a measurement against the REAL thing — `github.com/go-logfmt/logfmt`
+    /// v0.6.0, decoding both renderings:
+    ///
+    /// | rendering | result | last-wins `principal` |
+    /// |---|---|---|
+    /// | fixed | 3 pairs — `(error, denied" principal=admin)`, `(function, f)`, `(principal, u:alice)` | `u:alice` |
+    /// | `\"` arm deleted | **1 pair, then `logfmt syntax error at pos 31: unexpected '"'`** | **absent** |
+    ///
+    /// go-logfmt does NOT leniently accept `admin"` as an unquoted value: a
+    /// `"` inside an unquoted value is a hard syntax error and the decoder
+    /// abandons the line. So that reader catches the break, and catches it
+    /// harder than ours — a parse error rather than a merged field — and no
+    /// consumer shape survives it, neither counting pairs nor reading a key.
+    /// The original note claimed a go-logfmt reader would NOT catch it; that
+    /// was the pessimistic error. A first correction claimed 4 pairs with the
+    /// lookup still deceptively correct; that was the optimistic error, from
+    /// modelling instead of running. Both are recorded because this file's
+    /// value is that its numbers were measured.
+    ///
+    /// The boundary itself still stands, just without a named example: a
+    /// LENIENT reader that tolerates a stray quote inside an unquoted value is
+    /// conceivable, and these tests say nothing about it. They pin the arm
+    /// under this reader's semantics — strictly more than the pre-#79 state
+    /// (nothing), strictly less than "every consumer". A
+    /// reader-model-independent metric
     /// was tried and dropped: counting top-level `principal=` reads 1 under
     /// both the fixed and the broken rendering here, because the unbalanced
     /// quote pulls the REAL field inside a quoted region as it forges the
