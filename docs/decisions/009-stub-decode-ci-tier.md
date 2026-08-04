@@ -1,6 +1,6 @@
 # 009 — Stub decode CI tier: pure-Swift control-flow seams, not a fake MLX device
 
-**Status:** Accepted — Implemented (M70.2/.3, v0.10.151+). All decision-algebra seams + unit tests landed (`DecodeLoopControl`, `GuidedMask`/`maskedArgmax`, ~~`PrefixKVCache`~~, ~~speculative-sampling~~, structured-schema). The numeric tier stays env-gated (`ATHENA_RUN_MODEL_TESTS`) by design — `MLXArray` cannot evaluate under `swift test`. (M70.3 test-coverage tail ND14/ND15 still open — see `docs/backlog-hitlist.md` #8.) **Two seams struck (#76).** `PrefixKVCache` — the M59 **in-RAM** prefix cache that the ADR 027 disk stack was built on, not a member of it — was deleted by publication S0 (`997d36fd`). `speculative-sampling` (the `SpeculativeSampling` seam) was deleted by #41/#48 (`9d1c5442`) after S0 orphaned it. Neither is in `Sources/` or `Tests/`, so this line claimed two landed seams that are not in the tree. Struck rather than silently dropped, so the list does not read as if the tier always had three seams.
+**Status:** Accepted — Implemented (M70.2/.3, v0.10.151+). All decision-algebra seams + unit tests landed (`DecodeLoopControl`, `GuidedMask`/`maskedArgmax`, ~~`PrefixKVCache`~~, ~~speculative-sampling~~, structured-schema). The numeric tier stays env-gated (`ATHENA_RUN_MODEL_TESTS`) by design — `MLXArray` cannot evaluate under `swift test`. (M70.3 test-coverage tail ND14/ND15 still open — see `docs/backlog-hitlist.md` #8.) **Two seams struck (#76).** `PrefixKVCache` — the M59 **in-RAM** prefix cache that the ADR 027 disk stack was built on, not a member of it — was deleted by publication S0 (`997d36fd`). `speculative-sampling` (the `SpeculativeSampling` seam) was deleted by #41/#48 (`9d1c5442`) after S0 orphaned it. Neither is in `Sources/` or `Tests/`, so this line claimed two landed seams that are not in the tree. Struck rather than silently dropped, so the list does not read as if the tier always had three seams. **One Consequences deliverable was never built (#101):** `StubDecodeHarness` — see Consequences. That is a different failure from the two struck seams above, which existed and were later removed, and it is called out here because a reader who stops at this Status line would otherwise take "all seams + unit tests landed" at face value.
 **Date:** 2026-06-13
 **Milestone:** M70 (audit-remediation; resolves the L-cross-cutting "stub-model CI
 tier" keystone + L1/L2/L5/L7/L8, NC4/NC5/NC6 — "CI blindness")
@@ -65,7 +65,8 @@ Two structural options to get past that:
 
 **Option (a).** The stub decode tier is a **control-flow / decision-algebra
 tier, not a numeric tier.** It follows the same extract-pure-seam pattern this
-program already used for `rankTopK`/`lengthBuckets`/`AthenaMetrics.percentile`/
+program already used for ~~`rankTopK`~~ (deleted with the vector store by
+`c6cab9d6`, ADR 025 S1+S3)/`lengthBuckets`/`AthenaMetrics.percentile`/
 `AthenaProxy.describe`: the seams that decide *what* the loop does are pulled
 into MLX-free Swift and pinned by `./deploy/test.sh`; the `MLXArray` numerics
 that compute the values stay in the MLX-linked targets and remain the province
@@ -79,10 +80,16 @@ device is not even available as a fallback: MLX won't initialize without the
 metallib, so (b) would still require a non-MLX tensor type threaded through the
 hot path.
 
-Co-location, not a new target (per the lengthBuckets/rankTopK/`SpeculativeSampling`
-precedent — the last of those has since been deleted (#41/#48); the precedent stands
-on the other two — those live in MLX-linked targets but never call MLX in-body, so they
-run fine under `swift test`): the new seams live beside their loops in
+Co-location, not a new target (per the lengthBuckets/~~rankTopK~~/~~`SpeculativeSampling`~~
+precedent — `SpeculativeSampling` was deleted by #41/#48 and `rankTopK` by `c6cab9d6`,
+so the precedent now stands on `lengthBuckets` **alone among the three named
+here** (`Sources/AthenaEmbedding/MLXEmbeddingModule.swift` + its test); it
+lives in an MLX-linked target but never calls MLX in-body, so it
+runs fine under `swift test`. That is a narrower class than the four seams
+listed under Decision above: `AthenaMetrics.percentile` and
+`AthenaProxy.describe` are both alive, but they live in MLX-free targets
+(`AthenaServerKit`/`AthenaCore`), so they were never precedents for
+co-locating a seam *inside* an MLX-linked target): the new seams live beside their loops in
 `AthenaLLM`, except the cross-loop cancellation predicate, which lives in
 `AthenaCore` beside `DecodeProgress` (all four loops already import it). No
 `Package.swift` change.
@@ -111,14 +118,31 @@ tier must not read as "the numerics are covered"):
 
 - The new seams are MLX-free static functions/structs co-located with their
   loops; they compile and link into the MLX-linked targets and, being MLX-free
-  in body, run under `./deploy/test.sh` exactly as `lengthBuckets`/`rankTopK`
-  (and, when this was written, `SpeculativeSampling` — since deleted, #41/#48)
-  already do. `AthenaCoreTests` gains a small
-  `StubDecodeHarness` (scripted logits/tokens + a controllable
-  `DecodeProgressCounter` whose `isCancelled` can flip).
+  in body, run under `./deploy/test.sh` exactly as `lengthBuckets`
+  already does (and, when this was written, ~~`rankTopK`~~ and
+  ~~`SpeculativeSampling`~~ — both since deleted, by `c6cab9d6` and #41/#48
+  respectively).
+  ~~`AthenaCoreTests` gains a small `StubDecodeHarness` (scripted
+  logits/tokens + a controllable `DecodeProgressCounter` whose `isCancelled`
+  can flip).~~ **NOT BUILT.** Unlike the struck seams above, this one was never
+  removed — it never existed. The durable check is path-scoped:
+  `git log -S"StubDecodeHarness" --all -- Sources/ Tests/ clients/` returns
+  nothing, and at the object level every blob in the repository containing the
+  string is a revision of this ADR. (A path-LESS search is not the check: it
+  finds `917af970`, which added this sentence, and now also the commit that
+  added this annotation — so the count changes as the record is maintained.)
+  The seams it was meant to drive
+  did land, each pinned directly by its own test, so nothing is uncovered by
+  its absence; this line described a deliverable of its own Decision that was
+  not built. Recorded rather than struck silently, because "promised and never
+  built" is a different failure from "built and later deleted".
 - The extractions are **behavior-preserving refactors**: each loop calls the
   seam where it made the decision inline before, so the bit-identical-greedy /
-  structured-output / TurboQuant / TriAttention contracts are unchanged. The
+  structured-output / TurboQuant / TriAttention contracts are unchanged.
+  (**Deliberate retention, same basis as the Context banner (#76):** TurboQuant
+  was hard-removed by ADR 028 in v0.10.217, months after this refactor. The
+  sentence records what M70.2 preserved at the time and is left as written;
+  it is not a claim that TurboQuant exists today.) The
   `e2e-rbac.sh` gate (561/0) + the real-model smokes prove no drift on every
   slice.
 - The numeric half of each invariant (real-model bit-identity, cosine scoring,
