@@ -92,7 +92,12 @@ final class InferenceGateTests: XCTestCase {
         /// removing the timing dependence is the point.
         ///
         /// Driven by `testHeldGateCallerCancellationIsNotBlamedOnTheGate`,
-        /// which forces the condition rather than sampling it.
+        /// which forces CALLER CANCELLATION; the child race it exposes is
+        /// sampled, not forced — see that test's comment for the measurement
+        /// (`.entered` 81 / `.neverAcquired` 9 / `.timedOut` 10 per 100, so the
+        /// misreport condition appears roughly 1 in 5). The determinism belongs
+        /// to the fix, which collapses all three to one outcome, not to the
+        /// construction.
         private enum Handshake {
             case entered, neverAcquired, timedOut, callerCancelled
         }
@@ -187,10 +192,15 @@ final class InferenceGateTests: XCTestCase {
                     // acquisitions == 1 on every misreport).
                     //
                     // Still REPORTS rather than returning nil quietly. A
-                    // cancelled caller is not itself a defect, but every call
-                    // site is `guard let ... else { return }`, so a silent nil
-                    // would skip the rest of that test and pass vacuously.
-                    // Naming the cancellation is the safer failure mode.
+                    // cancelled caller is not itself a defect, but at the call
+                    // sites that EXPECT a holder — the
+                    // `guard let ... else { return }` ones — a silent nil would
+                    // skip the rest of that test and pass vacuously. The
+                    // remaining sites bind the result and assert nil
+                    // deliberately, so they are unaffected either way. Stated
+                    // as two classes rather than a count of each, because a
+                    // count in prose goes silently false the day someone adds
+                    // a ninth call site.
                     cause =
                         "HeldGate handshake was abandoned because the CALLER "
                         + "was cancelled — this reports nothing about the "
@@ -235,7 +245,9 @@ final class InferenceGateTests: XCTestCase {
         ///
         /// The floor is what keeps this fast rather than flaky. The span being
         /// bounded is `task.cancel()` + `releaseC.finish()` draining a handful
-        /// of actor hops, plus `joinUnwind`'s 1 ms poll tick. No direct
+        /// of actor hops, plus `joinUnwind`'s poll tick (~2 ms in situ since
+        /// #107 moved the pacing into an uncancellable Task; it was nominally
+        /// 1 ms before, and 0 under cancellation). No direct
         /// measurement of THIS span exists; the floor is justified by analogy
         /// with a comparable one measured elsewhere in this repo — #28's
         /// actor-hop span, 2–14 ms even under 2x CPU oversubscription. 1 s is
@@ -292,7 +304,40 @@ final class InferenceGateTests: XCTestCase {
                         file, line)
                     return
                 }
-                try? await Task.sleep(for: .milliseconds(1))
+                // Pace from a context that CANNOT be cancelled. `try? await
+                // Task.sleep` looks like a 1 ms pause but is a no-op in a
+                // cancelled task — sleep throws immediately and `try?`
+                // swallows it — so the loop would spin at full tilt until the
+                // holder unwinds or the budget expires. #106 introduced the
+                // first path that reaches here from a CANCELLED caller (25×
+                // per run), which is what made this reachable.
+                //
+                // MEASURED two ways, because the worst case and the typical
+                // case are far apart and quoting only one misleads.
+                //
+                // Worst case — 200 polls in a cancelled task with `done` never
+                // set, i.e. the loop running to its deadline:
+                //   try? await Task.sleep(1ms)       0.00015 s   (no pacing)
+                //   await Task { sleep(1ms) }.value  0.307 s     (~1.5 ms each)
+                //
+                // In situ — the 25 cancelled calls this file actually makes:
+                // the OLD form spun 0–7 times per call, 47 polls total, 2–15 µs
+                // per call. So on a normal runner the bug was invisible, which
+                // is why it was recorded as a harmless ceiling for a while.
+                // The NEW form paces once per call at ~2.0 ms.
+                //
+                // The reason to fix it anyway is that "invisible" depends on
+                // the pool: under `LIBDISPATCH_COOPERATIVE_POOL_STRICT=1` the
+                // old form fails deterministically, because a loop that never
+                // yields cannot let the observer task run on a one-thread
+                // pool. Not pinned by the default tier (#143).
+                //
+                // The fix rests on two facts this file already relies on: an
+                // unstructured `Task {}` does not inherit cancellation, and
+                // awaiting `task.value` is not interrupted by the awaiting
+                // task's own cancellation (see `joinUnwind`'s header). Cost is
+                // one Task allocation per poll, bounded by the deadline.
+                await Task { try? await Task.sleep(for: .milliseconds(1)) }.value
             }
         }
 
@@ -764,13 +809,25 @@ final class InferenceGateTests: XCTestCase {
     /// iterations 4, 2, 3, 1, 2, 3, 3, 2, 3. The loop is what turns a ~1-in-5
     /// detection into a reliable one.
     ///
-    /// CEILING: `joinUnwind`'s poll paces on `try? await Task.sleep`, which
-    /// throws instantly in a cancelled task — so this is the first path that
-    /// reaches it busy-spinning, 25× per run. Measured harmless (0.002 s total,
-    /// unchanged under 2× CPU oversubscription). The flake shape if a runner
-    /// ever starves is specific and worth recognising: a SECOND diagnostic
-    /// ("bail did not unwind"), which trips the `recorded.count == 1`
-    /// assertion rather than any of the arm assertions.
+    /// CEILING — RESOLVED (#107), kept because the failure it predicted was
+    /// then reproduced deterministically. This is the first path to reach
+    /// `joinUnwind` from a cancelled caller (25× per run, counted in situ), and
+    /// `joinUnwind` used to pace on a bare `try? await Task.sleep`, which
+    /// throws instantly in a cancelled task and so did not pace at all. On a
+    /// normal runner that was harmless — 47 polls total across the 25 calls,
+    /// 2–15 µs each — which is what "measured harmless, 0.002 s" recorded.
+    ///
+    /// Starve the pool and it stops being harmless, exactly in the shape this
+    /// note predicted: under `LIBDISPATCH_COOPERATIVE_POOL_STRICT=1` the old
+    /// pacing fails deterministically — every iteration reports a SECOND
+    /// diagnostic ("bail did not unwind within 1.0s") and trips the
+    /// `recorded.count == 1` assertion, rather than any arm assertion failing.
+    /// The busy loop never yielded, so on a one-thread cooperative pool the
+    /// observer task could not run. Reproduced by mutation, both directions.
+    ///
+    /// `joinUnwind` now paces from an uncancellable context (see its pacing
+    /// comment), and the same strict-pool run is green. Nothing in the default
+    /// tier pins this — see the note there.
     func testHeldGateCallerCancellationIsNotBlamedOnTheGate() async throws {
         // #81's premise is "the gate was acquired NORMALLY" — all 44 original
         // misreports had `acquisitions == 1`. Without pinning that, this test
