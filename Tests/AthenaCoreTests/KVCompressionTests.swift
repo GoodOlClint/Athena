@@ -5,8 +5,10 @@ import XCTest
 
 /// The shared `kv_compression` knob: precedence (env > TOML > none),
 /// normalization (case-folding and trimming), fail-closed validation, and the
-/// `kvScheme` accessor the MLX-coupled extension exposes — the seven tests
-/// below, in that order. Pure logic — no MLX, always runs in CI. M20.2 introduced
+/// `kvScheme` accessor the MLX-coupled extension exposes. Those are the
+/// behaviours the tests below cover, not a running order — one test exercises
+/// precedence and trimming together, so the categories do not map onto the
+/// file top to bottom. Pure logic — no MLX, always runs in CI. M20.2 introduced
 /// this contract; M21 added the `triattention` case (the M20 `turboquant` case
 /// has since been retired).
 ///
