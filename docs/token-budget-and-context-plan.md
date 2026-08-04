@@ -22,7 +22,7 @@ Surfaced per the gate, resolved in-plan rather than deferred:
 |---|---|
 | All HTTP routes live in `OpenAPISpec.swift`, updated in the same edit | Every slice that adds a route or field edits the spec in the same commit; `deploy/e2e-rbac.sh`'s path-count drift guard is updated with it. |
 | All errors use the `{"error":{message,type,code}}` envelope | `quota_exceeded` / `insufficient_quota` uses the envelope verbatim, mirroring `RateLimit.tooMany`. |
-| `/v1` compatibility rule — non-OpenAI surfaces must be tagged in the introducing ADR, the spec description, and the CLAUDE.md endpoint list | ADR 042 §2 marks the two model fields as native extensions on an `[oai]` route; `count_tokens` is tagged `[anthropic]`. All three edits land with the code. |
+| `/v1` compatibility rule — non-OpenAI surfaces must be tagged in the introducing ADR, the spec description, and the AGENTS.md endpoint list | ADR 042 §2 marks the two model fields as native extensions on an `[oai]` route; `count_tokens` is tagged `[anthropic]`. All three edits land with the code. |
 | No parallel implementation of a canonical pipeline | `count_tokens` reuses `container.prepare` (the request path's own tokenizer + template) rather than re-implementing counting; quotas reuse the `meter()` chokepoint and the `RateLimitMiddleware` shape. |
 | ADR 009 — decision logic MLX-free and unit-pinned | `QuotaWindow` / `QuotaDecision` in `AthenaServerKit`; `ModelConfigInfo.maxPositionEmbeddings` and the effective-ceiling resolution in `AthenaCore`. All pinned by `./deploy/test.sh`. |
 | ADR 040 S8 — versions are release events | Slices land as plain commits, **no `appVersion` bump, no per-slice tag**. A version bump happens only in an operator-approved release commit. |
