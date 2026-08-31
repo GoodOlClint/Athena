@@ -205,13 +205,18 @@ final class InferenceGateTests: XCTestCase {
                     // place that can name it.
                     //
                     // Deliberately not justified by classifying call sites.
-                    // Three previous versions of this comment tried that ("every
-                    // call site is `guard let`", then "the remaining sites are
-                    // unaffected either way", then an exhaustive two-shape
-                    // split) and each was falsified by a site that did not fit.
-                    // Any claim quantified over the caller inventory decays
-                    // silently the moment someone adds a caller; the contract
-                    // above does not.
+                    // Two shipped versions of this comment tried that and were
+                    // each falsified by call sites that did not fit ("every call
+                    // site is `guard let`" — the four binding sites; "the
+                    // remaining sites are unaffected either way" — #145, at
+                    // the one site the branch reaches). A third, an exhaustive
+                    // two-shape split, was drafted and rejected in review on
+                    // the form of the claim, not by a counterexample:
+                    // enumeration is the wrong instrument here, however
+                    // correct today's enumeration happens to be. Any claim
+                    // quantified over the caller inventory decays silently the
+                    // moment someone adds a caller; the contract above does
+                    // not.
                     cause =
                         "HeldGate handshake was abandoned because the CALLER "
                         + "was cancelled — this reports nothing about the "
