@@ -796,23 +796,23 @@ final class MemoryGovernorTests: XCTestCase {
         XCTAssertEqual(sLax.modules.first { $0.id == .llm }?.state, .loaded)
     }
 
-    /// Rung 1 of the admission ladder: shedding the reconstructible prompt-KV
-    /// pool lowers the live footprint (it is live MLX memory, counted in
+    /// Rung 1 of the admission ladder: trimming the reconstructible MLX buffer
+    /// cache lowers the live footprint (it is live MLX memory, counted in
     /// `committed`), so a load that didn't fit at the front door fits after the
     /// reclaim — WITHOUT evicting a tenant.
     func testReclaimRungAdmitsWithoutEviction() async throws {
-        // Front door: committed 950 ⇒ 950 + 400 > 1000, refuse. The relief hook
-        // drops the live footprint to 300 (the pool was the bloat) ⇒ re-gate
+        // Front door: committed 950 ⇒ 950 + 400 > 1000, refuse. The reclaim hook
+        // drops the live footprint to 300 (the cache was the bloat) ⇒ re-gate
         // 300 + 400 ≤ 1000, admit.
         let fp = FakeFootprint(phys: 950, cache: 0)
-        let reliefCalled = FakeFootprint(phys: 0)  // reuse as a simple counter
+        let reclaimCalled = FakeFootprint(phys: 0)  // reuse as a simple counter
         let gov = MemoryGovernor(
             totalBudgetBytes: 1_000,
-            promptCacheRelief: {
-                fp.phys = 300
-                reliefCalled.phys += 1
-            },
             footprintProbe: { fp.sample() },
+            reclaimCache: {
+                fp.phys = 300
+                reclaimCalled.phys += 1
+            },
             admissionMode: .footprint)
         await gov.register(StubLLMModule(reserveBytes: 400), evictable: false)
 
@@ -821,9 +821,9 @@ final class MemoryGovernorTests: XCTestCase {
         let s = await gov.snapshot()
         XCTAssertEqual(
             s.modules.first { $0.id == .llm }?.state, .loaded,
-            "reclaiming the prompt pool should admit without eviction")
+            "reclaiming the buffer cache should admit without eviction")
         XCTAssertGreaterThanOrEqual(
-            reliefCalled.phys, 1, "the relief rung must have fired")
+            reclaimCalled.phys, 1, "the reclaim rung must have fired")
     }
 
     /// ADR 029 WP1 — the governor's admission reclaim must run its Metal-touching
@@ -853,14 +853,14 @@ final class MemoryGovernorTests: XCTestCase {
 
         let gov = MemoryGovernor(
             totalBudgetBytes: 1_000,
-            promptCacheRelief: {
+            footprintProbe: { fp.sample() },
+            reclaimCache: {
                 // Mirror Load.swift: run the reclaim under the gate.
                 try? await gate.withExclusiveExecution {
                     fp.phys = 300
                     await log.append("reclaim")
                 }
             },
-            footprintProbe: { fp.sample() },
             admissionMode: .footprint)
         await gov.register(StubLLMModule(reserveBytes: 400), evictable: false)
 
@@ -890,7 +890,7 @@ final class MemoryGovernorTests: XCTestCase {
         let s = await gov.snapshot()
         XCTAssertEqual(
             s.modules.first { $0.id == .llm }?.state, .loaded,
-            "the load still succeeds once the pool is reclaimed under the gate")
+            "the load still succeeds once the cache is reclaimed under the gate")
     }
 
     /// Ordered event log for the WP1 gate-serialization test.

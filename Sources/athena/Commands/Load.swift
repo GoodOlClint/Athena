@@ -665,7 +665,7 @@ struct Load: AsyncParsableCommand {
                     cacheBytes: MLX.Memory.cacheMemory
                 )
             },
-            // ADR 029 WP1 — gated reclaim (see `prefixPoolRelief`).
+            // ADR 029 WP1 — gated reclaim: the MLX free runs under the gate.
             reclaimCache: {
                 try? await InferenceGate.shared.withExclusiveExecution {
                     MLX.Memory.clearCache()

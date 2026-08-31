@@ -200,10 +200,6 @@ extension AthenaServer {
             }
         }
         await meter(principal: principal, usage: collected.usage)
-        // M60.6 parity with the OpenAI collect path — shed the prompt-prefix
-        // KV pool if this request pushed the footprint over the high-water
-        // mark. No-op (a cheap phys probe) when there's headroom.
-        await governor.relievePromptCachePressureIfNeeded()
         // WP7 — the one shared tool-call precedence algebra (ADR 034/036): a
         // substrate-detected free call keeps the text as content; a Guide-forced
         // call IS the text (drop it); else plain content.
