@@ -37,7 +37,7 @@ SwiftPM validates dependency-level settings (e.g. `traits: []`) against the mani
 
 - **Local `swift test`/`swift build`**: `rm -rf .build/checkouts .build/workspace-state.json`, re-resolve.
 - **Local xcodebuild**: `rm -rf .build/xcode/SourcePackages`.
-- **CI**: `restore-keys` prefix-restores a stale `.build` from ANY sibling key, so the whole cache namespace is poisoned — **bump the SPM salt** (`spm-vN` → `spm-vN+1`, all six occurrences across unit + seed, byte-identical). Bump it **in the bump PR itself**: a separate salt-bump PR re-poisons the new namespace, because main's post-merge seed still builds the pre-bump tree and a failed build never overwrites its save (the #94 lesson — its review is the full analysis).
+- **CI**: `restore-keys` prefix-restores a stale `.build` from ANY sibling key, so the whole cache namespace is poisoned — but since #96 the resolve step **self-heals the re-resolvable case**: the `unit` job (and `seed`, only on the cache-miss runs where its lookup-only probe lets it resolve at all — an exact hit skips resolve entirely) resolves explicitly and, on failure, emits a `::warning::`, clears `.build`, and resolves exactly once more, paying one cold rebuild with no hand-authored salt bump. A salt bump is **still required in exactly two cases**: **(a) a mis-keyed cache entry** (the #56 story) — it resolves cleanly, so the self-heal never fires and no warning ever appears; the symptom is a full recompile on every run despite an exact cache hit; **(b) re-resolvable poison whose cache key does not rotate** — a `Package.swift`-only dependency-shape change with `Package.resolved` unchanged is an exact key hit, so the poisoned entry is never replaced: every `unit` run re-heals and pays the full cold build indefinitely, and the recurring `::warning::` from the self-heal step is the signal to bump (the signal covers only (b); (a) never warns). When bumping: **bump the SPM salt** (`spm-vN` → `spm-vN+1`, all six occurrences across unit + seed, byte-identical), **in the bump PR itself**: a separate salt-bump PR re-poisons the new namespace, because main's post-merge seed still builds the pre-bump tree and a failed build never overwrites its save (the #94 lesson — its review is the full analysis).
 
 ## 5. Gates — all of them, in this order
 
@@ -45,7 +45,7 @@ SwiftPM validates dependency-level settings (e.g. `traits: []`) against the mani
 |---|---|---|
 | Unit tier | `./deploy/test.sh` | Compiles + decision seams hold against the new pin (787 tests, MLX-free — proves **no numerics**) |
 | Release build | `./deploy/build.sh Release` | Metal shaders compile; pin guard emits provenance |
-| Cold resolve | `swift package resolve --cache-path <fresh> --scratch-path <fresh>` from a copied manifest | The tag is fetchable with zero cache — the #86 failure mode |
+| Cold resolve | `swift package resolve --cache-path <fresh> --scratch-path <fresh>` from a copied manifest | The tag is fetchable with zero cache — the #86 failure mode; the local rehearsal of what `cold-resolve.yml` enforces on CI (weekly, on dispatch, and on any PR touching `Package.swift`/`Package.resolved`) |
 | e2e tool-calling | `deploy/e2e-tool-choice-auto.sh` | ADR 034/035 vs. any `ToolCallProcessor`/tool-parsing changes |
 | e2e count-tokens | `deploy/e2e-count-tokens.sh` | ADR 042 count==usage parity through the new `container.prepare` |
 | Vision smoke | red-PNG `image_url` chat against a VLM checkpoint → expect the color | ADR 010 vs. any vision-tower/pooler rewrite |
@@ -72,6 +72,6 @@ One PR, base main, `Closes` the bump issue and every issue it resolves (grep the
 | `Disabled default traits … declares no traits` | Stale checkout of a pre-traits pin (local or restored cache) | §4 |
 | `'mlx-swift' >= X contains incompatible tools version` | Toolchain older than mlx-swift's manifest | §2 (Xcode/runner floor) |
 | Missing-member errors on MLX types (`maskFill`, …) | mlx-swift resolved below the real floor (manifest floor too low + warm `.build`) | §2 (raise the manifest floor) |
-| Cold build fails, CI green | Warm cache masking an unreachable/orphaned pin | §0 (tag pin); #86/#90 |
+| Cold build fails; `unit` green on cache warmth | Unreachable/orphaned pin — the warm `unit` cache masks it; `cold-resolve.yml`'s `Resolve pins with no cache` job reddens on its next run (weekly, on dispatch, and on any PR touching `Package.swift`/`Package.resolved` — a direct-to-main manifest push gets no run until the weekly cron) | §0 (tag pin); `.github/workflows/cold-resolve.yml` |
 | `keyNotFound` at MTP drafter load | Checkpoint key-prefix vs sanitize filter mismatch — may be pre-existing, diff the load chain across pins before blaming the bump | #92 |
 | Parity gate skipped | Drafter didn't pair — investigate before reading the run as green | §5 boundary |
