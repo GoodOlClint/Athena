@@ -14,7 +14,7 @@ Two independent tracks. Track B is what the consuming project actually needs and
 
 Out of scope, recorded so it is not silently assumed: mid-stream budget cancellation; sliding-window accounting; per-token (as opposed to per-principal) budgets; metering the control plane (ADR 007 #8, closed); quota enforcement in loopback dev mode (structurally impossible per ADR 025 — there is no store and no principal); the Anthropic-dialect `POST /v1/messages/count_tokens` (deferred, ADR 042 §4(a) — same core plus the existing decoder, lands when a Messages-dialect consumer needs it); `max_output_tokens` on the model object (refused — no such cap exists, ADR 042 §4(d)); token ids or per-message breakdowns from the count route; image-bearing count requests (400, ADR 042 §4(b)).
 
-## CLAUDE.md rules this change touches
+## AGENTS.md rules this change touches
 
 Surfaced per the gate, resolved in-plan rather than deferred:
 
