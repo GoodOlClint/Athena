@@ -1,0 +1,1 @@
+scratch file for issue #157 delete_file verification — deleted in the next commit
