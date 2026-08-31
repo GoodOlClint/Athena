@@ -131,6 +131,10 @@ curl http://127.0.0.1:7447/openapi.json  # self-describing surface
 
 For production install (boot-time launchd, TLS, bearer auth, WebUI), see `docs/quickstart.md`.
 
+## Agent pushes go through the GitHub MCP (operator decision 2026-08-31)
+
+Agent-authored branches are pushed via the `github` MCP tools (`create_branch` + `push_files`, committing as the `goodolclint-claude`/`goodolclint-codex` App), **not** local `git push` over the operator's SSH key. Local git stays for everything else — worktrees, branches, local commits, diffs; only the push itself goes through the API. Exception: changes under `.github/workflows/` — the App token has no `workflows` permission, so those pushes are refused by GitHub and stay on operator-attended local `git push`. `push_files` creates its own commit from full file contents, so the commit message is passed to the tool and no `Co-Authored-By` trailer is needed (the App is the author). Because the content is re-uploaded inline, every API push is verified before the PR: commit the identical change locally, `git fetch`, and `git diff <local-commit> origin/<branch> --` must be empty — a mangled byte fails loudly here instead of merging.
+
 ## Versioning (ADR 040 S8 — in force since v0.11.0)
 
 **Versions are release events, not commit events.** `Athena.appVersion` (`Sources/athena/Athena.swift`, SSOT — also stamped into `/openapi.json`) bumps only when a release is cut: **patch** = fix-only release, **minor** = feature release, **major/1.0** = operator-reserved. Slices land as plain commits with NO version bump and NO per-slice tag (the pre-publication bump-every-slice ritual is retired). Annotated `v*` tags mark releases and drive the release pipeline. Do not bump `appVersion` in a feature commit — bump it in the release commit the operator approves (`/ship`).
