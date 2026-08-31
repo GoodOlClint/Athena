@@ -1,6 +1,6 @@
 ---
 name: pr-merge-loop
-description: Take a working diff to state=MERGED — pre-submit gate (sibling sweep + subagent review + premise-check), verdict-gated merge (APPROVED hands ready-to-merge to the operator; folds only on CHANGES_REQUESTED), review-response policy (scoped fold-in, round cap), follow-up triage, inline-thread follow-up, post-merge harvest. Invoke when code is ready to become a PR, and again whenever a review verdict or failed merge needs handling.
+description: Take a working diff to state=MERGED — pre-submit gate (sibling sweep + subagent review + premise-check), verdict-gated merge (APPROVED merges immediately; folds only on CHANGES_REQUESTED), review-response policy (scoped fold-in, round cap), follow-up triage, inline-thread follow-up, post-merge harvest. Invoke when code is ready to become a PR, and again whenever a review verdict or failed merge needs handling.
 ---
 
 # PR merge loop
@@ -52,7 +52,7 @@ Four checks on the working diff, before the first push — a defect caught here 
 - The PR body carries `Closes #N` for every issue it resolves — never close issues by hand; the merge closes them.
 - Squash on merge: per-PR commits collapse to one curated commit on main, matching the house one-commit-per-slice history.
 - Never bump `Athena.appVersion` or touch `v*` tags in a PR — versions are release events (ADR 040 S8), cut by the operator via `/ship`.
-- Merging is the operator's explicit act after the verdict — see APPROVED below.
+- Merging is an explicit act after the verdict — see APPROVED below.
 
 ## The review loop
 
@@ -67,7 +67,7 @@ The automated `claude-review` GitHub Action reviews on every push and submits ex
 
 ### APPROVED
 
-- **The verdict is the gate; the merge is the operator's.** Under the App identities the bot never merges (house rule, and the `main` ruleset requires a code-owner review no bot can give) — the operator reviews and merges as themself. On APPROVED: report the PR ready-to-merge, request the operator's review (`update_pull_request`, `reviewers`), and suspend the loop; when the merge lands, run the post-merge harvest. (Lineage: the 2026-08-01 "merge immediately" policy predates the identity split — the agent then merged on the operator's own credentials, which no longer exist in the loop. The verdict-gating and no-fold rules below are unchanged.)
+- **Merge immediately**: `merge_pull_request` (merge_method `squash`). Then the post-merge harvest. (Operator ruling 2026-08-31: merge-on-APPROVED survives the identity split — the merge lands as the App. Human judgment enters through the reviewer's COMMENTED deferral, where the operator approves or requests changes as themself.)
 - **Do NOT fold anything on an approval** (policy 2026-08-01). If a finding truly had to land before merge, the reviewer's verdict would have been CHANGES_REQUESTED — trust the verdict. Every post-approval push costs a full CI run plus a full re-review round; in the first remediation cycle the fold-after-APPROVED path added 9 extra rounds across 7 of 14 PRs for items that could all have waited one PR.
 - Follow-ups the reviewer noted in the review body survive via the post-merge harvest; issues the reviewer filed stay open for **end-of-cycle triage, before starting the next plan item** — report each with a priority and when it will be resolved. Don't let them silently become backlog.
 
@@ -91,8 +91,8 @@ If `required_conversation_resolution` is enabled on the repo, unresolved inline 
 ## Exit conditions
 
 - Loop until `pull_request_read` (get) shows the PR merged.
-- COMMENTED deferral, no-review-arrives, or awaiting the operator (ready-to-merge on APPROVED, or inline-thread resolution) → the loop suspends pending the operator; report and stop (these are valid exits short of MERGED).
-- PR approved but not merging and the operator asks why → triage in order: unresolved review threads, required status checks (`pull_request_read`, get_check_runs), branch protection. Report what you find; fix what you can.
+- COMMENTED deferral, no-review-arrives, or awaiting operator inline-thread resolution → the loop suspends pending the operator; report and stop (these are valid exits short of MERGED).
+- PR approved but not merging → triage in order: unresolved review threads, required status checks (`pull_request_read`, get_check_runs), branch protection. Report what you find; fix what you can.
 - Stacked PRs: merge sequentially, one at a time, rebasing each onto the new main after the prior lands.
 
 ## After merge (harvest — the loop's last act)
