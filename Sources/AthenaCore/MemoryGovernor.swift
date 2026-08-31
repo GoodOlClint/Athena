@@ -152,20 +152,6 @@ public actor MemoryGovernor {
     /// logging dependency; the `athena` target maps it to a per-module
     /// unified-log category.
     public typealias EventHook = @Sendable (ModuleID, String) -> Void
-    /// M59.2 — sync read of the prompt-prefix KV pool's (bytes, entries) for
-    /// the snapshot. Injected so AthenaCore stays free of any AthenaLLM
-    /// dependency. NOTE: the M59 prompt cache was removed in the S0 de-vendor,
-    /// so this hook is currently unwired (always nil) — retained as the
-    /// injection point for a future substrate prefix-cache seam (mlx-tracker
-    /// #24). nil ⇒ pool disabled / not wired.
-    public typealias PromptCachePoolProbe = @Sendable () -> (bytes: Int, entries: Int)
-    /// M59.2 — shed the prompt-prefix KV pool (drop entries not in use) as a
-    /// cheap reclaim BEFORE evicting a module or refusing a load. Injected.
-    /// nil ⇒ nothing to shed. ADR 029 WP1 — `async` for the same reason as
-    /// `ReclaimCacheHook`: `flushIdle`/`clearCache` are Metal-touching, so the
-    /// serve-side hook runs them inside the `InferenceGate`; the governor awaits.
-    public typealias PromptCacheReliefHook = @Sendable () async -> Void
-
     public let totalBudgetBytes: Int
     /// Governor-owned global prompt-cache byte cap (brief 4b). The LLM
     /// module reads this to refuse over-cap prompts.
@@ -211,8 +197,6 @@ public actor MemoryGovernor {
     private let memoryProbe: MemoryProbe?
     private let onUnloaded: UnloadHook?
     private let onEvent: EventHook?
-    private let promptCachePoolProbe: PromptCachePoolProbe?
-    private let promptCacheRelief: PromptCacheReliefHook?
     /// ADR 023 G2 — live-footprint probe + cache reclaim hook + the accounting
     /// mode. When `admissionMode == .footprint` and `footprintProbe` returns a
     /// usable sample, admission meters `max(committed, reserved)`; otherwise it
@@ -230,8 +214,6 @@ public actor MemoryGovernor {
         onUnloaded: UnloadHook? = nil,
         onEvent: EventHook? = nil,
         promptCacheCapBytes: Int? = nil,
-        promptCachePoolProbe: PromptCachePoolProbe? = nil,
-        promptCacheRelief: PromptCacheReliefHook? = nil,
         footprintProbe: FootprintProbe? = nil,
         reclaimCache: ReclaimCacheHook? = nil,
         admissionMode: GovernorMemory.AdmissionMode = .footprint
@@ -243,8 +225,6 @@ public actor MemoryGovernor {
         self.onEvent = onEvent
         self.promptCacheCapBytes =
             promptCacheCapBytes ?? (budget / 4)
-        self.promptCachePoolProbe = promptCachePoolProbe
-        self.promptCacheRelief = promptCacheRelief
         self.footprintProbe = footprintProbe
         self.reclaimCache = reclaimCache
         self.admissionMode = admissionMode
@@ -254,8 +234,6 @@ public actor MemoryGovernor {
         config: GovernorConfig, memoryProbe: MemoryProbe? = nil,
         onUnloaded: UnloadHook? = nil,
         onEvent: EventHook? = nil,
-        promptCachePoolProbe: PromptCachePoolProbe? = nil,
-        promptCacheRelief: PromptCacheReliefHook? = nil,
         footprintProbe: FootprintProbe? = nil,
         reclaimCache: ReclaimCacheHook? = nil,
         admissionMode: GovernorMemory.AdmissionMode = .footprint
@@ -270,8 +248,6 @@ public actor MemoryGovernor {
         self.promptCacheCapBytes =
             config.promptCacheCapBytes > 0
             ? config.promptCacheCapBytes : (budget / 4)
-        self.promptCachePoolProbe = promptCachePoolProbe
-        self.promptCacheRelief = promptCacheRelief
         self.footprintProbe = footprintProbe
         self.reclaimCache = reclaimCache
         self.admissionMode = admissionMode
@@ -521,16 +497,6 @@ public actor MemoryGovernor {
         guard let memoryProbe else { return }
         let highWater = totalBudgetBytes / 10 * 9  // 90%
         guard memoryProbe() > highWater else { return }
-        // M59.2 — shed the prompt-prefix KV pool first: it's a pure
-        // performance cache (every entry is reconstructible by a cold
-        // prefill), so dropping it is a cheaper, less disruptive reclaim than
-        // evicting a loaded module. Best-effort; the freed MLX buffers return
-        // to the budget on the next clearCache (the unload hook).
-        // ADR 029 WP1 — awaited: the hook runs its MLX free under the
-        // InferenceGate, so it can't race an in-flight decode. The re-read
-        // below sees its effect once it lands.
-        await promptCacheRelief?()
-        if memoryProbe() <= highWater { return }
         let victim =
             entries
             .filter {
@@ -540,25 +506,6 @@ public actor MemoryGovernor {
             .min { $0.value.lastUsed < $1.value.lastUsed }?
             .key
         if let victim { evictSync(victim) }
-    }
-
-    /// M60.6 — shed the prompt-prefix KV pool if the process footprint is over
-    /// the high-water mark, INDEPENDENT of a model-load admission. Called after
-    /// each generation so a pool that grew during sustained decode is reclaimed
-    /// instead of staying pinned over budget until the next load (`relievePressure`
-    /// above only runs on the load path). Prompt-cache only — it never evicts a
-    /// loaded module mid-serving.
-    ///
-    /// Deliberately uses **phys_footprint**, not the RSS `memoryProbe`: the
-    /// retained KV pool lives in Metal/GPU buffers that RSS under-counts (M55),
-    /// so an RSS check would miss the very memory we need to shed.
-    public func relievePromptCachePressureIfNeeded() async {
-        guard promptCacheRelief != nil else { return }
-        let highWater = totalBudgetBytes / 10 * 9  // 90%
-        guard ProcessMemory.sample().physFootprint > highWater else { return }
-        // ADR 029 WP1 — gated hook (awaited): shed the pool without racing a
-        // concurrent tenant's decode.
-        await promptCacheRelief?()
     }
 
     private func performLoad(_ id: ModuleID) async throws {
@@ -771,18 +718,16 @@ public actor MemoryGovernor {
         }
 
         // Rung 1 — reclaim reconstructible headroom WITHOUT evicting a tenant:
-        // shed the prompt-prefix KV pool (live MLX memory ⇒ counted in
-        // `committed`, so this lowers the admission ceiling) and trim the
-        // reclaimable MLX buffer cache (keeps actual `phys_footprint` under the
-        // hard MLX limit as the new model allocates). Then re-gate — if the pool
-        // was the bloat, the load now fits without disrupting a resident module.
-        // No-ops on the pure path (both hooks nil), so the re-gate just repeats
+        // trim the reclaimable MLX buffer cache (keeps actual `phys_footprint`
+        // under the hard MLX limit as the new model allocates). Then re-gate —
+        // if the cache was the bloat, the load now fits without disrupting a
+        // resident module.
+        // No-op on the pure path (hook nil), so the re-gate just repeats
         // the front-door verdict there.
-        // ADR 029 WP1 — both hooks are awaited: they run their MLX frees under
+        // ADR 029 WP1 — the hook is awaited: it runs its MLX free under
         // the InferenceGate, so this rung waits for any in-flight decode rather
         // than tearing down the buffer pool beneath it. The re-gate below still
         // sees the reclaim's effect (the hook completes before we return).
-        await promptCacheRelief?()
         await reclaimCache?()
         if GovernorMemory.fits(
             request: estimate, denominator: admissionDenominator(),
