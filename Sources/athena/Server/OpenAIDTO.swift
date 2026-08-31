@@ -302,8 +302,13 @@ struct ChatCompletionRequest: Codable {
         if !deterministic {
             return (
                 "'logprobs' is only supported on the deterministic decode "
-                    + "path: set 'temperature' to 0, or use structured output "
-                    + "(response_format / tools).",
+                    + "path: set 'temperature' to 0, set 'response_format' to "
+                    + "'json_object' or 'json_schema', or force a tool call "
+                    + "with 'tool_choice' 'required' or a named tool — the "
+                    + "forced forms require a non-empty 'tools' array (and, "
+                    + "for the named form, that the name is declared in it); "
+                    + "'tools' with the default 'tool_choice' does not "
+                    + "qualify.",
                 "logprobs_requires_deterministic"
             )
         }
