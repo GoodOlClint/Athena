@@ -1,6 +1,6 @@
 ---
 name: pr-merge-loop
-description: Take a working diff to state=MERGED — pre-submit gate (sibling sweep + subagent review + premise-check), verdict-gated merge (APPROVED merges immediately; folds only on CHANGES_REQUESTED), review-response policy (scoped fold-in, round cap), follow-up triage, inline-thread resolution, post-merge harvest. Invoke when code is ready to become a PR, and again whenever a review verdict or failed merge needs handling.
+description: Take a working diff to state=MERGED — pre-submit gate (sibling sweep + subagent review + premise-check), verdict-gated merge (APPROVED merges immediately; folds only on CHANGES_REQUESTED), review-response policy (scoped fold-in, round cap), follow-up triage, inline-thread follow-up, post-merge harvest. Invoke when code is ready to become a PR, and again whenever a review verdict or failed merge needs handling.
 ---
 
 # PR merge loop
@@ -13,7 +13,7 @@ Opening a PR is the start of the job, not the end. Done means `state=MERGED`. Gr
 
 Four checks on the working diff, before the first push — a defect caught here costs one local fix; the same defect caught by CI costs a full round trip.
 
-1. **Sibling sweep — no tunnel vision.** The instance you were asked to fix is rarely the only one. Before finalizing, hunt for similar code the same defect or pattern lives in: code-intel MCP `search` (semantic — "where else does X happen") plus grep for the exact symbol/pattern, and graphify blast-radius ("what calls the function I changed") when the change alters behavior callers depend on. In-scope siblings get fixed in this PR; out-of-scope ones get a `gh issue create` before you open the PR.
+1. **Sibling sweep — no tunnel vision.** The instance you were asked to fix is rarely the only one. Before finalizing, hunt for similar code the same defect or pattern lives in: code-intel MCP `search` (semantic — "where else does X happen") plus grep for the exact symbol/pattern, and graphify blast-radius ("what calls the function I changed") when the change alters behavior callers depend on. In-scope siblings get fixed in this PR; out-of-scope ones get an issue (github MCP `issue_write`) before you open the PR.
 2. **Adversarial pre-review — two models, not one.** This gate is deliberately cross-model: the measured gain from a second reviewer comes from *context separation*, and a different vendor buys different blind spots.
 
    **(a) House reviewer.** Spawn the repo's **`athena-pre-reviewer`** agent (`.claude/agents/athena-pre-reviewer.md`; fall back to correctness-reviewer or /code-review where unavailable) on the working diff. Its definition carries the house instructions — correctness pass, attack-the-claims, the mutation check on test-pinning claims, and the premise check — so don't re-derive them in the spawn prompt; just point it at the diff and name the issues it implements.
@@ -47,8 +47,9 @@ Four checks on the working diff, before the first push — a defect caught here 
 
 ## Open the PR — merge is verdict-gated (policy 2026-07-31)
 
-- Push branch → `gh pr create` (base main). Do NOT arm auto-merge: the loop's job doesn't end at merge — the post-merge harvest and doc reconciliation need the agent present at merge time, and auto-merge can land the squash while the loop is between polls.
-- The PR body carries `Closes #N` for every issue it resolves — never close issues by hand with `gh issue close`; the merge closes them.
+- **All GitHub writes go through the `github` MCP tools (`mcp__github__*`), acting as the `goodolclint-claude` App** — `Bash(gh …)` is denied, and the bot identity is what lets the automated review run on agent-authored PRs (`allowed_bots` in `claude-code-review.yml`, PR #154). Setup + rationale: `~/Source/homelab/docs/github-agent-identity.md`.
+- Push the branch per **AGENTS.md "Agent pushes go through the GitHub MCP"** (operator decision 2026-08-31): `create_branch` + `push_files` as the App (commit message goes to the tool; no `Co-Authored-By` trailer — the App is the author), then the byte-verify — commit the identical change locally, `git fetch`, and `git diff <local-commit> origin/<branch> --` must be empty. `push_files` cannot express deletions or renames; a diff needing them fails the verify and waits for an operator-attended local `git push`, as do `.github/workflows/*` changes (the App has no `workflows` permission). Then `create_pull_request` (base main). Do NOT arm auto-merge: the loop's job doesn't end at merge — the post-merge harvest and doc reconciliation need the agent present at merge time, and auto-merge can land the squash while the loop is between polls.
+- The PR body carries `Closes #N` for every issue it resolves — never close issues by hand; the merge closes them.
 - Squash on merge: per-PR commits collapse to one curated commit on main, matching the house one-commit-per-slice history.
 - Never bump `Athena.appVersion` or touch `v*` tags in a PR — versions are release events (ADR 040 S8), cut by the operator via `/ship`.
 - Merging is an explicit act after the verdict — see APPROVED below.
@@ -60,13 +61,13 @@ The automated `claude-review` GitHub Action reviews on every push and submits ex
 ### CHANGES_REQUESTED
 
 - Fix every blocker.
-- In-scope follow-ups the reviewer wrote in the review body may be fixed in the same round as the blockers. Issues the reviewer filed are out-of-scope by construction (the review prompt files issues only for findings outside the diff; if a legacy-prompt review files an in-scope issue anyway, it waits for end-of-cycle triage all the same) — they stay open for end-of-cycle triage. If the operator directs an issue fold-in anyway, add `Closes #N` to the PR body (`gh pr edit <N> --body`); never close issues by hand.
+- In-scope follow-ups the reviewer wrote in the review body may be fixed in the same round as the blockers. Issues the reviewer filed are out-of-scope by construction (the review prompt files issues only for findings outside the diff; if a legacy-prompt review files an in-scope issue anyway, it waits for end-of-cycle triage all the same) — they stay open for end-of-cycle triage. If the operator directs an issue fold-in anyway, add `Closes #N` to the PR body (`update_pull_request`, body); never close issues by hand.
 - **Fold-ins spend the PR's single fold budget — one round per PR.** A PR that has already folded once has spent it: every later round fixes exactly what the reviewer flagged and nothing else. (Unconditional fold-in once spiraled a PR through three review rounds in a sibling repo — this cap is the lesson.)
 - Push; the reviewer re-reviews automatically. Loop.
 
 ### APPROVED
 
-- **Merge immediately**: `gh pr merge <N> --squash`. Then the post-merge harvest.
+- **Merge immediately**: `merge_pull_request` (merge_method `squash`). Then the post-merge harvest. (Operator ruling 2026-08-31: merge-on-APPROVED survives the identity split — the merge lands as the App. Human judgment enters through the reviewer's COMMENTED deferral, where the operator approves or requests changes as themself.)
 - **Do NOT fold anything on an approval** (policy 2026-08-01). If a finding truly had to land before merge, the reviewer's verdict would have been CHANGES_REQUESTED — trust the verdict. Every post-approval push costs a full CI run plus a full re-review round; in the first remediation cycle the fold-after-APPROVED path added 9 extra rounds across 7 of 14 PRs for items that could all have waited one PR.
 - Follow-ups the reviewer noted in the review body survive via the post-merge harvest; issues the reviewer filed stay open for **end-of-cycle triage, before starting the next plan item** — report each with a priority and when it will be resolved. Don't let them silently become backlog.
 
@@ -77,22 +78,23 @@ The automated `claude-review` GitHub Action reviews on every push and submits ex
 ### No review arrives
 
 - The action self-skips when the PR's copy of **`.github/workflows/claude-code-review.yml`** differs from the default branch (its anti-tamper gate) — that one file, not `.github/workflows/` broadly; a PR touching an unrelated workflow is still reviewed. It also skips draft PRs and fork PRs (no secrets).
-- The three causes do **not** behave alike, so name which one you hit:
-  - **Anti-tamper** — the job runs and fails closed, so `claude-review` goes **red**. Being a required check, the PR then needs an operator **admin merge**. Say that plainly rather than reporting "no review arrived": the red check, not the missing review, is what blocks the merge.
+- The causes do **not** behave alike, so name which one you hit:
+  - **Anti-tamper, PR edits the file** — the job runs and fails closed, so `claude-review` goes **red**. Being a required check, the PR then needs an operator **admin merge**. Say that plainly rather than reporting "no review arrived": the red check, not the missing review, is what blocks the merge.
+  - **Anti-tamper, stale branch** — the PR does *not* touch the file, but branched before a main-side change to it, so its copy differs anyway and the same red fail-closed check fires. Different fix: `update_pull_request_branch` (merges main in), and the review runs on the resulting push (verified on PR #153: red → success). Try this before reporting a dead loop.
   - **Draft or fork** — the job's own `if:` is false, so `claude-review` is **skipped**, which reads as passing (#77) and blocks nothing. Do not report a red check here; there isn't one.
-- No automated verdict will come, so report why and stop the loop. Requesting review from the operator (`gh pr edit <N> --add-reviewer GoodOlClint`) is a courtesy signal, not the control: `.github/` is CODEOWNERS-owned so the request is usually automatic, `require_code_owner_reviews` is off so it blocks nothing, and GitHub refuses the request outright when the operator is the PR author.
+- For the non-recoverable causes (true tamper, draft, fork) no automated verdict will come — report which one and stop the loop; after a stale-branch refresh the verdict arrives normally, so keep polling instead. Requesting the operator's review (`update_pull_request`, `reviewers`) works on bot-authored PRs (GitHub refuses the request when the requestee authored the PR, which no longer applies; verified on #153) — it's the right signal on a true-tamper PR, since the operator's admin merge is the only way it lands.
 
 ## Inline threads
 
-If `required_conversation_resolution` is enabled on the repo, unresolved inline threads keep the PR `BLOCKED` even after approval. After fixing what a thread raised, resolve it via GraphQL `resolveReviewThread(input:{threadId})` (thread ids from `pullRequest.reviewThreads`). An unresolved thread is an unmerged PR.
+If `required_conversation_resolution` is enabled on the repo, unresolved inline threads keep the PR `BLOCKED` even after approval. After fixing what a thread raised, resolve it. The github MCP toolset carries no resolve-thread mutation (GitHub exposes it via GraphQL only, and `gh api` is denied) — reply on the thread (`add_reply_to_pull_request_comment`) saying what fixed it, then ask the operator to resolve it in the web UI. An unresolved thread is an unmerged PR.
 
 ## Exit conditions
 
-- Loop until `gh pr view <N> --json state` shows `MERGED`.
-- COMMENTED deferral or no-review-arrives → the loop suspends pending the operator; report and stop (these are valid exits short of MERGED).
-- PR approved but not merging → triage in order: unresolved review threads, required status checks (`gh pr checks <N>`), branch protection. Report what you find; fix what you can.
+- Loop until `pull_request_read` (get) shows the PR merged.
+- COMMENTED deferral, no-review-arrives, or awaiting operator inline-thread resolution → the loop suspends pending the operator; report and stop (these are valid exits short of MERGED).
+- PR approved but not merging → triage in order: unresolved review threads, required status checks (`pull_request_read`, get_check_runs), branch protection. Report what you find; fix what you can.
 - Stacked PRs: merge sequentially, one at a time, rebasing each onto the new main after the prior lands.
 
 ## After merge (harvest — the loop's last act)
 
-On `state=MERGED`, before end-of-cycle triage: (1) if a tracked document (ADR, plan doc, issue) describes this change, reconcile it against the squashed diff — the record describes the code that merged, never the first cut; (2) sweep every review body on the PR for observations that exist nowhere else — "minor, not filed" / "notes, not blocking" items become issues labeled `review-note` (create the label first if the repo lacks it: `gh label create review-note --description "harvested from a PR review body"`), and anything the reviewer addressed to the operator directly is surfaced to the operator rather than left in the review. Review bodies are the only place this material exists; the harvest is what makes it survive the merge. Those two sentences are the whole procedure — the operator's environment carries it as a `doc-reconcile` skill, but no skill is required.
+On `state=MERGED`, before end-of-cycle triage: (1) if a tracked document (ADR, plan doc, issue) describes this change, reconcile it against the squashed diff — the record describes the code that merged, never the first cut; (2) sweep every review body on the PR for observations that exist nowhere else — "minor, not filed" / "notes, not blocking" items become issues labeled `review-note` (create the label first if the repo lacks it: `label_write` — `color` is required on create, e.g. `ededed`; description "harvested from a PR review body"), and anything the reviewer addressed to the operator directly is surfaced to the operator rather than left in the review. Review bodies are the only place this material exists; the harvest is what makes it survive the merge. Those two sentences are the whole procedure — the operator's environment carries it as a `doc-reconcile` skill, but no skill is required.
