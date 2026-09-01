@@ -1,6 +1,6 @@
 # 035 — Route channel-delimited reasoning to `reasoning_content`
 
-**Status:** Accepted (gate-approved 2026-06-30) — implementing.
+**Status:** Accepted (gate-approved 2026-06-30) — **IMPLEMENTED v0.10.232** (`deabfe69`). This line read "implementing" from the moment the code landed; corrected #193 against the tree. Live: `ReasoningChannelFilter` + `splitReasoningChannel` (`Sources/AthenaServerKit/ReasoningChannel.swift`).
 **Date:** 2026-06-30
 **Milestone:** TBD (tool-calling / reasoning correctness)
 **Relates to:** ADR 034 (tool_choice:auto un-forcing surfaced this), ADR 013 (`/v1` OpenAI-compat surface).
