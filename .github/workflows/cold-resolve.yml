@@ -49,8 +49,10 @@ on:
     # it may be GC-ed and unrecoverable — the deadline #86 itself names.
     - cron: '0 7 * * 1'
   workflow_dispatch:
-  # Also on any change to the pins themselves, where a bad pin is most likely
-  # to be introduced and where the feedback is worth having immediately.
+  # Also on a PR touching the pins themselves or this workflow, where a bad pin
+  # is most likely to be introduced and where the feedback is worth having
+  # immediately. PR-only on purpose: a direct-to-main push of any of these
+  # paths gets no run until the weekly cron.
   pull_request:
     paths:
       - 'Package.swift'
