@@ -45,7 +45,7 @@ SwiftPM validates dependency-level settings (e.g. `traits: []`) against the mani
 |---|---|---|
 | Unit tier | `./deploy/test.sh` | Compiles + decision seams hold against the new pin (787 tests, MLX-free — proves **no numerics**) |
 | Release build | `./deploy/build.sh Release` | Metal shaders compile; pin guard emits provenance |
-| Cold resolve | `swift package resolve --cache-path <fresh> --scratch-path <fresh>` from a copied manifest | The tag is fetchable with zero cache — the #86 failure mode; the local rehearsal of what `cold-resolve.yml` enforces on CI (weekly, on dispatch, and on any PR touching `Package.swift`/`Package.resolved`) |
+| Cold resolve | `swift package resolve --cache-path <fresh> --scratch-path <fresh>` from a copied manifest | The tag is fetchable with zero cache — the #86 failure mode; the local rehearsal of what `cold-resolve.yml` enforces on CI (weekly, on dispatch, and on any PR touching `Package.swift`/`Package.resolved` or the workflow file itself) |
 | e2e tool-calling | `deploy/e2e-tool-choice-auto.sh` | ADR 034/035 vs. any `ToolCallProcessor`/tool-parsing changes |
 | e2e count-tokens | `deploy/e2e-count-tokens.sh` | ADR 042 count==usage parity through the new `container.prepare` |
 | Vision smoke | red-PNG `image_url` chat against a VLM checkpoint → expect the color | ADR 010 vs. any vision-tower/pooler rewrite |
@@ -63,7 +63,7 @@ Heavy gates need xcodebuild (metallib; ADR 009 — they crash under bare `swift 
 
 ## 7. Delivery
 
-One PR, base main, `Closes` the bump issue and every issue it resolves (grep the body for closing keywords next to issues that must stay open — GitHub ignores negation). The PR's CI run gives you a **genuine on-CI cold-resolve demonstration**: `cold-resolve.yml` triggers on any change to `Package.swift`/`Package.resolved`, and resolves with no cache and no `.build`, so a bump PR always exercises the new pin against the real remote. (The `unit` job's own run proves nothing about reachability — `restore-keys` silently serves the pins from a restored mirror, which is exactly how #86 stayed green.) Expect the review loop to attack the claims; every number in the PR body should have a log behind it.
+One PR, base main, `Closes` the bump issue and every issue it resolves (grep the body for closing keywords next to issues that must stay open — GitHub ignores negation). The PR's CI run gives you a **genuine on-CI cold-resolve demonstration**: a bump PR touches `Package.swift`/`Package.resolved` by definition, which is among `cold-resolve.yml`'s trigger paths, and it resolves with no cache and no `.build`, so a bump PR always exercises the new pin against the real remote. (The `unit` job's own run proves nothing about reachability — `restore-keys` silently serves the pins from a restored mirror, which is exactly how #86 stayed green.) Expect the review loop to attack the claims; every number in the PR body should have a log behind it.
 
 ## Failure signatures → cause
 
@@ -72,6 +72,6 @@ One PR, base main, `Closes` the bump issue and every issue it resolves (grep the
 | `Disabled default traits … declares no traits` | Stale checkout of a pre-traits pin (local or restored cache) | §4 |
 | `'mlx-swift' >= X contains incompatible tools version` | Toolchain older than mlx-swift's manifest | §2 (Xcode/runner floor) |
 | Missing-member errors on MLX types (`maskFill`, …) | mlx-swift resolved below the real floor (manifest floor too low + warm `.build`) | §2 (raise the manifest floor) |
-| Cold build fails; `unit` green on cache warmth | Unreachable/orphaned pin — the warm `unit` cache masks it; `cold-resolve.yml`'s `Resolve pins with no cache` job reddens on its next run (weekly, on dispatch, and on any PR touching `Package.swift`/`Package.resolved` — a direct-to-main manifest push gets no run until the weekly cron) | §0 (tag pin); `.github/workflows/cold-resolve.yml` |
+| Cold build fails; `unit` green on cache warmth | Unreachable/orphaned pin — the warm `unit` cache masks it; `cold-resolve.yml`'s `Resolve pins with no cache` job reddens on its next run (weekly, on dispatch, and on any PR touching `Package.swift`/`Package.resolved` or the workflow file itself — a direct-to-main push of any of them gets no run until the weekly cron) | §0 (tag pin); `.github/workflows/cold-resolve.yml` |
 | `keyNotFound` at MTP drafter load | Checkpoint key-prefix vs sanitize filter mismatch — may be pre-existing, diff the load chain across pins before blaming the bump | #92 |
 | Parity gate skipped | Drafter didn't pair — investigate before reading the run as green | §5 boundary |
