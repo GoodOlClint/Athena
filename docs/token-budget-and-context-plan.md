@@ -22,7 +22,7 @@ Surfaced per the gate, resolved in-plan rather than deferred:
 |---|---|
 | All HTTP routes live in `OpenAPISpec.swift`, updated in the same edit | Every slice that adds a route or field edits the spec in the same commit; `deploy/e2e-rbac.sh`'s path-count drift guard is updated with it. |
 | All errors use the `{"error":{message,type,code}}` envelope | `quota_exceeded` / `insufficient_quota` uses the envelope verbatim, mirroring `RateLimit.tooMany`. |
-| `/v1` compatibility rule — non-OpenAI surfaces must be tagged in the introducing ADR, the spec description, and the AGENTS.md endpoint list | ADR 042 §2 marks the two model fields as native extensions on an `[oai]` route; `count_tokens` is tagged `[anthropic]`. All three edits land with the code. |
+| `/v1` compatibility rule — non-OpenAI surfaces must be tagged in the introducing ADR, the spec description, and the AGENTS.md endpoint list | ADR 042 §2 marks the two model fields as native extensions on an `[oai]` route; `POST /v1/chat/completions/count_tokens` is tagged `[native]`. All three edits land with the code. |
 | No parallel implementation of a canonical pipeline | `count_tokens` reuses `container.prepare` (the request path's own tokenizer + template) rather than re-implementing counting; quotas reuse the `meter()` chokepoint and the `RateLimitMiddleware` shape. |
 | ADR 009 — decision logic MLX-free and unit-pinned | `QuotaWindow` / `QuotaDecision` in `AthenaServerKit`; `ModelConfigInfo.maxPositionEmbeddings` and the effective-ceiling resolution in `AthenaCore`. All pinned by `./deploy/test.sh`. |
 | ADR 040 S8 — versions are release events | Slices land as plain commits, **no `appVersion` bump, no per-slice tag**. A version bump happens only in an operator-approved release commit. |
@@ -55,7 +55,7 @@ Route on the OpenAI dialect reusing the existing `ChatCompletionRequest` decoder
 
 ## Track B outcome (2026-07-25)
 
-All three slices landed with their spec + CLAUDE.md edits in the same commit. Gates: `./deploy/test.sh` 748/0 (35 skipped), `./deploy/e2e-rbac.sh` 496/0 including the OpenAPI drift guard (which derives routes from source, so the new route needed no count bump), `./deploy/build.sh Release` green, and the new `deploy/e2e-count-tokens.sh` green against two real models.
+~~All three slices landed with their spec + CLAUDE.md edits in the same commit.~~ — **corrected #164:** B2 (`eae8724f`) and B3 (`56b13ccb`) each landed with both edits; B1 (`76134365`) owed neither — it adds no route and no surface field, only `ModelConfigInfo.maxPositionEmbeddings` and its tests, and touched no other file. Gates: `./deploy/test.sh` 748/0 (35 skipped), `./deploy/e2e-rbac.sh` 496/0 including the OpenAPI drift guard (which derives routes from source, so the new route needed no count bump), `./deploy/build.sh Release` green, and the new `deploy/e2e-count-tokens.sh` green against two real models.
 
 The DoD model (`gemma-4-26b-a4b-it-8bit`) lives on the Studio appliance, not this workstation's store, so the heavy DoD ran on `Llama-3.2-3B-Instruct-8bit` (fast) and `gemma-4-31b-it-4bit` (same family, vision wrapper — which also exercises B1's nested-`text_config` read on a real checkpoint). Measured:
 

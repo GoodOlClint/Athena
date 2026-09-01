@@ -100,7 +100,7 @@ Image-bearing count requests are refused with a cause-naming 400 rather than sil
 
 ## Consequences
 
-- One new optional field in `ModelConfigInfo`, two new omitted-when-nil fields on the OpenAI model object, one new route. `OpenAPISpec.swift` (SSOT) and the CLAUDE.md stable-endpoint list are updated in the same edit; the new route is tagged `[anthropic]`, the two fields explicitly marked native extensions.
+- One new optional field in `ModelConfigInfo`, two new omitted-when-nil fields on the OpenAI model object, one new route — two, once §4(a)'s Messages-dialect analogue shipped the same day. `OpenAPISpec.swift` (SSOT) and the CLAUDE.md stable-endpoint list are updated in the same edit; `POST /v1/chat/completions/count_tokens` is tagged `[native]` and `POST /v1/messages/count_tokens` `[anthropic]`, the two model fields explicitly marked native extensions on an `[oai]` route.
 - `context_window` is only as honest as the checkpoint: a config that omits `max_position_embeddings`, or advertises a window the weights cannot really sustain, yields a missing or optimistic field. Athena reports what the checkpoint declares and does not attempt to validate it — the same honesty boundary ADR 021 draws for config-only preflight (it confirms declared packaging, never numeric behavior).
 - `count_tokens` can cold-load a model, which is surprising for a call that "just counts". Documented on the route.
 - Athena's Anthropic dialect gets closer to complete, which is a maintenance commitment: a client that finds `count_tokens` will expect its count to match a subsequent request's `input_tokens`, and the shared-path decision above is what keeps that true.
