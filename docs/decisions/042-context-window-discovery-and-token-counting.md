@@ -1,6 +1,6 @@
 # 042 — Context-window discovery + exact token counting
 
-**Status:** Accepted — **IMPLEMENTED 2026-07-25** (B1 `76134365`, B2 `eae8724f`, B3 `56b13ccb`, Anthropic parity route same day). Brownfield-gated; operator-approved 2026-07-25 (surface shape confirmed by interview). DoD: `deploy/e2e-count-tokens.sh`.
+**Status:** Accepted — **IMPLEMENTED 2026-07-25** (B1 `76134365`, B2 `eae8724f`, B3 `56b13ccb`, Anthropic parity route same day). Brownfield-gated; operator-approved 2026-07-25 (surface shape confirmed by interview). DoD: `deploy/e2e-count-tokens.sh`. Plan: [`docs/token-budget-and-context-plan.md`](../token-budget-and-context-plan.md). Recorded #193.
 **Date:** 2026-07-25
 **Amended 2026-07-25 (same day)** on a downstream consumer requirement spec: the pre-flight count route moves to the **OpenAI dialect** as the primary surface (the deferral tripwire below fired — an OpenAI-dialect consumer asked), counting is specified as **no-eval / no-gate**, the model field is renamed `context_length` to match ecosystem convention, and `max_output_tokens` is refused as unpublishable. See §4.
 **Milestone:** TBD (client-enablement surface)

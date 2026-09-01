@@ -1,6 +1,6 @@
 # 012 — Vision-aware `athena convert`: load via the VLM path, keep the vision tower full-precision
 
-**Status:** Accepted — **Implemented & validated**. M72.1 (vision-aware convert: load + quantize + config) shipped v0.10.161. M72.2 (real-model validation) DONE 2026-06-17: `athena convert google/gemma-4-26B-A4B-it --q-bits 4` → loads + accurately describes a test image; the base `google/gemma-4-26B-A4B` converts + loads with the vision tower intact (chat blocked only by its missing chat template — use `-it`).
+**Status:** Accepted — **Implemented & validated**. M72.1 (vision-aware convert: load + quantize + config) shipped v0.10.161. M72.2 (real-model validation) DONE 2026-06-17: `athena convert google/gemma-4-26B-A4B-it --q-bits 4` → loads + accurately describes a test image; the base `google/gemma-4-26B-A4B` converts + loads with the vision tower intact (chat blocked only by its missing chat template — use `-it`). The **2026-06-17 amendment section below** carries the gemma4-only gate; this line simply did not point at it. It shipped in `80d2d8b4` (v0.10.165) as `Gemma4QuantRule.appliesMixedPrecision` (declared in `Sources/AthenaLLM/Gemma4QuantRule.swift`, called from `ModelConvert.swift`), and converts have been named `<base>-mlx-<N>bit` since the same commit. Pointer added #193.
 **Date:** 2026-06-17
 **Milestone:** M72 — goal: `athena convert google/gemma-4-26B-A4B` produces a model that loads and serves **vision**.
 

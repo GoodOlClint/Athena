@@ -1,6 +1,6 @@
 # 015 — Block-until-ready for on-disk cold-loads; 503 only on timeout, download, or failure
 
-**Status:** Accepted — decision; staged implementation (operator-assigned milestone/tags)
+**Status:** Accepted — **SHIPPED v0.10.164** (`11343c75`). This line read "staged implementation" from the moment the code landed; corrected #193 against the tree, not against the AGENTS.md ledger. Live: `MemoryGovernor.awaitLoad` / `peekLoad` (`Sources/AthenaCore/MemoryGovernor.swift`) and the `cold_load_wait_secs` key.
 **Date:** 2026-06-17
 **Supersedes/refines:** the M43.2 "never block the request thread on cold-load" rationale — narrows it to the *download* case, which was its real target.
 **Relates:** ADR 011 (memory governor), ADR 013 (`/v1` inference surface), M62 (cold-load model selection), M33 (preload-on-start), ADR 009 (stub-tier CI for MLX-free decision logic).
