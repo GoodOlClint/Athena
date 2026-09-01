@@ -2,144 +2,48 @@
 
 **Status:** Accepted — Implemented (v0.10.167). `ExpectContinueHandler` + `UploadLimit` algebra in `AthenaServerKit` (unit-pinned), `max_audio_upload_bytes` (100 MiB) / `max_request_body_bytes` (4 MiB) config (0⇒parse-error), clean 413 `payload_too_large`, cap surfaced in `/openapi.json`. Streaming-to-disk decode remains a noted out-of-scope follow-up (see `docs/backlog-hitlist.md` #28).
 **Date:** 2026-06-18
-**Relates:** ADR 008 (AthenaServerKit testable seam), ADR 009 (stub/MLX-free CI tier),
-ADR 013 (`/v1` is the inference surface), ADR 004 (non-loopback TLS posture / reverse proxy),
-M29 (rate-limit/concurrency caps), M33 (request timeout), the multipart audio handlers
-([AthenaServer.swift:1687-2110](../../Sources/athena/Server/AthenaServer.swift#L1687)).
+**Relates:** ADR 008 (AthenaServerKit testable seam), ADR 009 (stub/MLX-free CI tier), ADR 013 (`/v1` is the inference surface), ADR 004 (non-loopback TLS posture / reverse proxy), M29 (rate-limit/concurrency caps), M33 (request timeout), the multipart audio handlers ([AthenaServer.swift:1687-2110](../../Sources/athena/Server/AthenaServer.swift#L1687)).
 
 ## Context
 
-A multipart audio upload over the ~25 MB cap appears to **hang** for the client's full
-timeout (1800 s) — no response, nothing logged, no GPU spin-up — while the daemon stays
-responsive to concurrent small requests. Small files transcribe normally.
+A multipart audio upload over the ~25 MB cap appears to **hang** for the client's full timeout (1800 s) — no response, nothing logged, no GPU spin-up — while the daemon stays responsive to concurrent small requests. Small files transcribe normally.
 
-Investigation (reproduced against a no-auth daemon, real handler path) found **two distinct
-defects**, only one of which is the hang:
+Investigation (reproduced against a no-auth daemon, real handler path) found **two distinct defects**, only one of which is the hang:
 
-1. **Primary — the hang is `Expect: 100-continue`, not the size cap.** Swift HTTP clients
-   (URLSession, AsyncHTTPClient) add `Expect: 100-continue` **only for large request bodies**,
-   then wait for the server to send `100 Continue` before streaming the body. Athena's stack
-   (Hummingbird 2.23 on `.http1()`) sends `100 Continue` **nowhere** — confirmed by grepping
-   the entire Hummingbird source tree and the Athena pipeline. So the handler reaches
-   `request.body.collect(...)` and awaits the first body byte; the client awaits `100`; deadlock
-   until the client times out. Reproduced — **both 1 MB and 30 MB** uploads with `Expect:
-   100-continue` hang identically waiting for `100 Continue`. This matches every observation:
-   no log (parked in `collect`, before model load), no GPU, "small files fine" (client omits
-   `Expect` below its threshold), one wedged connection while the event loop stays live.
-   **The 37 MB file is special because it's over the client's *Expect* threshold, not over the
-   25 MB cap — a valid 20 MB file would hang the same way.** Disproved alternatives: full-duplex
-   curl and half-duplex sockets (even with an 8 KB send buffer) both get a fast response;
-   Hummingbird's keep-alive body-drain works, so "respond-without-drain" is *not* the cause.
+1. **Primary — the hang is `Expect: 100-continue`, not the size cap.** Swift HTTP clients (URLSession, AsyncHTTPClient) add `Expect: 100-continue` **only for large request bodies**, then wait for the server to send `100 Continue` before streaming the body. Athena's stack (Hummingbird 2.23 on `.http1()`) sends `100 Continue` **nowhere** — confirmed by grepping the entire Hummingbird source tree and the Athena pipeline. So the handler reaches `request.body.collect(...)` and awaits the first body byte; the client awaits `100`; deadlock until the client times out. Reproduced — **both 1 MB and 30 MB** uploads with `Expect: 100-continue` hang identically waiting for `100 Continue`. This matches every observation: no log (parked in `collect`, before model load), no GPU, "small files fine" (client omits `Expect` below its threshold), one wedged connection while the event loop stays live. **The 37 MB file is special because it's over the client's *Expect* threshold, not over the 25 MB cap — a valid 20 MB file would hang the same way.** Disproved alternatives: full-duplex curl and half-duplex sockets (even with an 8 KB send buffer) both get a fast response; Hummingbird's keep-alive body-drain works, so "respond-without-drain" is *not* the cause.
 
-2. **Secondary — the size cap returns the wrong thing.** When a body *does* stream past the
-   cap, `collect(upTo: 25*1024*1024)` throws `NIOTooManyBytesError`, caught and returned as
-   **HTTP 400** with the **internal NIO error type leaked** in `message`
-   (`"Invalid request body: NIOTooManyBytesError(maxBytes: Optional(26212571))"`) and `code:
-   "invalid_body"`. It should be **413** with a clean envelope, the cap is **fixed at 25 MiB**
-   (too small for 77-min audio — clients chunk client-side, which defeats whole-file
-   diarization), and it is **invisible in `/openapi.json`** so clients can't pre-check.
+2. **Secondary — the size cap returns the wrong thing.** When a body *does* stream past the cap, `collect(upTo: 25*1024*1024)` throws `NIOTooManyBytesError`, caught and returned as **HTTP 400** with the **internal NIO error type leaked** in `message` (`"Invalid request body: NIOTooManyBytesError(maxBytes: Optional(26212571))"`) and `code: "invalid_body"`. It should be **413** with a clean envelope, the cap is **fixed at 25 MiB** (too small for 77-min audio — clients chunk client-side, which defeats whole-file diarization), and it is **invisible in `/openapi.json`** so clients can't pre-check.
 
-The cap today is `25 * 1024 * 1024` = 26,214,400 bytes on the **raw multipart body** (file +
-MIME framing), identical on all three audio routes
-([transcriptions:1702](../../Sources/athena/Server/AthenaServer.swift#L1702),
-[diarizations:1866](../../Sources/athena/Server/AthenaServer.swift#L1866),
-[embeddings:2034](../../Sources/athena/Server/AthenaServer.swift#L2034)). JSON routes
-(`/v1/chat/completions`, `/v1/embeddings`) cap their bodies at `4 * 1024 * 1024`.
+The cap today is `25 * 1024 * 1024` = 26,214,400 bytes on the **raw multipart body** (file + MIME framing), identical on all three audio routes ([transcriptions:1702](../../Sources/athena/Server/AthenaServer.swift#L1702), [diarizations:1866](../../Sources/athena/Server/AthenaServer.swift#L1866), [embeddings:2034](../../Sources/athena/Server/AthenaServer.swift#L2034)). JSON routes (`/v1/chat/completions`, `/v1/embeddings`) cap their bodies at `4 * 1024 * 1024`.
 
 ## Decision
 
-**Make Athena answer `Expect: 100-continue`, make the upload caps configurable and
-modality-scoped, and return a clean `413` (not a 400 with a leaked error) when a body exceeds
-its cap — surfaced in `/openapi.json`.**
+**Make Athena answer `Expect: 100-continue`, make the upload caps configurable and modality-scoped, and return a clean `413` (not a 400 with a leaked error) when a body exceeds its cap — surfaced in `/openapi.json`.**
 
-1. **Answer `Expect: 100-continue` at the channel layer (the actual fix for the hang).** Add a
-   small **stateless** NIO handler via `HTTP1Channel.Configuration.additionalChannelHandlers`
-   (one config object passed into both `.http1(configuration:)` and the `.tls(base:)` builder,
-   so plaintext and TLS both get it). On any request head carrying `Expect: 100-continue`, it
-   **writes an interim `100 Continue` and forwards the head unchanged** to the app; on every
-   other head it is a passthrough. That is the whole handler — **no route-awareness, no
-   size check, no body draining, no request short-circuiting** at the channel layer. This is a
-   protocol-correctness fix for **every** route and fixes the under-cap-`Expect` case (a valid
-   20 MB upload) as well as the over-cap one.
+1. **Answer `Expect: 100-continue` at the channel layer (the actual fix for the hang).** Add a small **stateless** NIO handler via `HTTP1Channel.Configuration.additionalChannelHandlers` (one config object passed into both `.http1(configuration:)` and the `.tls(base:)` builder, so plaintext and TLS both get it). On any request head carrying `Expect: 100-continue`, it **writes an interim `100 Continue` and forwards the head unchanged** to the app; on every other head it is a passthrough. That is the whole handler — **no route-awareness, no size check, no body draining, no request short-circuiting** at the channel layer. This is a protocol-correctness fix for **every** route and fixes the under-cap-`Expect` case (a valid 20 MB upload) as well as the over-cap one.
 
-   *Why this is safe here (research, ADR 017 sources):* the server codec
-   ([`NIOHTTPTypesHTTP1/HTTP1ToHTTPCodec.swift:117`](../../) write path) passes **any** response
-   head through unconditionally — `HTTPResponse(status: .continue)` → `HTTPResponseHead`, no
-   status filtering. The two NIO state machines that historically made interim 1xx responses
-   fragile (`HTTPServerPipelineHandler`, `HTTPServerProtocolErrorHandler`; the targets of
-   [swift-nio #1330](https://github.com/apple/swift-nio/pull/1330)) are **both disabled** in
-   Hummingbird's pipeline (`withPipeliningAssistance: false`, `withErrorHandling: false` —
-   "HTTP is pipelined by NIOAsyncChannel"). Our outbound interim write does not even traverse
-   `HTTPConnectionStateHandler` (it sits app-side of our handler) — only the codec + encoder.
-   So the interim write is a plain `context.writeAndFlush(.head(HTTPResponse(status: .continue)))`.
+   *Why this is safe here (research, ADR 017 sources):* the server codec ([`NIOHTTPTypesHTTP1/HTTP1ToHTTPCodec.swift:117`](../../) write path) passes **any** response head through unconditionally — `HTTPResponse(status: .continue)` → `HTTPResponseHead`, no status filtering. The two NIO state machines that historically made interim 1xx responses fragile (`HTTPServerPipelineHandler`, `HTTPServerProtocolErrorHandler`; the targets of [swift-nio #1330](https://github.com/apple/swift-nio/pull/1330)) are **both disabled** in Hummingbird's pipeline (`withPipeliningAssistance: false`, `withErrorHandling: false` — "HTTP is pipelined by NIOAsyncChannel"). Our outbound interim write does not even traverse `HTTPConnectionStateHandler` (it sits app-side of our handler) — only the codec + encoder. So the interim write is a plain `context.writeAndFlush(.head(HTTPResponse(status: .continue)))`.
 
-2. **Two configurable, modality-scoped caps** (operator review chose split over one global knob,
-   to avoid a 100 MB JSON-body abuse vector):
-   - **`max_audio_upload_bytes`** — the three `/v1/audio/*` multipart routes. **Default
-     104,857,600 (100 MiB)**, up from 25 MiB, so whole-file diarization/speaker-embedding of
-     long audio no longer forces client-side chunking.
-   - **`max_request_body_bytes`** — the JSON routes (`/v1/chat/completions`, `/v1/embeddings`,
-     and the other `4 * 1024 * 1024` collect sites). **Default 4,194,304 (4 MiB)** — unchanged
-     behavior, now tunable.
-   Both follow the existing optional-field → snake_case-TOML → daemon-default convention
-   (`AthenaConfig` → `ConfigEditor` → `Load` → `AthenaServer`), like `cold_load_wait_secs`.
-   `0` is **rejected at config-parse** (not "unlimited") — an unbounded upload is a memory-DoS
-   the governor doesn't cover; an operator who wants "effectively unlimited" sets a large number.
+2. **Two configurable, modality-scoped caps** (operator review chose split over one global knob, to avoid a 100 MB JSON-body abuse vector):
+   - **`max_audio_upload_bytes`** — the three `/v1/audio/*` multipart routes. **Default 104,857,600 (100 MiB)**, up from 25 MiB, so whole-file diarization/speaker-embedding of long audio no longer forces client-side chunking.
+   - **`max_request_body_bytes`** — the JSON routes (`/v1/chat/completions`, `/v1/embeddings`, and the other `4 * 1024 * 1024` collect sites). **Default 4,194,304 (4 MiB)** — unchanged behavior, now tunable. Both follow the existing optional-field → snake_case-TOML → daemon-default convention (`AthenaConfig` → `ConfigEditor` → `Load` → `AthenaServer`), like `cold_load_wait_secs`. `0` is **rejected at config-parse** (not "unlimited") — an unbounded upload is a memory-DoS the governor doesn't cover; an operator who wants "effectively unlimited" sets a large number.
 
-3. **Over-cap ⇒ clean `413 Payload Too Large`.** Replace the leaked-NIO 400 with the standard
-   envelope `{"error":{"message","type":"invalid_request_error","code":"payload_too_large"}}`
-   (same shape as the auth body). Two enforcement points, both 413: the up-front `Content-Length`
-   check (fast path, also drives the `Expect` 413 above) **and** the streamed-overflow
-   `collect(upTo: cap)` backstop (for chunked / absent / lying `Content-Length`). The message
-   states the cap in bytes; no internal type names.
+3. **Over-cap ⇒ clean `413 Payload Too Large`.** Replace the leaked-NIO 400 with the standard envelope `{"error":{"message","type":"invalid_request_error","code":"payload_too_large"}}` (same shape as the auth body). Two enforcement points, both 413: the up-front `Content-Length` check (fast path, also drives the `Expect` 413 above) **and** the streamed-overflow `collect(upTo: cap)` backstop (for chunked / absent / lying `Content-Length`). The message states the cap in bytes; no internal type names.
 
-4. **Surface the cap in `/openapi.json`.** Add a reusable `PayloadTooLarge` response component
-   and a documented max size to the three audio routes (and a `413` on the JSON routes), so
-   clients pre-check deterministically instead of guessing. The spec is version-stamped and the
-   bidirectional drift-guard stays green.
+4. **Surface the cap in `/openapi.json`.** Add a reusable `PayloadTooLarge` response component and a documented max size to the three audio routes (and a `413` on the JSON routes), so clients pre-check deterministically instead of guessing. The spec is version-stamped and the bidirectional drift-guard stays green.
 
-5. **MLX-free + unit-pinned (ADR 008/009).** The cap-decision algebra (Content-Length vs cap →
-   `continue` | `reject413`) and the `Expect`/`100-continue` handler are pure NIO/Swift — they
-   live in **`AthenaServerKit`** alongside the other server primitives and are unit-tested under
-   `swift test`. End-to-end (real client, real `Expect`, oversized file) is an `e2e`/RUNBOOK item.
+5. **MLX-free + unit-pinned (ADR 008/009).** The cap-decision algebra (Content-Length vs cap → `continue` | `reject413`) and the `Expect`/`100-continue` handler are pure NIO/Swift — they live in **`AthenaServerKit`** alongside the other server primitives and are unit-tested under `swift test`. End-to-end (real client, real `Expect`, oversized file) is an `e2e`/RUNBOOK item.
 
 ## Consequences
 
-- **The reported hang is fixed for every client and every route**, because the cause was
-  protocol handling, not the cap. The cap work is a separate correctness/ergonomics fix.
-- **Video later fits the same shape.** There is no video-input surface today (vision is
-  base64 image parts inside chat JSON, ADR 010). If/when a video route lands it gets its own
-  `max_video_upload_bytes` knob — the modality-scoped pattern already accommodates it; we are
-  **not** building video plumbing now.
-- **Reverse-proxy guidance changes (ADR 004).** A proxy in front of Athena has its **own** body
-  cap (nginx `client_max_body_size` defaults to 1 MB) and may **buffer the whole request**
-  (`proxy_request_buffering`). Raising Athena's cap to 100 MB is moot unless the operator raises
-  the proxy's too. `docs/reverse-proxy.md` gets a note; the daemon's 413 still fires for direct
-  (loopback) clients regardless.
-- **Memory cost is bounded and honest.** Each in-flight audio upload now buffers up to 100 MiB
-  (the handlers `collect` the whole body before decode). Concurrency caps (M29.2) bound the
-  multiplier; the doc states `max_audio_upload_bytes × max_concurrency` as the worst-case
-  transient footprint so an operator sizes it deliberately. Streaming-to-disk decode is a noted
-  follow-up, **out of scope** here.
-- **Interim-response risk is low (downgraded after research), still gated.** The original plan
-  feared writing a `100 Continue` through the framework was unproven. Research (see sources)
-  shows the path is clear: the server codec passes informational heads through unconditionally,
-  the two fragile NIO state machines are disabled in Hummingbird's config, and the interim write
-  bypasses `HTTPConnectionStateHandler`. The handler is **stateless and ~15 lines** (send 100,
-  forward head) — no body draining or short-circuit logic to get wrong. It is still its own
-  slice, pinned by a `NIOEmbeddedChannel` unit test (head-with-Expect → 100 emitted + head
-  forwarded) and an e2e test (the original hang repro returns < 1 s). Residual risk: the
-  `NIOAsyncChannel` outbound-half-closure / flush interaction, which the embedded-channel test
-  resolves definitively. **Over-cap rejection does not depend on this handler** — it is enforced
-  entirely app-side (Content-Length 413 + `collect` backstop, proven to return fast for full-
-  and half-duplex clients), so even a worst-case handler problem cannot reintroduce the hang for
-  oversized uploads; only the under-cap-`Expect` ergonomics would be affected.
-- **Revert is config + a flag.** Setting `max_audio_upload_bytes = 26214400` restores the old
-  cap; the `Expect` handler is additive and removable.
-- **No passive-oracle / governor-thesis impact (ADR 011).** Inbound-only; no new outbound; the
-  governor is untouched (these are ingress limits, not Metal-budget tenants).
+- **The reported hang is fixed for every client and every route**, because the cause was protocol handling, not the cap. The cap work is a separate correctness/ergonomics fix.
+- **Video later fits the same shape.** There is no video-input surface today (vision is base64 image parts inside chat JSON, ADR 010). If/when a video route lands it gets its own `max_video_upload_bytes` knob — the modality-scoped pattern already accommodates it; we are **not** building video plumbing now.
+- **Reverse-proxy guidance changes (ADR 004).** A proxy in front of Athena has its **own** body cap (nginx `client_max_body_size` defaults to 1 MB) and may **buffer the whole request** (`proxy_request_buffering`). Raising Athena's cap to 100 MB is moot unless the operator raises the proxy's too. `docs/reverse-proxy.md` gets a note; the daemon's 413 still fires for direct (loopback) clients regardless.
+- **Memory cost is bounded and honest.** Each in-flight audio upload now buffers up to 100 MiB (the handlers `collect` the whole body before decode). Concurrency caps (M29.2) bound the multiplier; the doc states `max_audio_upload_bytes × max_concurrency` as the worst-case transient footprint so an operator sizes it deliberately. Streaming-to-disk decode is a noted follow-up, **out of scope** here.
+- **Interim-response risk is low (downgraded after research), still gated.** The original plan feared writing a `100 Continue` through the framework was unproven. Research (see sources) shows the path is clear: the server codec passes informational heads through unconditionally, the two fragile NIO state machines are disabled in Hummingbird's config, and the interim write bypasses `HTTPConnectionStateHandler`. The handler is **stateless and ~15 lines** (send 100, forward head) — no body draining or short-circuit logic to get wrong. It is still its own slice, pinned by a `NIOEmbeddedChannel` unit test (head-with-Expect → 100 emitted + head forwarded) and an e2e test (the original hang repro returns < 1 s). Residual risk: the `NIOAsyncChannel` outbound-half-closure / flush interaction, which the embedded-channel test resolves definitively. **Over-cap rejection does not depend on this handler** — it is enforced entirely app-side (Content-Length 413 + `collect` backstop, proven to return fast for full- and half-duplex clients), so even a worst-case handler problem cannot reintroduce the hang for oversized uploads; only the under-cap-`Expect` ergonomics would be affected.
+- **Revert is config + a flag.** Setting `max_audio_upload_bytes = 26214400` restores the old cap; the `Expect` handler is additive and removable.
+- **No passive-oracle / governor-thesis impact (ADR 011).** Inbound-only; no new outbound; the governor is untouched (these are ingress limits, not Metal-budget tenants).
 
 ## Plan
 
-See `docs/upload-limits-plan.md` (internal repo) — staged, test-pinned slices with
-`appVersion` bumped in each slice commit (house style).
+See `docs/upload-limits-plan.md` (internal repo) — staged, test-pinned slices with `appVersion` bumped in each slice commit (house style).
