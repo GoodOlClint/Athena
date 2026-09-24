@@ -66,7 +66,8 @@ public enum ModelPull {
                             // derive, and is unknown when the repo declares no
                             // size (0 total ⇒ the renderer shows no ratio).
                             let total = f.sizeBytes ?? 0
-                            let bytes = Int64(f.fractionCompleted * Double(total))
+                            let clampedFraction = min(max(f.fractionCompleted, 0), 1)
+                            let bytes = Int64(clampedFraction * Double(total))
                             progress?(
                                 .file(
                                     name: (f.path as NSString).lastPathComponent,

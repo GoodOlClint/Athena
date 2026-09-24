@@ -179,10 +179,12 @@ let package = Package(
         // per shard instead of a single aggregate bar. The progress/resume fix
         // this fork also used to carry (upstream PR #50) merged upstream and
         // shipped in 0.10.0, so the fork now rebases onto upstream `main`.
-        // SCM pin on GoodOlClint/swift-huggingface @ athena/per-file-progress
-        // by default; ATHENA_LOCAL_DEV=1 swaps to ../swift-huggingface — see
-        // `hubDep`. Revert to the upstream `url:` dep + a version bump once
-        // PR #69 merges and a release carries it.
+        // SCM pin on GoodOlClint/swift-huggingface, anchored by the dated tag
+        // athena-per-file-progress-2026-09-02 (also the tip of branch
+        // athena/per-file-progress, the name ATHENA_LOCAL_DEV=1's
+        // ../swift-huggingface checkout uses) — see `hubDep`. Revert to the
+        // upstream `url:` dep + a version bump once PR #69 merges and a
+        // release carries it.
         hubDep,
         // M60.3 — sudoless Apple Silicon GPU clock + die temperature via
         // IOReport/SMC (the in-process replacement for a root `powermetrics`
