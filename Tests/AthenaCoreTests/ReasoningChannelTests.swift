@@ -219,4 +219,22 @@ final class ReasoningPromptTailTests: XCTestCase {
                 "<think>\nprior reasoning\n</think>\n\nprior answer<|im_end|>\n"
             ))
     }
+
+    /// Codex adversarial review, PR #213 round 3: a USER message ending in
+    /// the literal text `<think>` is followed by real template boilerplate
+    /// (the generation-prompt suffix), not whitespace — must read as closed.
+    func testUserContentEndingInLiteralOpenTagIsNotForgeable() {
+        XCTAssertFalse(
+            ReasoningPromptTail.startsInOpenBlock(
+                "Please explain the <think> tag convention<|im_end|>\n<|im_start|>assistant\n"
+            ))
+    }
+
+    /// A close marker with trailing whitespace only (Qwen3.5's exact shape,
+    /// `<think>\n`) is still open — the whitespace-only requirement must not
+    /// be stricter than the real template output.
+    func testOpenMarkerFollowedByOnlyWhitespaceIsOpen() {
+        XCTAssertTrue(
+            ReasoningPromptTail.startsInOpenBlock("<think>\n  \n"))
+    }
 }
