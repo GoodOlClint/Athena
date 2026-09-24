@@ -66,4 +66,11 @@ public enum GenChunk: Sendable {
     /// surfaces it as `tool_calls` + `finish_reason:"tool_calls"`. The
     /// Guide-forced path does not use this (it streams the call as `.text`).
     case toolCall(name: String, argumentsJSON: String)
+    /// #198 (ADR 035 amendment) — whether the rendered prompt opened a
+    /// reasoning block (e.g. Qwen3.5's `<think>\n`) it never closes, so the
+    /// completion's own first byte is already inside it. Emitted once,
+    /// before the first `.text`, only on the free-generation path (never on
+    /// a schema-guided/forced-tool-call decode — the server already knows
+    /// that case has no reasoning to extract).
+    case startsInReasoning(Bool)
 }

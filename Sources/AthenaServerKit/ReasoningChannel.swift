@@ -123,49 +123,39 @@ public func splitReasoningChannel(
 public let qwenThinkStart = "<think>"
 public let qwenThinkEnd = "</think>"
 
-/// Model-gated, unlike `ReasoningChannelFilter` (ADR 035 amendment — see the
-/// ADR file). Qwen3.5's chat template pre-inserts the OPENING `<think>\n`
-/// into the *prompt* whenever thinking is active (`enable_thinking` unset or
-/// `true`), so the model's own completion carries only the CLOSE marker —
-/// reasoning text starts at generation's first byte with no delimiter to key
-/// on. A marker-only filter (Gemma's design) can't tell that apart from
-/// ordinary content for a model that never emits `</think>` at all, so this
-/// filter's mode has to be told, per request, whether the caller already
-/// opened the block: `qwenReasoningMode` resolves that from the same inputs
-/// the template itself uses (the model + `enable_thinking` + whether the
-/// response is schema-guided), BEFORE generation starts, so streaming never
-/// has to buffer output while it waits to find out.
+/// **Not model-gated** (operator ruling, PR #213 round 3 — reverses an
+/// earlier revision of this same PR that WAS model-gated): whether reasoning
+/// starts already open is derived from the actual rendered PROMPT
+/// (`ReasoningPromptTail.startsInOpenBlock`, computed in `AthenaLLM` where
+/// the tokenizer lives, passed in as `startsInReasoning`), never from a
+/// model-name guess. This keeps ADR 035's "universal, not model-gated"
+/// property true for real: any model whose chat template pre-opens a
+/// `<think>` block it never closes gets `.reasoningOpen`; every other model
+/// gets `.awaitingOpenTag`, the same marker-driven no-op-in-practice design
+/// Gemma's filter already relies on (the markers are chosen because they
+/// don't occur in ordinary content — the same assumption ADR 035 makes for
+/// `<|channel>`, not a new one).
 ///
 /// The close-tag-only form is the observed default (`enable_thinking` unset
 /// or `true`, 2026-09-23, `Qwen3.5-27B-4bit`, greedy): raw completion bytes
 /// were `Thinking Process:\n\n1.  **Analyze the Request:**\n…\n5.  **Construct
 /// Final Response:** 4.cw\n</think>\n\n4` — no opening tag anywhere in the
-/// completion.
-///
-/// `.disabled` is a TRUE no-op — it never scans for either marker. This
-/// matters beyond Qwen3.5: without it, a `<think>` literal appearing in
-/// ordinary content from ANY model (e.g. a prompt asking to explain XML/HTML
-/// tags) would be silently stripped as a false-positive paired-form match,
-/// breaking ADR 035's "safe no-op for models that don't emit the markers"
-/// guarantee (Codex adversarial review, PR #213). Every non-Qwen3.5 request
-/// gets `.disabled`.
+/// completion, because the template already put `<think>\n` at the end of
+/// the prompt.
 public struct QwenThinkFilter: Sendable {
-    /// - `.disabled`: never scans for either marker — a true no-op (non-Qwen
-    ///   models, or Qwen3.5 requests this daemon didn't recognize as such).
-    /// - `.awaitingOpenTag`: Qwen3.5, but the prompt did NOT pre-open the
-    ///   block (`enable_thinking: false`, or a schema-guided/forced-tool-call
-    ///   response — the Guide masks from token 0 and suppresses `<think>`,
-    ///   so there is no reasoning to extract). Still watches defensively for
-    ///   a literal `<think>` (paired form), scoped to Qwen3.5 only.
-    /// - `.reasoningOpen`: Qwen3.5, prompt pre-opened the block — the
-    ///   close-tag-only form; reasoning starts at byte 0.
+    /// - `.awaitingOpenTag`: the default. Watches for a literal `<think>`
+    ///   (paired form) before entering `.reasoning` — a no-op unless that
+    ///   marker actually appears, same design as `ReasoningChannelFilter`.
+    /// - `.reasoningOpen`: the prompt was determined (from its own rendered
+    ///   text, see `ReasoningPromptTail`) to already be inside an open
+    ///   `<think>` block — the close-tag-only form; reasoning starts at
+    ///   byte 0.
     public enum Mode: Sendable, Equatable {
-        case disabled
         case awaitingOpenTag
         case reasoningOpen
     }
 
-    private enum State { case disabled, content, reasoning }
+    private enum State { case content, reasoning }
     private var state: State
     private var buffer = ""
     private static let holdback =
@@ -175,7 +165,6 @@ public struct QwenThinkFilter: Sendable {
 
     public init(mode: Mode) {
         switch mode {
-        case .disabled: state = .disabled
         case .awaitingOpenTag: state = .content
         case .reasoningOpen: state = .reasoning
         }
@@ -199,10 +188,6 @@ public struct QwenThinkFilter: Sendable {
         var reasoning = ""
         loop: while true {
             switch state {
-            case .disabled:
-                content += buffer
-                buffer = ""
-                break loop
             case .content:
                 if let r = buffer.range(of: qwenThinkStart) {
                     content += String(buffer[..<r.lowerBound])
@@ -251,33 +236,19 @@ public func splitQwenThink(
     return (a.content + b.content, a.reasoning + b.reasoning)
 }
 
-/// Resolve, from request-time inputs alone (before any text has generated),
-/// the `QwenThinkFilter.Mode` for this request. `modelName` is the resolved
-/// canonical store id — a name-substring heuristic (no `model_type` config
-/// read: this stays MLX-free and `AthenaServerKit` has no `AthenaLLM`/
-/// `ModelSupport` dependency to classify architecture properly). Non-Qwen3.5
-/// models always get `.disabled` — a true no-op, never scanning for either
-/// marker (Codex adversarial review, PR #213: an earlier revision searched
-/// for the markers unconditionally, which could strip a literal `<think>`
-/// out of ordinary content from an unrelated model).
-///
-/// `isStructured` (schema-guided decoding OR a forced tool call) forces
-/// `.awaitingOpenTag` even when `enable_thinking` would otherwise be on:
-/// Athena's Guide masks the vocabulary from token 0 for both, which
-/// suppresses the model's own `<think>` emission entirely (same review: an
-/// earlier revision defaulted straight to `.reasoningOpen` here, which
-/// swallowed the entire structured response — and any forced tool call —
-/// into `reasoning_content`, leaving `content`/the parsed tool call empty).
-/// `chatTemplateKwargs["enable_thinking"]` otherwise mirrors the template's
-/// own default: thinking is ON unless explicitly set to `false`.
+/// Resolve the `QwenThinkFilter.Mode` for this request. `startsInReasoning`
+/// comes from `ReasoningPromptTail.startsInOpenBlock` on the actual rendered
+/// prompt (computed in `AthenaLLM`, where the tokenizer lives — not a
+/// model-name guess). `isStructured` (schema-guided decoding OR a forced
+/// tool call) overrides it to `.awaitingOpenTag` regardless: Athena's Guide
+/// masks the vocabulary from token 0 for both, so even when the prompt did
+/// open a `<think>` block, the Guide-masked completion can never close it —
+/// starting in `.reasoningOpen` there would swallow the entire structured
+/// response (or the parsed tool call) into `reasoning_content`, leaving
+/// `content` empty (Codex adversarial review, PR #213 round 1).
 public func qwenReasoningMode(
-    modelName: String, chatTemplateKwargs: [String: any Sendable]?,
-    isStructured: Bool
+    startsInReasoning: Bool, isStructured: Bool
 ) -> QwenThinkFilter.Mode {
-    guard modelName.lowercased().contains("qwen3.5") else { return .disabled }
     if isStructured { return .awaitingOpenTag }
-    if let flag = chatTemplateKwargs?["enable_thinking"] as? Bool, !flag {
-        return .awaitingOpenTag
-    }
-    return .reasoningOpen
+    return startsInReasoning ? .reasoningOpen : .awaitingOpenTag
 }

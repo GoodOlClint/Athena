@@ -165,7 +165,6 @@ extension AthenaServer {
                                 "streamed request truncated by deadline path=/v1/messages")
                         }),
                     isToolCall: lowered.isToolCall, stops: lowered.stops,
-                    chatTemplateKwargs: lowered.native.chatTemplateKwargs,
                     isStructured: lowered.native.schemaJSON != nil,
                     onConsumerCancel: { cancelCounter.cancelGeneration() },
                     record: { usage in
@@ -194,8 +193,7 @@ extension AthenaServer {
         var text = splitQwenThink(
             splitReasoningChannel(collected.text).content,
             mode: qwenReasoningMode(
-                modelName: model,
-                chatTemplateKwargs: lowered.native.chatTemplateKwargs,
+                startsInReasoning: collected.startsInReasoning,
                 isStructured: lowered.native.schemaJSON != nil
                     || lowered.isToolCall)
         ).content

@@ -37,7 +37,7 @@ One line per ADR: number, title, status, link. Status is taken from each ADR fil
 - [ADR 032 — Gemma 4 MTP speculative decoding (second drafter backend)](032-gemma4-mtp-speculative-decoding.md) — Accepted — implemented + e2e verified
 - [ADR 033 — Collapse Qwen3.5 MTP onto the substrate drafter path](033-collapse-qwen35-mtp-onto-substrate-drafter.md) — Proposed — awaiting operator approval
 - [ADR 034 — `tool_choice: auto` must not force a tool call](034-tool-choice-auto-non-forcing.md) — Accepted — implemented
-- [ADR 035 — Route channel-delimited reasoning to `reasoning_content`](035-reasoning-channel-to-reasoning-content.md) — Accepted — implemented; amended #198 (Qwen3.5 `<think>`, model-gated)
+- [ADR 035 — Route channel-delimited reasoning to `reasoning_content`](035-reasoning-channel-to-reasoning-content.md) — Accepted — implemented; amended #198 (close-tag-only reasoning form, prompt-derived — not model-gated)
 - [ADR 036 — Multiple protocol adapters over one inference engine (Anthropic Messages; one stream, two terminal ops)](036-multi-protocol-adapters-over-one-engine.md) — Accepted — S1–S3 shipped
 - [ADR 037 — Daemon-mediated config + sudoless restart (sudo only for install/uninstall)](037-daemon-mediated-config-and-restart.md) — Accepted
 - [ADR 038 — Serialize execution; batch within the span](038-serialize-execution-batch-within-the-span.md) — Accepted — immediate slice shipped

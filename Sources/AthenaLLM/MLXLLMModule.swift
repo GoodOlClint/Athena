@@ -843,14 +843,16 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                                 // runSpeculative returns nil only for
                                 // UNstructured requests (no schema) — those
                                 // stream from the standard substrate path.
-                                let stream = try await self.beginGeneration(
+                                let begun = try await self.beginGeneration(
                                     messages: messages, tools: tools,
                                     maxTokens: maxTokens,
                                     temperature: temperature,
                                     topP: topP, seed: seed,
                                     chatTemplateKwargs: chatTemplateKwargs,
                                     requestSpeculative: speculative)
-                                for await event in stream {
+                                continuation.yield(
+                                    .startsInReasoning(begun.startsInReasoning))
+                                for await event in begun.stream {
                                     switch event {
                                     case .chunk(let text):
                                         continuation.yield(.text(text))
@@ -1199,7 +1201,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         topP: Double?, seed: Int?,
         chatTemplateKwargs: [String: any Sendable]?,
         requestSpeculative: Bool? = nil
-    ) async throws -> AsyncStream<Generation> {
+    ) async throws -> (stream: AsyncStream<Generation>, startsInReasoning: Bool) {
         guard let container else {
             throw AthenaError.moduleLoadFailed(
                 .llm, reason: "generate called before load")
@@ -1265,6 +1267,19 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             // ADR 030 — same prefill ceiling as runSpeculative; this is the
             // substrate-stream path the gemma4-MoE long-context abort took.
             try enforcePromptCeiling(tokenCount: lmInput.text.tokens.size)
+            // #198 (ADR 035 amendment) — decode the last few prompt tokens to
+            // tell whether the rendered chat template opened a reasoning
+            // block (e.g. Qwen3.5's `<think>\n`) it never closes, so the
+            // completion's own first byte is already inside it. Pure
+            // MLX-free string check in `ReasoningPromptTail`; only the
+            // decode itself needs the tokenizer.
+            let tailIds = lmInput.text.tokens.asArray(Int.self).suffix(
+                ReasoningPromptTail.tailTokenCount)
+            let tailText = try await container.perform { ctx in
+                ctx.tokenizer.decode(tokenIds: Array(tailIds))
+            }
+            let startsInReasoning = ReasoningPromptTail.startsInOpenBlock(
+                tailText)
             // ADR 032 — Gemma 4 MTP: when speculative resolves on AND a paired
             // drafter is resident, drive the substrate's MTP overload (target +
             // drafter, lossless via target-verify) instead of the plain stream.
@@ -1277,15 +1292,18 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             if (requestSpeculative ?? params.speculative),
                 let drafterBox = mtpDrafterModel
             {
-                return try await container.perform(nonSendable: lmInput) {
-                    ctx, lmInput in
+                let stream = try await container.perform(
+                    nonSendable: lmInput
+                ) { ctx, lmInput in
                     try MLXLMCommon.generate(
                         input: lmInput, parameters: gp, context: ctx,
                         mtpDrafter: drafterBox.model, blockSize: 4)
                 }
+                return (stream, startsInReasoning)
             }
-            return try await container.generate(
+            let stream = try await container.generate(
                 input: lmInput, parameters: gp)
+            return (stream, startsInReasoning)
         }
     }
 

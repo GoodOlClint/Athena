@@ -304,7 +304,6 @@ extension AthenaServer {
                         },
                         includeUsage: includeUsage,
                         isToolCall: effective?.isToolCall == true, stops: stops,
-                        chatTemplateKwargs: native.chatTemplateKwargs,
                         isStructured: schemaJSON != nil,
                         onConsumerCancel: { cancelCounter.cancelGeneration() },
                         record: { usage in
@@ -331,7 +330,6 @@ extension AthenaServer {
                         }),
                     includeUsage: includeUsage,
                     isToolCall: effective?.isToolCall == true, stops: stops,
-                    chatTemplateKwargs: native.chatTemplateKwargs,
                     isStructured: schemaJSON != nil,
                     onConsumerCancel: { cancelCounter.cancelGeneration() },
                     record: { usage in
@@ -363,13 +361,15 @@ extension AthenaServer {
         // <channel|>`) out of the content before anything else; surface it as
         // `reasoning_content`. No-op for models that don't emit the markers.
         let split = splitReasoningChannel(collected.text)
-        // #198 — Qwen3.5's `<think>…</think>` on whatever the Gemma split
-        // left as content. No-op for every other model.
+        // #198 — the close-tag-only reasoning form (any model whose chat
+        // template pre-opens a block it never closes), on whatever the
+        // Gemma split left as content.
         let qwenSplit = splitQwenThink(
             split.content,
             mode: qwenReasoningMode(
-                modelName: model, chatTemplateKwargs: native.chatTemplateKwargs,
-                isStructured: schemaJSON != nil || effective?.isToolCall == true))
+                startsInReasoning: collected.startsInReasoning,
+                isStructured: schemaJSON != nil
+                    || effective?.isToolCall == true))
         var text = qwenSplit.content
         let reasoning =
             (split.reasoning + qwenSplit.reasoning).isEmpty
@@ -514,6 +514,10 @@ extension AthenaServer {
         // the substrate. nil ⇒ plain text completion (or a Guide-forced call,
         // which arrives as `text` and is parsed via `isToolCall`).
         var toolCall: (name: String, argsJSON: String)?
+        // #198 — whether the rendered prompt opened a reasoning block the
+        // completion never closes (see `ReasoningPromptTail`). Only ever set
+        // on the free-generation path.
+        var startsInReasoning = false
     }
 
     /// NSLock-isolated state for the M46.7 heartbeat: the event-drain
@@ -812,6 +816,8 @@ extension AthenaServer {
                         case .toolCall(let name, let argsJSON):
                             // ADR 034 — substrate-detected free tool call.
                             c.toolCall = (name, argsJSON)
+                        case .startsInReasoning(let b):
+                            c.startsInReasoning = b
                         case .error(let athenaErr):
                             // M49.5.2 — re-throw the classified error so the
                             // HTTP layer's `do { ... } catch let e as AthenaError`
