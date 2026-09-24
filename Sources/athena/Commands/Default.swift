@@ -2,7 +2,6 @@ import ArgumentParser
 import AthenaClient
 import AthenaCore
 import AthenaDeploy
-import AthenaLLM
 import Foundation
 
 /// `athena default [--module M] [NAME]` — show or set a module's default
