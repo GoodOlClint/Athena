@@ -67,7 +67,9 @@ public enum PeerClose {
 /// request's handler runs (a client that sends and closes in one burst) is
 /// still seen. On `handlerAdded` it puts a forwarder first in the pipeline:
 /// the HTTP pipelining handler can hold back `inputClosed` while a request is
-/// in flight, so the latch must see the event before any codec does.
+/// in flight, so the latch must see the event before any codec does. It also
+/// records the events itself, a backstop should the forwarder be missing.
+/// `@unchecked Sendable`: every mutable field is read and written under `lock`.
 public final class PeerCloseLatch: ChannelInboundHandler, RemovableChannelHandler,
     @unchecked Sendable
 {
@@ -81,6 +83,18 @@ public final class PeerCloseLatch: ChannelInboundHandler, RemovableChannelHandle
     public func handlerAdded(context: ChannelHandlerContext) {
         try? context.pipeline.syncOperations.addHandler(
             Front(self), position: .first)
+    }
+
+    public func userInboundEventTriggered(
+        context: ChannelHandlerContext, event: Any
+    ) {
+        if let e = event as? ChannelEvent, e == .inputClosed { markClosed() }
+        context.fireUserInboundEventTriggered(event)
+    }
+
+    public func channelInactive(context: ChannelHandlerContext) {
+        markClosed()
+        context.fireChannelInactive()
     }
 
     /// A stream that yields once the peer has closed — at once if it already

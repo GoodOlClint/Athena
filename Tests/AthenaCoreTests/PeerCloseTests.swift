@@ -63,14 +63,15 @@ final class PeerCloseTests: XCTestCase {
     /// `inputClosed` event, not a channel close.
     func testInputClosedDuringRequestCancels() async throws {
         let channel = try await connectedChannel()
-        let work = Task {
-            try await PeerClose.cancelling(channel) {
-                await Self.untilCancelled()
-            }
+        let pipeline = channel.pipeline
+        let fire = Task {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            pipeline.fireUserInboundEventTriggered(ChannelEvent.inputClosed)
         }
-        try await Task.sleep(nanoseconds: 50_000_000)
-        channel.pipeline.fireUserInboundEventTriggered(ChannelEvent.inputClosed)
-        let r = try await work.value
+        let r = try await PeerClose.cancelling(channel) {
+            await Self.untilCancelled()
+        }
+        _ = await fire.result
         XCTAssertEqual(r, "cancelled")
     }
 
@@ -89,14 +90,15 @@ final class PeerCloseTests: XCTestCase {
 
     func testChannelInactiveCancels() async throws {
         let channel = try await connectedChannel()
-        let work = Task {
-            try await PeerClose.cancelling(channel) {
-                await Self.untilCancelled()
-            }
+        let pipeline = channel.pipeline
+        let fire = Task {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            pipeline.close(promise: nil)
         }
-        try await Task.sleep(nanoseconds: 50_000_000)
-        try await channel.close()
-        let r = try await work.value
+        let r = try await PeerClose.cancelling(channel) {
+            await Self.untilCancelled()
+        }
+        _ = await fire.result
         XCTAssertEqual(r, "cancelled")
     }
 
