@@ -165,6 +165,7 @@ extension AthenaServer {
                                 "streamed request truncated by deadline path=/v1/messages")
                         }),
                     isToolCall: lowered.isToolCall, stops: lowered.stops,
+                    isStructured: lowered.native.schemaJSON != nil,
                     onConsumerCancel: { cancelCounter.cancelGeneration() },
                     record: { usage in
                         await meter(principal: principal, usage: usage)
@@ -188,7 +189,14 @@ extension AthenaServer {
                 message: c.message)
         }
         // ADR 035 — strip channel-reasoning so it never leaks into the text.
-        var text = splitReasoningChannel(collected.text).content
+        // #198 — likewise strip Qwen3.5's `<think>…</think>`; no-op elsewhere.
+        var text = splitQwenThink(
+            splitReasoningChannel(collected.text).content,
+            mode: qwenReasoningMode(
+                startsInReasoning: collected.startsInReasoning,
+                isStructured: lowered.native.schemaJSON != nil
+                    || lowered.isToolCall)
+        ).content
         var stopHit: String?
         if !lowered.stops.isEmpty {
             let cut = StopStreamFilter.truncate(text, stops: lowered.stops)

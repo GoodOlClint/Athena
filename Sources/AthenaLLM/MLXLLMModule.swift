@@ -833,6 +833,9 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                                 principal: principal, logprobs: logprobs)
                             {
                                 u = speculative.usage
+                                continuation.yield(
+                                    .startsInReasoning(
+                                        speculative.startsInReasoning))
                                 continuation.yield(.text(speculative.text))
                                 continuation.yield(.usage(u))
                                 // C2 (ADR 013 §4): per-token logprobs.
@@ -843,14 +846,16 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                                 // runSpeculative returns nil only for
                                 // UNstructured requests (no schema) — those
                                 // stream from the standard substrate path.
-                                let stream = try await self.beginGeneration(
+                                let begun = try await self.beginGeneration(
                                     messages: messages, tools: tools,
                                     maxTokens: maxTokens,
                                     temperature: temperature,
                                     topP: topP, seed: seed,
                                     chatTemplateKwargs: chatTemplateKwargs,
                                     requestSpeculative: speculative)
-                                for await event in stream {
+                                continuation.yield(
+                                    .startsInReasoning(begun.startsInReasoning))
+                                for await event in begun.stream {
                                     switch event {
                                     case .chunk(let text):
                                         continuation.yield(.text(text))
@@ -946,7 +951,10 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         promptCacheKey: String? = nil,
         principal: String? = nil,
         logprobs: LogprobsRequest? = nil
-    ) async throws -> (text: String, usage: TokenUsage, logprobs: [TokenLogprob]?)? {
+    ) async throws -> (
+        text: String, usage: TokenUsage, logprobs: [TokenLogprob]?,
+        startsInReasoning: Bool
+    )? {
         guard let container else { return nil }
         // C2 (ADR 013 §4) — per-token logprob capture sink. Non-nil only when
         // the caller asked for logprobs; the server has already enforced that
@@ -1014,6 +1022,22 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         // and abort the daemon. Shared with the substrate-stream path
         // (`beginGeneration`) so BOTH decode routes are covered.
         try enforcePromptCeiling(tokenCount: promptTokens.count)
+        // #198 — same prelude `beginGeneration` sends (Codex adversarial
+        // review, PR #213 round 3: this path — a `logprobs:true` unstructured
+        // request — reaches here too via `dispatch.defersToSubstrateStream ==
+        // false`, and had no equivalent emission). The server ignores this
+        // when the request is actually structured (`isStructured`), so it's
+        // safe to compute unconditionally.
+        let tailIds = promptTokens.suffix(ReasoningPromptTail.tailTokenCount)
+        let tailText = await container.perform { ctx in
+            // Explicit `false` (round-4 automated review follow-up): the
+            // whitespace-only check depends on the template's own special
+            // tokens (`<|im_start|>assistant\n`) surviving in the decoded
+            // tail, not on the tokenizer's own default.
+            ctx.tokenizer.decode(tokenIds: Array(tailIds), skipSpecialTokens: false)
+        }
+        let startsInReasoning = ReasoningPromptTail.startsInOpenBlock(
+            tailText)
         // M24.3: a positive per-request override wins over the loaded
         // default; the greedy/MTP paths are length-only (temperature is
         // inert under the Guide / speculative greedy).
@@ -1169,7 +1193,8 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                 promptTokens: promptTokens.count,
                 completionTokens: decoded.completion,
                 cachedTokens: decoded.cached),
-            decoded.logprobs
+            decoded.logprobs,
+            startsInReasoning
         )
     }
 
@@ -1199,7 +1224,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         topP: Double?, seed: Int?,
         chatTemplateKwargs: [String: any Sendable]?,
         requestSpeculative: Bool? = nil
-    ) async throws -> AsyncStream<Generation> {
+    ) async throws -> (stream: AsyncStream<Generation>, startsInReasoning: Bool) {
         guard let container else {
             throw AthenaError.moduleLoadFailed(
                 .llm, reason: "generate called before load")
@@ -1265,6 +1290,19 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             // ADR 030 — same prefill ceiling as runSpeculative; this is the
             // substrate-stream path the gemma4-MoE long-context abort took.
             try enforcePromptCeiling(tokenCount: lmInput.text.tokens.size)
+            // #198 (ADR 035 amendment) — decode the last few prompt tokens to
+            // tell whether the rendered chat template opened a reasoning
+            // block (e.g. Qwen3.5's `<think>\n`) it never closes, so the
+            // completion's own first byte is already inside it. Pure
+            // MLX-free string check in `ReasoningPromptTail`; only the
+            // decode itself needs the tokenizer.
+            let tailIds = lmInput.text.tokens.asArray(Int.self).suffix(
+                ReasoningPromptTail.tailTokenCount)
+            let tailText = await container.perform { ctx in
+                ctx.tokenizer.decode(tokenIds: Array(tailIds), skipSpecialTokens: false)
+            }
+            let startsInReasoning = ReasoningPromptTail.startsInOpenBlock(
+                tailText)
             // ADR 032 — Gemma 4 MTP: when speculative resolves on AND a paired
             // drafter is resident, drive the substrate's MTP overload (target +
             // drafter, lossless via target-verify) instead of the plain stream.
@@ -1277,15 +1315,18 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             if (requestSpeculative ?? params.speculative),
                 let drafterBox = mtpDrafterModel
             {
-                return try await container.perform(nonSendable: lmInput) {
-                    ctx, lmInput in
+                let stream = try await container.perform(
+                    nonSendable: lmInput
+                ) { ctx, lmInput in
                     try MLXLMCommon.generate(
                         input: lmInput, parameters: gp, context: ctx,
                         mtpDrafter: drafterBox.model, blockSize: 4)
                 }
+                return (stream, startsInReasoning)
             }
-            return try await container.generate(
+            let stream = try await container.generate(
                 input: lmInput, parameters: gp)
+            return (stream, startsInReasoning)
         }
     }
 
@@ -1548,6 +1589,18 @@ extension MLXLLMModule {
                         conts[uid] = batch[i].continuation
                         prompt[uid] = batch[i].promptCount
                         produced[uid] = 0
+                        // #198 — same prelude the non-batched path sends
+                        // (Sources/AthenaCore/ReasoningPromptTail), computed
+                        // per row from its own already-tokenized prompt
+                        // rather than a second `container.prepare`.
+                        let tailIds = batch[i].promptTokens.suffix(
+                            ReasoningPromptTail.tailTokenCount)
+                        let tailText = ctx.tokenizer.decode(
+                            tokenIds: Array(tailIds), skipSpecialTokens: false)
+                        batch[i].continuation.yield(
+                            .startsInReasoning(
+                                ReasoningPromptTail.startsInOpenBlock(
+                                    tailText)))
                     }
                     while gen.hasWork {
                         for r in gen.next() {
