@@ -7,6 +7,12 @@ public enum AthenaError: Error, Sendable, Equatable {
     /// Admission was refused: the request would exceed the global budget and
     /// nothing evictable could be freed. Governed backpressure → 503.
     case memoryBudgetExceeded(requested: Int, available: Int, module: ModuleID)
+    /// The model can never be admitted: its weights (plus, for the LLM, one
+    /// request's KV headroom — the prompt-cache cap) exceed the whole budget,
+    /// so no eviction helps. A client-correctable 400, refused before any load.
+    case modelExceedsBudget(
+        module: ModuleID, model: String?, weightBytes: Int, headroomBytes: Int,
+        budgetBytes: Int)
     /// A module load failed in the substrate.
     case moduleLoadFailed(ModuleID, reason: String)
     /// No module is registered under this id.
@@ -124,6 +130,7 @@ public enum AthenaError: Error, Sendable, Equatable {
     public var httpStatus: Int {
         switch self {
         case .memoryBudgetExceeded: return 503
+        case .modelExceedsBudget: return 400
         case .moduleLoadFailed: return 500
         case .moduleNotRegistered: return 404
         case .metalOutOfMemory: return 503
@@ -159,6 +166,7 @@ public enum AthenaError: Error, Sendable, Equatable {
     public var code: String {
         switch self {
         case .memoryBudgetExceeded: return "memory_budget_exceeded"
+        case .modelExceedsBudget: return "model_exceeds_memory_budget"
         case .moduleLoadFailed: return "module_load_failed"
         case .moduleNotRegistered: return "module_not_registered"
         case .metalOutOfMemory: return "metal_oom"
@@ -187,6 +195,13 @@ public enum AthenaError: Error, Sendable, Equatable {
         case let .memoryBudgetExceeded(requested, available, module):
             return "Insufficient governed memory for \(module.rawValue): "
                 + "requested \(requested) B, \(available) B available after eviction."
+        case let .modelExceedsBudget(module, model, weights, headroom, budget):
+            let kv =
+                headroom > 0
+                ? " plus \(headroom) B KV headroom (prompt_cache_cap_bytes)" : ""
+            return "Model \(model ?? module.rawValue) needs \(weights) B of weights"
+                + "\(kv), more than the \(budget) B memory budget; it can never "
+                + "be loaded. Raise budget_bytes or choose a smaller model."
         case let .moduleLoadFailed(module, _):
             // NE7: the substrate `reason` (filesystem paths, repo ids,
             // internal state) is for the server log only — see

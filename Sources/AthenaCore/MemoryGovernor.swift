@@ -115,6 +115,13 @@ public actor MemoryGovernor {
         /// tell why a slot is empty (idle eviction vs. operator
         /// unload vs. load failure) without grepping the audit log.
         var unloadedReason: UnloadedReason? = nil
+        /// The model `reservation` was issued for (nil for a module that is
+        /// not `ModelSelectable`).
+        var model: String? = nil
+        /// ADR 023 G3 — `reservation.bytes` is a measured footprint (set by
+        /// `reconcile`), not the pre-load estimate. Reset on every new
+        /// reservation, so it describes the model resident now.
+        var measured = false
     }
 
     /// Reads process-global Metal/MLX active bytes. Injected so
@@ -180,6 +187,9 @@ public actor MemoryGovernor {
     /// `/healthz` lies). Mirror of the `inFlight` load handle, for the unload
     /// direction. Cleared in `markUnloaded` when the teardown completes.
     private var teardown: [ModuleID: Task<Void, Never>] = [:]
+    /// Generation of the teardown in `teardown[id]`, so a finishing older
+    /// teardown never clears the handle of a newer one still running.
+    private var teardownToken: [ModuleID: UInt64] = [:]
     /// M62 — the error from the most recent FAILED load, kept so the
     /// non-blocking `beginLoadIfNeeded` path can surface the real reason to
     /// the next caller instead of silently kicking another doomed load and
@@ -206,8 +216,21 @@ public actor MemoryGovernor {
     private let admissionMode: GovernorMemory.AdmissionMode
     /// M5.4: real footprint observed on a prior load. Subsequent
     /// admissions use this instead of the static `memoryEstimate()`, so
-    /// an evicted-then-reloaded module is admitted on its true cost.
-    private var learnedFootprint: [ModuleID: Int] = [:]
+    /// an evicted-then-reloaded module is admitted on its true cost. Keyed by
+    /// model as well as module: one slot serves many models of very different
+    /// sizes, so a footprint learned for one must never admit another.
+    private struct FootprintKey: Hashable {
+        let module: ModuleID
+        let model: String?
+    }
+    private var learnedFootprint: [FootprintKey: Int] = [:]
+    /// The last rebind queued per slot; each rebind waits for the one before.
+    private var rebindTail: [ModuleID: Task<Void, Never>] = [:]
+    /// Keep one request's KV headroom (`promptCacheCapBytes`, the per-request
+    /// KV bound the LLM enforces at preflight) free whenever the LLM is
+    /// resident: weights that fit the budget with no room for their own KV
+    /// cross it on the first long prompt.
+    private let reserveKVHeadroom: Bool
 
     public init(
         totalBudgetBytes: Int, memoryProbe: MemoryProbe? = nil,
@@ -216,7 +239,8 @@ public actor MemoryGovernor {
         promptCacheCapBytes: Int? = nil,
         footprintProbe: FootprintProbe? = nil,
         reclaimCache: ReclaimCacheHook? = nil,
-        admissionMode: GovernorMemory.AdmissionMode = .footprint
+        admissionMode: GovernorMemory.AdmissionMode = .footprint,
+        reserveKVHeadroom: Bool = false
     ) {
         let budget = Self.safeBudget(totalBudgetBytes)
         self.totalBudgetBytes = budget
@@ -228,6 +252,7 @@ public actor MemoryGovernor {
         self.footprintProbe = footprintProbe
         self.reclaimCache = reclaimCache
         self.admissionMode = admissionMode
+        self.reserveKVHeadroom = reserveKVHeadroom
     }
 
     public init(
@@ -236,7 +261,8 @@ public actor MemoryGovernor {
         onEvent: EventHook? = nil,
         footprintProbe: FootprintProbe? = nil,
         reclaimCache: ReclaimCacheHook? = nil,
-        admissionMode: GovernorMemory.AdmissionMode = .footprint
+        admissionMode: GovernorMemory.AdmissionMode = .footprint,
+        reserveKVHeadroom: Bool = false
     ) {
         let budget = Self.safeBudget(config.totalBudgetBytes)
         self.totalBudgetBytes = budget
@@ -251,6 +277,7 @@ public actor MemoryGovernor {
         self.footprintProbe = footprintProbe
         self.reclaimCache = reclaimCache
         self.admissionMode = admissionMode
+        self.reserveKVHeadroom = reserveKVHeadroom
     }
 
     /// M68.1 (E5) — a non-positive budget (a misconfigured `totalBudgetBytes`,
@@ -524,15 +551,6 @@ public actor MemoryGovernor {
             if entries[id]?.state == .loaded { return }
         }
 
-        // M5.4: prefer a previously-observed real footprint.
-        let estimate: Int
-        if let learned = learnedFootprint[id] {
-            estimate = learned
-        } else {
-            estimate = await module.memoryEstimate()
-            // E1 — re-read after the `memoryEstimate()` suspension.
-            if entries[id]?.state == .loaded { return }
-        }
         // NE2 (M68.1) — admission can fail (model larger than the budget, or
         // the budget perpetually over after eviction). Record it in
         // `lastLoadError` exactly like a `module.load()` throw, so the
@@ -540,8 +558,16 @@ public actor MemoryGovernor {
         // `memory_budget_exceeded` 503 to the next caller instead of kicking
         // another doomed background load and 503-ing `module_loading` forever
         // (the detached cleanup swallows this throw via `try?`).
+        let model: String?
+        let estimate: Int
+        let victims: [ModuleID]
         do {
-            try await makeRoom(for: estimate, requestedBy: id)
+            (model, estimate) = try await admissionEstimate(
+                id, module, model: nil)
+            // E1 — re-read after the estimate's suspension.
+            if entries[id]?.state == .loaded { return }
+            victims = try await makeRoom(
+                for: estimate, requestedBy: id, model: model)
         } catch {
             let classified = AthenaError.classify(error, module: id)
             lastLoadError[id] = classified
@@ -553,6 +579,12 @@ public actor MemoryGovernor {
         residentBytes += estimate
         entries[id]?.state = .loading
         entries[id]?.reservation = reservation
+        entries[id]?.model = model
+        entries[id]?.measured = false
+        // An evicted tenant's weights stay resident until its teardown runs;
+        // allocating first would overlap the two. The reservation is already
+        // on the books, so admissions during the wait see it.
+        for victim in victims { await teardown[victim]?.value }
 
         let before = memoryProbe?()
         let started = Date()
@@ -628,8 +660,119 @@ public actor MemoryGovernor {
         // makes the NEXT admission correctly 503/evict; an over-budget
         // reconciliation also sheds other evictable modules now.
         if observed > 0 {
-            reconcile(id, estimate: estimate, observed: observed)
+            reconcile(id, observed: observed)
         }
+    }
+
+    /// The model a load (`model == nil`) or rebind of `id` binds and the bytes
+    /// to admit it on: the footprint learned for that model, else the module's
+    /// estimate for it.
+    private func admissionEstimate(
+        _ id: ModuleID, _ module: any InferenceModule, model: String?
+    ) async throws -> (model: String?, bytes: Int) {
+        guard let sel = module as? any ModelSelectable else {
+            let learned = learnedFootprint[FootprintKey(module: id, model: nil)]
+            if let learned { return (nil, learned) }
+            return (nil, await module.memoryEstimate())
+        }
+        let target = try await sel.admissionEstimate(forModel: model)
+        let learned = learnedFootprint[
+            FootprintKey(module: id, model: target.model)]
+        return (target.model, learned ?? target.bytes)
+    }
+
+    /// #206 — a warm in-place model swap (`perform` runs the module's
+    /// `rebind`) under the same admission and reconcile as a cold load, so a
+    /// slot admitted for a small model cannot swap in a large one unchecked
+    /// and `residentBytes` follows the resident model. Rebinds of one slot run
+    /// one at a time; a no-op rebind (target already resident) just runs
+    /// `perform`.
+    public func rebind(
+        _ id: ModuleID, to model: String?,
+        perform: @Sendable () async throws -> Void
+    ) async throws {
+        let previous = rebindTail[id]
+        let (turn, done) = AsyncStream<Void>.makeStream()
+        rebindTail[id] = Task { for await _ in turn {} }
+        defer { done.finish() }
+        await previous?.value
+        try await rebindSerialized(id, to: model, perform: perform)
+    }
+
+    private func rebindSerialized(
+        _ id: ModuleID, to model: String?,
+        perform: @Sendable () async throws -> Void
+    ) async throws {
+        guard let module = entries[id]?.module else {
+            throw AthenaError.moduleNotRegistered(id)
+        }
+        let (target, estimate) = try await admissionEstimate(
+            id, module, model: model)
+        if entries[id]?.state != .loaded { try await ensureLoaded(id) }
+        let sel = module as? any ModelSelectable
+        let resident = await sel?.residentModelId()
+        guard let sel, resident != target else {
+            try await perform()
+            return
+        }
+        guard entries[id]?.state == .loaded, let old = entries[id]?.reservation
+        else { throw Self.slotLost(id) }
+        // The swap drops the old model before loading the new one, so admit
+        // the new model in place of the old reservation.
+        let victims = try await makeRoom(
+            for: estimate, requestedBy: id, model: target, replacing: old.bytes)
+        guard entries[id]?.state == .loaded, let held = entries[id]?.reservation
+        else { throw Self.slotLost(id) }
+        // Until the swap completes either model may be resident.
+        let hold = max(held.bytes, estimate)
+        residentBytes += hold - held.bytes
+        entries[id]?.reservation = MemoryReservation(module: id, bytes: hold)
+        for victim in victims { await teardown[victim]?.value }
+        let started = Date()
+        onEvent?(
+            id,
+            "rebinding \(resident ?? "-") → \(target ?? "-") "
+                + "(estimate \(Self.fmtBytes(estimate)))")
+        do {
+            try await perform()
+        } catch {
+            let now = await sel.residentModelId()
+            if let res = entries[id]?.reservation {
+                if now == nil {
+                    residentBytes -= res.bytes
+                    entries[id]?.reservation = nil
+                    entries[id]?.state = .unloaded
+                    entries[id]?.unloadedReason = .loadFailed
+                } else if now == resident {
+                    residentBytes += held.bytes - res.bytes
+                    entries[id]?.reservation = held
+                }
+            }
+            onEvent?(
+                id, "rebind failed after \(Self.ms(since: started)): \(error)")
+            throw error
+        }
+        guard await sel.residentModelId() == target,
+            entries[id]?.state == .loaded
+        else { return }
+        entries[id]?.model = target
+        entries[id]?.measured = false
+        // The process-wide probe cannot attribute a swap (the old model's
+        // freed buffers land in the MLX cache inside the same delta), so the
+        // module's own post-swap self-report is the measurement.
+        let observed = await module.residentBytes
+        onEvent?(
+            id,
+            "rebound to \(target ?? "-") "
+                + "(\(Self.fmtBytes(observed > 0 ? observed : estimate))) "
+                + "in \(Self.ms(since: started))")
+        reconcile(id, observed: observed > 0 ? observed : estimate)
+        if observed <= 0 { entries[id]?.measured = false }
+    }
+
+    private static func slotLost(_ id: ModuleID) -> AthenaError {
+        .moduleLoadFailed(
+            id, reason: "slot was unloaded while the rebind waited; retry")
     }
 
     /// Human bytes for log events (GB ≥ 1 GB, else MB).
@@ -649,18 +792,21 @@ public actor MemoryGovernor {
     /// Replace `id`'s estimate-based reservation with the observed
     /// footprint and, if that pushes the budget over, evict other
     /// evictable modules LRU-first to get back under.
-    private func reconcile(
-        _ id: ModuleID, estimate: Int, observed: Int
-    ) {
+    private func reconcile(_ id: ModuleID, observed: Int) {
         guard observed > 0,
             entries[id]?.state == .loaded,
-            entries[id]?.reservation != nil
+            let current = entries[id]?.reservation
         else { return }
-        residentBytes += observed - estimate
+        residentBytes += observed - current.bytes
         entries[id]?.reservation = MemoryReservation(
             module: id, bytes: observed)
-        learnedFootprint[id] = observed  // M5.4
-        guard residentBytes > totalBudgetBytes else { return }
+        entries[id]?.measured = true
+        learnedFootprint[FootprintKey(module: id, model: entries[id]?.model)] =
+            observed  // M5.4
+        let headroom =
+            reserveKVHeadroom && entries[.llm]?.state == .loaded
+            ? promptCacheCapBytes : 0
+        guard residentBytes + headroom > totalBudgetBytes else { return }
         let victims =
             entries
             .filter {
@@ -669,7 +815,7 @@ public actor MemoryGovernor {
             }
             .sorted { $0.value.lastUsed < $1.value.lastUsed }
         for (victimID, _) in victims {
-            if residentBytes <= totalBudgetBytes { break }
+            if residentBytes + headroom <= totalBudgetBytes { break }
             evictSync(victimID)
         }
     }
@@ -701,9 +847,36 @@ public actor MemoryGovernor {
         (admissionDenominator(), totalBudgetBytes)
     }
 
-    /// Free budget for `estimate` bytes, evicting evictable loaded modules
-    /// LRU-first. Throws if it still cannot fit after exhausting eviction.
-    private func makeRoom(for estimate: Int, requestedBy id: ModuleID) async throws {
+    /// One request's KV headroom to keep free when admitting `id`: charged
+    /// whenever the LLM is (or is becoming) resident, so neither the LLM's
+    /// own load nor a co-tenant's can consume the room its KV needs.
+    private func kvHeadroom(admitting id: ModuleID) -> Int {
+        guard reserveKVHeadroom else { return 0 }
+        let llm = entries[.llm]?.state
+        return id == .llm || llm == .loaded || llm == .loading
+            ? promptCacheCapBytes : 0
+    }
+
+    /// Free budget for `estimate` bytes (plus the KV headroom), evicting
+    /// evictable loaded modules LRU-first. `replacing` is a reservation the
+    /// admitted load frees first (a rebind's old model). Throws
+    /// `modelExceedsBudget` (400) when no eviction could ever fit it, else
+    /// `memoryBudgetExceeded` (503) if it still cannot fit after eviction.
+    /// Returns the modules it evicted; their teardown may still be running.
+    @discardableResult
+    private func makeRoom(
+        for estimate: Int, requestedBy id: ModuleID, model: String? = nil,
+        replacing: Int = 0
+    ) async throws -> [ModuleID] {
+        let ownHeadroom =
+            reserveKVHeadroom && id == .llm ? promptCacheCapBytes : 0
+        if estimate + ownHeadroom > totalBudgetBytes {
+            throw AthenaError.modelExceedsBudget(
+                module: id, model: model, weightBytes: estimate,
+                headroomBytes: ownHeadroom, budgetBytes: totalBudgetBytes)
+        }
+        let need = estimate + kvHeadroom(admitting: id) - replacing
+        guard need > 0 else { return [] }
         // ADR 023 G2 — front-door gate on the LIVE footprint, not the
         // reservation sum alone, so the genuinely-pinned resident footprint the
         // estimates were blind to can't be overcommitted.
@@ -711,10 +884,10 @@ public actor MemoryGovernor {
         // or the mode is `.estimate`, so this line is the pre-G2 admit check
         // unchanged on that path.
         if GovernorMemory.fits(
-            request: estimate, denominator: admissionDenominator(),
+            request: need, denominator: admissionDenominator(),
             budget: totalBudgetBytes)
         {
-            return
+            return []
         }
 
         // Rung 1 — reclaim reconstructible headroom WITHOUT evicting a tenant:
@@ -730,10 +903,10 @@ public actor MemoryGovernor {
         // sees the reclaim's effect (the hook completes before we return).
         await reclaimCache?()
         if GovernorMemory.fits(
-            request: estimate, denominator: admissionDenominator(),
+            request: need, denominator: admissionDenominator(),
             budget: totalBudgetBytes)
         {
-            return
+            return []
         }
 
         // Rung 2 — evict evictable modules LRU-first. The loop meters the
@@ -746,9 +919,11 @@ public actor MemoryGovernor {
             .filter { $0.key != id && $0.value.evictable && $0.value.state == .loaded }
             .sorted { $0.value.lastUsed < $1.value.lastUsed }
 
+        var evicted: [ModuleID] = []
         for (victimID, _) in candidates {
-            if residentBytes + estimate <= totalBudgetBytes { break }
+            if residentBytes + need <= totalBudgetBytes { break }
             evictSync(victimID)
+            evicted.append(victimID)
         }
 
         // Reject if we still can't fit. After eviction the reservation gate is
@@ -759,11 +934,11 @@ public actor MemoryGovernor {
         // authoritative and rejects an overcommit the box genuinely can't fit
         // (the G2 point: stop admitting work the reservation count says fits but
         // the real footprint does not).
-        let reservedOver = residentBytes + estimate > totalBudgetBytes
+        let reservedOver = residentBytes + need > totalBudgetBytes
         let committedOver =
             candidates.isEmpty
             && !GovernorMemory.fits(
-                request: estimate, denominator: admissionDenominator(),
+                request: need, denominator: admissionDenominator(),
                 budget: totalBudgetBytes)
         if reservedOver || committedOver {
             throw AthenaError.memoryBudgetExceeded(
@@ -772,6 +947,7 @@ public actor MemoryGovernor {
                 module: id
             )
         }
+        return evicted
     }
 
     /// Synchronously drop a victim's reservation, then unload it detached.
@@ -795,6 +971,9 @@ public actor MemoryGovernor {
         // NE1 (M68.1) — register the teardown so a concurrent reload of THIS
         // slot (`performLoad`) awaits `module.unload()` before calling
         // `module.load()`, instead of racing it on the module actor.
+        loadSeq &+= 1
+        let token = loadSeq
+        teardownToken[id] = token
         teardown[id] = Task { [weak self] in
             // ADR 029 WP1 — `module.unload()` frees weights on the Metal pool and
             // `hook` trims the buffer cache; both must not run while a decode
@@ -804,18 +983,21 @@ public actor MemoryGovernor {
                 await module.unload()
                 hook?()
             }
-            await self?.markUnloaded(id)
+            await self?.markUnloaded(id, token: token)
         }
     }
 
-    private func markUnloaded(_ id: ModuleID) {
+    private func markUnloaded(_ id: ModuleID, token: UInt64) {
         if entries[id]?.state == .unloading {
             entries[id]?.state = .unloaded
         }
         // NE1 — the teardown for this slot is done; drop the handle so the
         // next reload doesn't await a completed task (harmless) and so the
         // map doesn't leak entries.
-        teardown[id] = nil
+        if teardownToken[id] == token {
+            teardown[id] = nil
+            teardownToken[id] = nil
+        }
     }
 
     /// M43.1 — reconcile the governor when a module drops its resident
@@ -863,13 +1045,16 @@ public actor MemoryGovernor {
         //      and the state write is no longer clobbered back to `.unloaded`.
         let module = entry.module
         let hook = onUnloaded
+        loadSeq &+= 1
+        let token = loadSeq
+        teardownToken[id] = token
         let task = Task { [weak self] in
             // ADR 029 WP1 — gate the teardown span (see `evictSync`).
             try? await InferenceGate.shared.withExclusiveExecution {
                 await module.unload()
                 hook?()
             }
-            await self?.markUnloaded(id)
+            await self?.markUnloaded(id, token: token)
         }
         teardown[id] = task
         await task.value
@@ -884,9 +1069,7 @@ public actor MemoryGovernor {
                 evictable: $0.evictable,
                 unloadedReason:
                     $0.state == .loaded ? nil : $0.unloadedReason,
-                // ADR 023 G3: `learnedFootprint` is set only by a successful
-                // reconcile, so its presence ⇒ residentBytes is measured.
-                measured: learnedFootprint[$0.module.id] != nil
+                measured: $0.measured
             )
         }
         .sorted { $0.id.rawValue < $1.id.rawValue }

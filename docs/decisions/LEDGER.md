@@ -25,7 +25,7 @@ One line per ADR: number, title, status, link. Status is taken from each ADR fil
 - [ADR 020 — multi-backend transcription (Whisper + Parakeet)](020-multi-backend-transcription.md) — Accepted — shipped
 - [ADR 021 — unified model-support classification + pre-pull preflight](021-model-support-preflight.md) — Accepted — shipped
 - [ADR 022 — video support: transcription + keyframe description](022-video-transcription-and-description.md) — M78.1 shipped; M78.2 proposed/deferred
-- [ADR 023 — governor memory-accounting truthfulness + serve-path cache bound](023-governor-memory-accounting-truthfulness.md) — Accepted — all slices shipped
+- [ADR 023 — governor memory-accounting truthfulness + serve-path cache bound](023-governor-memory-accounting-truthfulness.md) — Accepted — all slices shipped; amended 2026-09-24 (#206)
 - [ADR 024 — in-memory data protection against a co-resident adversary](024-in-memory-data-protection-coresident-threat.md) — T1 + T2 retained; T3 removed
 - [ADR 025 — collapse the persistent data tenants (queue + vector DB) and add a stateless loopback mode](025-collapse-persistent-data-tenants.md) — Accepted — all slices shipped
 - [ADR 026 — retire the model allowlist; the model store is the registry](026-retire-allowlist-store-is-registry.md) — Accepted — shipped

@@ -1274,15 +1274,7 @@ extension AthenaServer {
         }
         do {
             try await governor.ensureLoaded(moduleId)
-            // ADR 029 WP3 — gate the rebind exactly as the request-path
-            // `auditedRebind` (:3761) does: a warm swap drops+loads weights on
-            // the Metal pool and must not run while a decode holds the slot
-            // (transient double-residency → OOM) or another tenant executes.
-            // This control-plane path previously rebound off-gate (the H3
-            // hazard reachable via /api/models/load).
-            try await InferenceGate.shared.withExclusiveExecution {
-                try await sel.rebind(to: target)
-            }
+            try await governedRebind(moduleId, to: target)
         } catch let e as AthenaError {
             await audit(
                 request, action: "model.load",
@@ -1290,7 +1282,7 @@ extension AthenaServer {
                 result: "denied", detail: e.code)
             return Self.error(
                 status: HTTPResponse.Status(code: e.httpStatus),
-                message: e.message, type: "server_error", code: e.code)
+                message: e.message, type: e.type, code: e.code)
         } catch {
             await audit(
                 request, action: "model.load",

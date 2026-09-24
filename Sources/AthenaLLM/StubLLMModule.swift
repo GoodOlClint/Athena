@@ -245,6 +245,8 @@ public actor StubLLMModule: LLMModule, ModelSelectable {
     public nonisolated var moduleID: ModuleID { .llm }
 
     private let reserveBytes: Int
+    /// Per-model footprints; a model absent here uses `reserveBytes`.
+    private let modelBytes: [String: Int]
     private let modelIds: [String]
     private let configuredDefault: String?
     private var residentId: String?
@@ -261,20 +263,33 @@ public actor StubLLMModule: LLMModule, ModelSelectable {
     public init(
         reserveBytes: Int = 8 * 1024 * 1024 * 1024,
         modelIds: [String] = ["athena-stub"],
-        configuredDefault: String? = nil
+        configuredDefault: String? = nil,
+        modelBytes: [String: Int] = [:]
     ) {
         precondition(
             !modelIds.isEmpty,
             "StubLLMModule needs at least one model id")
         self.reserveBytes = reserveBytes
+        self.modelBytes = modelBytes
         self.modelIds = modelIds
         self.configuredDefault =
             (configuredDefault?.isEmpty == true) ? nil : configuredDefault
     }
 
-    public var residentBytes: Int { residentId == nil ? 0 : reserveBytes }
+    public var residentBytes: Int {
+        residentId.map { modelBytes[$0] ?? reserveBytes } ?? 0
+    }
 
-    public func memoryEstimate() -> Int { reserveBytes }
+    public func memoryEstimate() -> Int {
+        (try? admissionEstimate(forModel: nil).bytes) ?? reserveBytes
+    }
+
+    public func admissionEstimate(forModel id: String?) throws
+        -> (model: String, bytes: Int)
+    {
+        let model = try id.map(resolve) ?? desiredId ?? residentId ?? resolve(nil)
+        return (model, modelBytes[model] ?? reserveBytes)
+    }
 
     public func load(reservation: MemoryReservation) async throws {
         // M62 — bind the requested cold-load target (set via

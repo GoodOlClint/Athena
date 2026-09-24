@@ -27,14 +27,16 @@ final class MemoryGovernorTests: XCTestCase {
 
         do {
             try await gov.ensureLoaded(.llm)
-            XCTFail("expected memoryBudgetExceeded")
+            XCTFail("expected modelExceedsBudget")
         } catch let e as AthenaError {
-            XCTAssertEqual(e.httpStatus, 503)
-            XCTAssertEqual(e.code, "memory_budget_exceeded")
-            guard case let .memoryBudgetExceeded(requested, available, module) = e
+            // #206 — larger than the whole budget: no eviction can ever fit
+            // it, so a cause-naming 400 rather than a retryable 503.
+            XCTAssertEqual(e.httpStatus, 400)
+            XCTAssertEqual(e.code, "model_exceeds_memory_budget")
+            guard case let .modelExceedsBudget(module, _, weights, _, budget) = e
             else { return XCTFail("wrong error case: \(e)") }
-            XCTAssertEqual(requested, 100)
-            XCTAssertEqual(available, 50)
+            XCTAssertEqual(weights, 100)
+            XCTAssertEqual(budget, 50)
             XCTAssertEqual(module, .llm)
         }
 
@@ -72,8 +74,9 @@ final class MemoryGovernorTests: XCTestCase {
         do {
             try await gov.ensureLoaded(.transcription)
             XCTFail("expected memoryBudgetExceeded")
-        } catch is AthenaError {
-            // expected
+        } catch let e as AthenaError {
+            XCTAssertEqual(e.httpStatus, 503)
+            XCTAssertEqual(e.code, "memory_budget_exceeded")
         }
         let s = await gov.snapshot()
         XCTAssertEqual(s.residentBytes, 80)
@@ -550,14 +553,12 @@ final class MemoryGovernorTests: XCTestCase {
         let gov = MemoryGovernor(totalBudgetBytes: 100)
         let park = Signal()
         let a = SlowUnloadModule(id: .transcription, bytes: 60, park: park)
-        // B is collateral (the reload evicts it to make room); its teardown must
-        // not park, or nothing would ever drain it.
-        let b = SlowUnloadModule(id: .textEmbedding, bytes: 60)
         await gov.register(a, evictable: true)
-        await gov.register(b, evictable: true)
 
         try await gov.ensureLoaded(.transcription)  // A loaded (60)
-        try await gov.ensureLoaded(.textEmbedding)  // evicts A, B loaded
+        // #206: a load that evicts waits for its victims' teardown, so the
+        // parked teardown is opened by an unload, not by evicting A.
+        Task { await gov.unload(.transcription) }
 
         // A's teardown is now provably open — held by the park, not by a sleep
         // a slow runner can outlast.
@@ -686,8 +687,8 @@ final class MemoryGovernorTests: XCTestCase {
         let e = try XCTUnwrap(
             surfaced as? AthenaError,
             "admission failure must surface, not loop on module_loading")
-        guard case .memoryBudgetExceeded = e else {
-            return XCTFail("expected memoryBudgetExceeded, got \(e)")
+        guard case .modelExceedsBudget = e else {
+            return XCTFail("expected modelExceedsBudget, got \(e)")
         }
     }
 
@@ -1187,18 +1188,18 @@ final class MemoryGovernorTests: XCTestCase {
         }
     }
 
-    /// ADR 015 — over-budget admission surfaces `memory_budget_exceeded` from
-    /// the blocking call too (not a wait, not a perpetual loading).
+    /// ADR 015 — an admission refusal surfaces from the blocking call too
+    /// (not a wait, not a perpetual loading).
     func testAwaitLoadSurfacesAdmissionFailure() async throws {
         let gov = MemoryGovernor(totalBudgetBytes: 50)
         await gov.register(StubLLMModule(reserveBytes: 100), evictable: false)
 
         do {
             _ = try await gov.awaitLoad(.llm, within: 5.0)
-            XCTFail("expected memoryBudgetExceeded")
+            XCTFail("expected modelExceedsBudget")
         } catch let e as AthenaError {
-            guard case .memoryBudgetExceeded = e else {
-                return XCTFail("expected memoryBudgetExceeded, got \(e)")
+            guard case .modelExceedsBudget = e else {
+                return XCTFail("expected modelExceedsBudget, got \(e)")
             }
         }
     }

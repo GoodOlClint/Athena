@@ -36,4 +36,27 @@ public enum ModelStoreLayout {
         let u = root.appendingPathComponent(identity, isDirectory: true)
         return FileManager.default.fileExists(atPath: u.path) ? u : nil
     }
+
+    /// Sum of the `*.safetensors` shard sizes under `directory`, following
+    /// the store-entry symlink and each shard's HF-cache blob symlink. A
+    /// per-model admission estimate: file bytes ≥ the tensor bytes MLX maps.
+    public static func safetensorsBytes(at directory: URL) -> Int {
+        let fm = FileManager.default
+        // `contentsOfDirectory` does not traverse a symlinked root, and a
+        // pulled shard is itself a ~76 B symlink to ../../blobs/<sha>; sizing
+        // either link instead of its target yields a ~0 B estimate.
+        let dir = directory.resolvingSymlinksInPath()
+        guard
+            let entries = try? fm.contentsOfDirectory(
+                at: dir,
+                includingPropertiesForKeys: [.fileSizeKey])
+        else { return 0 }
+        var total = 0
+        for url in entries where url.pathExtension == "safetensors" {
+            total +=
+                (try? url.resolvingSymlinksInPath()
+                .resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+        }
+        return total
+    }
 }
