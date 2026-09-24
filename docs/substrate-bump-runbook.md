@@ -58,7 +58,7 @@ Heavy gates need xcodebuild (metallib; ADR 009 — they crash under bare `swift 
 
 - **ADR 028's bit-identity claim is per-pin evidence.** It does not survive a bump. Re-run the parity gate at the new pin and re-stamp the ADR (revision, model pair, proposed/accepted counts) — or explicitly re-scope the claim to the revision it was measured on. Never leave it silently pointing at the old pin.
 - A new ADR for any §1 class-4 decision (trait, vendored surface) — ADR 044 is the template, including its measured honesty boundary (xcodebuild ignores `.when(traits:)` at build planning; `nm -gU athena | grep -c xgrammar` tripwire per Xcode major).
-- AGENTS.md: ADR index entry; the Dependencies bullet if the discipline itself changed.
+- `docs/decisions/LEDGER.md`: the new ADR's index line; AGENTS.md's Dependencies bullet if the discipline itself changed.
 - Toolchain-floor docs (§2) if the floor moved. State only **measured** versions — "26.4+" was flagged in review precisely because the evidence bracketed 26.3-bad/26.5-good without testing 26.4.
 
 ## 7. Delivery
