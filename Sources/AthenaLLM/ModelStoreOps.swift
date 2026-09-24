@@ -219,7 +219,12 @@ public enum ModelStoreOps {
         return out.sorted { $0.name < $1.name }
     }
 
-    /// Delete a model directory (a direct child of the store root).
+    /// Delete a model directory (a direct child of the store root). Looks
+    /// the entry up with `lstat` semantics (`.isSymbolicLinkKey`, which does
+    /// not follow the link) rather than `fileExists`, which follows it — a
+    /// `pull` symlink whose HF-cache target was pruned independently still
+    /// sits in the store as a real filesystem entry and must be removable
+    /// (#202), even though it reads as absent to a target-following check.
     public static func remove(root: URL, name: String) throws {
         guard isValidName(name) else {
             throw OpError.invalidName(name)
@@ -227,10 +232,13 @@ public enum ModelStoreOps {
         let dir = root.appendingPathComponent(
             name, isDirectory: true)
         var isDir: ObjCBool = false
-        guard
-            FileManager.default.fileExists(
-                atPath: dir.path, isDirectory: &isDir),
-            isDir.boolValue
+        let existsFollowingLink = FileManager.default.fileExists(
+            atPath: dir.path, isDirectory: &isDir)
+        let isDanglingSymlink =
+            !existsFollowingLink
+            && ((try? dir.resourceValues(forKeys: [.isSymbolicLinkKey]))?
+                .isSymbolicLink ?? false)
+        guard (existsFollowingLink && isDir.boolValue) || isDanglingSymlink
         else { throw OpError.notFound(name) }
         do {
             try FileManager.default.removeItem(at: dir)

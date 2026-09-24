@@ -1,3 +1,4 @@
+import AthenaCore
 import Foundation
 
 /// Offline structural integrity check for a stored model directory —
@@ -5,6 +6,21 @@ import Foundation
 /// `athena prune` (M9.5c). A dangling `pull` symlink (HF cache / SSD
 /// gone) reports as `missing` because `fileExists` follows symlinks.
 public enum ModelHealth {
+    /// Modalities the ADR 021 `ModelSupport` router says require a
+    /// tokenizer to be loadable. ASR/diarization/speaker-embedding/MTP
+    /// checkpoints ship no tokenizer file by design (#201) — Whisper's own
+    /// HF snapshot has no `tokenizer.json`; its decoder's vocabulary is
+    /// pinned in-code (`ModelSupport.whisperLoadability`), not read from a
+    /// tokenizer file, so requiring one there is a false positive, not a
+    /// path/layout bug.
+    private static func modalityNeedsTokenizer(_ modality: ModelModality) -> Bool {
+        switch modality {
+        case .llm, .vision, .embedding: return true
+        case .transcription, .diarization, .speakerEmbedding, .mtpDrafter,
+            .unsupported:
+            return false
+        }
+    }
     /// Empty ⇒ healthy. Each string is one human-readable problem.
     public static func check(_ entry: URL) -> [String] {
         let fm = FileManager.default
@@ -31,15 +47,18 @@ public enum ModelHealth {
 
         problems += safetensorsProblems(dir)
 
-        let tok = [
-            "tokenizer.json", "tokenizer_config.json",
-            "tokenizer.model", "vocab.json",
-        ]
-        if !tok.contains(where: {
-            fm.fileExists(
-                atPath: dir.appendingPathComponent($0).path)
-        }) {
-            problems.append("no tokenizer")
+        let modality = ModelSupport.detect(in: dir).modality
+        if modalityNeedsTokenizer(modality) {
+            let tok = [
+                "tokenizer.json", "tokenizer_config.json",
+                "tokenizer.model", "vocab.json",
+            ]
+            if !tok.contains(where: {
+                fm.fileExists(
+                    atPath: dir.appendingPathComponent($0).path)
+            }) {
+                problems.append("no tokenizer")
+            }
         }
         return problems
     }

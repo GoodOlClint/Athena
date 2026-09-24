@@ -1,3 +1,4 @@
+import AthenaCore
 import Foundation
 import XCTest
 
@@ -135,5 +136,102 @@ final class ModelHealthTests: XCTestCase {
         XCTAssertTrue(
             broken.first { $0.name == "noconfig" }?.problems
                 .contains { $0.contains("config.json") } ?? false)
+    }
+
+    /// #201 — a tokenizer is required only for the modalities that actually
+    /// read one (llm/vision/embedding). Whisper, diarization, speaker-embedding
+    /// and MTP-drafter checkpoints ship none by design and must read as
+    /// healthy without one; a genuinely tokenizer-less LLM must still fail.
+    func testTokenizerRequiredOnlyForTextModalities() throws {
+        let fm = FileManager.default
+
+        /// Build a fixture dir with `config.json` (+ optional extra marker
+        /// files) and a valid safetensors shard, no tokenizer, and return the
+        /// health problems.
+        func fixtureProblems(
+            configJSON: String, extraFiles: [String] = []
+        ) throws -> [String] {
+            let dir = try tmpDir()
+            defer { try? fm.removeItem(at: dir) }
+            try Data(configJSON.utf8).write(
+                to: dir.appendingPathComponent("config.json"))
+            try writeSafetensors(
+                to: dir.appendingPathComponent("model.safetensors"))
+            for f in extraFiles {
+                try Data().write(to: dir.appendingPathComponent(f))
+            }
+            return ModelHealth.check(dir)
+        }
+
+        // Text modalities: no tokenizer ⇒ flagged.
+        let llmProblems = try fixtureProblems(
+            configJSON: #"{"model_type":"llama"}"#)
+        XCTAssertTrue(
+            llmProblems.contains("no tokenizer"),
+            "generative checkpoint without a tokenizer must be flagged, got \(llmProblems)"
+        )
+
+        let embeddingProblems = try fixtureProblems(
+            configJSON: #"{"model_type":"bert"}"#)
+        XCTAssertTrue(
+            embeddingProblems.contains("no tokenizer"),
+            "embedding checkpoint without a tokenizer must be flagged, got \(embeddingProblems)"
+        )
+
+        // Audio/drafter modalities: no tokenizer ⇒ NOT flagged.
+        let whisperProblems = try fixtureProblems(
+            configJSON: #"{"model_type":"whisper"}"#)
+        XCTAssertFalse(
+            whisperProblems.contains("no tokenizer"),
+            "whisper has no tokenizer by design, got \(whisperProblems)")
+
+        let sortformerProblems = try fixtureProblems(
+            configJSON: #"{"model_type":"sortformer"}"#)
+        XCTAssertFalse(
+            sortformerProblems.contains("no tokenizer"),
+            "sortformer has no tokenizer by design, got \(sortformerProblems)")
+
+        let pyannoteProblems = try fixtureProblems(
+            configJSON: #"{"model_type":"pyannote-segmentation"}"#)
+        XCTAssertFalse(
+            pyannoteProblems.contains("no tokenizer"),
+            "pyannote has no tokenizer by design, got \(pyannoteProblems)")
+
+        let speakerProblems = try fixtureProblems(
+            configJSON: #"{"model_type":"wespeaker-resnet34-lm"}"#)
+        XCTAssertFalse(
+            speakerProblems.contains("no tokenizer"),
+            "wespeaker has no tokenizer by design, got \(speakerProblems)")
+
+        let mtpProblems = try fixtureProblems(
+            configJSON: #"{"model_type":"gemma4_assistant"}"#)
+        XCTAssertFalse(
+            mtpProblems.contains("no tokenizer"),
+            "MTP drafter has no tokenizer by design, got \(mtpProblems)")
+    }
+
+    /// #202 — `athena rm` must remove a dangling store symlink (its HF-cache
+    /// target pruned out from under it), not read it as absent.
+    func testRemoveDanglingSymlink() throws {
+        let fm = FileManager.default
+        let store = try tmpDir()
+        let hfCache = try tmpDir()
+        defer {
+            try? fm.removeItem(at: store)
+            try? fm.removeItem(at: hfCache)
+        }
+
+        let link = store.appendingPathComponent("Dangling-Model")
+        try fm.createSymbolicLink(
+            at: link,
+            withDestinationURL: hfCache.appendingPathComponent(
+                "nonexistent-snapshot"))
+
+        XCTAssertNoThrow(
+            try ModelStoreOps.remove(root: store, name: "Dangling-Model"))
+        let stillPresent =
+            (try? link.resourceValues(forKeys: [.isSymbolicLinkKey]))?
+            .isSymbolicLink ?? false
+        XCTAssertFalse(stillPresent, "dangling symlink must be gone after rm")
     }
 }
