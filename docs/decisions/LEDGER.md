@@ -1,0 +1,49 @@
+# ADR ledger — Athena
+
+One line per ADR: number, title, status, link. Status is taken from each ADR file's own Status line, not restated here — open the file for substance.
+
+- [ADR 000 — Pre-ADR foundational decisions (retrospective)](000-pre-adr-history.md) — Accepted (retrospective record)
+- [ADR 001 — DFlash speculative decoding for non-MTP targets (Gemma4-first)](001-dflash-speculative-decoding.md) — Superseded by ADR 028
+- [ADR 002 — Gemma4 MoE architecture support (26B-A4B; unblocks DFlash M63.5)](002-gemma4-moe-arch.md) — Accepted — implemented
+- [ADR 003 — rust-shim FFI panic strategy: per-entry `catch_unwind`](003-rust-shim-panic-strategy.md) — Accepted — implemented
+- [ADR 004 — Non-loopback TLS posture: warn-only, not fail-closed](004-nonloopback-tls-posture.md) — Implemented
+- [ADR 005 — Remove secrets from argv (`--password`)](005-remove-secrets-from-argv.md) — Implemented
+- [ADR 006 — Vector-store owner-scoping](006-vector-store-owner-scoping.md) — Implemented
+- [ADR 007 — Native `/api` metering + token-budget quotas (in-program)](007-api-metering-and-quotas.md) — Accepted — superseded in part by ADR 041
+- [ADR 008 — Testable server seam: extract `AthenaServerKit`, don't `@testable import` the executable](008-testable-server-seam.md) — Accepted — implemented
+- [ADR 009 — Stub decode CI tier: pure-Swift control-flow seams, not a fake MLX device](009-stub-decode-ci-tier.md) — Accepted — implemented
+- [ADR 010 — Vision input on chat: wire the substrate VLM path, base64-only images, defer audio-in-chat](010-vision-input-vlm-chat.md) — Accepted — implementing
+- [ADR 011 — The unified-memory governor is Athena's reason to exist; everything else is a tenant or a tax](011-unified-memory-governor-as-thesis.md) — Accepted — positioning / strategy
+- [ADR 012 — Vision-aware `athena convert`: load via the VLM path, keep the vision tower full-precision](012-vision-aware-convert.md) — Accepted — implemented & validated
+- [ADR 013 — `/v1` is the inference surface; `/api` is control-only; refuse the OpenAI platform tail](013-v1-inference-surface-api-control-only.md) — Accepted — decisions + staged rollout
+- [ADR 014 — Cross-file speaker identity stays client-side; the daemon is not extended](014-speaker-identity-client-side.md) — Accepted — decision, client-side tool
+- [ADR 015 — Block-until-ready for on-disk cold-loads; 503 only on timeout, download, or failure](015-block-until-ready-cold-load.md) — Accepted — shipped
+- [ADR 016 — model-class-aware convert + cause-naming load errors](016-model-class-aware-convert.md) — Accepted — implemented
+- [ADR 017 — Configurable upload limits + `Expect: 100-continue` handling](017-upload-limits-and-expect-continue.md) — Accepted — implemented
+- [ADR 018 — multi-backend diarization (pyannote pipeline for >4 / overlapping speakers)](018-multi-backend-diarization.md) — Accepted — shipped
+- [ADR 019 — Parakeet ASR: MLX feasibility spike (was: deferred)](019-parakeet-asr-deferred.md) — Spike complete — GO
+- [ADR 020 — multi-backend transcription (Whisper + Parakeet)](020-multi-backend-transcription.md) — Accepted — shipped
+- [ADR 021 — unified model-support classification + pre-pull preflight](021-model-support-preflight.md) — Accepted — shipped
+- [ADR 022 — video support: transcription + keyframe description](022-video-transcription-and-description.md) — M78.1 shipped; M78.2 proposed/deferred
+- [ADR 023 — governor memory-accounting truthfulness + serve-path cache bound](023-governor-memory-accounting-truthfulness.md) — Accepted — all slices shipped
+- [ADR 024 — in-memory data protection against a co-resident adversary](024-in-memory-data-protection-coresident-threat.md) — T1 + T2 retained; T3 removed
+- [ADR 025 — collapse the persistent data tenants (queue + vector DB) and add a stateless loopback mode](025-collapse-persistent-data-tenants.md) — Accepted — all slices shipped
+- [ADR 026 — retire the model allowlist; the model store is the registry](026-retire-allowlist-store-is-registry.md) — Accepted — shipped
+- [ADR 027 — disk-backed KV snapshots (versioned, encrypted, resumable)](027-disk-kv-snapshots.md) — Removed (publication S0)
+- [ADR 028 — Retire DFlash + TurboQuant to track upstream swift-mlx-lm](028-retire-dflash-turboquant-upstream-sync.md) — Accepted — shipped
+- [ADR 029 — Execution-exclusive inference slot (one Metal-executing tenant at a time)](029-execution-exclusive-inference-slot.md) — Accepted — implemented
+- [ADR 030 — Default-on prefill ceiling + degrade recoverable MLX allocation faults](030-default-prefill-ceiling-and-mlx-fault-degrade.md) — Accepted — Part 1 + Part 2 implemented
+- [ADR 031 — Remove the deprecated `/api/chat` native inference surface](031-remove-deprecated-api-chat.md) — Accepted — implemented
+- [ADR 032 — Gemma 4 MTP speculative decoding (second drafter backend)](032-gemma4-mtp-speculative-decoding.md) — Accepted — implemented + e2e verified
+- [ADR 033 — Collapse Qwen3.5 MTP onto the substrate drafter path](033-collapse-qwen35-mtp-onto-substrate-drafter.md) — Proposed — awaiting operator approval
+- [ADR 034 — `tool_choice: auto` must not force a tool call](034-tool-choice-auto-non-forcing.md) — Accepted — implemented
+- [ADR 035 — Route channel-delimited reasoning to `reasoning_content`](035-reasoning-channel-to-reasoning-content.md) — Accepted — implemented
+- [ADR 036 — Multiple protocol adapters over one inference engine (Anthropic Messages; one stream, two terminal ops)](036-multi-protocol-adapters-over-one-engine.md) — Accepted — S1–S3 shipped
+- [ADR 037 — Daemon-mediated config + sudoless restart (sudo only for install/uninstall)](037-daemon-mediated-config-and-restart.md) — Accepted
+- [ADR 038 — Serialize execution; batch within the span](038-serialize-execution-batch-within-the-span.md) — Accepted — immediate slice shipped
+- [ADR 039 — Per-sequence KV accounting + batch-within-the-span scheduler](039-per-sequence-kv-accounting-and-batch-scheduler.md) — Accepted — S0–S2 shipped
+- [ADR 040 — Publish Athena as a personal-identity public monorepo](040-publish-athena-as-a-personal-identity-public-monorepo.md) — Accepted
+- [ADR 041 — Per-principal token budgets (rolling window)](041-per-principal-token-budgets.md) — Accepted — implemented
+- [ADR 042 — Context-window discovery + exact token counting](042-context-window-discovery-and-token-counting.md) — Accepted — implemented
+- [ADR 043 — Adopt swift-sqlcipher package over vendored SQLCipher amalgamation](043-adopt-swift-sqlcipher-package-over-vendored-sqlcipher-amalgamation.md) — Accepted
+- [ADR 044 — Disable the substrate FoundationModelsIntegration trait (no FoundationModels, no xgrammar)](044-disable-the-substrate-foundationmodelsintegration-trait-no-foundationmodels-no-xgrammar.md) — Accepted
