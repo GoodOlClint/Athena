@@ -999,7 +999,7 @@ enum OpenAPISpec {
               "ModelListResponse": { "type": "object", "properties": { "models": { "type": "array", "items": { "$ref": "#/components/schemas/ModelEntry" } } } },
               "ModelDetailResponse": { "type": "object", "properties": { "name": { "type": "string" }, "path": { "type": "string" }, "bytes": { "type": "integer" }, "config": {} } },
               "ModelRemovedResponse": { "type": "object", "properties": { "name": { "type": "string" }, "removed": { "type": "boolean" } } },
-              "DefaultModelResponse": { "type": "object", "properties": { "model": { "type": "string" }, "source": { "type": "string", "enum": ["config", "builtin"] } } },
+              "DefaultModelResponse": { "type": "object", "properties": { "model": { "type": "string" }, "source": { "type": "string", "enum": ["config", "store", "none"] } } },
               "SetDefaultModelRequest": { "type": "object", "required": ["name"], "properties": { "name": { "type": "string" } } },
               "ModelCopyRequest": { "type": "object", "required": ["src", "dst"], "properties": { "src": { "type": "string" }, "dst": { "type": "string" }, "copy": { "type": "boolean" }, "force": { "type": "boolean" } } },
               "ModelCopyResponse": { "type": "object", "properties": { "src": { "type": "string" }, "dst": { "type": "string" }, "path": { "type": "string" }, "aliased": { "type": "boolean" } } },

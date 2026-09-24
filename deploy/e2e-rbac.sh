@@ -114,8 +114,14 @@ code() {
 
 start_daemon() { # DATADIR HOST [EXTRA-FLAGS...]
   local dd="$1" host="$2"; shift 2
+  # #203 retired the compiled-in default model id; the stub engine no
+  # longer seeds "Qwen3.5-27B-4bit-mtp" on its own (it falls back to its
+  # own synthetic "athena-stub" id instead). This suite's request bodies
+  # name the model explicitly throughout, so give the stub daemon that id
+  # here rather than editing every request body.
   "$ATHENA" load --engine stub --host "$host" --port "$PORT" \
-    --data-dir "$dd" --model-store "$MSTORE" "$@" \
+    --data-dir "$dd" --model-store "$MSTORE" \
+    --llm-model Qwen3.5-27B-4bit-mtp "$@" \
     > "$D/daemon.log" 2>&1 &
   DPID=$!
   for _ in $(seq 1 40); do

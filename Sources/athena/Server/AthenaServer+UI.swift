@@ -289,7 +289,7 @@ extension AthenaServer {
         guard await uiCaller(r).perms.contains(.modelRead) else {
             return Self.uiDeny("need model.read")
         }
-        return handleDefaultModelGet()
+        return await handleDefaultModelGet()
     }
 
     /// CSRF + per-action `.modelWrite` re-check, THEN delegate to

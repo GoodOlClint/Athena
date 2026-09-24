@@ -90,7 +90,7 @@ extension AthenaServer {
             handleModelsList()
         }
         router.get("/api/models/default") { _, _ -> Response in
-            handleDefaultModelGet()
+            await handleDefaultModelGet()
         }
         router.put("/api/models/default") { request, _ -> Response in
             await handleDefaultModelSet(request)
@@ -1159,7 +1159,7 @@ extension AthenaServer {
         }
     }
 
-    func handleDefaultModelGet() -> Response {
+    func handleDefaultModelGet() async -> Response {
         let url = ConfigEditor.resolvePath(nil)
         if let cfg = try? AthenaConfig.parse(file: url),
             let model = cfg.model, !model.isEmpty
@@ -1167,10 +1167,15 @@ extension AthenaServer {
             return Self.json(
                 DefaultModelResponse(model: model, source: "config"))
         }
+        // #203 — no compiled-in model id. ADR 026's ambiguity rule (the same
+        // resolver every module's serve path uses, via `defaultModelId()`):
+        // the store's sole llm/vision model, or "" when the store holds zero
+        // or more than one (the request path then answers with the precise
+        // `model_not_available`/`ambiguous_model` 400).
+        let resolved = await selectable(.llm).defaultModelId()
         return Self.json(
             DefaultModelResponse(
-                model: ModelStore.defaultModelName,
-                source: "builtin"))
+                model: resolved, source: resolved.isEmpty ? "none" : "store"))
     }
 
     func handleDefaultModelSet(_ request: Request) async
