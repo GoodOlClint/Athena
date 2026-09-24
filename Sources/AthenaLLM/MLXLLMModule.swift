@@ -1029,8 +1029,12 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         // when the request is actually structured (`isStructured`), so it's
         // safe to compute unconditionally.
         let tailIds = promptTokens.suffix(ReasoningPromptTail.tailTokenCount)
-        let tailText = try await container.perform { ctx in
-            ctx.tokenizer.decode(tokenIds: Array(tailIds))
+        let tailText = await container.perform { ctx in
+            // Explicit `false` (round-4 automated review follow-up): the
+            // whitespace-only check depends on the template's own special
+            // tokens (`<|im_start|>assistant\n`) surviving in the decoded
+            // tail, not on the tokenizer's own default.
+            ctx.tokenizer.decode(tokenIds: Array(tailIds), skipSpecialTokens: false)
         }
         let startsInReasoning = ReasoningPromptTail.startsInOpenBlock(
             tailText)
@@ -1294,8 +1298,8 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             // decode itself needs the tokenizer.
             let tailIds = lmInput.text.tokens.asArray(Int.self).suffix(
                 ReasoningPromptTail.tailTokenCount)
-            let tailText = try await container.perform { ctx in
-                ctx.tokenizer.decode(tokenIds: Array(tailIds))
+            let tailText = await container.perform { ctx in
+                ctx.tokenizer.decode(tokenIds: Array(tailIds), skipSpecialTokens: false)
             }
             let startsInReasoning = ReasoningPromptTail.startsInOpenBlock(
                 tailText)

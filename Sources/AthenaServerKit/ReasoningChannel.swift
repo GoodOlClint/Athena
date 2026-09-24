@@ -131,10 +131,14 @@ public let qwenThinkEnd = "</think>"
 /// model-name guess. This keeps ADR 035's "universal, not model-gated"
 /// property true for real: any model whose chat template pre-opens a
 /// `<think>` block it never closes gets `.reasoningOpen`; every other model
-/// gets `.awaitingOpenTag`, the same marker-driven no-op-in-practice design
-/// Gemma's filter already relies on (the markers are chosen because they
-/// don't occur in ordinary content — the same assumption ADR 035 makes for
-/// `<|channel>`, not a new one).
+/// gets `.awaitingOpenTag`, the same marker-driven design Gemma's filter
+/// uses. Unlike Gemma's `<|channel>`/`<channel|>` (deliberately non-natural
+/// delimiters that don't occur in ordinary content — see this file's header
+/// comment), `<think>` is plain ASCII a model can plausibly emit in ordinary
+/// prose, so `.awaitingOpenTag` misclassifying such a response as reasoning
+/// is a real, tracked, NOT-eliminated residual risk (round-4 automated
+/// review "Claim check" — an earlier revision of this comment wrongly
+/// claimed equivalence with Gemma's).
 ///
 /// The close-tag-only form is the observed default (`enable_thinking` unset
 /// or `true`, 2026-09-23, `Qwen3.5-27B-4bit`, greedy): raw completion bytes

@@ -33,16 +33,15 @@ public enum ReasoningPromptTail {
     /// True iff `tail` (the decoded text of the prompt's last
     /// `tailTokenCount` tokens — i.e. the prompt's own true suffix, since
     /// nothing follows it) ends with `openMarker` followed by nothing but
-    /// whitespace, with no `closeMarker` in between.
+    /// whitespace. (No separate close-marker check: a suffix that is
+    /// nothing-but-whitespace cannot contain the close marker's own text —
+    /// round-4 automated review, dead-code finding.)
     public static func startsInOpenBlock(
-        _ tail: String, openMarker: String = "<think>",
-        closeMarker: String = "</think>"
+        _ tail: String, openMarker: String = "<think>"
     ) -> Bool {
         guard let lastOpen = tail.range(of: openMarker, options: .backwards)
         else { return false }
-        let afterOpen = tail[lastOpen.upperBound...]
-        guard afterOpen.range(of: closeMarker) == nil else { return false }
-        return afterOpen.trimmingCharacters(in: .whitespacesAndNewlines)
-            .isEmpty
+        return tail[lastOpen.upperBound...]
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }
