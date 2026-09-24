@@ -95,11 +95,11 @@ struct Default: AsyncParsableCommand {
             let def = Self.configuredDefault(for: moduleId, in: cfg)
         {
             print(def)
-        } else if moduleId == .llm {
-            print(
-                "\(ModelStore.defaultModelName)  "
-                    + "(built-in default; unset in config)")
         } else {
+            // ADR 026's ambiguity rule (ModelSelection.resolve), the same one
+            // every module's serve path uses: no compiled-in model id (#203) —
+            // the sole store model of this class is used, else the request
+            // must name one.
             print(
                 "(no default configured for \(module); the store's sole model "
                     + "of this class is used, else the request must name one)")

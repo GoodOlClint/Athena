@@ -43,8 +43,10 @@ final class MTPSpeculativeParityTests: XCTestCase {
         guard env["ATHENA_RUN_MODEL_TESTS"] == "1" else {
             throw XCTSkip("set ATHENA_RUN_MODEL_TESTS=1 to run (heavy)")
         }
-        let modelURL = ModelStore().resolve(
-            env["ATHENA_TEST_MTP_MODEL"] ?? "gemma-4-26b-a4b-it-4bit")
+        guard
+            let modelURL = ModelStore().resolve(
+                env["ATHENA_TEST_MTP_MODEL"] ?? "gemma-4-26b-a4b-it-4bit")
+        else { throw XCTSkip("no MTP-capable checkpoint configured") }
         guard
             FileManager.default.fileExists(
                 atPath: modelURL.appendingPathComponent("config.json").path)

@@ -256,7 +256,11 @@ public enum ModelStoreOps {
             throw OpError.invalidName(src)
         }
         let store = ModelStore(rootDirectory: root)
-        let source = store.resolve(src)
+        // `src` was just validated non-empty above, so `resolve` always
+        // returns a URL here — never the "no reference" nil case.
+        guard let source = store.resolve(src) else {
+            throw OpError.notFound(src)
+        }
         let fm = FileManager.default
         guard fm.fileExists(atPath: source.path) else {
             throw OpError.notFound(src)

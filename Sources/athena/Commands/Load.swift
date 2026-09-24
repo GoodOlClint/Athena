@@ -748,13 +748,14 @@ struct Load: AsyncParsableCommand {
         // request omits `model`); `athena init` / startup still pulls every
         // configured id so both engine families (whisper+parakeet,
         // sortformer+pyannote) land in the store and become selectable.
-        let llmDefaultName =
-            llmModels.first ?? model ?? ModelStore.defaultModelName
+        // #203 — no compiled-in fallback name; nil here means "unconfigured",
+        // and the llm module resolves it per-request via ADR 026's ambiguity
+        // rule (ModelSelection.resolve), same as every other module.
+        let llmDefaultName: String? = llmModels.first ?? model
         let modelURL = store.resolve(llmDefaultName)
         // Stub seed sets (the stub has no disk; these stand in for the store).
         let llmStubIds =
-            llmModels.isEmpty
-            ? [model ?? ModelStore.defaultModelName] : llmModels
+            llmModels.isEmpty ? [model].compactMap { $0 } : llmModels
         let embeddingDefault = embeddingModels.first
         let transcriptionDefault = transcriptionModels.first
         let diarizationDefault = diarizationModels.first
@@ -765,7 +766,7 @@ struct Load: AsyncParsableCommand {
         // warns + runs uncompressed — fail-closed is reserved for an
         // unrecognized VALUE (handled at resolve() above). An unknown
         // arch (no/unreadable config.json) is left silent — can't tell.
-        if engine == .mlx, kvCompression != .none {
+        if let modelURL, engine == .mlx, kvCompression != .none {
             let modelType = ModelConfigInfo.read(
                 modelDirectory: modelURL)?.modelType
             if !kvCompression.servesArch(modelType: modelType) {
@@ -873,7 +874,7 @@ struct Load: AsyncParsableCommand {
         Logging.Logger(label: AthenaLog.daemonLabel).notice(
             """
             athena daemon up — engine=\(engine.rawValue) \
-            model=\(modelURL.path) \
+            model=\(modelURL?.path ?? "(unconfigured; resolved per-request)") \
             listen=\(config.listenHost):\(config.listenPort) \
             budget=\(config.totalBudgetBytes)B
             """)
@@ -923,7 +924,7 @@ struct Load: AsyncParsableCommand {
             diarization: diarization,
             speakerEmbedding: speakerEmbedding,
             store: athenaStore,
-            modelName: modelURL.lastPathComponent,
+            modelName: llmDefaultName ?? "",
             modelStoreRoot: store.rootDirectory, auth: authConfig,
             tlsCertPath: tlsCert, tlsKeyPath: tlsKey,
             rateLimit: rateLimit ?? 0, rateBurst: rateBurst ?? 0,
