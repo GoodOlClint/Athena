@@ -210,6 +210,57 @@ final class ModelHealthTests: XCTestCase {
             "MTP drafter has no tokenizer by design, got \(mtpProblems)")
     }
 
+    /// #201 follow-up (Codex adversarial review) — the tokenizer exemption
+    /// must not blanket-pass a checkpoint whose PACKAGING is unloadable.
+    /// `ModelSupport.detect`'s `loadability` verdict (not just `modality`)
+    /// has to reach the health check, so a real Whisper checkpoint with the
+    /// wrong decoder vocab, a transformers-format Parakeet export, and an
+    /// unidentified config all still fail, while the genuinely healthy
+    /// tokenizer-free audio fixtures stay clean.
+    func testUnsupportedPackagingStillFlaggedDespiteTokenizerExemption() throws {
+        let fm = FileManager.default
+
+        func fixtureProblems(configJSON: String) throws -> [String] {
+            let dir = try tmpDir()
+            defer { try? fm.removeItem(at: dir) }
+            try Data(configJSON.utf8).write(
+                to: dir.appendingPathComponent("config.json"))
+            try writeSafetensors(
+                to: dir.appendingPathComponent("model.safetensors"))
+            return ModelHealth.check(dir)
+        }
+
+        // Whisper with a non-large-v3 vocab: unloadable, must be flagged —
+        // not silently passed just because whisper is tokenizer-exempt.
+        let badWhisper = try fixtureProblems(
+            configJSON: #"{"model_type":"whisper","n_vocab":51865}"#)
+        XCTAssertFalse(
+            badWhisper.isEmpty,
+            "wrong-vocab whisper must be flagged unhealthy")
+
+        // Transformers-format Parakeet (no NeMo joint.vocabulary): unloadable.
+        let badParakeet = try fixtureProblems(
+            configJSON: #"{"model_type":"parakeet_tdt"}"#)
+        XCTAssertFalse(
+            badParakeet.isEmpty,
+            "transformers-format parakeet (no joint.vocabulary) must be flagged unhealthy"
+        )
+
+        // No model_type at all: unidentified, must be flagged (not exempted
+        // by falling into `.unsupported` modality).
+        let unidentified = try fixtureProblems(configJSON: #"{}"#)
+        XCTAssertFalse(
+            unidentified.isEmpty, "a config with no model_type must be flagged unhealthy")
+
+        // Sanity: a CORRECT whisper vocab stays clean of the loadability
+        // problem (the earlier test already covers the tokenizer exemption).
+        let goodWhisper = try fixtureProblems(
+            configJSON: #"{"model_type":"whisper","n_vocab":51866}"#)
+        XCTAssertTrue(
+            goodWhisper.isEmpty,
+            "correctly-packaged whisper must read healthy, got \(goodWhisper)")
+    }
+
     /// #202 — `athena rm` must remove a dangling store symlink (its HF-cache
     /// target pruned out from under it), not read it as absent.
     func testRemoveDanglingSymlink() throws {

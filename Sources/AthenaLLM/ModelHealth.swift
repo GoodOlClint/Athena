@@ -15,10 +15,9 @@ public enum ModelHealth {
     /// path/layout bug.
     private static func modalityNeedsTokenizer(_ modality: ModelModality) -> Bool {
         switch modality {
-        case .llm, .vision, .embedding: return true
-        case .transcription, .diarization, .speakerEmbedding, .mtpDrafter,
-            .unsupported:
+        case .transcription, .diarization, .speakerEmbedding, .mtpDrafter:
             return false
+        case .llm, .vision, .embedding, .unsupported: return true
         }
     }
     /// Empty ⇒ healthy. Each string is one human-readable problem.
@@ -47,8 +46,15 @@ public enum ModelHealth {
 
         problems += safetensorsProblems(dir)
 
-        let modality = ModelSupport.detect(in: dir).modality
-        if modalityNeedsTokenizer(modality) {
+        let support = ModelSupport.detect(in: dir)
+        // The packaging verdict, not just the modality: a checkpoint whose
+        // fields the loader needs are missing (e.g. a non-large-v3 Whisper
+        // vocab, or a transformers-format Parakeet export with no
+        // joint.vocabulary) is unloadable regardless of tokenizer presence.
+        if case .unsupported(let reason, _) = support.loadability {
+            problems.append(reason)
+        }
+        if modalityNeedsTokenizer(support.modality) {
             let tok = [
                 "tokenizer.json", "tokenizer_config.json",
                 "tokenizer.model", "vocab.json",
