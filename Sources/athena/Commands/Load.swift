@@ -671,7 +671,9 @@ struct Load: AsyncParsableCommand {
                     MLX.Memory.clearCache()
                 }
             },
-            admissionMode: admissionMode)
+            admissionMode: admissionMode,
+            // #206 — the KV headroom rides the G2 revert switch.
+            reserveKVHeadroom: admissionMode == .footprint)
 
         // ADR 039 S2 — feed the batch scheduler the governor's live admission
         // inputs (denominator + budget) so per-sequence KV reservations meter

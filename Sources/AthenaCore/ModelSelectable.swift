@@ -11,7 +11,8 @@ import Foundation
 /// on-request download; an omitted `model` resolves by `ModelSelection`'s
 /// ambiguity rule (configured default → sole store model → 400 `ambiguousModel`
 /// when >1 with no default). One id is resident at a time — rebind unloads the
-/// previous — so the governor accounting stays a fixed per-class estimate.
+/// previous. The governor admits each load and rebind on the target model's own
+/// estimate (`admissionEstimate(forModel:)`), not a fixed per-class number.
 ///
 /// Concrete modules conform to this in addition to their typed inference
 /// protocol; the server walks every module via the `any ModelSelectable`
@@ -35,4 +36,18 @@ public protocol ModelSelectable: Actor {
     /// the class with no configured default (400), and
     /// `AthenaError.moduleLoadFailed` on a substrate failure.
     func rebind(to id: String?) async throws
+    /// The model a load or rebind to `id` binds, and its admission estimate in
+    /// bytes. `id == nil` ⇒ the next cold-load target (the staged selection,
+    /// else the resolved default). Throws exactly as `rebind(to:)` resolution
+    /// does. The default reports the module's static `memoryEstimate()`.
+    func admissionEstimate(forModel id: String?) throws
+        -> (model: String, bytes: Int)
+}
+
+extension ModelSelectable where Self: InferenceModule {
+    public func admissionEstimate(forModel id: String?) throws
+        -> (model: String, bytes: Int)
+    {
+        (id ?? residentModelId() ?? defaultModelId(), memoryEstimate())
+    }
 }

@@ -470,7 +470,7 @@ struct AthenaServer {
                 return .failed(
                     Self.error(
                         status: HTTPResponse.Status(code: e.httpStatus),
-                        message: e.message, type: "server_error", code: e.code))
+                        message: e.message, type: e.type, code: e.code))
             } catch {
                 return .failed(Self.classified(error, module: .llm))
             }
@@ -548,7 +548,7 @@ struct AthenaServer {
             return .failed(
                 Self.error(
                     status: HTTPResponse.Status(code: e.httpStatus),
-                    message: e.message, type: "server_error", code: e.code))
+                    message: e.message, type: e.type, code: e.code))
         } catch {
             return .failed(Self.classified(error, module: .llm))
         }
@@ -812,7 +812,7 @@ struct AthenaServer {
         } catch let e as AthenaError {
             return Self.error(
                 status: HTTPResponse.Status(code: e.httpStatus),
-                message: e.message, type: "server_error", code: e.code)
+                message: e.message, type: e.type, code: e.code)
         } catch {
             return Self.classified(error, module: .llm)
         }
@@ -828,14 +828,7 @@ struct AthenaServer {
     ) async throws {
         let sel = selectable(module)
         let before = await sel.residentModelId()
-        // ADR 029 — a warm swap loads the new model's weights; gate it so it
-        // can't run while a decode holds the slot (which retains the OLD
-        // container via ARC → transient double-residency → OOM) or while
-        // another tenant executes. Cold-load (`performLoad`) stays UNgated —
-        // that is the governor's load wait, not Metal execution.
-        try await InferenceGate.shared.withExclusiveExecution {
-            try await sel.rebind(to: target)
-        }
+        try await governedRebind(module, to: target)
         let after = await sel.residentModelId()
         guard before != after, let request else { return }
         await audit(
@@ -843,6 +836,21 @@ struct AthenaServer {
             target: "\(module.rawValue):\(target)", result: "ok",
             detail: "from=\(before ?? "-") to=\(after ?? "-") "
                 + "trigger=inference")
+    }
+
+    /// #206 — a warm swap is admitted and reconciled by the governor like a
+    /// cold load. ADR 029 — the swap itself loads weights, so it runs gated:
+    /// never while a decode holds the slot (which retains the OLD container
+    /// via ARC → transient double-residency → OOM) or another tenant executes.
+    /// Admission stays outside the gate: its cache-reclaim rung takes the
+    /// gate itself.
+    func governedRebind(_ module: ModuleID, to target: String) async throws {
+        let sel = selectable(module)
+        try await governor.rebind(module, to: target) {
+            try await InferenceGate.shared.withExclusiveExecution {
+                try await sel.rebind(to: target)
+            }
+        }
     }
 
     /// The id actually resident in the LLM slot; falls back to the

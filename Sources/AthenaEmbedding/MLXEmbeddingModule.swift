@@ -132,6 +132,19 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
 
     public func memoryEstimate() -> Int { estimatedBytes }
 
+    /// #206 — the target's own on-disk weight bytes (the static estimate when
+    /// it has none on disk). `id == nil` ⇒ the cold-load target, resolved as
+    /// `load(reservation:)` resolves it.
+    public func admissionEstimate(forModel id: String?) throws
+        -> (model: String, bytes: Int)
+    {
+        let model = try id.map(resolve) ?? desiredName ?? residentId ?? resolve(nil)
+        let onDisk =
+            localDirectory(for: model).map(ModelStoreLayout.safetensorsBytes)
+            ?? 0
+        return (model, onDisk > 0 ? onDisk : estimatedBytes)
+    }
+
     public func load(reservation: MemoryReservation) async throws {
         if container != nil { return }
         // NI3: honor the staged selection on a cold/reload, else the resolved

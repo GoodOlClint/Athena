@@ -116,13 +116,9 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     private let configuredDefault: String?
     private let modelStoreRoot: URL
     private let params: LLMGenerationParameters
-    /// Governor admission estimate. M41.2 sizes this as the MAX across
-    /// the allowlist, so the fixed slot bounds the largest member —
-    /// admitting a small default but later rebinding to a giant would
-    /// otherwise under-account. Same approach M39 took (implicit) for
-    /// embeddings.
-    private let estimatedBytes: Int
     private var container: ModelContainer?
+    /// The resident model's parameter bytes, summed at load (nil ⇒ none).
+    private var residentWeightBytes: Int?
     /// Currently-resident model name (nil ⇒ slot unloaded).
     private var residentName: String?
     /// ADR 032 — the resident target's paired MTP speculative drafter, loaded
@@ -256,20 +252,8 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             ? nil : configuredDefault
         self.configuredDefault = cleanDefault
         self.params = parameters
-        // Governor admission estimate: MAX across the store's LLM/vision
-        // models so the fixed slot still bounds the largest member after a
-        // rebind. Errs high (the safe direction for an OOM gate); 0 when the
-        // store has no model of the class yet (e.g. pulled post-boot).
         let classIds = StoreModelClass.ids(
             storeRoot: modelStoreRoot, accept: { $0.isLLMSlot })
-        self.estimatedBytes =
-            classIds
-            .compactMap {
-                ModelStoreLayout.localDirectory(
-                    for: $0, storeRoot: modelStoreRoot)
-            }
-            .map { Self.estimateBytes(forModelAt: $0) }
-            .max() ?? 0
         self.promptCacheCapBytes = promptCacheCapBytes
 
         // Initial cap geometry seeded from the configured default (or the
@@ -438,7 +422,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     }
 
     public var residentBytes: Int {
-        container == nil ? 0 : estimatedBytes
+        container == nil ? 0 : (residentWeightBytes ?? 0)
     }
 
     /// M71.2 — true when the resident model accepts image inputs (loaded via
@@ -446,7 +430,11 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     /// on this: a vision request to a text-only model is a 400.
     public var servesVision: Bool { residentIsVision }
 
-    public func memoryEstimate() -> Int { estimatedBytes }
+    /// The next cold load's target estimate (0 when it cannot be resolved;
+    /// the load itself then surfaces the resolution error).
+    public func memoryEstimate() -> Int {
+        (try? admissionEstimate(forModel: nil).bytes) ?? 0
+    }
 
     /// C10 (M68.2) — invalidate every per-model DERIVED structured-output
     /// cache in ONE place. The vocab build (C3) and the parser-factory share
@@ -466,6 +454,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     private func dropResidentModel() {
         container = nil
         residentName = nil
+        residentWeightBytes = nil
         residentIsVision = false  // M71.2
         mtpDrafterModel = nil  // ADR 032 — drafter is paired to the target
         mtpDrafterName = nil
@@ -608,6 +597,9 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         container = loaded
         residentName = name
         residentIsVision = isVision  // M71.2
+        residentWeightBytes = await loaded.perform { ctx in
+            ctx.model.parameters().flattened().reduce(0) { $0 + $1.1.nbytes }
+        }
         // ADR 032 — pair an MTP speculative drafter for a Gemma 4 target when
         // speculative is enabled. Best-effort: a missing/failed drafter logs and
         // leaves MTP inert, never failing the target load.
@@ -737,6 +729,19 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
 
     public func selectColdLoadModel(_ id: String?) async throws {
         desiredName = try resolve(id)
+    }
+
+    /// #206 — the target's own on-disk weight bytes, so admission sizes the
+    /// model actually requested. `id == nil` ⇒ the cold-load target, resolved
+    /// exactly as `load(reservation:)` resolves it.
+    public func admissionEstimate(forModel id: String?) throws
+        -> (model: String, bytes: Int)
+    {
+        let model =
+            try id.map(resolve) ?? desiredName ?? residentName
+            ?? resolvedDefaultName()
+        let bytes = directoryURL(for: model).map(Self.estimateBytes) ?? 0
+        return (model, bytes)
     }
 
     /// ADR 026 resolution against the live store scan: a named id matches by
@@ -1365,32 +1370,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
     /// bytes. For 4-/8-bit quantized weights this closely tracks the bytes
     /// MLX maps resident, so it is an honest governor admission estimate.
     static func estimateBytes(forModelAt directory: URL) -> Int {
-        let fm = FileManager.default
-        // Resolve the store-entry symlink first: `pull` lands a model as a
-        // symlink (~/.athena/models/<name> → HF snapshot). `contentsOfDirectory`
-        // does NOT traverse a symlinked root, so a pulled model would
-        // enumerate to nothing → 0 B estimate → defeated OOM gate. (Then the
-        // per-shard resolve below handles the blob symlinks inside.)
-        let dir = directory.resolvingSymlinksInPath()
-        guard
-            let entries = try? fm.contentsOfDirectory(
-                at: dir,
-                includingPropertiesForKeys: [.fileSizeKey])
-        else { return 0 }
-        var total = 0
-        for url in entries where url.pathExtension == "safetensors" {
-            // Resolve the shard symlink before sizing: `pull` stores
-            // shards in the HF-cache layout (each a symlink to
-            // ../../blobs/<sha>). Sizing the link itself (~76 B) would
-            // make the governor's pre-load estimate ~0 and defeat its OOM
-            // admission gate — same root cause as ModelHealth's size check.
-            let size =
-                (try? url.resolvingSymlinksInPath()
-                .resourceValues(forKeys: [.fileSizeKey]))?.fileSize
-                ?? 0
-            total += size
-        }
-        return total
+        ModelStoreLayout.safetensorsBytes(at: directory)
     }
 }
 
