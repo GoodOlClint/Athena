@@ -104,7 +104,7 @@ final class QwenThinkFilterTests: XCTestCase {
         XCTAssertEqual(r.reasoning, "reasoning")
     }
 
-    /// #218 (operator ruling, PR #213 round 7): `<think>` is recognized
+    /// #198 (operator ruling, PR #213 round 7): `<think>` is recognized
     /// ONLY when it opens the completion. Once any other content byte has
     /// been emitted, a later `<think>` is ordinary content — this is the
     /// fix for the round-4/5/6 residual risk (a response that merely
@@ -125,6 +125,17 @@ final class QwenThinkFilterTests: XCTestCase {
         let r = splitQwenThink(raw, mode: .awaitingOpenTag)
         XCTAssertEqual(r.content, "")
         XCTAssertEqual(r.reasoning, "reasoning that never closes")
+    }
+
+    /// Round-7 automated review follow-up: once a leading `<think>…</think>`
+    /// pair has closed, a LATER `<think>` in the post-close content must
+    /// never re-open reasoning — the old scanning `.content` state would
+    /// have; the new terminal `.content` state is a one-way transition.
+    func testLeadingPairThenLaterTagStaysInContent() {
+        let raw = "<think>a</think>b <think> c"
+        let r = splitQwenThink(raw, mode: .awaitingOpenTag)
+        XCTAssertEqual(r.content, "b <think> c")
+        XCTAssertEqual(r.reasoning, "a")
     }
 
     /// `.awaitingOpenTag` must not touch ordinary content that never
