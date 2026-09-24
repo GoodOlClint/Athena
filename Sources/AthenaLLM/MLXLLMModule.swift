@@ -605,6 +605,11 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         // leaves MTP inert, never failing the target load.
         await loadMTPDrafterIfEligible(
             targetName: name, modelType: info?.modelType)
+        if let drafter = mtpDrafterModel?.model {
+            residentWeightBytes =
+                (residentWeightBytes ?? 0)
+                + drafter.parameters().flattened().reduce(0) { $0 + $1.1.nbytes }
+        }
     }
 
     /// ADR 032 — load the Gemma 4 MTP drafter paired to the just-loaded target,

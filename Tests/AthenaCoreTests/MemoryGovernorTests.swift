@@ -553,14 +553,12 @@ final class MemoryGovernorTests: XCTestCase {
         let gov = MemoryGovernor(totalBudgetBytes: 100)
         let park = Signal()
         let a = SlowUnloadModule(id: .transcription, bytes: 60, park: park)
-        // B is collateral (the reload evicts it to make room); its teardown must
-        // not park, or nothing would ever drain it.
-        let b = SlowUnloadModule(id: .textEmbedding, bytes: 60)
         await gov.register(a, evictable: true)
-        await gov.register(b, evictable: true)
 
         try await gov.ensureLoaded(.transcription)  // A loaded (60)
-        try await gov.ensureLoaded(.textEmbedding)  // evicts A, B loaded
+        // #206: a load that evicts waits for its victims' teardown, so the
+        // parked teardown is opened by an unload, not by evicting A.
+        Task { await gov.unload(.transcription) }
 
         // A's teardown is now provably open — held by the park, not by a sleep
         // a slow runner can outlast.

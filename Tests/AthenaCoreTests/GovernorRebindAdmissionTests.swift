@@ -38,22 +38,27 @@ final class GovernorRebindAdmissionTests: XCTestCase {
             "900 + 300 > 1000: the co-tenant must be evicted, got \(String(describing: emb))")
     }
 
-    // (a) — a footprint learned for one model never admits another.
+    // (a) — a footprint learned for one model never admits another. The
+    // co-tenant is not evictable, so a wrong (small) estimate would admit and
+    // load instead of refusing up front.
     func testLearnedFootprintIsPerModel() async throws {
         let gov = MemoryGovernor(totalBudgetBytes: 1_000)
         let l = llm(["small": 100, "big": 900])
         await gov.register(l, evictable: false)
-        await gov.register(StubEmbeddingModule(reserveBytes: 300), evictable: true)
+        await gov.register(StubEmbeddingModule(reserveBytes: 300), evictable: false)
 
         try await gov.ensureLoaded(.llm)  // learns small = 100
         await gov.unload(.llm)
         try await gov.ensureLoaded(.textEmbedding)
         try await l.selectColdLoadModel("big")
-        try await gov.ensureLoaded(.llm)
-
-        let s = await gov.snapshot()
-        XCTAssertEqual(mod(s, .llm)?.residentBytes, 900)
-        XCTAssertNotEqual(mod(s, .textEmbedding)?.state, .loaded)
+        do {
+            try await gov.ensureLoaded(.llm)
+            XCTFail("900 + 300 > 1000 must be refused before the load")
+        } catch let e as AthenaError {
+            XCTAssertEqual(e.code, "memory_budget_exceeded")
+        }
+        let resident = await l.residentModelId()
+        XCTAssertNil(resident)
     }
 
     // (b) — a rebind re-measures: residentBytes follows the new model.
@@ -77,7 +82,109 @@ final class GovernorRebindAdmissionTests: XCTestCase {
         XCTAssertEqual(s.residentBytes, 100)
     }
 
-    // (b) — a rebind is admitted: a growing swap evicts co-tenants first.
+    // (b) — a growing rebind that cannot fit is refused before the swap: the
+    // co-tenant is not evictable, so only admission (not a post-swap
+    // reconcile) can stop it.
+    func testRebindRefusedBeforeSwapWhenItCannotFit() async throws {
+        let gov = MemoryGovernor(totalBudgetBytes: 1_000)
+        let l = llm(["small": 100, "big": 800])
+        await gov.register(l, evictable: false)
+        await gov.register(StubEmbeddingModule(reserveBytes: 300), evictable: false)
+        try await gov.ensureLoaded(.llm)
+        try await gov.ensureLoaded(.textEmbedding)
+
+        do {
+            try await gov.rebind(.llm, to: "big") { try await l.rebind(to: "big") }
+            XCTFail("100→800 with a 300 non-evictable co-tenant must be refused")
+        } catch let e as AthenaError {
+            XCTAssertEqual(e.code, "memory_budget_exceeded")
+        }
+        let resident = await l.residentModelId()
+        XCTAssertEqual(resident, "small")
+        let s = await gov.snapshot()
+        XCTAssertEqual(s.residentBytes, 400)
+    }
+
+    // (b) — the swap is admitted in place of the old reservation: 400 → 500
+    // next to a 450 co-tenant needs only +100, which fits.
+    func testRebindAdmitsInPlaceOfOldReservation() async throws {
+        let gov = MemoryGovernor(totalBudgetBytes: 1_000)
+        let l = llm(["small": 400, "big": 500])
+        await gov.register(l, evictable: false)
+        await gov.register(StubEmbeddingModule(reserveBytes: 450), evictable: false)
+        try await gov.ensureLoaded(.llm)
+        try await gov.ensureLoaded(.textEmbedding)
+
+        try await gov.rebind(.llm, to: "big") { try await l.rebind(to: "big") }
+        let s = await gov.snapshot()
+        XCTAssertEqual(mod(s, .llm)?.residentBytes, 500)
+        XCTAssertEqual(s.residentBytes, 950)
+    }
+
+    // (b) — a swap that fails before it starts (e.g. the gate wait is
+    // cancelled) leaves the old model resident and its reservation intact.
+    func testFailedRebindRestoresOldReservation() async throws {
+        let gov = MemoryGovernor(totalBudgetBytes: 1_000)
+        let l = llm(["small": 100, "big": 600])
+        await gov.register(l, evictable: false)
+        try await gov.ensureLoaded(.llm)
+
+        do {
+            try await gov.rebind(.llm, to: "big") { throw CancellationError() }
+            XCTFail("expected the perform error")
+        } catch is CancellationError {}
+        var s = await gov.snapshot()
+        XCTAssertEqual(mod(s, .llm)?.residentBytes, 100)
+        XCTAssertEqual(s.residentBytes, 100)
+
+        try await gov.rebind(.llm, to: "big") { try await l.rebind(to: "big") }
+        s = await gov.snapshot()
+        XCTAssertEqual(mod(s, .llm)?.residentBytes, 600)
+    }
+
+    // (b) — a swap that empties the slot and then fails returns its bytes.
+    func testFailedRebindThatEmptiedSlotReleasesReservation() async throws {
+        let gov = MemoryGovernor(totalBudgetBytes: 1_000)
+        let l = llm(["small": 100, "big": 600])
+        await gov.register(l, evictable: false)
+        try await gov.ensureLoaded(.llm)
+
+        struct Boom: Error {}
+        do {
+            try await gov.rebind(.llm, to: "big") {
+                await l.unload()
+                throw Boom()
+            }
+            XCTFail("expected Boom")
+        } catch is Boom {}
+        let s = await gov.snapshot()
+        XCTAssertEqual(s.residentBytes, 0)
+        XCTAssertEqual(mod(s, .llm)?.state, .unloaded)
+    }
+
+    // (c) — a load measured above its estimate keeps the KV headroom:
+    // reconcile evicts a co-tenant rather than eat into it.
+    func testReconcileKeepsKVHeadroom() async throws {
+        let probe = ProbeScript()
+        let gov = MemoryGovernor(
+            totalBudgetBytes: 1_000, memoryProbe: { probe.next() },
+            promptCacheCapBytes: 200, reserveKVHeadroom: true)
+        let l = llm(["small": 500])
+        await gov.register(l, evictable: false)
+        await gov.register(StubEmbeddingModule(reserveBytes: 250), evictable: true)
+        try await gov.ensureLoaded(.textEmbedding)
+
+        probe.queue([0, 0, 700])  // relief check, before, after the LLM load
+        try await gov.ensureLoaded(.llm)
+
+        let s = await gov.snapshot()
+        XCTAssertEqual(mod(s, .llm)?.residentBytes, 700)
+        XCTAssertNotEqual(
+            mod(s, .textEmbedding)?.state, .loaded,
+            "700 + 250 + 200 headroom > 1000: the co-tenant must go")
+    }
+
+    // (b) — a growing swap evicts an evictable co-tenant.
     func testRebindAdmissionEvictsCoTenant() async throws {
         let gov = MemoryGovernor(totalBudgetBytes: 1_000)
         let l = llm(["small": 100, "big": 800])
@@ -195,5 +302,15 @@ final class GovernorRebindAdmissionTests: XCTestCase {
         try await m.selectColdLoadModel("big-llm")
         let coldBig = await m.memoryEstimate()
         XCTAssertEqual(coldBig, 9_000)
+    }
+}
+
+/// A scripted process-memory probe: returns queued values, then 0.
+private final class ProbeScript: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [Int] = []
+    func queue(_ v: [Int]) { lock.withLock { values = v } }
+    func next() -> Int {
+        lock.withLock { values.isEmpty ? 0 : values.removeFirst() }
     }
 }

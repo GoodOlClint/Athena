@@ -37,9 +37,10 @@ public protocol ModelSelectable: Actor {
     /// `AthenaError.moduleLoadFailed` on a substrate failure.
     func rebind(to id: String?) async throws
     /// The model a load or rebind to `id` binds, and its admission estimate in
-    /// bytes. `id == nil` ⇒ the next cold-load target (the staged selection,
-    /// else the resolved default). Throws exactly as `rebind(to:)` resolution
-    /// does. The default reports the module's static `memoryEstimate()`.
+    /// bytes. `id == nil` ⇒ the next cold-load target. The default does not
+    /// resolve or throw: it canonicalizes `id` by store identity (so an alias
+    /// of the resident model is a no-op rebind), falls back to the resident
+    /// then the default id, and reports the static `memoryEstimate()`.
     func admissionEstimate(forModel id: String?) throws
         -> (model: String, bytes: Int)
 }
@@ -48,6 +49,7 @@ extension ModelSelectable where Self: InferenceModule {
     public func admissionEstimate(forModel id: String?) throws
         -> (model: String, bytes: Int)
     {
-        (id ?? residentModelId() ?? defaultModelId(), memoryEstimate())
+        let named = id.map { allowedModelIds().canonicalByStoreIdentity($0) ?? $0 }
+        return (named ?? residentModelId() ?? defaultModelId(), memoryEstimate())
     }
 }

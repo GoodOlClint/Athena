@@ -221,6 +221,8 @@ public actor MemoryGovernor {
         let model: String?
     }
     private var learnedFootprint: [FootprintKey: Int] = [:]
+    /// The last rebind queued per slot; each rebind waits for the one before.
+    private var rebindTail: [ModuleID: Task<Void, Never>] = [:]
     /// Keep one request's KV headroom (`promptCacheCapBytes`, the per-request
     /// KV bound the LLM enforces at preflight) free whenever the LLM is
     /// resident: weights that fit the budget with no room for their own KV
@@ -555,12 +557,14 @@ public actor MemoryGovernor {
         // (the detached cleanup swallows this throw via `try?`).
         let model: String?
         let estimate: Int
+        let victims: [ModuleID]
         do {
             (model, estimate) = try await admissionEstimate(
                 id, module, model: nil)
             // E1 — re-read after the estimate's suspension.
             if entries[id]?.state == .loaded { return }
-            try await makeRoom(for: estimate, requestedBy: id, model: model)
+            victims = try await makeRoom(
+                for: estimate, requestedBy: id, model: model)
         } catch {
             let classified = AthenaError.classify(error, module: id)
             lastLoadError[id] = classified
@@ -574,6 +578,10 @@ public actor MemoryGovernor {
         entries[id]?.reservation = reservation
         entries[id]?.model = model
         entries[id]?.measured = false
+        // An evicted tenant's weights stay resident until its teardown runs;
+        // allocating first would overlap the two. The reservation is already
+        // on the books, so admissions during the wait see it.
+        for victim in victims { await teardown[victim]?.value }
 
         let before = memoryProbe?()
         let started = Date()
@@ -673,40 +681,50 @@ public actor MemoryGovernor {
     /// #206 — a warm in-place model swap (`perform` runs the module's
     /// `rebind`) under the same admission and reconcile as a cold load, so a
     /// slot admitted for a small model cannot swap in a large one unchecked
-    /// and `residentBytes` follows the resident model. A no-op rebind (target
-    /// already resident) and a slot that is not `.loaded` just run `perform`.
+    /// and `residentBytes` follows the resident model. Rebinds of one slot run
+    /// one at a time; a no-op rebind (target already resident) just runs
+    /// `perform`.
     public func rebind(
+        _ id: ModuleID, to model: String?,
+        perform: @Sendable () async throws -> Void
+    ) async throws {
+        let previous = rebindTail[id]
+        let (turn, done) = AsyncStream<Void>.makeStream()
+        rebindTail[id] = Task { for await _ in turn {} }
+        defer { done.finish() }
+        await previous?.value
+        try await rebindSerialized(id, to: model, perform: perform)
+    }
+
+    private func rebindSerialized(
         _ id: ModuleID, to model: String?,
         perform: @Sendable () async throws -> Void
     ) async throws {
         guard let module = entries[id]?.module else {
             throw AthenaError.moduleNotRegistered(id)
         }
+        if entries[id]?.state != .loaded { try await ensureLoaded(id) }
         let (target, estimate) = try await admissionEstimate(
             id, module, model: model)
         let sel = module as? any ModelSelectable
         let resident = await sel?.residentModelId()
-        guard entries[id]?.state == .loaded,
-            let old = entries[id]?.reservation,
-            let sel, resident != target
-        else {
+        guard let sel, resident != target else {
             try await perform()
             return
         }
+        guard entries[id]?.state == .loaded, let old = entries[id]?.reservation
+        else { throw Self.slotLost(id) }
         // The swap drops the old model before loading the new one, so admit
         // the new model in place of the old reservation.
-        try await makeRoom(
+        let victims = try await makeRoom(
             for: estimate, requestedBy: id, model: target, replacing: old.bytes)
-        guard let current = entries[id]?.reservation,
-            entries[id]?.state == .loaded
-        else {
-            try await perform()
-            return
-        }
-        residentBytes += estimate - current.bytes
-        entries[id]?.reservation = MemoryReservation(module: id, bytes: estimate)
-        entries[id]?.model = target
-        entries[id]?.measured = false
+        guard entries[id]?.state == .loaded, let held = entries[id]?.reservation
+        else { throw Self.slotLost(id) }
+        // Until the swap completes either model may be resident.
+        let hold = max(held.bytes, estimate)
+        residentBytes += hold - held.bytes
+        entries[id]?.reservation = MemoryReservation(module: id, bytes: hold)
+        for victim in victims { await teardown[victim]?.value }
         let started = Date()
         onEvent?(
             id,
@@ -715,20 +733,27 @@ public actor MemoryGovernor {
         do {
             try await perform()
         } catch {
-            // The module drops its old model before loading the new one, so a
-            // failed swap usually leaves the slot empty: return its bytes.
-            if await sel.residentModelId() == nil,
-                let res = entries[id]?.reservation
-            {
-                residentBytes -= res.bytes
-                entries[id]?.reservation = nil
-                entries[id]?.state = .unloaded
-                entries[id]?.unloadedReason = .loadFailed
+            let now = await sel.residentModelId()
+            if let res = entries[id]?.reservation {
+                if now == nil {
+                    residentBytes -= res.bytes
+                    entries[id]?.reservation = nil
+                    entries[id]?.state = .unloaded
+                    entries[id]?.unloadedReason = .loadFailed
+                } else if now == resident {
+                    residentBytes += held.bytes - res.bytes
+                    entries[id]?.reservation = held
+                }
             }
             onEvent?(
                 id, "rebind failed after \(Self.ms(since: started)): \(error)")
             throw error
         }
+        guard await sel.residentModelId() == target,
+            entries[id]?.state == .loaded
+        else { return }
+        entries[id]?.model = target
+        entries[id]?.measured = false
         // The process-wide probe cannot attribute a swap (the old model's
         // freed buffers land in the MLX cache inside the same delta), so the
         // module's own post-swap self-report is the measurement.
@@ -738,9 +763,13 @@ public actor MemoryGovernor {
             "rebound to \(target ?? "-") "
                 + "(\(Self.fmtBytes(observed > 0 ? observed : estimate))) "
                 + "in \(Self.ms(since: started))")
-        if observed > 0 {
-            reconcile(id, observed: observed)
-        }
+        reconcile(id, observed: observed > 0 ? observed : estimate)
+        if observed <= 0 { entries[id]?.measured = false }
+    }
+
+    private static func slotLost(_ id: ModuleID) -> AthenaError {
+        .moduleLoadFailed(
+            id, reason: "slot was unloaded while the rebind waited; retry")
     }
 
     /// Human bytes for log events (GB ≥ 1 GB, else MB).
@@ -771,7 +800,10 @@ public actor MemoryGovernor {
         entries[id]?.measured = true
         learnedFootprint[FootprintKey(module: id, model: entries[id]?.model)] =
             observed  // M5.4
-        guard residentBytes > totalBudgetBytes else { return }
+        let headroom =
+            reserveKVHeadroom && entries[.llm]?.state == .loaded
+            ? promptCacheCapBytes : 0
+        guard residentBytes + headroom > totalBudgetBytes else { return }
         let victims =
             entries
             .filter {
@@ -780,7 +812,7 @@ public actor MemoryGovernor {
             }
             .sorted { $0.value.lastUsed < $1.value.lastUsed }
         for (victimID, _) in victims {
-            if residentBytes <= totalBudgetBytes { break }
+            if residentBytes + headroom <= totalBudgetBytes { break }
             evictSync(victimID)
         }
     }
@@ -827,10 +859,12 @@ public actor MemoryGovernor {
     /// admitted load frees first (a rebind's old model). Throws
     /// `modelExceedsBudget` (400) when no eviction could ever fit it, else
     /// `memoryBudgetExceeded` (503) if it still cannot fit after eviction.
+    /// Returns the modules it evicted; their teardown may still be running.
+    @discardableResult
     private func makeRoom(
         for estimate: Int, requestedBy id: ModuleID, model: String? = nil,
         replacing: Int = 0
-    ) async throws {
+    ) async throws -> [ModuleID] {
         let ownHeadroom =
             reserveKVHeadroom && id == .llm ? promptCacheCapBytes : 0
         if estimate + ownHeadroom > totalBudgetBytes {
@@ -839,7 +873,7 @@ public actor MemoryGovernor {
                 headroomBytes: ownHeadroom, budgetBytes: totalBudgetBytes)
         }
         let need = estimate + kvHeadroom(admitting: id) - replacing
-        guard need > 0 else { return }
+        guard need > 0 else { return [] }
         // ADR 023 G2 — front-door gate on the LIVE footprint, not the
         // reservation sum alone, so the genuinely-pinned resident footprint the
         // estimates were blind to can't be overcommitted.
@@ -850,7 +884,7 @@ public actor MemoryGovernor {
             request: need, denominator: admissionDenominator(),
             budget: totalBudgetBytes)
         {
-            return
+            return []
         }
 
         // Rung 1 — reclaim reconstructible headroom WITHOUT evicting a tenant:
@@ -869,7 +903,7 @@ public actor MemoryGovernor {
             request: need, denominator: admissionDenominator(),
             budget: totalBudgetBytes)
         {
-            return
+            return []
         }
 
         // Rung 2 — evict evictable modules LRU-first. The loop meters the
@@ -882,9 +916,11 @@ public actor MemoryGovernor {
             .filter { $0.key != id && $0.value.evictable && $0.value.state == .loaded }
             .sorted { $0.value.lastUsed < $1.value.lastUsed }
 
+        var evicted: [ModuleID] = []
         for (victimID, _) in candidates {
             if residentBytes + need <= totalBudgetBytes { break }
             evictSync(victimID)
+            evicted.append(victimID)
         }
 
         // Reject if we still can't fit. After eviction the reservation gate is
@@ -908,6 +944,7 @@ public actor MemoryGovernor {
                 module: id
             )
         }
+        return evicted
     }
 
     /// Synchronously drop a victim's reservation, then unload it detached.

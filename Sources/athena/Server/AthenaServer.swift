@@ -501,12 +501,12 @@ struct AthenaServer {
                         }
                     } catch let e as AthenaError {
                         return .failed(
-                            message: e.message, type: "server_error",
+                            message: e.message, type: e.type,
                             code: e.code)
                     } catch {
                         let c = AthenaError.classify(error, module: .llm)
                         return .failed(
-                            message: c.message, type: "server_error",
+                            message: c.message, type: c.type,
                             code: c.code)
                     }
                 },
@@ -524,10 +524,10 @@ struct AthenaServer {
                             chatTemplateKwargs: chatTemplateKwargs)
                         return nil
                     } catch let e as AthenaError {
-                        return (e.message, "server_error", e.code)
+                        return (e.message, e.type, e.code)
                     } catch {
                         let c = AthenaError.classify(error, module: .llm)
-                        return (c.message, "server_error", c.code)
+                        return (c.message, c.type, c.code)
                     }
                 })
         }
