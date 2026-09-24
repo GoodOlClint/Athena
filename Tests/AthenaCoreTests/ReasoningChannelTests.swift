@@ -68,10 +68,10 @@ final class ReasoningChannelTests: XCTestCase {
 /// `qwenReasoningMode` is **prompt-derived**: the caller passes
 /// `startsInReasoning`, computed from the actual rendered prompt
 /// (`ReasoningPromptTail`, `AthenaCoreTests`), never a model-name guess.
-/// `.awaitingOpenTag` (the default) is a marker-driven no-op exactly like
-/// `ReasoningChannelFilter` — it only touches text when a literal `<think>`
-/// actually appears, universal across every model, same as ADR 035's
-/// original design. MLX-free, fast tier (ADR 009).
+/// `.awaitingOpenTag` (the default) recognizes `<think>` only when it opens
+/// the completion (operator ruling, round 7) — universal across every
+/// model, same as ADR 035's original design, but scoped to where the
+/// template can actually place the marker. MLX-free, fast tier (ADR 009).
 final class QwenThinkFilterTests: XCTestCase {
     /// The exact observed shape (2026-09-23, `Qwen3.5-27B-4bit`, greedy,
     /// default `enable_thinking`): the completion carries ONLY the close
@@ -84,14 +84,47 @@ final class QwenThinkFilterTests: XCTestCase {
         XCTAssertEqual(r.reasoning, "Thinking Process:\n\n1.  Analyze.\n\n5.  Construct: 4.\n")
     }
 
-    /// Paired form is honored in `.awaitingOpenTag` (the prompt did NOT
-    /// open the block — e.g. `enable_thinking: false`, or a differently
-    /// configured template that emits the open tag itself).
-    func testPairedTagFormAwaitingOpenTag() {
+    /// Paired form is honored in `.awaitingOpenTag` when the marker opens
+    /// the completion (the prompt did NOT open the block — e.g.
+    /// `enable_thinking: false`, or a differently configured template that
+    /// emits the open tag itself).
+    func testLeadingPairedTagSplits() {
         let raw = "<think>reasoning</think>content"
         let r = splitQwenThink(raw, mode: .awaitingOpenTag)
         XCTAssertEqual(r.content, "content")
         XCTAssertEqual(r.reasoning, "reasoning")
+    }
+
+    /// Leading whitespace before the marker still counts as "opening" the
+    /// completion — the whitespace itself surfaces as content.
+    func testLeadingWhitespaceThenTagSplits() {
+        let raw = "  \n<think>reasoning</think>content"
+        let r = splitQwenThink(raw, mode: .awaitingOpenTag)
+        XCTAssertEqual(r.content, "  \ncontent")
+        XCTAssertEqual(r.reasoning, "reasoning")
+    }
+
+    /// #218 (operator ruling, PR #213 round 7): `<think>` is recognized
+    /// ONLY when it opens the completion. Once any other content byte has
+    /// been emitted, a later `<think>` is ordinary content — this is the
+    /// fix for the round-4/5/6 residual risk (a response that merely
+    /// discusses the tag was previously misread as opening reasoning).
+    func testMidTextThinkTagStaysInContent() {
+        let raw = "The <think> tag means the model is reasoning."
+        let r = splitQwenThink(raw, mode: .awaitingOpenTag)
+        XCTAssertEqual(r.content, raw)
+        XCTAssertEqual(r.reasoning, "")
+    }
+
+    /// A leading `<think>` cut off by `max_tokens` before `</think>`
+    /// arrives correctly routes everything to reasoning — this is the
+    /// template's own close-tag-only shape working as intended, not a
+    /// failure mode.
+    func testUnterminatedLeadingTagPutsAllOutputInReasoning() {
+        let raw = "<think>reasoning that never closes"
+        let r = splitQwenThink(raw, mode: .awaitingOpenTag)
+        XCTAssertEqual(r.content, "")
+        XCTAssertEqual(r.reasoning, "reasoning that never closes")
     }
 
     /// `.awaitingOpenTag` must not touch ordinary content that never
@@ -132,8 +165,12 @@ final class QwenThinkFilterTests: XCTestCase {
         XCTAssertEqual(reasoning, oneShot.reasoning)
     }
 
-    func testStreamingEqualsOneShotPaired() {
-        let full = "pre<think>\nreasoning here\n</think>post"
+    /// Streaming must agree with one-shot for the leading-whitespace case —
+    /// this exercises the round-7 holdback rule ("hold back only while the
+    /// emitted prefix is whitespace plus a partial `<think>`") one character
+    /// at a time, the worst case for a marker split across pushes.
+    func testStreamingEqualsOneShotLeadingWhitespaceThenTag() {
+        let full = "  \n<think>reasoning here\n</think>post"
         let oneShot = splitQwenThink(full, mode: .awaitingOpenTag)
         var f = QwenThinkFilter(mode: .awaitingOpenTag)
         var content = "", reasoning = ""
@@ -147,8 +184,32 @@ final class QwenThinkFilterTests: XCTestCase {
         reasoning += tail.reasoning
         XCTAssertEqual(content, oneShot.content)
         XCTAssertEqual(reasoning, oneShot.reasoning)
-        XCTAssertEqual(content, "prepost")
-        XCTAssertEqual(reasoning, "\nreasoning here\n")
+        XCTAssertEqual(content, "  \npost")
+        XCTAssertEqual(reasoning, "reasoning here\n")
+    }
+
+    /// Streaming must agree with one-shot for the mid-text case — the
+    /// divergence (first non-whitespace char isn't `<`) happens on the very
+    /// first pushed character, so the filter must correctly stay in
+    /// permanent passthrough for every subsequent push, including the
+    /// later `<think>` occurrence.
+    func testStreamingEqualsOneShotMidTextThinkTag() {
+        let full = "The <think> tag means reasoning."
+        let oneShot = splitQwenThink(full, mode: .awaitingOpenTag)
+        var f = QwenThinkFilter(mode: .awaitingOpenTag)
+        var content = "", reasoning = ""
+        for ch in full {
+            let s = f.push(String(ch))
+            content += s.content
+            reasoning += s.reasoning
+        }
+        let tail = f.flush()
+        content += tail.content
+        reasoning += tail.reasoning
+        XCTAssertEqual(content, oneShot.content)
+        XCTAssertEqual(reasoning, oneShot.reasoning)
+        XCTAssertEqual(content, full)
+        XCTAssertEqual(reasoning, "")
     }
 
     /// Codex adversarial review, PR #213 round 4: `.passthrough` must not

@@ -131,14 +131,21 @@ public let qwenThinkEnd = "</think>"
 /// model-name guess. This keeps ADR 035's "universal, not model-gated"
 /// property true for real: any model whose chat template pre-opens a
 /// `<think>` block it never closes gets `.reasoningOpen`; every other model
-/// gets `.awaitingOpenTag`, the same marker-driven design Gemma's filter
-/// uses. Unlike Gemma's `<|channel>`/`<channel|>` (deliberately non-natural
-/// delimiters that don't occur in ordinary content — see this file's header
-/// comment), `<think>` is plain ASCII a model can plausibly emit in ordinary
-/// prose, so `.awaitingOpenTag` misclassifying such a response as reasoning
-/// is a real, tracked, NOT-eliminated residual risk (round-4 automated
-/// review "Claim check" — an earlier revision of this comment wrongly
-/// claimed equivalence with Gemma's).
+/// gets `.awaitingOpenTag`.
+///
+/// **`.awaitingOpenTag` recognizes `<think>` only when it opens the
+/// completion** (operator ruling, PR #213 round 7 — closes the residual risk
+/// round 4/5/6 flagged): optional leading whitespace, then the marker. Once
+/// any non-whitespace byte that isn't part of a leading `<think>` match has
+/// been emitted, the filter is permanent passthrough for the rest of the
+/// completion — a `<think>` appearing later in ordinary prose (a response
+/// that merely discusses the tag) is just content, never re-enters
+/// reasoning. Unlike Gemma's `<|channel>`/`<channel|>` (deliberately
+/// non-natural delimiters that don't occur in ordinary content — see this
+/// file's header comment), `<think>` is plain ASCII a model can plausibly
+/// emit in prose, so recognizing it only at the position the template
+/// actually puts it (the very start of generation) is what makes this safe
+/// rather than a heuristic that happens not to have misfired yet.
 ///
 /// The close-tag-only form is the observed default (`enable_thinking` unset
 /// or `true`, 2026-09-23, `Qwen3.5-27B-4bit`, greedy): raw completion bytes
@@ -147,9 +154,12 @@ public let qwenThinkEnd = "</think>"
 /// completion, because the template already put `<think>\n` at the end of
 /// the prompt.
 public struct QwenThinkFilter: Sendable {
-    /// - `.awaitingOpenTag`: the default. Watches for a literal `<think>`
-    ///   (paired form) before entering `.reasoning` — a no-op unless that
-    ///   marker actually appears, same design as `ReasoningChannelFilter`.
+    /// - `.awaitingOpenTag`: the default. Recognizes a literal `<think>`
+    ///   ONLY at the start of the completion (optional leading whitespace,
+    ///   then the marker) — once any other non-whitespace byte has been
+    ///   emitted, permanently a no-op for the rest of the completion (PR
+    ///   #213 round 7). A `<think>` appearing later in ordinary prose is
+    ///   just content.
     /// - `.reasoningOpen`: the prompt was determined (from its own rendered
     ///   text, see `ReasoningPromptTail`) to already be inside an open
     ///   `<think>` block — the close-tag-only form; reasoning starts at
@@ -166,7 +176,11 @@ public struct QwenThinkFilter: Sendable {
         case passthrough
     }
 
-    private enum State { case content, reasoning, passthrough }
+    /// `.leading`: `.awaitingOpenTag`'s start — still deciding whether the
+    /// completion opens with `<think>`. `.content`: permanent passthrough,
+    /// reached either by `.awaitingOpenTag` diverging from a leading match,
+    /// by closing a `.reasoning` block, or directly for `.passthrough` mode.
+    private enum State { case leading, reasoning, content }
     private var state: State
     private var buffer = ""
     private static let holdback =
@@ -176,22 +190,22 @@ public struct QwenThinkFilter: Sendable {
 
     public init(mode: Mode) {
         switch mode {
-        case .awaitingOpenTag: state = .content
+        case .awaitingOpenTag: state = .leading
         case .reasoningOpen: state = .reasoning
-        case .passthrough: state = .passthrough
+        case .passthrough: state = .content
         }
     }
 
     public mutating func push(
         _ piece: String
     ) -> (content: String, reasoning: String) {
-        if case .passthrough = state { return (piece, "") }
+        if case .content = state { return (piece, "") }
         buffer += piece
         return drain(flush: false)
     }
 
     public mutating func flush() -> (content: String, reasoning: String) {
-        if case .passthrough = state { return ("", "") }
+        if case .content = state { return ("", "") }
         return drain(flush: true)
     }
 
@@ -202,14 +216,39 @@ public struct QwenThinkFilter: Sendable {
         var reasoning = ""
         loop: while true {
             switch state {
-            case .content:
-                if let r = buffer.range(of: qwenThinkStart) {
-                    content += String(buffer[..<r.lowerBound])
-                    buffer = String(buffer[r.upperBound...])
+            case .leading:
+                guard let firstNonWS = buffer.firstIndex(where: { !$0.isWhitespace })
+                else {
+                    // Nothing but whitespace so far — still ambiguous unless
+                    // this is the final call and no more data is coming.
+                    if flush {
+                        content += buffer
+                        buffer = ""
+                    }
+                    break loop
+                }
+                let leadingWhitespace = String(buffer[..<firstNonWS])
+                let rest = buffer[firstNonWS...]
+                if rest.hasPrefix(qwenThinkStart) {
+                    content += leadingWhitespace
+                    buffer = String(rest.dropFirst(qwenThinkStart.count))
                     state = .reasoning
                     continue loop
                 }
-                content += emitSafe(flush: flush)
+                if qwenThinkStart.hasPrefix(rest) {
+                    // `rest` could still extend into the full marker —
+                    // hold back everything unless this is the last call.
+                    if flush {
+                        content += buffer
+                        buffer = ""
+                        state = .content
+                    }
+                    break loop
+                }
+                // Definitively not a leading `<think>` — permanent passthrough.
+                content += buffer
+                buffer = ""
+                state = .content
                 break loop
             case .reasoning:
                 if let r = buffer.range(of: qwenThinkEnd) {
@@ -220,7 +259,7 @@ public struct QwenThinkFilter: Sendable {
                 }
                 reasoning += emitSafe(flush: flush)
                 break loop
-            case .passthrough:
+            case .content:
                 content += buffer
                 buffer = ""
                 break loop

@@ -1596,7 +1596,7 @@ extension MLXLLMModule {
                         let tailIds = batch[i].promptTokens.suffix(
                             ReasoningPromptTail.tailTokenCount)
                         let tailText = ctx.tokenizer.decode(
-                            tokenIds: Array(tailIds))
+                            tokenIds: Array(tailIds), skipSpecialTokens: false)
                         batch[i].continuation.yield(
                             .startsInReasoning(
                                 ReasoningPromptTail.startsInOpenBlock(
