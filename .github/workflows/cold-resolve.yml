@@ -15,8 +15,8 @@
 #
 # What it would have caught, and still will: a pin whose object is no longer
 # FETCHABLE — #86's orphaned commit, the fork being re-created, or
-# `GoodOlClint/swift-huggingface` losing `athena/pr-50-download-progress`,
-# whose branch tip is what the current `727df097` pin resolves through.
+# `GoodOlClint/swift-huggingface` losing the refs that keep its pinned commit
+# reachable.
 #
 # Stated as reachability rather than as "a pruned tag" on purpose: deleting a
 # dated tag whose commit is still reachable from another ref leaves the pin
@@ -25,12 +25,12 @@
 #
 # What it does NOT catch, so nobody reads more into a green run than it means:
 # this job tests REACHABILITY, never pin FORM. A bare-hash pin that happens to
-# be reachable passes forever — and one is live right now: `Package.swift`'s
-# `hubDep` pins the 40-hex `727df097…`, which is the TIP of a branch, i.e.
-# exactly the #86 shape, one force-push away from orphaned. This job would
-# report that only AFTER the object was orphaned, which is the moment its own
-# error text calls urgent. Enforcing the AGENTS.md dated-tag rule is a separate
-# check nobody has written.
+# be reachable passes forever. `hubDep`'s 40-hex `14efd567…` is such a pin, but
+# it is no longer the #86 shape: the commit is anchored by the dated tag
+# `athena-per-file-progress-2026-09-02`, not only by a branch tip a force-push
+# could orphan. This job would still report an orphaning only AFTER the fact,
+# which is the moment its own error text calls urgent. Enforcing the AGENTS.md
+# dated-tag rule is a separate check nobody has written.
 #
 # Deliberately cheap so it can be routine: free Linux, resolve only. No
 # compile, no Metal Toolchain download, no macOS minutes (which bill at 10x).
