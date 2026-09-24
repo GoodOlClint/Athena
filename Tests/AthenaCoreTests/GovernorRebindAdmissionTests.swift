@@ -1,5 +1,6 @@
 import AthenaEmbedding
 import AthenaLLM
+import AthenaTranscription
 import Foundation
 import XCTest
 
@@ -274,6 +275,29 @@ final class GovernorRebindAdmissionTests: XCTestCase {
         try await gov.ensureLoaded(.textEmbedding)
         let s = await gov.snapshot()
         XCTAssertEqual(s.residentBytes, 900)
+    }
+
+    // An unknown model id is refused before admission can evict anyone.
+    func testUnknownModelRebindEvictsNothing() async throws {
+        let gov = MemoryGovernor(totalBudgetBytes: 100)
+        let t = StubTranscriptionModule(reserveBytes: 60)
+        await gov.register(t, evictable: true)
+        await gov.register(StubEmbeddingModule(reserveBytes: 60), evictable: true)
+        try await gov.ensureLoaded(.transcription)
+        try await gov.ensureLoaded(.textEmbedding)  // evicts transcription
+        let before = await gov.snapshot()
+        XCTAssertEqual(mod(before, .textEmbedding)?.state, .loaded)
+
+        do {
+            try await gov.rebind(.transcription, to: "no-such-model") {
+                try await t.rebind(to: "no-such-model")
+            }
+            XCTFail("expected modelNotAvailable")
+        } catch let e as AthenaError {
+            XCTAssertEqual(e.code, "model_not_available")
+        }
+        let after = await gov.snapshot()
+        XCTAssertEqual(mod(after, .textEmbedding)?.state, .loaded)
     }
 
     // (a) — the real LLM module estimates the requested model, not the store max.

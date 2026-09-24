@@ -187,6 +187,9 @@ public actor MemoryGovernor {
     /// `/healthz` lies). Mirror of the `inFlight` load handle, for the unload
     /// direction. Cleared in `markUnloaded` when the teardown completes.
     private var teardown: [ModuleID: Task<Void, Never>] = [:]
+    /// Generation of the teardown in `teardown[id]`, so a finishing older
+    /// teardown never clears the handle of a newer one still running.
+    private var teardownToken: [ModuleID: UInt64] = [:]
     /// M62 — the error from the most recent FAILED load, kept so the
     /// non-blocking `beginLoadIfNeeded` path can surface the real reason to
     /// the next caller instead of silently kicking another doomed load and
@@ -703,9 +706,9 @@ public actor MemoryGovernor {
         guard let module = entries[id]?.module else {
             throw AthenaError.moduleNotRegistered(id)
         }
-        if entries[id]?.state != .loaded { try await ensureLoaded(id) }
         let (target, estimate) = try await admissionEstimate(
             id, module, model: model)
+        if entries[id]?.state != .loaded { try await ensureLoaded(id) }
         let sel = module as? any ModelSelectable
         let resident = await sel?.residentModelId()
         guard let sel, resident != target else {
@@ -968,6 +971,9 @@ public actor MemoryGovernor {
         // NE1 (M68.1) — register the teardown so a concurrent reload of THIS
         // slot (`performLoad`) awaits `module.unload()` before calling
         // `module.load()`, instead of racing it on the module actor.
+        loadSeq &+= 1
+        let token = loadSeq
+        teardownToken[id] = token
         teardown[id] = Task { [weak self] in
             // ADR 029 WP1 — `module.unload()` frees weights on the Metal pool and
             // `hook` trims the buffer cache; both must not run while a decode
@@ -977,18 +983,21 @@ public actor MemoryGovernor {
                 await module.unload()
                 hook?()
             }
-            await self?.markUnloaded(id)
+            await self?.markUnloaded(id, token: token)
         }
     }
 
-    private func markUnloaded(_ id: ModuleID) {
+    private func markUnloaded(_ id: ModuleID, token: UInt64) {
         if entries[id]?.state == .unloading {
             entries[id]?.state = .unloaded
         }
         // NE1 — the teardown for this slot is done; drop the handle so the
         // next reload doesn't await a completed task (harmless) and so the
         // map doesn't leak entries.
-        teardown[id] = nil
+        if teardownToken[id] == token {
+            teardown[id] = nil
+            teardownToken[id] = nil
+        }
     }
 
     /// M43.1 — reconcile the governor when a module drops its resident
@@ -1036,13 +1045,16 @@ public actor MemoryGovernor {
         //      and the state write is no longer clobbered back to `.unloaded`.
         let module = entry.module
         let hook = onUnloaded
+        loadSeq &+= 1
+        let token = loadSeq
+        teardownToken[id] = token
         let task = Task { [weak self] in
             // ADR 029 WP1 — gate the teardown span (see `evictSync`).
             try? await InferenceGate.shared.withExclusiveExecution {
                 await module.unload()
                 hook?()
             }
-            await self?.markUnloaded(id)
+            await self?.markUnloaded(id, token: token)
         }
         teardown[id] = task
         await task.value
