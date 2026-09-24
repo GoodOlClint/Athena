@@ -36,11 +36,14 @@ listen_port = 7447
 # "stub" (no model loaded — health/dev only).
 engine = "mlx"
 
-# Model directory path, or a name resolved under the model-store root.
-# Commented ⇒ the built-in default (Qwen3.5-27B-4bit-mtp, MTP weights
-# preserved). Any architecture the substrate factory supports works
-# here; `athena show <model>` reports its type + capability tier.
-# model = "Qwen3.5-27B-4bit-mtp"
+# Model directory path, or a name resolved under the model-store root —
+# the llm module's per-module default (ADR 026, same rule as the other
+# module defaults below). Commented ⇒ no compiled-in default: the store's
+# sole llm/vision model is used, else a request that omits `model` (with
+# more than one) is a 400 `ambiguous_model`. Any architecture the substrate
+# factory supports works here; `athena show <model>` reports its type +
+# capability tier.
+# model = "gemma-4-31b-it-4bit"
 
 # Per-module default model ids (ADR 026). Availability is the model store
 # classified by ModelSupport; these name the model loaded when a request to

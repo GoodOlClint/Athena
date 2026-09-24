@@ -754,8 +754,13 @@ struct Load: AsyncParsableCommand {
         let llmDefaultName: String? = llmModels.first ?? model
         let modelURL = store.resolve(llmDefaultName)
         // Stub seed sets (the stub has no disk; these stand in for the store).
-        let llmStubIds =
+        // `StubLLMModule` traps on an empty id set (Codex review, PR #212) —
+        // an unconfigured llm module falls back to its own synthetic
+        // "athena-stub" id, never a real compiled-in checkpoint name.
+        let llmStubIdsConfigured =
             llmModels.isEmpty ? [model].compactMap { $0 } : llmModels
+        let llmStubIds =
+            llmStubIdsConfigured.isEmpty ? ["athena-stub"] : llmStubIdsConfigured
         let embeddingDefault = embeddingModels.first
         let transcriptionDefault = transcriptionModels.first
         let diarizationDefault = diarizationModels.first
@@ -924,7 +929,7 @@ struct Load: AsyncParsableCommand {
             diarization: diarization,
             speakerEmbedding: speakerEmbedding,
             store: athenaStore,
-            modelName: llmDefaultName ?? "",
+            modelName: await (llm as! any ModelSelectable).defaultModelId(),
             modelStoreRoot: store.rootDirectory, auth: authConfig,
             tlsCertPath: tlsCert, tlsKeyPath: tlsKey,
             rateLimit: rateLimit ?? 0, rateBurst: rateBurst ?? 0,
