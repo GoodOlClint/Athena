@@ -150,12 +150,19 @@ public struct QwenThinkFilter: Sendable {
     ///   text, see `ReasoningPromptTail`) to already be inside an open
     ///   `<think>` block — the close-tag-only form; reasoning starts at
     ///   byte 0.
+    /// - `.passthrough`: schema-guided or forced-tool-call output (Codex
+    ///   adversarial review, PR #213 round 4). The completion is structured
+    ///   data, not prose — a legitimate schema value or tool argument can
+    ///   contain the literal text `<think>…</think>` (e.g. a user asking the
+    ///   model to echo it), and `.awaitingOpenTag` would silently strip that
+    ///   substring out of valid JSON. Scans nothing; every byte is content.
     public enum Mode: Sendable, Equatable {
         case awaitingOpenTag
         case reasoningOpen
+        case passthrough
     }
 
-    private enum State { case content, reasoning }
+    private enum State { case content, reasoning, passthrough }
     private var state: State
     private var buffer = ""
     private static let holdback =
@@ -167,18 +174,21 @@ public struct QwenThinkFilter: Sendable {
         switch mode {
         case .awaitingOpenTag: state = .content
         case .reasoningOpen: state = .reasoning
+        case .passthrough: state = .passthrough
         }
     }
 
     public mutating func push(
         _ piece: String
     ) -> (content: String, reasoning: String) {
+        if case .passthrough = state { return (piece, "") }
         buffer += piece
         return drain(flush: false)
     }
 
     public mutating func flush() -> (content: String, reasoning: String) {
-        drain(flush: true)
+        if case .passthrough = state { return ("", "") }
+        return drain(flush: true)
     }
 
     private mutating func drain(
@@ -205,6 +215,10 @@ public struct QwenThinkFilter: Sendable {
                     continue loop
                 }
                 reasoning += emitSafe(flush: flush)
+                break loop
+            case .passthrough:
+                content += buffer
+                buffer = ""
                 break loop
             }
         }
@@ -240,15 +254,17 @@ public func splitQwenThink(
 /// comes from `ReasoningPromptTail.startsInOpenBlock` on the actual rendered
 /// prompt (computed in `AthenaLLM`, where the tokenizer lives — not a
 /// model-name guess). `isStructured` (schema-guided decoding OR a forced
-/// tool call) overrides it to `.awaitingOpenTag` regardless: Athena's Guide
-/// masks the vocabulary from token 0 for both, so even when the prompt did
-/// open a `<think>` block, the Guide-masked completion can never close it —
-/// starting in `.reasoningOpen` there would swallow the entire structured
-/// response (or the parsed tool call) into `reasoning_content`, leaving
-/// `content` empty (Codex adversarial review, PR #213 round 1).
+/// tool call) overrides it to `.passthrough` regardless: the completion is
+/// structured data, not prose, so it must never be scanned for `<think>` at
+/// all — not `.reasoningOpen` (Codex adversarial review, PR #213 round 1:
+/// that would swallow the whole structured response/tool call into
+/// `reasoning_content`), and not `.awaitingOpenTag` either (Codex
+/// adversarial review, PR #213 round 4: that still scans for literal
+/// `<think>…</think>` pairs, silently corrupting a schema value or tool
+/// argument that legitimately contains that text).
 public func qwenReasoningMode(
     startsInReasoning: Bool, isStructured: Bool
 ) -> QwenThinkFilter.Mode {
-    if isStructured { return .awaitingOpenTag }
+    if isStructured { return .passthrough }
     return startsInReasoning ? .reasoningOpen : .awaitingOpenTag
 }

@@ -151,6 +151,36 @@ final class QwenThinkFilterTests: XCTestCase {
         XCTAssertEqual(reasoning, "\nreasoning here\n")
     }
 
+    /// Codex adversarial review, PR #213 round 4: `.passthrough` must not
+    /// scan for markers at all — a literal paired `<think>…</think>` inside
+    /// a schema value or tool argument must survive byte-for-byte, not be
+    /// read as reasoning and stripped out of the structured data.
+    func testPassthroughLeavesLiteralTagsInContentUntouched() {
+        let raw = #"{"value":"<think>x</think>"}"#
+        let r = splitQwenThink(raw, mode: .passthrough)
+        XCTAssertEqual(r.content, raw)
+        XCTAssertEqual(r.reasoning, "")
+    }
+
+    func testStreamingEqualsOneShotPassthrough() {
+        let full = #"{"value":"<think>x</think>","n":1}"#
+        let oneShot = splitQwenThink(full, mode: .passthrough)
+        var f = QwenThinkFilter(mode: .passthrough)
+        var content = "", reasoning = ""
+        for ch in full {
+            let s = f.push(String(ch))
+            content += s.content
+            reasoning += s.reasoning
+        }
+        let tail = f.flush()
+        content += tail.content
+        reasoning += tail.reasoning
+        XCTAssertEqual(content, oneShot.content)
+        XCTAssertEqual(reasoning, oneShot.reasoning)
+        XCTAssertEqual(content, full)
+        XCTAssertEqual(reasoning, "")
+    }
+
     // MARK: qwenReasoningMode
 
     func testModeReasoningOpenWhenPromptStartsInReasoning() {
@@ -165,16 +195,20 @@ final class QwenThinkFilterTests: XCTestCase {
             .awaitingOpenTag)
     }
 
-    /// #198 Codex follow-up (round 1): a schema-guided or forced-tool-call
-    /// response is Guide-masked from token 0, which suppresses `<think>`
-    /// entirely — `isStructured` must force `.awaitingOpenTag` even when the
-    /// prompt DID open a reasoning block, or the whole structured response
-    /// (or tool call) gets swallowed into `reasoning_content` and `content`
-    /// comes back empty.
-    func testModeStructuredForcesAwaitingOpenTagEvenWhenPromptOpened() {
+    /// #198 Codex follow-up (round 4): `.awaitingOpenTag` still scans for
+    /// literal `<think>…</think>` pairs, which would corrupt a schema value
+    /// or tool argument containing that text — `isStructured` must force the
+    /// true no-op `.passthrough`, not `.awaitingOpenTag`.
+    func testModeStructuredForcesPassthroughEvenWhenPromptOpened() {
         XCTAssertEqual(
             qwenReasoningMode(startsInReasoning: true, isStructured: true),
-            .awaitingOpenTag)
+            .passthrough)
+    }
+
+    func testModeStructuredForcesPassthroughWhenPromptDoesNotOpen() {
+        XCTAssertEqual(
+            qwenReasoningMode(startsInReasoning: false, isStructured: true),
+            .passthrough)
     }
 }
 
@@ -230,7 +264,7 @@ final class ReasoningPromptTailTests: XCTestCase {
             ))
     }
 
-    /// A close marker with trailing whitespace only (Qwen3.5's exact shape,
+    /// An open marker with trailing whitespace only (Qwen3.5's exact shape,
     /// `<think>\n`) is still open — the whitespace-only requirement must not
     /// be stricter than the real template output.
     func testOpenMarkerFollowedByOnlyWhitespaceIsOpen() {

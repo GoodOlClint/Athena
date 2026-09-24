@@ -69,8 +69,8 @@ public enum GenChunk: Sendable {
     /// #198 (ADR 035 amendment) — whether the rendered prompt opened a
     /// reasoning block (e.g. Qwen3.5's `<think>\n`) it never closes, so the
     /// completion's own first byte is already inside it. Emitted once,
-    /// before the first `.text`, only on the free-generation path (never on
-    /// a schema-guided/forced-tool-call decode — the server already knows
-    /// that case has no reasoning to extract).
+    /// before the first `.text`, on every decode path (free-generation,
+    /// speculative/logprobs, batched) — the server ignores it whenever
+    /// `isStructured`, since Guide-masking already suppresses `<think>`.
     case startsInReasoning(Bool)
 }

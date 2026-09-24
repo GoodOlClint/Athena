@@ -230,12 +230,16 @@ extension AthenaServer {
         // appears) and is upgraded to `.reasoningOpen` below the moment the
         // generation source confirms the PROMPT itself opened the block
         // (`.startsInReasoning`) — never from a model-name guess. `isStructured`
-        // (response_format OR a forced tool call) keeps it at `.awaitingOpenTag`
-        // regardless: the Guide masks from token 0 for both, so there is no
-        // `<think>` to extract — `isToolCall` alone doesn't cover a plain
+        // (response_format OR a forced tool call) starts it at `.passthrough`
+        // instead — not just "keeps it at `.awaitingOpenTag`" (Codex
+        // adversarial review, PR #213 round 4): the completion is structured
+        // data, so it must never be scanned for `<think>` at all, or a
+        // legitimate schema value/tool argument containing that literal text
+        // gets silently corrupted. `isToolCall` alone doesn't cover a plain
         // `response_format` request, which still reaches this filter below
         // (it isn't Guide-buffered like a tool call is).
-        var qwenFilter = QwenThinkFilter(mode: .awaitingOpenTag)
+        var qwenFilter = QwenThinkFilter(
+            mode: isStructured ? .passthrough : .awaitingOpenTag)
         // Route a content piece through the stop filter (latching `stop` + the
         // matched sequence) or emit it directly when no stops are set.
         func pushContent(_ piece: String) {
@@ -270,9 +274,9 @@ extension AthenaServer {
             case .usage(let u):
                 usage = u
             case .startsInReasoning(let b):
-                // Only ever emitted on the free-generation path, before any
-                // `.text` — safe to swap the filter wholesale, it hasn't
-                // buffered anything yet. `isStructured` always wins.
+                // Emitted on every decode path, before any `.text` — safe to
+                // swap the filter wholesale, it hasn't buffered anything
+                // yet. `isStructured` always wins.
                 if !isStructured && b {
                     qwenFilter = QwenThinkFilter(mode: .reasoningOpen)
                 }
