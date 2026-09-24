@@ -166,6 +166,7 @@ extension AthenaServer {
                         }),
                     isToolCall: lowered.isToolCall, stops: lowered.stops,
                     chatTemplateKwargs: lowered.native.chatTemplateKwargs,
+                    isStructured: lowered.native.schemaJSON != nil,
                     onConsumerCancel: { cancelCounter.cancelGeneration() },
                     record: { usage in
                         await meter(principal: principal, usage: usage)
@@ -192,9 +193,11 @@ extension AthenaServer {
         // #198 — likewise strip Qwen3.5's `<think>…</think>`; no-op elsewhere.
         var text = splitQwenThink(
             splitReasoningChannel(collected.text).content,
-            expectThinking: qwenExpectsThinking(
+            mode: qwenReasoningMode(
                 modelName: model,
-                chatTemplateKwargs: lowered.native.chatTemplateKwargs)
+                chatTemplateKwargs: lowered.native.chatTemplateKwargs,
+                isStructured: lowered.native.schemaJSON != nil
+                    || lowered.isToolCall)
         ).content
         var stopHit: String?
         if !lowered.stops.isEmpty {

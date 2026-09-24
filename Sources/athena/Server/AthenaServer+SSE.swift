@@ -33,6 +33,7 @@ extension AthenaServer {
         isToolCall: Bool = false,
         stops: [String] = [],
         chatTemplateKwargs: [String: any Sendable]? = nil,
+        isStructured: Bool = false,
         onConsumerCancel: (@Sendable () -> Void)? = nil,
         record: @escaping @Sendable (TokenUsage) async -> Void
     ) -> Response {
@@ -43,7 +44,7 @@ extension AthenaServer {
                     created: created, events: events,
                     includeUsage: includeUsage, isToolCall: isToolCall,
                     stops: stops, chatTemplateKwargs: chatTemplateKwargs,
-                    record: record)
+                    isStructured: isStructured, record: record)
             }
             // A8 (M68.4) — a client disconnect terminates THIS byte stream;
             // bridge it to the generation's cancel flag so the synchronous
@@ -94,6 +95,7 @@ extension AthenaServer {
         eventsBuilder: @escaping @Sendable () -> AsyncStream<GenChunk>,
         includeUsage: Bool, isToolCall: Bool = false, stops: [String] = [],
         chatTemplateKwargs: [String: any Sendable]? = nil,
+        isStructured: Bool = false,
         onConsumerCancel: (@Sendable () -> Void)? = nil,
         record: @escaping @Sendable (TokenUsage) async -> Void
     ) -> Response {
@@ -161,7 +163,7 @@ extension AthenaServer {
                         created: created, events: eventsBuilder(),
                         includeUsage: includeUsage, isToolCall: isToolCall,
                         stops: stops, chatTemplateKwargs: chatTemplateKwargs,
-                        record: record)
+                        isStructured: isStructured, record: record)
                 }
             }
             continuation.onTermination = { _ in
@@ -217,6 +219,7 @@ extension AthenaServer {
         events: AsyncStream<GenChunk>, stops: [String], isToolCall: Bool,
         modelName: String = "",
         chatTemplateKwargs: [String: any Sendable]? = nil,
+        isStructured: Bool = false,
         into sink: ProtocolEncoder
     ) async -> TokenUsage {
         var usage = TokenUsage.zero
@@ -228,9 +231,15 @@ extension AthenaServer {
         var reasoningFilter = ReasoningChannelFilter()
         // #198 — Qwen3.5's `<think>…</think>`, chained after the Gemma
         // channel filter so a model that emits neither is unaffected.
+        // `isStructured` (response_format OR a forced tool call) forces
+        // `.awaitingOpenTag`: the Guide masks from token 0 for both, so
+        // there is no `<think>` to extract — `isToolCall` alone doesn't
+        // cover a plain `response_format` request, which still reaches
+        // this filter below (it isn't Guide-buffered like a tool call is).
         var qwenFilter = QwenThinkFilter(
-            expectThinking: qwenExpectsThinking(
-                modelName: modelName, chatTemplateKwargs: chatTemplateKwargs))
+            mode: qwenReasoningMode(
+                modelName: modelName, chatTemplateKwargs: chatTemplateKwargs,
+                isStructured: isStructured))
         // Route a content piece through the stop filter (latching `stop` + the
         // matched sequence) or emit it directly when no stops are set.
         func pushContent(_ piece: String) {
@@ -319,6 +328,7 @@ extension AthenaServer {
         isToolCall: Bool = false,
         stops: [String],
         chatTemplateKwargs: [String: any Sendable]? = nil,
+        isStructured: Bool = false,
         record: @escaping @Sendable (TokenUsage) async -> Void
     ) async {
         func emit(_ chunk: ChatCompletionChunk) {
@@ -426,7 +436,7 @@ extension AthenaServer {
         let usage = await foldGenChunks(
             events: events, stops: stops, isToolCall: isToolCall,
             modelName: model, chatTemplateKwargs: chatTemplateKwargs,
-            into: encoder)
+            isStructured: isStructured, into: encoder)
         await record(usage)
         continuation.finish()
     }
@@ -438,6 +448,7 @@ extension AthenaServer {
         id: String, model: String,
         events: AsyncStream<GenChunk>, isToolCall: Bool, stops: [String],
         chatTemplateKwargs: [String: any Sendable]? = nil,
+        isStructured: Bool = false,
         onConsumerCancel: (@Sendable () -> Void)? = nil,
         record: @escaping @Sendable (TokenUsage) async -> Void
     ) -> Response {
@@ -446,7 +457,8 @@ extension AthenaServer {
                 await pumpAnthropic(
                     into: continuation, id: id, model: model, events: events,
                     isToolCall: isToolCall, stops: stops,
-                    chatTemplateKwargs: chatTemplateKwargs, record: record)
+                    chatTemplateKwargs: chatTemplateKwargs,
+                    isStructured: isStructured, record: record)
             }
             continuation.onTermination = { _ in
                 task.cancel()
@@ -475,6 +487,7 @@ extension AthenaServer {
         id: String, model: String,
         events: AsyncStream<GenChunk>, isToolCall: Bool, stops: [String],
         chatTemplateKwargs: [String: any Sendable]? = nil,
+        isStructured: Bool = false,
         record: @escaping @Sendable (TokenUsage) async -> Void
     ) async {
         func emit<T: Encodable>(_ eventName: String, _ payload: T) {
@@ -579,7 +592,7 @@ extension AthenaServer {
         let usage = await foldGenChunks(
             events: events, stops: stops, isToolCall: isToolCall,
             modelName: model, chatTemplateKwargs: chatTemplateKwargs,
-            into: encoder)
+            isStructured: isStructured, into: encoder)
         await record(usage)
         continuation.finish()
     }

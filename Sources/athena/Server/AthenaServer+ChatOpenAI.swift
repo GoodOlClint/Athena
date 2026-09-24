@@ -305,6 +305,7 @@ extension AthenaServer {
                         includeUsage: includeUsage,
                         isToolCall: effective?.isToolCall == true, stops: stops,
                         chatTemplateKwargs: native.chatTemplateKwargs,
+                        isStructured: schemaJSON != nil,
                         onConsumerCancel: { cancelCounter.cancelGeneration() },
                         record: { usage in
                             await meter(principal: principal, usage: usage)
@@ -331,6 +332,7 @@ extension AthenaServer {
                     includeUsage: includeUsage,
                     isToolCall: effective?.isToolCall == true, stops: stops,
                     chatTemplateKwargs: native.chatTemplateKwargs,
+                    isStructured: schemaJSON != nil,
                     onConsumerCancel: { cancelCounter.cancelGeneration() },
                     record: { usage in
                         await meter(principal: principal, usage: usage)
@@ -365,8 +367,9 @@ extension AthenaServer {
         // left as content. No-op for every other model.
         let qwenSplit = splitQwenThink(
             split.content,
-            expectThinking: qwenExpectsThinking(
-                modelName: model, chatTemplateKwargs: native.chatTemplateKwargs))
+            mode: qwenReasoningMode(
+                modelName: model, chatTemplateKwargs: native.chatTemplateKwargs,
+                isStructured: schemaJSON != nil || effective?.isToolCall == true))
         var text = qwenSplit.content
         let reasoning =
             (split.reasoning + qwenSplit.reasoning).isEmpty
