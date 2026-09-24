@@ -101,4 +101,5 @@ Agent-authored branches are pushed via the `github` MCP tools (`create_branch` +
 
 This project runs one long-lived coordinator session, **Athena Scheduling Coordinator**, that launches background workers from kickoff files and independently verifies each worker's results.
 The coordinator asks the operator before every worker launch — there is no standing launch permission.
+When the coordinator asks the operator to approve a deferred (COMMENTED) PR, it states the PR's size (lines and files) and whether it is one coherent change or should have been split.
 Workers push through the GitHub MCP the same as any other agent, workflow files included (see "Agent pushes go through the GitHub MCP" above).
