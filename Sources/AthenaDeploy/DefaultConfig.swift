@@ -40,7 +40,7 @@ public enum DefaultConfig {
         engine = "\(engine)"
         # LLM dir path or a name under the model store. No hard default —
         # pull one (`athena pull`) and select it (`athena default`).
-        # model = "Qwen3.5-27B-4bit-mtp"
+        # model = "gemma-4-31b-it-4bit"
         # Model-store ROOT. Commented ⇒ "~/.athena/models" of the
         # daemon's user. Set to relocate the store (e.g. an external SSD).
         # model_store = "/Volumes/<your-disk>/mlx-models"

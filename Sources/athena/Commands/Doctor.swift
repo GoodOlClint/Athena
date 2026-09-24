@@ -89,25 +89,42 @@ struct Doctor: AsyncParsableCommand {
             }
         }
 
-        // 5. Default model resolvable + healthy.
+        // 5. Default model resolvable + healthy. No compiled-in model id
+        // (#203) — an unconfigured default resolves the same ADR 026
+        // ambiguity rule the llm module's serve path uses.
         let store = ModelStore(rootDirectory: root)
-        let modelURL = store.resolve(parsed?.model)
-        if !fm.fileExists(atPath: modelURL.path) {
+        let resolvedDefault =
+            parsed?.model
+            ?? {
+                let available = StoreModelClass.ids(
+                    storeRoot: root, accept: { $0.isLLMSlot })
+                return ModelSelection.displayDefault(
+                    available: available, configuredDefault: nil)
+            }()
+        if let modelURL = store.resolve(resolvedDefault) {
+            if !fm.fileExists(atPath: modelURL.path) {
+                say(
+                    .warn,
+                    "default model not present: \(modelURL.path) "
+                        + "(pull/convert before serving)")
+            } else {
+                let problems = ModelHealth.check(modelURL)
+                if problems.isEmpty {
+                    say(.ok, "default model ok: \(modelURL.lastPathComponent)")
+                } else {
+                    say(
+                        .fail,
+                        "default model unhealthy "
+                            + "(\(modelURL.lastPathComponent)): "
+                            + problems.joined(separator: "; "))
+                }
+            }
+        } else {
             say(
                 .warn,
-                "default model not present: \(modelURL.path) "
-                    + "(pull/convert before serving)")
-        } else {
-            let problems = ModelHealth.check(modelURL)
-            if problems.isEmpty {
-                say(.ok, "default model ok: \(modelURL.lastPathComponent)")
-            } else {
-                say(
-                    .fail,
-                    "default model unhealthy "
-                        + "(\(modelURL.lastPathComponent)): "
-                        + problems.joined(separator: "; "))
-            }
+                "no default model configured, and the store holds zero or "
+                    + "more than one llm/vision model — a request must name "
+                    + "one (pull/convert, or `athena default MODEL`)")
         }
 
         // 5b. Dangling / broken store entries (M69 operability). A

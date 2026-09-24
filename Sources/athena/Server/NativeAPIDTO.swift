@@ -129,7 +129,10 @@ struct ModelCopyResponse: Codable {
 
 struct DefaultModelResponse: Codable {
     let model: String
-    let source: String  // "config" | "builtin"
+    // "config" (a configured default) | "store" (ADR 026 ambiguity rule
+    // resolved the store's sole model of this class) | "none" (zero or
+    // more than one candidate — no compiled-in fallback, #203).
+    let source: String
 }
 struct SetDefaultModelRequest: Codable { let name: String }
 

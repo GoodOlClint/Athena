@@ -13,16 +13,6 @@ public struct ModelStore: Sendable {
     public static let defaultRoot = AthenaEnv.userHome()
         .appendingPathComponent(".athena/models", isDirectory: true)
 
-    /// Default LLM: 4-bit Qwen3.5-27B with `mtp.*` preserved — the brief's
-    /// intended M2 default. The earlier "garbage" from these checkpoints
-    /// was a one-line norm-shift convention mismatch (stock mlx-swift-lm
-    /// double-shifted fork mtp checkpoints), now fixed in
-    /// `AthenaQwen35.sanitize`. Validated coherent at greedy; `mtp.*`
-    /// retained for M2.2 speculative decoding without a re-pull.
-    /// (`mlx-community/Qwen3.5-2B-4bit` remains a known-good lightweight
-    /// alternative via `--model`.)
-    public static let defaultModelName = "Qwen3.5-27B-4bit-mtp"
-
     public let rootDirectory: URL
 
     public init(rootDirectory: URL = ModelStore.defaultRoot) {
@@ -30,12 +20,12 @@ public struct ModelStore: Sendable {
     }
 
     /// Resolve a `--model` value: an absolute/existing path is used verbatim,
-    /// otherwise it is treated as a model name under the store root.
-    public func resolve(_ reference: String?) -> URL {
-        guard let reference, !reference.isEmpty else {
-            return rootDirectory.appendingPathComponent(
-                Self.defaultModelName, isDirectory: true)
-        }
+    /// otherwise it is treated as a model name under the store root. `nil`
+    /// when no reference is given (#203 — no compiled-in model id, per ADR
+    /// 021's guidance rule; callers that need a default in that case go
+    /// through `ModelSelection`'s ADR 026 ambiguity rule instead).
+    public func resolve(_ reference: String?) -> URL? {
+        guard let reference, !reference.isEmpty else { return nil }
         if reference.hasPrefix("/") {
             return URL(fileURLWithPath: reference, isDirectory: true)
         }
