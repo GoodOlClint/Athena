@@ -24,8 +24,10 @@ extension AthenaServer {
     /// Register the OpenAI chat route (`AthenaServer+ChatOpenAI.swift`).
     /// Called from `run()`.
     func registerChatRoutes(_ router: Router<AppRequestContext>) {
-        router.post("/v1/chat/completions") { request, _ -> Response in
-            await self.handleChatCompletions(request)
+        router.post("/v1/chat/completions") { request, context -> Response in
+            try await PeerClose.cancelling(context.channel) {
+                await self.handleChatCompletions(request)
+            }
         }
         // ADR 042 — pre-flight token count [native]. Same request body, no
         // generation: the client measures a prompt before spending on it.

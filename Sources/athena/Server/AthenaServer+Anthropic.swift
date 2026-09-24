@@ -22,8 +22,10 @@ import NIOSSL
 extension AthenaServer {
     /// ADR 036 — register the Anthropic Messages route. Called from `run()`.
     func registerAnthropicRoutes(_ router: Router<AppRequestContext>) {
-        router.post("/v1/messages") { request, _ -> Response in
-            await self.handleAnthropicMessages(request)
+        router.post("/v1/messages") { request, context -> Response in
+            try await PeerClose.cancelling(context.channel) {
+                await self.handleAnthropicMessages(request)
+            }
         }
         // ADR 042 §4(a), deferral lifted 2026-07-25 — dialect parity: the
         // Anthropic analogue of the OpenAI count route, over the same core.

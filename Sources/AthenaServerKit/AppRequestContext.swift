@@ -30,10 +30,14 @@ public struct AppRequestContext: RequestContext, RemoteAddressRequestContext {
     /// channel's real remote address — NOT a forwarded header — so it
     /// cannot be spoofed by a client that merely sets `X-Forwarded-For`.
     public let remoteAddress: SocketAddress?
+    /// The connection's channel, so a handler can cancel its work when the
+    /// client goes away (`PeerClose`, #209).
+    public let channel: any Channel
 
     public init(source: ApplicationRequestContextSource) {
         self.coreContext = .init(source: source)
         self.remoteAddress = source.channel.remoteAddress
+        self.channel = source.channel
     }
 }
 
