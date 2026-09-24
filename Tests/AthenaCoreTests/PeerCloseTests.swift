@@ -8,12 +8,22 @@ import XCTest
 /// #209 — a client disconnect cancels the in-flight handler work.
 final class PeerCloseTests: XCTestCase {
 
-    /// Stands in for a decode drain: runs until cancelled, then reports it.
+    /// Stands in for a decode drain: runs until cancelled (bounded, so a
+    /// regression fails instead of hanging the suite).
     private static func untilCancelled() async -> String {
+        let deadline = Date().addingTimeInterval(3)
         while !Task.isCancelled {
+            if Date() > deadline { return "timed-out" }
             try? await Task.sleep(nanoseconds: 5_000_000)
         }
         return "cancelled"
+    }
+
+    private func connectedChannel() async throws -> NIOAsyncTestingChannel {
+        let channel = NIOAsyncTestingChannel()
+        try await channel.pipeline.addHandler(PeerCloseLatch()).get()
+        try await channel.connect(to: .init(ipAddress: "127.0.0.1", port: 1))
+        return channel
     }
 
     func testCloseCancelsOperation() async throws {
@@ -22,12 +32,10 @@ final class PeerCloseTests: XCTestCase {
             try? await Task.sleep(nanoseconds: 50_000_000)
             signal.yield()
         }
-        let started = Date()
         let r = try await PeerClose.cancelling(on: closed) {
             await Self.untilCancelled()
         }
         XCTAssertEqual(r, "cancelled")
-        XCTAssertLessThan(Date().timeIntervalSince(started), 5)
     }
 
     func testOperationFinishingFirstIsNotCancelled() async throws {
@@ -53,9 +61,8 @@ final class PeerCloseTests: XCTestCase {
 
     /// The server allows remote half-closure, so a client FIN is an
     /// `inputClosed` event, not a channel close.
-    func testInputClosedOnChannelCancels() async throws {
-        let channel = NIOAsyncTestingChannel()
-        try await channel.connect(to: .init(ipAddress: "127.0.0.1", port: 1))
+    func testInputClosedDuringRequestCancels() async throws {
+        let channel = try await connectedChannel()
         let work = Task {
             try await PeerClose.cancelling(channel) {
                 await Self.untilCancelled()
@@ -67,9 +74,21 @@ final class PeerCloseTests: XCTestCase {
         XCTAssertEqual(r, "cancelled")
     }
 
+    /// A client that sends its request and closes in one burst: the close
+    /// lands before the handler runs, and the latch still reports it.
+    func testInputClosedBeforeRequestCancels() async throws {
+        let channel = try await connectedChannel()
+        channel.pipeline.fireUserInboundEventTriggered(ChannelEvent.inputClosed)
+        let active = channel.isActive
+        XCTAssertTrue(active, "half-closure leaves the channel active")
+        let r = try await PeerClose.cancelling(channel) {
+            await Self.untilCancelled()
+        }
+        XCTAssertEqual(r, "cancelled")
+    }
+
     func testChannelInactiveCancels() async throws {
-        let channel = NIOAsyncTestingChannel()
-        try await channel.connect(to: .init(ipAddress: "127.0.0.1", port: 1))
+        let channel = try await connectedChannel()
         let work = Task {
             try await PeerClose.cancelling(channel) {
                 await Self.untilCancelled()
@@ -81,18 +100,42 @@ final class PeerCloseTests: XCTestCase {
         XCTAssertEqual(r, "cancelled")
     }
 
-    /// The watcher leaves the pipeline once the request is done, so a
-    /// keep-alive connection does not accumulate one per request.
-    func testWatcherRemovedAfterCompletion() async throws {
-        let channel = NIOAsyncTestingChannel()
-        try await channel.connect(to: .init(ipAddress: "127.0.0.1", port: 1))
-        for _ in 0 ..< 3 {
-            _ = try await PeerClose.cancelling(channel) { "done" }
+    /// The close is seen ahead of any codec: a handler that swallows
+    /// `inputClosed` (as the HTTP pipelining handler can while a request is
+    /// in flight) must not hide it from the latch.
+    func testLatchSeesCloseAheadOfCodec() async throws {
+        final class Swallow: ChannelInboundHandler, Sendable {
+            typealias InboundIn = NIOAny
+            func userInboundEventTriggered(
+                context: ChannelHandlerContext, event: Any
+            ) {}
         }
-        try await Task.sleep(nanoseconds: 20_000_000)
-        let names = try await channel.pipeline.handler(
-            type: PeerClose.Watcher.self
-        ).map { _ in true }.recover { _ in false }.get()
-        XCTAssertFalse(names)
+        let channel = NIOAsyncTestingChannel()
+        try await channel.pipeline.addHandler(Swallow()).get()
+        try await channel.pipeline.addHandler(PeerCloseLatch()).get()
+        try await channel.connect(to: .init(ipAddress: "127.0.0.1", port: 1))
+        channel.pipeline.fireUserInboundEventTriggered(ChannelEvent.inputClosed)
+        let r = try await PeerClose.cancelling(channel) {
+            await Self.untilCancelled()
+        }
+        XCTAssertEqual(r, "cancelled")
+    }
+
+    /// Keep-alive: completed requests on one live connection are not
+    /// cancelled by the ones before them.
+    func testSequentialRequestsOnLiveConnectionComplete() async throws {
+        let channel = try await connectedChannel()
+        for _ in 0 ..< 3 {
+            let r = try await PeerClose.cancelling(channel) {
+                Task.isCancelled ? "cancelled" : "done"
+            }
+            XCTAssertEqual(r, "done")
+        }
+    }
+
+    func testChannelWithoutLatchJustRuns() async throws {
+        let channel = NIOAsyncTestingChannel()
+        let r = try await PeerClose.cancelling(channel) { "done" }
+        XCTAssertEqual(r, "done")
     }
 }

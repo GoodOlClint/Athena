@@ -393,9 +393,10 @@ struct AthenaServer {
         // AsyncHTTPClient, for large bodies) don't hang waiting for a `100`
         // the daemon otherwise never sends. The autoclosure builds a fresh
         // per-connection handler. One config object covers both transports.
+        // #209 — `PeerCloseLatch` records a client disconnect for `PeerClose`.
         let http1 = HTTPServerBuilder.http1(
             configuration: .init(
-                additionalChannelHandlers: [ExpectContinueHandler()]))
+                additionalChannelHandlers: [ExpectContinueHandler(), PeerCloseLatch()]))
         switch (tlsCertPath, tlsKeyPath) {
         case (nil, nil):
             return http1

@@ -4,11 +4,14 @@
 # its decode and releases the ADR 029 inference gate within a bound.
 #
 # For each of POST /v1/chat/completions and POST /v1/messages, non-streaming
-# and streaming: a raw-socket client starts a long generation, waits until the
-# gate is held, closes the socket, then polls /healthz. PASS when `gateHeld`
-# goes false within $BOUND seconds of the close.
+# and streaming, two timings:
+#   mid   — a raw-socket client starts a long generation, waits until the gate
+#           is held, closes the socket, then polls /healthz. PASS when
+#           `gateHeld` goes false within $BOUND seconds of the close.
+#   burst — the client sends the request and closes at once (before any
+#           handler runs). PASS when the gate is free $BOUND seconds later.
 #
-# Fails before the #209 fix on both non-streaming cases (the decode runs to
+# Fails before the #209 fix on the non-streaming cases (the decode runs to
 # completion, holding the gate for tens of seconds); streaming passed before
 # and must keep passing. Needs real MLX (ADR 009), so it is not in `swift test`.
 #
@@ -24,7 +27,11 @@ BOUND="${ATHENA_E2E_CANCEL_BOUND:-5}"
 STORE="${ATHENA_MODEL_STORE:-$HOME/.athena/models}"
 WORK="$(mktemp -d)"
 DATA="$(mktemp -d)"
-trap 'kill ${DPID:-0} 2>/dev/null; wait ${DPID:-0} 2>/dev/null; rm -rf "$WORK" "$DATA"' EXIT
+cleanup() {
+  if [ -n "${DPID:-}" ]; then kill "$DPID" 2>/dev/null; wait "$DPID" 2>/dev/null; fi
+  rm -rf "$WORK" "$DATA"
+}
+trap cleanup EXIT
 
 [ -x "$BIN" ] || { echo "error: no binary at $BIN (build it first)"; exit 1; }
 [ -d "$STORE/$MODEL" ] || { echo "SKIP: model '$MODEL' not in $STORE"; exit 0; }
@@ -48,9 +55,10 @@ curl -s -o /dev/null -X POST "http://127.0.0.1:$PORT/v1/chat/completions" \
 fail=0
 for path in /v1/chat/completions /v1/messages; do
   for stream in 0 1; do
-    out="$(python3 - "$PORT" "$path" "$MODEL" "$stream" "$BOUND" <<'PY'
+  for timing in mid burst; do
+    out="$(python3 - "$PORT" "$path" "$MODEL" "$stream" "$BOUND" "$timing" <<'PY'
 import json, socket, sys, time, urllib.request
-port, path, model, stream, bound = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4] == "1", float(sys.argv[5])
+port, path, model, stream, bound, timing = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4] == "1", float(sys.argv[5]), sys.argv[6]
 body = json.dumps({"model": model, "max_tokens": 4000, "stream": stream, "messages": [{"role": "user",
     "content": "Write an extremely long, detailed story of at least 6000 words about a lighthouse keeper and her family across three generations. Do not stop early."}]}).encode()
 def gate():
@@ -59,6 +67,10 @@ def gate():
 s = socket.create_connection(("127.0.0.1", int(port)))
 s.sendall((f"POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n"
            f"Content-Length: {len(body)}\r\n\r\n").encode() + body)
+if timing == "burst":
+    s.close()
+    time.sleep(bound)
+    print(f"RELEASED {bound:.2f}" if not gate() else f"HELD {bound}"); sys.exit()
 s.settimeout(0.1)
 deadline = time.time() + 60
 while not gate():
@@ -77,14 +89,15 @@ print(f"HELD {bound}")
 PY
 )"
     case "$out" in
-      RELEASED*) echo "PASS $path stream=$stream: gate released ${out#RELEASED }s after close" ;;
-      *) echo "FAIL $path stream=$stream: $out (bound ${BOUND}s)"; fail=1 ;;
+      RELEASED*) echo "PASS $path stream=$stream $timing: gate free ${out#RELEASED }s after close" ;;
+      *) echo "FAIL $path stream=$stream $timing: $out (bound ${BOUND}s)"; fail=1 ;;
     esac
     # Let a decode that did not cancel finish before the next case.
     for _ in $(seq 1 120); do
       curl -s "http://127.0.0.1:$PORT/healthz" | grep -q '"gateHeld":false' && break
       sleep 1
     done
+  done
   done
 done
 
