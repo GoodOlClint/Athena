@@ -53,30 +53,29 @@ final class MTPAcceptanceRateTests: XCTestCase {
 /// ModelStore path resolution — pure logic, no MLX, always runs in CI.
 final class ModelStoreTests: XCTestCase {
 
-    func testNilReferenceResolvesToDefaultModelUnderStoreRoot() {
+    /// #203 — no compiled-in model id: an unset/empty reference resolves to
+    /// nil (never a hard-coded checkpoint name), so a caller must go through
+    /// `ModelSelection`'s ADR 026 ambiguity rule for a default.
+    func testNilReferenceResolvesToNil() {
         let store = ModelStore(
             rootDirectory: URL(fileURLWithPath: "/tmp/store"))
-        XCTAssertEqual(
-            store.resolve(nil).path,
-            "/tmp/store/" + ModelStore.defaultModelName)
+        XCTAssertNil(store.resolve(nil))
     }
 
-    func testEmptyStringResolvesToDefault() {
-        XCTAssertEqual(
-            ModelStore().resolve(""),
-            ModelStore().resolve(nil))
+    func testEmptyStringResolvesToNil() {
+        XCTAssertNil(ModelStore().resolve(""))
     }
 
     func testAbsolutePathUsedVerbatim() {
         let url = ModelStore().resolve("/tmp/some-model")
-        XCTAssertEqual(url.path, "/tmp/some-model")
+        XCTAssertEqual(url?.path, "/tmp/some-model")
     }
 
     func testBareNameResolvedUnderStoreRoot() {
         let store = ModelStore(
             rootDirectory: URL(fileURLWithPath: "/models", isDirectory: true))
         XCTAssertEqual(
-            store.resolve("Qwen3.6-27B-8bit-mtp").path,
+            store.resolve("Qwen3.6-27B-8bit-mtp")?.path,
             "/models/Qwen3.6-27B-8bit-mtp")
     }
 }
@@ -301,7 +300,8 @@ final class MLXLLMGenerationIntegrationTests: XCTestCase {
         guard env["ATHENA_RUN_MODEL_TESTS"] == "1" else {
             throw XCTSkip("set ATHENA_RUN_MODEL_TESTS=1 to run (heavy)")
         }
-        let modelURL = ModelStore().resolve(env["ATHENA_TEST_MODEL"])
+        guard let modelURL = ModelStore().resolve(env["ATHENA_TEST_MODEL"])
+        else { throw XCTSkip("no default model configured (set ATHENA_TEST_MODEL)") }
         guard
             FileManager.default.fileExists(
                 atPath: modelURL.appendingPathComponent("config.json").path)
@@ -337,8 +337,9 @@ final class MLXLLMGenerationIntegrationTests: XCTestCase {
         guard env["ATHENA_RUN_MODEL_TESTS"] == "1" else {
             throw XCTSkip("set ATHENA_RUN_MODEL_TESTS=1 to run (heavy)")
         }
-        let realURL = ModelStore().resolve(env["ATHENA_TEST_MODEL"])
-            .resolvingSymlinksInPath()
+        guard let configuredURL = ModelStore().resolve(env["ATHENA_TEST_MODEL"])
+        else { throw XCTSkip("no default model configured (set ATHENA_TEST_MODEL)") }
+        let realURL = configuredURL.resolvingSymlinksInPath()
         guard
             FileManager.default.fileExists(
                 atPath: realURL.appendingPathComponent("config.json").path)
@@ -435,7 +436,8 @@ final class GuidedTemperatureInertnessTests: XCTestCase {
         guard env["ATHENA_RUN_MODEL_TESTS"] == "1" else {
             throw XCTSkip("set ATHENA_RUN_MODEL_TESTS=1 to run (heavy)")
         }
-        let modelURL = ModelStore().resolve(env["ATHENA_TEST_MODEL"])
+        guard let modelURL = ModelStore().resolve(env["ATHENA_TEST_MODEL"])
+        else { throw XCTSkip("no default model configured (set ATHENA_TEST_MODEL)") }
         guard
             FileManager.default.fileExists(
                 atPath: modelURL.appendingPathComponent("config.json").path)
@@ -524,7 +526,8 @@ final class SeededSamplingReproducibilityTests: XCTestCase {
         guard env["ATHENA_RUN_MODEL_TESTS"] == "1" else {
             throw XCTSkip("set ATHENA_RUN_MODEL_TESTS=1 to run (heavy)")
         }
-        let modelURL = ModelStore().resolve(env["ATHENA_TEST_MODEL"])
+        guard let modelURL = ModelStore().resolve(env["ATHENA_TEST_MODEL"])
+        else { throw XCTSkip("no default model configured (set ATHENA_TEST_MODEL)") }
         guard
             FileManager.default.fileExists(
                 atPath: modelURL.appendingPathComponent("config.json").path)

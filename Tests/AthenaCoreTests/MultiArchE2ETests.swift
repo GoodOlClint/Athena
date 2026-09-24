@@ -23,7 +23,8 @@ final class MultiArchE2ETests: XCTestCase {
         }
         let name =
             env["ATHENA_TEST_MODEL_NONQWEN"] ?? "Llama-3.2-1B-Instruct-4bit"
-        let modelURL = ModelStore().resolve(name)
+        guard let modelURL = ModelStore().resolve(name)
+        else { throw XCTSkip("no model configured") }
         guard
             FileManager.default.fileExists(
                 atPath: modelURL.appendingPathComponent("config.json").path)

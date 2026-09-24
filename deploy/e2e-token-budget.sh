@@ -68,6 +68,7 @@ echo
 echo "== phase 1: start auth-on daemon (stub engine, day window) =="
 "$ATHENA" load --engine stub --host 127.0.0.1 --port "$PORT" \
   --data-dir "$D" --model-store "$MSTORE" \
+  --llm-model Qwen3.5-27B-4bit-mtp \
   --token-budget-window day >"$D/daemon.log" 2>&1 &
 DPID=$!
 for _ in $(seq 1 60); do
