@@ -304,6 +304,7 @@ extension AthenaServer {
                         },
                         includeUsage: includeUsage,
                         isToolCall: effective?.isToolCall == true, stops: stops,
+                        chatTemplateKwargs: native.chatTemplateKwargs,
                         onConsumerCancel: { cancelCounter.cancelGeneration() },
                         record: { usage in
                             await meter(principal: principal, usage: usage)
@@ -329,6 +330,7 @@ extension AthenaServer {
                         }),
                     includeUsage: includeUsage,
                     isToolCall: effective?.isToolCall == true, stops: stops,
+                    chatTemplateKwargs: native.chatTemplateKwargs,
                     onConsumerCancel: { cancelCounter.cancelGeneration() },
                     record: { usage in
                         await meter(principal: principal, usage: usage)
@@ -359,8 +361,16 @@ extension AthenaServer {
         // <channel|>`) out of the content before anything else; surface it as
         // `reasoning_content`. No-op for models that don't emit the markers.
         let split = splitReasoningChannel(collected.text)
-        var text = split.content
-        let reasoning = split.reasoning.isEmpty ? nil : split.reasoning
+        // #198 — Qwen3.5's `<think>…</think>` on whatever the Gemma split
+        // left as content. No-op for every other model.
+        let qwenSplit = splitQwenThink(
+            split.content,
+            expectThinking: qwenExpectsThinking(
+                modelName: model, chatTemplateKwargs: native.chatTemplateKwargs))
+        var text = qwenSplit.content
+        let reasoning =
+            (split.reasoning + qwenSplit.reasoning).isEmpty
+            ? nil : split.reasoning + qwenSplit.reasoning
         let usage = collected.usage
         var finish = collected.finish
         // M31.3: truncate at the first stop sequence; a stop hit reports
