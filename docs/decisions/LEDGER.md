@@ -31,7 +31,7 @@ One line per ADR: number, title, status, link. Status is taken from each ADR fil
 - [ADR 026 — retire the model allowlist; the model store is the registry](026-retire-allowlist-store-is-registry.md) — Accepted — shipped
 - [ADR 027 — disk-backed KV snapshots (versioned, encrypted, resumable)](027-disk-kv-snapshots.md) — Removed (publication S0)
 - [ADR 028 — Retire DFlash + TurboQuant to track upstream swift-mlx-lm](028-retire-dflash-turboquant-upstream-sync.md) — Accepted — shipped
-- [ADR 029 — Execution-exclusive inference slot (one Metal-executing tenant at a time)](029-execution-exclusive-inference-slot.md) — Accepted — implemented
+- [ADR 029 — Execution-exclusive inference slot (one Metal-executing tenant at a time)](029-execution-exclusive-inference-slot.md) — Accepted — implemented; disconnect-cancel addendum 2026-09-24 (#209)
 - [ADR 030 — Default-on prefill ceiling + degrade recoverable MLX allocation faults](030-default-prefill-ceiling-and-mlx-fault-degrade.md) — Accepted — Part 1 + Part 2 implemented
 - [ADR 031 — Remove the deprecated `/api/chat` native inference surface](031-remove-deprecated-api-chat.md) — Accepted — implemented
 - [ADR 032 — Gemma 4 MTP speculative decoding (second drafter backend)](032-gemma4-mtp-speculative-decoding.md) — Accepted — implemented + e2e verified
