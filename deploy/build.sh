@@ -34,7 +34,7 @@ substrate_pin_guard() {
   if [ "${ATHENA_LOCAL_DEV:-}" = "1" ]; then
     echo "  manifest: ATHENA_LOCAL_DEV=1 (path deps)"
     _assert_dep "$sub" "integration" "mlx-swift-lm"
-    _assert_dep "$hub" "athena/pr-50-download-progress" "swift-huggingface"
+    _assert_dep "$hub" "athena/per-file-progress" "swift-huggingface"
   else
     echo "  manifest: SCM pins (GoodOlClint forks — reproducible)"
     # Report the RESOLVED revisions from Package.resolved, not the manifest

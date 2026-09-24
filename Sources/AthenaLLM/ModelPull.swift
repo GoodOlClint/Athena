@@ -58,17 +58,22 @@ public enum ModelPull {
                                 bytes: p.completedUnitCount,
                                 total: p.totalUnitCount))
                     },
-                    perFileHandler: { files in
+                    fileProgressHandler: { files in
                         let n = files.count
                         for (i, f) in files.enumerated() {
+                            // The hub client publishes a fraction plus the size
+                            // the repo declared; bytes transferred is ours to
+                            // derive, and is unknown when the repo declares no
+                            // size (0 total ⇒ the renderer shows no ratio).
+                            let total = f.sizeBytes ?? 0
+                            let bytes = Int64(f.fractionCompleted * Double(total))
                             progress?(
                                 .file(
                                     name: (f.path as NSString).lastPathComponent,
                                     index: i + 1, count: n,
-                                    bytes: f.completedUnitCount,
-                                    total: f.totalUnitCount,
-                                    done: f.totalUnitCount > 0
-                                        && f.completedUnitCount >= f.totalUnitCount))
+                                    bytes: bytes,
+                                    total: total,
+                                    done: f.fractionCompleted >= 1.0))
                         }
                     })
                 break

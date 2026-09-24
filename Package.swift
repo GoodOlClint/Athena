@@ -70,7 +70,7 @@ let hubDep: Package.Dependency =
     ? .package(path: "../swift-huggingface")
     : .package(
         url: "https://github.com/GoodOlClint/swift-huggingface.git",
-        revision: "727df097cfeceab6378b0ff6b3ce6791a50b5a05")  // athena/pr-50-download-progress (+per-file progress, audit §2)
+        revision: "14efd56741f5ee614b0bd9cc2e6efaea19e095b9")  // tag athena-per-file-progress-2026-09-02 = upstream main + per-file progress (upstream PR #69), audit §2
 
 let package = Package(
     name: "athena",
@@ -173,17 +173,16 @@ let package = Package(
         .package(
             url: "https://github.com/huggingface/swift-transformers",
             from: "1.3.0"),
-        // swift-huggingface (Hub client) — fork carrying the unmerged
-        // upstream fix from PR #50 (tracking issue #48): the stock async
-        // `session.download(for:delegate:)` never delivered `didWriteData`,
-        // so model-pull progress sat at 0% then jumped, and a stalled
-        // transfer couldn't resume (restarted multi-GB shards from zero).
-        // The fork's continuation-based download bridge restores real
-        // per-byte progress + resume for EVERY download site. SCM pin on
-        // GoodOlClint/swift-huggingface @ athena/pr-50-download-progress by
-        // default; ATHENA_LOCAL_DEV=1 swaps to ../swift-huggingface — see
+        // swift-huggingface (Hub client) — fork carrying ONE commit that is
+        // submitted upstream as PR #69: an additive `fileProgressHandler` on
+        // `downloadSnapshot`, which `ModelPull` uses to emit one progress row
+        // per shard instead of a single aggregate bar. The progress/resume fix
+        // this fork also used to carry (upstream PR #50) merged upstream and
+        // shipped in 0.10.0, so the fork now rebases onto upstream `main`.
+        // SCM pin on GoodOlClint/swift-huggingface @ athena/per-file-progress
+        // by default; ATHENA_LOCAL_DEV=1 swaps to ../swift-huggingface — see
         // `hubDep`. Revert to the upstream `url:` dep + a version bump once
-        // PR #50 merges.
+        // PR #69 merges and a release carries it.
         hubDep,
         // M60.3 — sudoless Apple Silicon GPU clock + die temperature via
         // IOReport/SMC (the in-process replacement for a root `powermetrics`
