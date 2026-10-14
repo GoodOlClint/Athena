@@ -18,6 +18,12 @@ import MLXLMCommon
 /// needed here. The vendored Qwen3.5 path is untouched (faster MTP +
 /// optional thinking prefix), so this is purely additive for other arches.
 enum GuidedSubstrate {
+    /// The prefill window of the serve and guided paths. ADR 030's prompt
+    /// ceiling reasons about the O(seq²) score buffer per 512-token chunk, so
+    /// the step is pinned (#88) and so is the chunking: the substrate's default
+    /// became `.balanced` at integration-2026-10-14, which re-divides the prompt
+    /// into equal chunks; `.remainder` keeps the exact 512-token boundaries.
+    static let prefill = PrefillParameters(stepSize: 512, chunking: .remainder)
 
     /// A `LogitProcessor` that constrains every step to the Guide's
     /// currently-allowed token set and advances the Guide on each
@@ -83,7 +89,7 @@ enum GuidedSubstrate {
         var iterator = try TokenIterator(
             input: input, model: model, cache: nil,
             processor: processor, sampler: ArgMaxSampler(),
-            prefillStepSize: 512, maxTokens: maxTokens)
+            prefill: prefill, maxTokens: maxTokens)
 
         var out: [Int] = []
         while let token = iterator.next() {

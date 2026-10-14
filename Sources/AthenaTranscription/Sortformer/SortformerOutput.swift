@@ -20,7 +20,10 @@ public struct DiarizationSegment: Sendable {
 
 // MARK: - Diarization Output
 
-public struct DiarizationOutput: Sendable {
+// ponytail: @unchecked — each value is built by one producer and handed to one
+// consumer, never mutated after the hand-off. mlx-swift 0.32 surfaces
+// MLXArray's non-Sendability through `@preconcurrency import MLX`.
+public struct DiarizationOutput: @unchecked Sendable {
     public let segments: [DiarizationSegment]
     public let speakerProbs: MLXArray?
     public let numSpeakers: Int
@@ -56,7 +59,8 @@ public struct DiarizationOutput: Sendable {
 
 // MARK: - Streaming State
 
-public struct StreamingState: Sendable {
+// ponytail: @unchecked — same single-owner hand-off as DiarizationOutput.
+public struct StreamingState: @unchecked Sendable {
     public var spkcache: MLXArray  // (1, cache_frames, emb_dim)
     public var spkcachePreds: MLXArray  // (1, cache_frames, n_spk)
     public var fifo: MLXArray  // (1, fifo_frames, emb_dim)

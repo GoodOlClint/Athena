@@ -50,7 +50,8 @@ public enum DefaultConfig {
         # max_tokens = 1024
         # temperature = 0.7
         # speculative = false
-        # KV-cache compression: "none" | "triattention".
+        # KV-cache compression: "none" ("triattention" is refused while the
+        # MLX substrate pin lacks it).
         # kv_compression = "none"
 
 

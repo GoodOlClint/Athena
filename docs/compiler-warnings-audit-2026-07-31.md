@@ -71,6 +71,12 @@ This is a compiler-adjacent build warning about a deliberate, already-tracked st
 
 Two ways to close it sooner, neither belonging in a warnings-cleanup change: commit a `.swiftpm/configuration/mirrors.json` mapping the upstream URL onto the fork, or vendor the patch. Both alter dependency resolution and want their own change with a resolution diff and a fresh `Package.resolved`.
 
+### 4. `@unchecked Sendable` on two vendored Sortformer structs (added 2026-10-14, substrate bump #234)
+
+At mlx-swift 0.32.3, `@preconcurrency import MLX` no longer hides `MLXArray`'s non-Sendability inside `Sendable` structs, so `DiarizationOutput` and `StreamingState` (`Sources/AthenaTranscription/Sortformer/SortformerOutput.swift`) raised 7 new warnings, one per `MLXArray` property. Removing the conformance is not possible: `DiarizationOutput` is the element type of the streaming diarizer's `AsyncThrowingStream`, which requires `Sendable` (`Sortformer.swift:1023` becomes an error without it).
+
+Both structs are now `@unchecked Sendable`. The invariant that makes this sound is single ownership: each value is built by one producer and handed to one consumer, and is never mutated after the hand-off. This is the same behaviour as before the bump, where the import attribute provided the same unchecked assertion implicitly. The real fix is upstream, if `MLXArray` ever gains a checked `Sendable` story.
+
 ## Follow-up (found here, not fixed here)
 
 Deleting the dead sampling locals exposed an adjacent inefficiency in `runSpeculative`, out of scope for a warnings change because fixing it alters control flow.
@@ -84,4 +90,4 @@ find Sources Tests -name '*.swift' -print0 | xargs -0 touch
 swift build --build-tests 2>&1 | grep -E '^/.*/(Sources|Tests)/.*warning:' | sort -u
 ```
 
-Expected: the three `setErrorHandler` sites and nothing else.
+Expected: the three `setErrorHandler` sites and nothing else. (Re-checked at substrate `integration-2026-10-14` / mlx-swift 0.32.3: still true after #234.)

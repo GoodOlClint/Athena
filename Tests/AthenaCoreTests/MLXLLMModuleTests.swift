@@ -563,3 +563,26 @@ final class SeededSamplingReproducibilityTests: XCTestCase {
                 + "(C11: per-request GenerateParameters.seed)")
     }
 }
+
+/// #88 / integration-2026-10-14 — the substrate's default chunking became
+/// `.balanced`, which re-divides a long prompt into equal chunks below the step
+/// size. Athena's serve and guided paths share `GuidedSubstrate.prefill`; it
+/// must keep exact 512-token chunks so ADR 030's per-chunk reasoning holds.
+final class PrefillWindowPinTests: XCTestCase {
+    func testServePrefillKeepsExact512Chunks() {
+        let p = GuidedSubstrate.prefill
+        XCTAssertEqual(p.stepSize, 512)
+        XCTAssertEqual(p.chunkLength(forChunking: 1000), 512)
+        XCTAssertEqual(p.chunkLength(forChunking: 4097), 512)
+        XCTAssertNotEqual(
+            PrefillParameters(stepSize: 512).chunkLength(forChunking: 1000), 512,
+            "substrate default is no longer balanced; revisit this pin")
+    }
+
+    func testServePathUsesThePinnedWindow() {
+        let gp = MLXLLMModule.serveParameters(
+            maxTokens: 16, kvScheme: nil, temperature: 0, topP: 1, seed: nil)
+        XCTAssertEqual(gp.prefill.stepSize, 512)
+        XCTAssertEqual(gp.prefill.chunkLength(forChunking: 1000), 512)
+    }
+}

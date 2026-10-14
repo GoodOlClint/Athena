@@ -49,7 +49,7 @@ let substrateDep: Package.Dependency =
         // moving an old one). The verified guarantee is the paragraph below.
         //
         // Belt-and-braces regardless: Package.resolved records the resolved
-        // SHA, so even a moved tag forces 5b892140 or fails loudly under
+        // SHA, so even a moved tag forces the recorded revision or fails loudly under
         // `swift build` / `swift test` — it never silently follows. Verified
         // by reproducing #86 in a scratch repo (force-move + GC ⇒ hard error,
         // never silent drift).
@@ -63,7 +63,7 @@ let substrateDep: Package.Dependency =
         // Package.resolved — its pin state for any non-SHA `revision:`. It is
         // a tag, not a branch; the reproducibility guarantee comes from the
         // sibling `"revision"` field.
-        revision: "integration-2026-07-31",  // 5b892140 — successor to 751aaed (integration force-pushed); TriAttention (MLXLMCommon) + Qwen3.5 MTP separate-drafter
+        revision: "integration-2026-10-14",  // 29dcb353 — upstream c53d7d4 + batch-generate, DSpark, prompt-cache-lru; NO TriAttention (ADR 028 amendment)
         traits: substrateTraits)
 let hubDep: Package.Dependency =
     athenaLocalDev
@@ -147,25 +147,19 @@ let package = Package(
         // below; the ranges are not identical.
         .package(
             url: "https://github.com/ml-explore/mlx-swift",
-            // Floor is 0.31.6, not 0.31.3: the substrate at
-            // integration-2026-07-31 calls `MLXArray.maskFill` and
-            // `DType.greatestFiniteMagnitudeArray`, which land in mlx-swift
-            // 0.31.5 (bb0399d, #429) — 0.31.4 fails with two missing-member
-            // errors that look like a substrate bug (#86 CI, run
-            // 30724316996). The floor is 0.31.6 rather than the minimal
-            // 0.31.5 because 0.31.6 is what the #91 bump was actually built
-            // and verified against (and what Package.resolved pins); relax to
-            // 0.31.5 only with a re-verification. The substrate's OWN
-            // manifest still declares `.upToNextMinor(from: "0.31.4")` — a
-            // floor it does not itself compile against — so Athena states the
-            // real requirement rather than leaving Package.resolved as the
-            // only thing holding it. Note the toolchain floor this imposes
+            // Floor is 0.32.3: the substrate at integration-2026-10-14
+            // declares `.upToNextMinor(from: "0.32.3")`, and 0.32.3 is what
+            // this pin was cold-built and verified against. The floor is
+            // stated here rather than left to Package.resolved because the
+            // substrate's manifest floor has been wrong before (it declared
+            // 0.31.4 while needing 0.31.5 — #86 CI, run 30724316996). Note
+            // the toolchain floor this imposes
             // is invisible in Athena's own `swift-tools-version: 6.1` header:
             // mlx-swift 0.31.5+ ships a swift-tools-version 6.3 manifest, so
             // building Athena needs Swift 6.3 (Xcode 26.5+, the verified floor) even though this
             // manifest itself parses under 6.1 — an older toolchain fails at
             // RESOLUTION with an error naming mlx-swift's tools version.
-            .upToNextMinor(from: "0.31.6")),
+            .upToNextMinor(from: "0.32.3")),
         // swift-transformers (Jinja chat templates + tokenizers) and
         // swift-huggingface (Hub client) are NOT transitive deps of
         // mlx-swift-lm — the MLXHuggingFace macros expand into code that

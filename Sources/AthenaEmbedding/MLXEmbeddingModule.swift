@@ -242,6 +242,17 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
     /// driving an unbounded O(L²) forward pass via a singleton bucket.
     static let maxInputTokens = 32_768
 
+    /// EmbeddingGemma 2 slices its input to its context length, so a longer
+    /// input would embed only its prefix while usage counts all of it.
+    // ponytail: scoped to EmbeddingGemma 2. BERT-family models also report a
+    // smaller `maxPositionEmbeddings` (512) and accept longer input today;
+    // applying the cap to every model is a client-visible change (#235).
+    static func inputCeiling(for model: any EmbeddingModel) -> Int {
+        guard model is EmbeddingGemma2, let limit = model.maxPositionEmbeddings
+        else { return maxInputTokens }
+        return min(maxInputTokens, limit)
+    }
+
     public func embed(_ texts: [String], model: String? = nil) async throws
         -> EmbeddingBatch
     {
@@ -346,12 +357,10 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
             // O(L²) forward pass on a RoPE embedder (remote OOM/compute
             // DoS); OpenAI likewise 400s over-length input rather than
             // returning a silently-truncated vector.
-            if let longest = encoded.map(\.count).max(),
-                longest > Self.maxInputTokens
-            {
+            let cap = Self.inputCeiling(for: ctx.model)
+            if let longest = encoded.map(\.count).max(), longest > cap {
                 throw AthenaError.inputTooLong(
-                    module: .textEmbedding, tokens: longest,
-                    maxTokens: Self.maxInputTokens)
+                    module: .textEmbedding, tokens: longest, maxTokens: cap)
             }
             let promptTokens = encoded.reduce(0) { $0 + $1.count }
             let pad = tokenizer.eosTokenId ?? 0

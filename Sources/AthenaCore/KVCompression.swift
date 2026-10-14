@@ -19,10 +19,30 @@ import Foundation
 ///
 /// Precedence: env `ATHENA_KV_COMPRESSION` > TOML `kv_compression` >
 /// built-in default `none`. An unrecognized value is a hard error at
-/// daemon start (fail-closed — never a silent fallback to `none`).
+/// daemon start (fail-closed — never a silent fallback to `none`), and so is a
+/// recognized codec the pinned substrate cannot serve (`unavailableReason`).
 public enum KVCompression: String, Sendable, CaseIterable, Equatable {
     case none
     case triattention
+
+    /// Why this codec cannot run at the pinned substrate, or nil if it can.
+    /// The substrate fails every generation whose `kvScheme` it does not
+    /// recognize, so an unavailable codec is refused here, once, by name.
+    public var unavailableReason: String? {
+        switch self {
+        case .none: return nil
+        case .triattention:
+            return "kv_compression 'triattention' is unavailable: the pinned "
+                + "MLX substrate (integration-2026-10-14) does not include "
+                + "TriAttention eviction. Set kv_compression = none "
+                + "(ADR 028, 2026-10-14 amendment)."
+        }
+    }
+
+    public struct UnavailableError: Error, CustomStringConvertible {
+        public let reason: String
+        public var description: String { reason }
+    }
 
     public struct ResolutionError: Error, CustomStringConvertible {
         public let value: String
@@ -33,7 +53,8 @@ public enum KVCompression: String, Sendable, CaseIterable, Equatable {
     }
 
     /// Pure resolver (inject env + TOML values). Precedence env > TOML >
-    /// `none`; empty/whitespace is treated as unset; unknown ⇒ throw.
+    /// `none`; empty/whitespace is treated as unset; unknown or unavailable ⇒
+    /// throw.
     public static func resolve(env: String?, toml: String?) throws -> KVCompression {
         func clean(_ s: String?) -> String? {
             guard let t = s?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -44,6 +65,9 @@ public enum KVCompression: String, Sendable, CaseIterable, Equatable {
         guard let raw = clean(env) ?? clean(toml) else { return .none }
         guard let v = KVCompression(rawValue: raw.lowercased()) else {
             throw ResolutionError(value: raw)
+        }
+        if let reason = v.unavailableReason {
+            throw UnavailableError(reason: reason)
         }
         return v
     }

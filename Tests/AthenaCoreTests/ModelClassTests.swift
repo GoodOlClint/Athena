@@ -45,6 +45,17 @@ final class ModelClassTests: XCTestCase {
         XCTAssertEqual(c, .vision)
     }
 
+    func testEmbeddingGemma2BeatsItsVisionTower() {
+        // google/embeddinggemma-2 — a multimodal embedder whose config carries
+        // vision_config (and audio_config); it loads only through the embedder
+        // factory, so the embedder-only type must outrank the vision rule.
+        let c = ModelClass.classify(
+            info: info(
+                #"{"model_type":"embedding_gemma2","vision_config":{"x":1}}"#),
+            hasSentenceTransformerMarkers: true)
+        XCTAssertEqual(c, .embedding)
+    }
+
     func testGenerativeQwen35() {
         XCTAssertEqual(
             ModelClass.classify(

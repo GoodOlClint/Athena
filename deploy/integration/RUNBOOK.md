@@ -153,6 +153,8 @@ value is covered by the automated `e2e-rbac.sh` phase-12 gate.
 
 ## H — KV-cache compression / TriAttention (Studio + MacBook) · P0*
 
+> **Suspended at substrate `integration-2026-10-14`.** That pin has no TriAttention, so the daemon refuses `kv_compression = triattention` at startup with a named reason (ADR 028, 2026-10-14 amendment). Record H as N/A until a substrate tag restores it.
+
 Exercises the `kv_compression = triattention` value (M21) on the
 **real model**. TriAttention is **token EVICTION**, not quantization:
 it drops low-`‖k‖` decode tokens once the cache exceeds its budget
@@ -190,7 +192,7 @@ kv_compression path** — otherwise N/A.
 | I2 | MacBook: `ath run "$TEST_MODEL" "name three primary colors"` | coherent real completion from the substrate stream | ☐ |
 | I3 | `curl $B/v1/chat/completions` with `response_format` json_schema (integer field) | **schema-valid JSON** — the substrate-path guided decoder enforces it; before M23 this was unconstrained prose (M23 fork A) | ☐ |
 | I4 | `curl $B/v1/chat/completions` with `tools` + a forced `tool_choice` | a `tool_calls` response with valid JSON arguments (guided on the substrate path) | ☐ |
-| I5 | Studio: start with `kv_compression=triattention` on the non-Qwen model; `athena logs --source start` | startup **warns** "inert for model type … running uncompressed"; generation still works (M23 fork B) | ☐ |
+| I5 | **N/A at substrate `integration-2026-10-14`** (triattention is refused at startup; see scenario H). Studio: start with `kv_compression=triattention` on the non-Qwen model; `athena logs --source start` | startup **warns** "inert for model type … running uncompressed"; generation still works (M23 fork B) | ☐ |
 | I7 | (control) point `TEST_MODEL` at the Qwen3.5 model; redo I2–I3 | unchanged — vendored path, MTP/structured intact (no regression) | ☐ (P1) |
 
 ---

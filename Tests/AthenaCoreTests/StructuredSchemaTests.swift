@@ -48,6 +48,8 @@ final class StructuredSchemaTests: XCTestCase {
         else { return XCTFail("unexpected shape: \(s)") }
         XCTAssertEqual(cnst, "get_weather")
         XCTAssertNotNil(props["arguments"])
+        XCTAssertEqual(
+            o["x-guidance"], .object(["whitespace_flexible": .bool(false)]))
     }
 
     func testToolCallUnionSchema() throws {
@@ -70,6 +72,8 @@ final class StructuredSchemaTests: XCTestCase {
             case .array(let branches)? = o["oneOf"]
         else { return XCTFail("expected oneOf array: \(s)") }
         XCTAssertEqual(branches.count, 2)
+        XCTAssertEqual(
+            o["x-guidance"], .object(["whitespace_flexible": .bool(false)]))
         var names: [String] = []
         for b in branches {
             guard case .object(let bo) = b,
