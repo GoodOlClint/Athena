@@ -883,6 +883,17 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                                                     tc.function.arguments
                                                         .mapValues { $0.anyValue }
                                                 )))
+                                    case .rejectedToolCall(let r):
+                                        // Tool-call-shaped output the substrate
+                                        // could not turn into a call. Before
+                                        // integration-2026-10-14 it flushed as
+                                        // content; keep that. The preview may
+                                        // hold argument values, so the log line
+                                        // carries the reason only.
+                                        Self.log.notice(
+                                            "rejected tool call: \(r.reason.rawValue) (\(r.rawTextByteCount) bytes, preview truncated: \(r.isPreviewTruncated))"
+                                        )
+                                        continuation.yield(.text(r.rawTextPreview))
                                     case .info(let info):
                                         // Substrate's terminal completion
                                         // record carries the token geometry.
@@ -1272,19 +1283,15 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         let requestSeed: UInt64? = seed.flatMap {
             $0 >= 0 ? UInt64($0) : nil
         }
-        // #88 — the substrate's prefillStepSize default became `nil`
-        // (model-chosen) at integration-2026-07-31. Pin 512 explicitly so the
-        // prefill chunk — the window over which the O(seq²) score buffer ADR
-        // 030's prompt ceiling reasons about is materialised — is chosen by
-        // Athena, not inherited, and so this path agrees with
-        // GuidedSubstrate's literal 512. Adopting a model-chosen window is
+        // #88 — the prefill window is Athena's, not the substrate default
+        // (see `GuidedSubstrate.prefill`). Adopting a model-chosen window is
         // #88 direction 2 and requires the peak-prefill-memory measurement.
         let gp = GenerateParameters(
             maxTokens: Self.effectiveMaxTokens(maxTokens, params.maxTokens),
             kvScheme: params.kvCompression.kvScheme,
             temperature: temp,
             topP: tp,
-            prefillStepSize: 512,
+            prefill: GuidedSubstrate.prefill,
             seed: requestSeed)
         // Publication S0 — TriAttention eviction now rides the substrate's
         // `kvScheme` hook on `gp` (upstream `applyKVScheme` swaps each

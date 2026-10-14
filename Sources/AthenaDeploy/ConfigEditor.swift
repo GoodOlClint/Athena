@@ -261,6 +261,11 @@ public enum ConfigEditor {
                         + KVCompression.allCases.map(\.rawValue)
                         .joined(separator: ", "))
             }
+            if key == "kv_compression",
+                let reason = KVCompression(rawValue: value)?.unavailableReason
+            {
+                throw Failure.badValue(key, "none — \(reason)")
+            }
             // ADR 023 G2 — admission mode is an enum-ish string; reject a typo
             // at set-time against the source-of-truth case list (mirrors
             // engine / kv_compression above) so a bad value can't silently fall

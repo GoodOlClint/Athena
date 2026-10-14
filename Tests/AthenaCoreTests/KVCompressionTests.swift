@@ -27,23 +27,22 @@ final class KVCompressionTests: XCTestCase {
 
     func testTomlUsedWhenNoEnv() throws {
         XCTAssertEqual(
-            try KVCompression.resolve(env: nil, toml: "triattention"),
-            .triattention)
+            try KVCompression.resolve(env: nil, toml: "none"), .none)
+        XCTAssertThrowsError(
+            try KVCompression.resolve(env: nil, toml: "triattention"))
     }
 
     func testEnvOverridesToml() throws {
         XCTAssertEqual(
             try KVCompression.resolve(env: "none", toml: "triattention"),
             .none)
-        XCTAssertEqual(
-            try KVCompression.resolve(env: "triattention", toml: "none"),
-            .triattention)
+        XCTAssertThrowsError(
+            try KVCompression.resolve(env: "triattention", toml: "none"))
     }
 
     func testCaseInsensitiveAndTrimmed() throws {
         XCTAssertEqual(
-            try KVCompression.resolve(env: "  TriAttention\n", toml: nil),
-            .triattention)
+            try KVCompression.resolve(env: "  NONE\n", toml: nil), .none)
     }
 
     func testUnknownValueFailsClosed() {
@@ -53,14 +52,22 @@ final class KVCompressionTests: XCTestCase {
             try KVCompression.resolve(env: nil, toml: "bogus"))
     }
 
-    /// M21: `triattention` now resolves (its eviction path exists).
-    func testTriattentionResolves() throws {
-        XCTAssertEqual(
-            try KVCompression.resolve(env: nil, toml: "triattention"),
-            .triattention)
-        XCTAssertEqual(
-            try KVCompression.resolve(env: "TriAttention ", toml: "none"),
-            .triattention)
+    /// ADR 028 2026-10-14 amendment — the pinned substrate has no
+    /// TriAttention, and it silently ignores an unknown `kvScheme`, so
+    /// `triattention` must fail at resolve with the named reason (distinct
+    /// from the unknown-value error) instead of running uncompressed.
+    func testTriattentionRefusedWithNamedReason() {
+        for (env, toml) in [(nil, "triattention"), ("TriAttention ", "none")] {
+            XCTAssertThrowsError(
+                try KVCompression.resolve(env: env, toml: toml)
+            ) { err in
+                XCTAssertTrue(err is KVCompression.UnavailableError, "\(err)")
+                XCTAssertTrue(
+                    "\(err)".contains("does not include TriAttention"),
+                    "\(err)")
+            }
+        }
+        XCTAssertNil(KVCompression.none.unavailableReason)
     }
 
     /// The substrate `kvScheme` seam is non-nil only for `triattention`.

@@ -157,9 +157,21 @@ public enum StructuredSchema {
     public static func toolCallSchema(
         functionName: String, parameters: JSONValue?
     ) -> String? {
-        toolCallObject(functionName: functionName, parameters: parameters)
-            .jsonString()
+        guard
+            case .object(var root) = toolCallObject(
+                functionName: functionName, parameters: parameters)
+        else { return nil }
+        root["x-guidance"] = compactSeparators
+        return JSONValue.object(root).jsonString()
     }
+
+    /// llguidance compile options for the forced tool-call grammars: fixed
+    /// `", "` / `": "` separators instead of free whitespace. With free
+    /// whitespace a greedy model can emit whitespace forever where the grammar
+    /// still needs `, "name"`, ending at max_tokens with no call (#234).
+    private static let compactSeparators: JSONValue = .object([
+        "whitespace_flexible": .bool(false)
+    ])
 
     /// Union constraining schema for free multi-tool choice (>1 tool
     /// with `tool_choice:"auto"`): `{"oneOf": [<tool-call object>, …]}`.
@@ -176,7 +188,8 @@ public enum StructuredSchema {
                 tools.map {
                     toolCallObject(
                         functionName: $0.name, parameters: $0.parameters)
-                })
+                }),
+            "x-guidance": compactSeparators,
         ]).jsonString()
     }
 }

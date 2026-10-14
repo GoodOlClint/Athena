@@ -153,6 +153,8 @@ value is covered by the automated `e2e-rbac.sh` phase-12 gate.
 
 ## H — KV-cache compression / TriAttention (Studio + MacBook) · P0*
 
+> **Suspended at substrate `integration-2026-10-14`.** That pin has no TriAttention, so the daemon refuses `kv_compression = triattention` at startup with a named reason (ADR 028, 2026-10-14 amendment). Record H as N/A until a substrate tag restores it.
+
 Exercises the `kv_compression = triattention` value (M21) on the
 **real model**. TriAttention is **token EVICTION**, not quantization:
 it drops low-`‖k‖` decode tokens once the cache exceeds its budget

@@ -29,6 +29,7 @@ public enum ModelClass: String, Sendable, Equatable {
     /// detector stays MLX-free; mirrors `EmbedderTypeRegistry`'s encoder set.
     public static let embedderOnlyTypes: Set<String> = [
         "bert", "roberta", "xlm-roberta", "distilbert", "nomic_bert",
+        "embedding_gemma2", "embedding_gemma2_text",
     ]
 
     /// Repo-root filenames whose presence marks a sentence-transformers
@@ -41,18 +42,19 @@ public enum ModelClass: String, Sendable, Equatable {
     ]
 
     /// Classify from parsed config + whether the snapshot carries
-    /// sentence-transformers markers. Order matters: vision wins first (an
-    /// image tower must load through the VLM factory), then embedding (ST
-    /// markers OR an embedder-only `model_type`), then any named generative
-    /// type, else unknown.
+    /// sentence-transformers markers. Order matters: an embedder-only
+    /// `model_type` wins first (EmbeddingGemma 2 ships vision and audio towers
+    /// but loads only through the embedder factory), then vision (an image
+    /// tower must load through the VLM factory), then ST markers, then any
+    /// named generative type, else unknown.
     public static func classify(
         info: ModelConfigInfo?,
         hasSentenceTransformerMarkers: Bool
     ) -> ModelClass {
-        if info?.hasVisionConfig == true { return .vision }
         let type = info?.modelType?.lowercased()
-        if hasSentenceTransformerMarkers { return .embedding }
         if let type, embedderOnlyTypes.contains(type) { return .embedding }
+        if info?.hasVisionConfig == true { return .vision }
+        if hasSentenceTransformerMarkers { return .embedding }
         return type == nil ? .unknown : .generative
     }
 

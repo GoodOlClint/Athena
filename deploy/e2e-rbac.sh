@@ -13,9 +13,10 @@
 #   5. CLI escalation guards   (unknown role / unknown user refused)
 #   6. fail-safe startup       (no creds + non-loopback ⇒ refuse)
 #   7. auth-disabled loopback  (no creds + loopback ⇒ open)
-#   8. kv_compression knob     (triattention accepted at daemon start;
-#                               unknown (incl. retired turboquant) ⇒
-#                               fail-closed start refusal, not a fallback)
+#   8. kv_compression knob     (triattention refused at daemon start with
+#                               its named reason — not in the pinned
+#                               substrate; unknown (incl. retired
+#                               turboquant) ⇒ fail-closed start refusal)
 #   9. lifecycle UX (M22)       (`stop` halts a user daemon and surfaces
 #                               sudo guidance for a system one; `init`
 #                               aux-pull is idempotent; `install`
@@ -2028,8 +2029,10 @@ echo
 echo "== phase 12: kv_compression knob — daemon-start contract (M21) =="
 # `kv_compression` is resolved ONCE at daemon start (Load.swift),
 # independent of the engine — so the stub daemon exercises the real
-# accept / fail-closed contract. TriAttention (M21) is token eviction and
-# must be accepted. An unknown value must REFUSE to start (no silent
+# accept / fail-closed contract. TriAttention (M21) is absent from the
+# pinned substrate (ADR 028, 2026-10-14 amendment), which ignores an unknown
+# kvScheme, so it must REFUSE to start with the named reason rather than run
+# uncompressed. An unknown value must REFUSE to start (no silent
 # fallback to none) — this now includes the retired M20 `turboquant`
 # codec. Honors this script's invariants: --engine stub, loopback,
 # ephemeral data dir.
@@ -2052,9 +2055,12 @@ kv_daemon() { # KVVALUE  -> rc 0 = came up healthy, 1 = process exited
   return $rc
 }
 if kv_daemon triattention; then
-  ok "kv_compression=triattention accepted (daemon healthy)"
+  bad "kv_compression=triattention started (unavailable at this pin, should refuse)"
+elif grep -q "does not include TriAttention" "$D/kv-triattention.log"; then
+  ok "kv_compression=triattention refused with its named reason"
 else
-  bad "kv_compression=triattention rejected"; cat "$D/kv-triattention.log"
+  bad "kv_compression=triattention refused without the named reason"
+  cat "$D/kv-triattention.log"
 fi
 if kv_daemon turboquant; then
   bad "kv_compression=turboquant started (retired M20 codec, should fail closed)"

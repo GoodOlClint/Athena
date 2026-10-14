@@ -92,9 +92,9 @@ engine = "mlx"
 # speculative = false
 
 # KV-cache compression (default "none"): "none" or
-# "triattention" (norm-only TriAttention token eviction — caps the cache
-# by dropping low-importance decode tokens; Qwen3.5-only, inert on other
-# architectures and on the MTP/speculative path).
+# "triattention" (norm-only TriAttention token eviction; Qwen3.5-only).
+# triattention is refused at startup while the pinned MLX substrate lacks
+# it (ADR 028, 2026-10-14 amendment); it returns with a later substrate tag.
 # The ATHENA_KV_COMPRESSION env var overrides this. An unrecognized value
 # is a hard startup error; a valid-but-inert codec (e.g. triattention on
 # a non-Qwen model) warns and runs uncompressed.

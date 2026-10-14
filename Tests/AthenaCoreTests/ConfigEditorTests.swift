@@ -196,10 +196,26 @@ final class ConfigEditorTests: XCTestCase {
         try ConfigEditor.setScalarThrowing(
             key: "engine", value: "stub", in: url)
         try ConfigEditor.setScalarThrowing(
-            key: "kv_compression", value: "triattention", in: url)
+            key: "kv_compression", value: "none", in: url)
         let out = try String(contentsOf: url, encoding: .utf8)
         XCTAssertTrue(out.contains("engine = \"stub\""))
-        XCTAssertTrue(out.contains("kv_compression = \"triattention\""))
+        XCTAssertTrue(out.contains("kv_compression = \"none\""))
+    }
+
+    /// ADR 028 2026-10-14 amendment — `triattention` is a known case the pinned
+    /// substrate cannot serve; set-time refuses it with the named reason and
+    /// leaves the file untouched.
+    func testRefusesUnavailableTriattention() throws {
+        let url = try tempConfig("listen_port = 7447\n")
+        XCTAssertThrowsError(
+            try ConfigEditor.setScalarThrowing(
+                key: "kv_compression", value: "triattention", in: url)
+        ) { err in
+            XCTAssertTrue(
+                "\(err)".contains("does not include TriAttention"), "\(err)")
+        }
+        let out = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertFalse(out.contains("kv_compression"))
     }
 
     /// B15: a NEW bare top-level key must be inserted BEFORE the first
