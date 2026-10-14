@@ -2030,9 +2030,9 @@ echo "== phase 12: kv_compression knob — daemon-start contract (M21) =="
 # `kv_compression` is resolved ONCE at daemon start (Load.swift),
 # independent of the engine — so the stub daemon exercises the real
 # accept / fail-closed contract. TriAttention (M21) is absent from the
-# pinned substrate (ADR 028, 2026-10-14 amendment), which ignores an unknown
-# kvScheme, so it must REFUSE to start with the named reason rather than run
-# uncompressed. An unknown value must REFUSE to start (no silent
+# pinned substrate (ADR 028, 2026-10-14 amendment), which fails every request
+# carrying an unknown kvScheme, so it must REFUSE to start with the named
+# reason. An unknown value must REFUSE to start (no silent
 # fallback to none) — this now includes the retired M20 `turboquant`
 # codec. Honors this script's invariants: --engine stub, loopback,
 # ephemeral data dir.

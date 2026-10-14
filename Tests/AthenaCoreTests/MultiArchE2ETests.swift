@@ -109,6 +109,9 @@ final class MultiArchE2ETests: XCTestCase {
     /// inert — generation still succeeds (runs uncompressed), it does not
     /// crash or degenerate.
     func testTriattentionInertOnNonQwenStillGenerates() async throws {
+        if let reason = KVCompression.triattention.unavailableReason {
+            throw XCTSkip(reason)
+        }
         let model = try skipUnlessEnabled()
         let llm = try await makeLLM(model, kv: .triattention)
         var out = ""

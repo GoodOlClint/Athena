@@ -626,12 +626,15 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         mtpDrafterName = nil
         guard params.speculative else { return }
         guard let mt = modelType?.lowercased() else { return }
-        // Qwen3.5 MTP (publication S0): the fused `mtp.*` head ships inside the
-        // TARGET checkpoint, so the substrate drafter loads from the same
-        // directory — no separate drafter repo / pairing map. Inert when the
-        // checkpoint carries no `mtp.*` weights.
         if mt.hasPrefix("qwen3_5") {
-            await loadQwen35MTPDrafter(targetName: targetName)
+            // ponytail: Qwen3.5 MTP stays inert at integration-2026-10-14. Its
+            // substrate iterator prefills the whole prompt in one unchunked
+            // forward (full-vocab logits per position), outside Athena's
+            // 512-token window and the ADR 030 ceiling; re-enable after that is
+            // measured (#92).
+            Self.log.notice(
+                "Qwen3.5 MTP speculative is disabled at this substrate pin (#92); decoding without a drafter",
+                metadata: ["function": "loadMTPDrafterIfEligible"])
             return
         }
         // The substrate drafter (`Gemma4AssistantDraftModel`) only drafts for a
@@ -886,13 +889,23 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                                     case .rejectedToolCall(let r):
                                         // Tool-call-shaped output the substrate
                                         // could not turn into a call. Before
-                                        // integration-2026-10-14 it flushed as
-                                        // content; keep that. The preview may
-                                        // hold argument values, so the log line
+                                        // integration-2026-10-14 malformed and
+                                        // incomplete calls flushed as content,
+                                        // and that is kept; a call to an
+                                        // undeclared tool, which used to pass
+                                        // through as a tool call, also lands
+                                        // here now. The preview may hold
+                                        // argument values, so the log line
                                         // carries the reason only.
                                         Self.log.notice(
                                             "rejected tool call: \(r.reason.rawValue) (\(r.rawTextByteCount) bytes, preview truncated: \(r.isPreviewTruncated))"
                                         )
+                                        // A truncated preview has lost its
+                                        // middle bytes; returning it as
+                                        // content would corrupt the answer.
+                                        if r.isPreviewTruncated {
+                                            throw RejectedToolCallError(r)
+                                        }
                                         continuation.yield(.text(r.rawTextPreview))
                                     case .info(let info):
                                         // Substrate's terminal completion
@@ -1286,19 +1299,10 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
         // #88 — the prefill window is Athena's, not the substrate default
         // (see `GuidedSubstrate.prefill`). Adopting a model-chosen window is
         // #88 direction 2 and requires the peak-prefill-memory measurement.
-        let gp = GenerateParameters(
+        let gp = Self.serveParameters(
             maxTokens: Self.effectiveMaxTokens(maxTokens, params.maxTokens),
             kvScheme: params.kvCompression.kvScheme,
-            temperature: temp,
-            topP: tp,
-            prefill: GuidedSubstrate.prefill,
-            seed: requestSeed)
-        // Publication S0 — TriAttention eviction now rides the substrate's
-        // `kvScheme` hook on `gp` (upstream `applyKVScheme` swaps each
-        // `KVCacheSimple` for a `TriAttentionKVCache` when the cache is built
-        // inside `generate`); no task-local, no vendored model. The substrate
-        // deliberately skips eviction on the MTP/speculative path, matching the
-        // old inert-on-MTP behavior.
+            temperature: temp, topP: tp, seed: requestSeed)
         do {
             let userInput = UserInput(
                 chat: Self.chatMessages(messages), tools: tools,
@@ -1345,6 +1349,17 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                 input: lmInput, parameters: gp)
             return (stream, startsInReasoning)
         }
+    }
+
+    /// The standard serve path's generation parameters. The prefill window is
+    /// `GuidedSubstrate.prefill`, never the substrate default (#88).
+    static func serveParameters(
+        maxTokens: Int, kvScheme: String?, temperature: Float, topP: Float,
+        seed: UInt64?
+    ) -> GenerateParameters {
+        GenerateParameters(
+            maxTokens: maxTokens, kvScheme: kvScheme, temperature: temperature,
+            topP: topP, prefill: GuidedSubstrate.prefill, seed: seed)
     }
 
     /// A positive per-request `max_tokens` override wins; otherwise the

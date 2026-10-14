@@ -258,8 +258,9 @@ public enum ConfigEditor {
                 throw Failure.badValue(
                     key,
                     "one of "
-                        + KVCompression.allCases.map(\.rawValue)
-                        .joined(separator: ", "))
+                        + KVCompression.allCases
+                        .filter { $0.unavailableReason == nil }
+                        .map(\.rawValue).joined(separator: ", "))
             }
             if key == "kv_compression",
                 let reason = KVCompression(rawValue: value)?.unavailableReason

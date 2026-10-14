@@ -578,4 +578,11 @@ final class PrefillWindowPinTests: XCTestCase {
             PrefillParameters(stepSize: 512).chunkLength(forChunking: 1000), 512,
             "substrate default is no longer balanced; revisit this pin")
     }
+
+    func testServePathUsesThePinnedWindow() {
+        let gp = MLXLLMModule.serveParameters(
+            maxTokens: 16, kvScheme: nil, temperature: 0, topP: 1, seed: nil)
+        XCTAssertEqual(gp.prefill.stepSize, 512)
+        XCTAssertEqual(gp.prefill.chunkLength(forChunking: 1000), 512)
+    }
 }

@@ -53,9 +53,9 @@ final class KVCompressionTests: XCTestCase {
     }
 
     /// ADR 028 2026-10-14 amendment — the pinned substrate has no
-    /// TriAttention, and it silently ignores an unknown `kvScheme`, so
-    /// `triattention` must fail at resolve with the named reason (distinct
-    /// from the unknown-value error) instead of running uncompressed.
+    /// TriAttention and fails every request carrying an unknown `kvScheme`,
+    /// so `triattention` must fail at resolve with the named reason (distinct
+    /// from the unknown-value error) instead of at each request.
     func testTriattentionRefusedWithNamedReason() {
         for (env, toml) in [(nil, "triattention"), ("TriAttention ", "none")] {
             XCTAssertThrowsError(

@@ -26,8 +26,8 @@ public enum KVCompression: String, Sendable, CaseIterable, Equatable {
     case triattention
 
     /// Why this codec cannot run at the pinned substrate, or nil if it can.
-    /// The substrate ignores a `kvScheme` it does not recognize, so an
-    /// unavailable codec must be refused here rather than passed through.
+    /// The substrate fails every generation whose `kvScheme` it does not
+    /// recognize, so an unavailable codec is refused here, once, by name.
     public var unavailableReason: String? {
         switch self {
         case .none: return nil

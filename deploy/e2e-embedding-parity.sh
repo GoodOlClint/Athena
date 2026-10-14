@@ -45,12 +45,15 @@ def cosine(a, b):
     dot = sum(x * y for x, y in zip(a, b))
     return dot / (math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b)))
 
-worst = 1.0
+if not queries:
+    raise SystemExit("reference has no queries")
+cosines = []
 for q in queries:
     c = cosine(embed(q["prefixed_input"]), q["vector"])
-    worst = min(worst, c)
-    mark = "ok  " if c >= bar else "FAIL"
+    cosines.append(c)
+    mark = "ok  " if math.isfinite(c) and c >= bar else "FAIL"
     print(f"{mark} cos={c:.6f}  {q['prefixed_input']}")
-print(f"{len(queries)} queries, min cosine {worst:.6f}, bar {bar}")
-sys.exit(0 if worst >= bar else 1)
+passed = all(math.isfinite(c) and c >= bar for c in cosines)
+print(f"{len(cosines)} queries, min cosine {min(cosines):.6f}, bar {bar}")
+sys.exit(0 if passed else 1)
 PY

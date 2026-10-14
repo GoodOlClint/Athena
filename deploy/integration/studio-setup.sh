@@ -26,9 +26,9 @@
 #   KV_COMPRESSION  kv-cache compression: none|triattention
 #                 (default: unset → leaves the config default `none`).
 #                 Set to triattention (RUNBOOK scenario H) to bring the
-#                 host up in that posture (refused at startup while the
-#                 substrate pin lacks TriAttention — ADR 028, 2026-10-14
-#                 amendment). The ATHENA_KV_COMPRESSION env
+#                 host up in that posture (refused by `config set`, which
+#                 aborts this script, while the substrate pin lacks
+#                 TriAttention — ADR 028, 2026-10-14 amendment). The ATHENA_KV_COMPRESSION env
 #                 var still overrides this at daemon start (H3).
 #   ADMIN_USER    seeded admin account (default: admin)
 #   ADMIN_PASS    admin password (default: prompted, no echo)

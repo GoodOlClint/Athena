@@ -165,8 +165,8 @@ public enum StructuredSchema {
         return JSONValue.object(root).jsonString()
     }
 
-    /// llguidance compile options for the forced tool-call grammars: fixed
-    /// `", "` / `": "` separators instead of free whitespace. With free
+    /// llguidance compile options for the forced tool-call grammars: compact
+    /// `,` / `:` separators instead of free whitespace. With free
     /// whitespace a greedy model can emit whitespace forever where the grammar
     /// still needs `, "name"`, ending at max_tokens with no call (#234).
     private static let compactSeparators: JSONValue = .object([
