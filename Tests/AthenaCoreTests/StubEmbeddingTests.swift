@@ -1,3 +1,4 @@
+import AthenaCore
 import Foundation
 import XCTest
 
@@ -48,5 +49,15 @@ final class StubEmbeddingTests: XCTestCase {
         XCTAssertEqual(
             r1.vectors[0],
             StubEmbeddingModule.stubVector(text: "hi", model: "m1"))
+    }
+}
+
+final class StubEmbeddingColdLoadTests: XCTestCase {
+    func testColdLoadBindsStagedModel() async throws {
+        let stub = StubEmbeddingModule(modelIds: ["m1", "m2"], configuredDefault: "m1")
+        try await stub.selectColdLoadModel("m2")
+        try await stub.load(reservation: .init(module: .textEmbedding, bytes: 0))
+        let resident = await stub.residentModelId()
+        XCTAssertEqual(resident, "m2")
     }
 }

@@ -33,6 +33,9 @@ public protocol EmbeddingModule: InferenceModule {
     /// fallback. The returned batch reports the id actually served.
     func embed(_ texts: [String], model: String?) async throws
         -> EmbeddingBatch
+    /// M62 / #236 — stage the model the next cold load binds (the requested
+    /// one), validating it first so an unknown id is a 400 before any load.
+    func selectColdLoadModel(_ id: String?) async throws
 }
 
 /// M0 placeholder, still used by `--engine stub`. Returns a deterministic
@@ -77,6 +80,10 @@ public actor StubEmbeddingModule: EmbeddingModule, ModelSelectable {
         if residentId == nil { residentId = try desiredName ?? resolve(nil) }
     }
     public func unload() async { residentId = nil }
+
+    public func selectColdLoadModel(_ id: String?) async throws {
+        desiredName = try resolve(id)
+    }
 
     public func allowedModelIds() -> [String] { modelIds }
     public func defaultModelId() -> String {
