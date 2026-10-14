@@ -40,12 +40,9 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
     private var container: EmbedderModelContainer?
     /// The id currently resident in `container` (nil ⇒ nothing loaded).
     private var residentId: String?
-    /// NI3 — the operator's last selection (rebind/embed), staged so a
-    /// governor evict→reload restores it instead of silently reverting the
-    /// slot to the default. Survives `unload()`; `load(reservation:)`
-    /// honors `desiredName ?? residentId ?? <resolved default>`, mirroring the
-    /// LLM module's M62 cold-load-binds-requested-model seam.
-    private var desiredName: String?
+    /// NI3 + M62 — what a cold `load(reservation:)` binds: the staged request
+    /// model, else the last model that loaded. Survives `unload()`.
+    private var plan = EmbeddingSlotPlan()
     /// Real weight footprint, summed at load by walking
     /// `model.parameters().flattened()`. Surfaced via `residentBytes` so
     /// `/healthz` reports what the loaded model actually holds instead
@@ -138,7 +135,7 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
     public func admissionEstimate(forModel id: String?) throws
         -> (model: String, bytes: Int)
     {
-        let model = try id.map(resolve) ?? desiredName ?? residentId ?? resolve(nil)
+        let model = try id.map(resolve) ?? plan.loadTarget(defaultModel: { try resolve(nil) })
         let onDisk =
             localDirectory(for: model).map(ModelStoreLayout.safetensorsBytes)
             ?? 0
@@ -147,10 +144,12 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
 
     public func load(reservation: MemoryReservation) async throws {
         if container != nil { return }
-        // NI3: honor the staged selection on a cold/reload, else the resolved
-        // configured default (ADR 026 — throws if store empty/ambiguous).
-        let name = try desiredName ?? residentId ?? resolve(nil)
+        let name = try plan.loadTarget(defaultModel: { try resolve(nil) })
         try await loadContainer(name)
+    }
+
+    public func selectColdLoadModel(_ id: String?) async throws {
+        plan.stageColdTarget(try resolve(id))
     }
 
     public func unload() async {
@@ -170,8 +169,6 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
     /// the target by triggering a fresh load — same fixed governor reservation).
     public func rebind(to id: String?) async throws {
         let target = try resolve(id)
-        // NI3: remember the selection so a later evict→reload restores it.
-        desiredName = target
         if residentId == target, container != nil { return }
         container = nil
         residentId = nil
@@ -206,6 +203,7 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
                         directory: dir.resolvingSymlinksInPath()))
             container = loaded
             residentId = id
+            plan.loadSucceeded(id)
             // Sum `nbytes` over every parameter array — the substrate's
             // wired-memory.md calls this "the most accurate approach"
             // and the measurements there put it within ~MB of MLX's own
@@ -219,6 +217,7 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
             container = nil
             residentId = nil
             weightBytes = nil
+            plan.loadFailed()
             throw AthenaError.moduleLoadFailed(
                 .textEmbedding,
                 reason: "embedding model \(id): \(error)")
@@ -328,9 +327,6 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
     private func embedSerialized(
         _ texts: [String], target: String
     ) async throws -> EmbeddingBatch {
-        // NI3: a per-request selection is also an operator choice — stage it
-        // so a governor evict→reload restores the last-served model.
-        desiredName = target
         if residentId != target || container == nil {
             container = nil
             residentId = nil

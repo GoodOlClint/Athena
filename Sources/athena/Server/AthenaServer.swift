@@ -737,6 +737,9 @@ struct AthenaServer {
         module: ModuleID, model: String? = nil
     ) async -> Outcome<EmbeddingBatch> {
         do {
+            // #236 — a cold load binds the model this request names, not the
+            // default or a previously failed choice.
+            try await embedding.selectColdLoadModel(model)
             // M43.2: never block the request thread on a multi-GB cold-load.
             // `.loading` ⇒ 503+Retry-After so the client paces its retries.
             switch try await governor.awaitLoad(.textEmbedding, within: coldLoadWaitSecs) {
@@ -754,12 +757,12 @@ struct AthenaServer {
         } catch {
             // issue #6: classify (correct 4xx + type, OOM→503, no leak)
             // instead of a catch-all 500.
-            return .fail(Self.classified(error, module: module))
+            return .fail(Self.classified(error, module: module, model: model))
         }
         do {
             return .ok(try await embedding.embed(inputs, model: model))
         } catch {
-            return .fail(Self.classified(error, module: module))
+            return .fail(Self.classified(error, module: module, model: model))
         }
     }
 
@@ -1174,7 +1177,7 @@ struct AthenaServer {
     }
 
     static func classified(
-        _ err: any Error, module: ModuleID
+        _ err: any Error, module: ModuleID, model: String? = nil
     ) -> Response {
         let e = AthenaError.classify(err, module: module)
         // NE7: log the FULL detail (substrate paths/ids/state) to os_log,
@@ -1184,9 +1187,13 @@ struct AthenaServer {
             governed request failed module=\(module) \
             status=\(e.httpStatus) code=\(e.code) \(e.serverDetail ?? e.message)
             """)
+        var message = e.message
+        if case .moduleLoadFailed = e, let model, !model.isEmpty {
+            message = "Module \(module.rawValue) failed to load model '\(model)'."
+        }
         return error(
             status: HTTPResponse.Status(code: e.httpStatus),
-            message: e.message, type: e.type, code: e.code)
+            message: message, type: e.type, code: e.code)
     }
 }
 
