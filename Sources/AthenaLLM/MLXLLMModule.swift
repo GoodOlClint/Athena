@@ -868,6 +868,7 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                                     requestSpeculative: speculative)
                                 continuation.yield(
                                     .startsInReasoning(begun.startsInReasoning))
+                                var truncatedRejection: RejectedToolCall?
                                 for await event in begun.stream {
                                     switch event {
                                     case .chunk(let text):
@@ -903,10 +904,15 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                                         // A truncated preview has lost its
                                         // middle bytes; returning it as
                                         // content would corrupt the answer.
+                                        // The stream is drained before the
+                                        // throw so the producer has stopped
+                                        // before the inference gate opens.
                                         if r.isPreviewTruncated {
-                                            throw RejectedToolCallError(r)
+                                            truncatedRejection = r
+                                        } else {
+                                            continuation.yield(
+                                                .text(r.rawTextPreview))
                                         }
-                                        continuation.yield(.text(r.rawTextPreview))
                                     case .info(let info):
                                         // Substrate's terminal completion
                                         // record carries the token geometry.
@@ -927,6 +933,9 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                                     @unknown default:
                                         break
                                     }
+                                }
+                                if let truncatedRejection {
+                                    throw RejectedToolCallError(truncatedRejection)
                                 }
                                 continuation.yield(.usage(u))
                             }
