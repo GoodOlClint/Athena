@@ -136,5 +136,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          PRE=""
+          case "${GITHUB_REF_NAME}" in *-*) PRE="--prerelease" ;; esac
           gh release create "${GITHUB_REF_NAME}" "$DIST_DIR"/* \
-            --title "${GITHUB_REF_NAME}" --generate-notes --verify-tag
+            --title "${GITHUB_REF_NAME}" --generate-notes --verify-tag $PRE
