@@ -14,7 +14,9 @@ public enum AthenaError: Error, Sendable, Equatable {
         module: ModuleID, model: String?, weightBytes: Int, headroomBytes: Int,
         budgetBytes: Int)
     /// A module load failed in the substrate.
-    case moduleLoadFailed(ModuleID, reason: String)
+    /// `model`, when set, is the model whose load failed; only genuine load
+    /// failures carry it, so the client message names it for those alone.
+    case moduleLoadFailed(ModuleID, model: String? = nil, reason: String)
     /// No module is registered under this id.
     case moduleNotRegistered(ModuleID)
     /// An MLX/Metal allocation failed (genuine device OOM, distinct
@@ -212,7 +214,7 @@ public enum AthenaError: Error, Sendable, Equatable {
             return "Model \(model ?? module.rawValue) needs \(weights) B of weights"
                 + "\(kv), more than the \(budget) B memory budget; it can never "
                 + "be loaded. Raise budget_bytes or choose a smaller model."
-        case let .moduleLoadFailed(module, _):
+        case let .moduleLoadFailed(module, _, _):
             // NE7: the substrate `reason` (filesystem paths, repo ids,
             // internal state) is for the server log only — see
             // `serverDetail`. Keep the client body stable and detail-free.
@@ -311,12 +313,18 @@ public enum AthenaError: Error, Sendable, Equatable {
         }
     }
 
+    /// The model a `moduleLoadFailed` names, if any.
+    public var failedModel: String? {
+        if case let .moduleLoadFailed(_, model, _) = self { return model }
+        return nil
+    }
+
     /// Full, potentially-sensitive detail (substrate paths, repo ids,
     /// internal state) for the SERVER LOG ONLY — never the client body.
     /// nil when `message` is already safe to return verbatim (NE7).
     public var serverDetail: String? {
         switch self {
-        case let .moduleLoadFailed(_, reason): return reason
+        case let .moduleLoadFailed(_, _, reason): return reason
         case let .metalOutOfMemory(_, detail): return detail
         case let .noChatTemplate(_, detail): return detail
         case let .invalidAudio(_, detail): return detail

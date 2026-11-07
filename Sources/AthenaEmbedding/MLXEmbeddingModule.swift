@@ -191,7 +191,7 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
         guard let dir = localDirectory(for: id) else {
             plan.loadFailed()
             throw AthenaError.moduleLoadFailed(
-                .textEmbedding,
+                .textEmbedding, model: id,
                 reason: "model '\(id)' is not in the model store — pull "
                     + "it first (operator action); inference does not "
                     + "auto-download")
@@ -223,7 +223,7 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
             weightBytes = nil
             plan.loadFailed()
             throw AthenaError.moduleLoadFailed(
-                .textEmbedding,
+                .textEmbedding, model: id,
                 reason: "embedding model \(id): \(error)")
         }
     }
