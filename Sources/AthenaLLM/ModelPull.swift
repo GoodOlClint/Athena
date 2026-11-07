@@ -8,6 +8,38 @@ import MLXLMCommon
 /// `storeRoot/<name>`, so `serve --model <name>` and `athena list`
 /// pick it up without a multi-GB copy. M6-cli-3.
 public enum ModelPull {
+    /// A pull refused before any download or store write.
+    public enum PullError: Error, LocalizedError {
+        case noLoadableWeights(id: String, problem: String, guidance: String)
+        public var errorDescription: String? {
+            switch self {
+            case let .noLoadableWeights(id, problem, guidance):
+                return "'\(id)' has \(problem); \(guidance)"
+            }
+        }
+    }
+
+    /// Repo-relative file paths of `id`; the default asks the Hub.
+    public typealias FileLister =
+        @Sendable (_ id: String, _ revision: String?) async throws -> [String]
+
+    /// The checkpoint's modality, or nil when it cannot be determined.
+    public typealias ModalityProbe =
+        @Sendable (_ id: String, _ revision: String?) async -> ModelModality?
+
+    public static let hubModality: ModalityProbe = { id, revision in
+        try? await ModelPreflight.classify(id: id, revision: revision).modality
+    }
+
+    public static let hubFileLister: FileLister = { id, revision in
+        guard let repo = HuggingFace.Repo.ID(rawValue: id) else {
+            throw ModelStoreOps.OpError.invalidName(id)
+        }
+        let client = HuggingFace.HubClient(session: AthenaProxy.proxiedURLSession())
+        return try await client.listFiles(in: repo, revision: revision ?? "main")
+            .filter { $0.type == .file }.map(\.path)
+    }
+
     /// `progress` (0…1 download fraction) is optional — default nil
     /// keeps the daemon/queue callers unchanged; the CLI passes a
     /// renderer.
@@ -24,6 +56,8 @@ public enum ModelPull {
         id: String, revision: String? = nil, into storeRoot: URL,
         progress: (@Sendable (ModelOpProgress) -> Void)? = nil,
         maxAttempts: Int = 5,
+        listFiles: FileLister = ModelPull.hubFileLister,
+        modality: ModalityProbe = ModelPull.hubModality,
         onRetry: (
             @Sendable (
                 _ attempt: Int, _ maxAttempts: Int,
@@ -41,6 +75,19 @@ public enum ModelPull {
             session: AthenaProxy.proxiedURLSession())
         guard let repo = HuggingFace.Repo.ID(rawValue: id) else {
             throw ModelStoreOps.OpError.invalidName(id)
+        }
+        // Best-effort: a listing failure (offline/gated) is left to the download
+        // below, which has its own retry and error reporting.
+        if let files = try? await listFiles(id, revision) {
+            let generic = WeightFiles.listingProblem(files: files, modality: nil)
+            let probed = generic == nil ? await modality(id, revision) : nil
+            if let problem = generic
+                ?? WeightFiles.listingProblem(files: files, modality: probed)
+            {
+                throw PullError.noLoadableWeights(
+                    id: id, problem: problem,
+                    guidance: WeightFiles.guidance(modality: probed))
+            }
         }
         while true {
             do {

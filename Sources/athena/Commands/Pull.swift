@@ -43,8 +43,8 @@ struct Pull: AsyncParsableCommand {
 
     func run() async throws {
         // ADR 021 S4 — `--check` is a host-independent dry run: it classifies
-        // from a config-only HF metadata fetch (the sanctioned passive-oracle
-        // egress) and downloads nothing, so it behaves identically in local and
+        // from a metadata-only HF fetch (config files + repo file listing)
+        // and downloads no weights, so it behaves identically in local and
         // remote mode and never contacts the daemon.
         if check {
             ProxyEnv.applyConfigAndAuth()  // egress proxy (M13.2)
@@ -64,7 +64,7 @@ struct Pull: AsyncParsableCommand {
             ?? ModelStore.defaultRoot
         ProxyEnv.applyConfigAndAuth()  // egress proxy (M13.2)
         HFAuth.exportToEnv()  // gated/private repos (M13)
-        // ADR 021 S4 — config-only preflight gate BEFORE the multi-GB pull:
+        // ADR 021 S4 — metadata-only preflight gate BEFORE the multi-GB pull:
         // refuse-early on a known-unsupported packaging (no wasted download),
         // warn-and-proceed on `.unknown` (best-effort generative/vision), and
         // proceed silently on `.loadable`. The gate is best-effort: a preflight
@@ -139,6 +139,10 @@ struct Pull: AsyncParsableCommand {
                 })
             r.finish()
             print("pulled \(id) → \(dest.path)")
+        } catch let e as ModelPull.PullError {
+            r.finish()
+            print("error: \(ModelPull.friendlyError(e)). Nothing was downloaded.")
+            throw ExitCode.failure
         } catch {
             r.finish()
             print("error: pull failed — \(ModelPull.friendlyError(error))")
@@ -149,7 +153,7 @@ struct Pull: AsyncParsableCommand {
         }
     }
 
-    /// `athena pull <id> --check` — config-only dry run. Fetches the model's
+    /// `athena pull <id> --check` — metadata-only dry run. Fetches the model's
     /// metadata, classifies it with the shared `ModelSupport` predicate, prints
     /// the verdict, and downloads no weights. Exits non-zero when the packaging
     /// is unsupported so a script can gate on it.

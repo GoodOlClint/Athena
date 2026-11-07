@@ -21,7 +21,9 @@ public enum ModelHealth {
         }
     }
     /// Empty ⇒ healthy. Each string is one human-readable problem.
-    public static func check(_ entry: URL) -> [String] {
+    /// `loaderRules: false` skips the loader-filename rules that only `verify`
+    /// reports, so `prune` selects exactly what it always did.
+    public static func check(_ entry: URL, loaderRules: Bool = true) -> [String] {
         let fm = FileManager.default
         // Resolve a symlinked model dir (how `pull` and `cp` alias
         // land) so enumeration sees the real contents; a dangling
@@ -47,6 +49,13 @@ public enum ModelHealth {
         problems += safetensorsProblems(dir)
 
         let support = ModelSupport.detect(in: dir)
+        if loaderRules, case .transcription(.whisper) = support.modality,
+            WeightFiles.whisper(in: dir) == nil
+        {
+            problems.append(
+                "no \(WeightFiles.whisperNames.joined(separator: " or ")) "
+                    + "(the Whisper loader opens only these)")
+        }
         // The packaging verdict, not just the modality: a checkpoint whose
         // fields the loader needs are missing (e.g. a non-large-v3 Whisper
         // vocab, or a transformers-format Parakeet export with no
