@@ -287,10 +287,6 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
             padTokenId: (obj["pad_token_id"] as? NSNumber)?.intValue)
     }
 
-    static func inputCeiling(for model: any EmbeddingModel) -> Int {
-        inputCeiling(maxPositionEmbeddings: model.maxPositionEmbeddings)
-    }
-
     static func checkInputLengths(
         _ lengths: [Int], maxPositionEmbeddings: Int?,
         reservedPositions: Int = 0
