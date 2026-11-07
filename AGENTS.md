@@ -49,7 +49,7 @@ OpenAI-compatible drop-in, **[native]** = Athena extension under `/v1`):
 - `POST /v1/chat/completions/count_tokens` **[native]** — exact pre-flight `{prompt_tokens}` for a chat body (same template/tokenizer as the request path, ADR 042); no OpenAI equivalent; no generation, no inference gate, not metered
 - `POST /v1/messages/count_tokens` **[anthropic]** — the Messages-dialect analogue (`{input_tokens}`), same decoder + same counting core, so the two dialects report the same number for the same conversation (ADR 042 §4(a), deferral lifted 2026-07-25 for dialect parity)
 - `POST /v1/embeddings` **[oai]**
-- `POST /v1/audio/transcriptions` **[oai]** — word timestamps, SRT/VTT; plus **Athena-native extension fields** on `verbose_json` (#246): response `model`, per-segment `no_speech_prob` and `compression_ratio` (Whisper only), none of which OpenAI's verbose_json has; fields are omitted when absent, never zero
+- `POST /v1/audio/transcriptions` **[oai]** — word timestamps, SRT/VTT; `verbose_json` segments carry `avg_logprob` (both engines) and, Whisper only, the OpenAI-standard `no_speech_prob` + `compression_ratio`; the response-level `model` id is an **Athena-native extension field** (#246). Optional fields are omitted when absent, never zero
 - `POST /v1/video/transcriptions` **[native]** — demux a video's audio track → transcription (ADR 022); no OpenAI equivalent
 - `POST /v1/audio/diarizations` **[native]** — no OpenAI equivalent
 - `POST /v1/audio/embeddings` (speaker embeddings) **[native]** — no OpenAI equivalent
