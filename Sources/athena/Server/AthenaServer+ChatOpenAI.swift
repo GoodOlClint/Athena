@@ -347,7 +347,10 @@ extension AthenaServer {
             let deadlineSecs =
                 body.timeout.map { $0 > 0 ? $0 : 0 }
                 ?? requestTimeoutSecs
-            collected = try await collectMetered(seconds: deadlineSecs) {
+            collected = try await collectMetered(
+                seconds: deadlineSecs,
+                meterFailure: { await meter(principal: principal, usage: $0) }
+            ) {
                 llm.generateMetered(native)
             }
         } catch let e as AthenaError {
@@ -675,6 +678,7 @@ extension AthenaServer {
     /// heartbeat reported nothing.
     func collectMetered(
         seconds: Int,
+        meterFailure: @escaping @Sendable (TokenUsage) async -> Void = { _ in },
         _ eventsBuilder: @escaping @Sendable () -> AsyncStream<GenChunk>
     ) async throws -> GenCollected {
         try await withInferenceDeadline(seconds: seconds) {
@@ -825,6 +829,7 @@ extension AthenaServer {
                             // HTTP layer's `do { ... } catch let e as AthenaError`
                             // returns the right status/code instead of a 200
                             // with the error text in the chat content.
+                            if c.usage != .zero { await meterFailure(c.usage) }
                             throw athenaErr
                         }
                     }

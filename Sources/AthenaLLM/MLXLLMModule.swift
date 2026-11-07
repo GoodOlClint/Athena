@@ -935,7 +935,9 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                                     }
                                 }
                                 if let truncatedRejection {
-                                    throw RejectedToolCallError(truncatedRejection)
+                                    throw Self.failTruncatedRejection(
+                                        truncatedRejection, usage: u
+                                    ) { continuation.yield($0) }
                                 }
                                 continuation.yield(.usage(u))
                             }
@@ -962,6 +964,9 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
                     // instead of being a real 400.
                     let classified =
                         (error as? AthenaError)
+                        ?? (error as? RejectedToolCallError).map {
+                            Self.athenaError(for: $0.rejection)
+                        }
                         ?? AthenaError.classify(error, module: .llm)
                     continuation.yield(.error(classified))
                 }
@@ -969,6 +974,24 @@ public actor MLXLLMModule: LLMModule, ModelSelectable {
             }
             continuation.onTermination = { _ in task.cancel() }
         }
+    }
+
+    /// The classified error for a substrate-rejected tool call; reason and byte
+    /// count only, never `rawTextPreview`.
+    static func athenaError(for r: RejectedToolCall) -> AthenaError {
+        .rejectedToolCall(
+            reason: r.reason.rawValue, rawTextByteCount: r.rawTextByteCount)
+    }
+
+    /// A decode that completed and then lost its output to a truncated
+    /// rejection still spent GPU time: emit its real usage before the failure
+    /// so the consumer meters it.
+    static func failTruncatedRejection(
+        _ r: RejectedToolCall, usage: TokenUsage,
+        emit: (GenChunk) -> Void
+    ) -> AthenaError {
+        emit(.usage(usage))
+        return athenaError(for: r)
     }
 
     /// The masking / logit-capture decode path. Returns the full decoded text,

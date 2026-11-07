@@ -177,7 +177,10 @@ extension AthenaServer {
 
         let collected: GenCollected
         do {
-            collected = try await collectMetered(seconds: deadlineSecs) {
+            collected = try await collectMetered(
+                seconds: deadlineSecs,
+                meterFailure: { await meter(principal: principal, usage: $0) }
+            ) {
                 llm.generateMetered(lowered.native)
             }
         } catch let e as AthenaError {
