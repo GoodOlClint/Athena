@@ -3,7 +3,7 @@ import Foundation
 
 /// Typed inference contract for the LLM module. The MLX-backed
 /// implementation lands in M1; this protocol is what the serve path holds.
-public protocol LLMModule: InferenceModule {
+public protocol LLMModule: InferenceModule, ModelSelectable {
     /// M71.2 — true when the resident model accepts image inputs (a vision
     /// checkpoint loaded via the substrate VLM path). The serve path gates
     /// OpenAI `image_url` content-parts on this. Default false (text-only
@@ -79,19 +79,6 @@ public protocol LLMModule: InferenceModule {
         tools: [[String: any Sendable]]?,
         chatTemplateKwargs: [String: any Sendable]?
     ) async throws -> Int
-
-    /// M62 — choose the model the NEXT governor cold-load will bind, WITHOUT
-    /// loading now: the non-blocking cold-load path (`beginLoadIfNeeded`)
-    /// drives the actual load under the governor's reservation, and a cold
-    /// slot would otherwise always bind the DEFAULT — so a request for a
-    /// non-default model on a just-restarted/evicted slot silently served
-    /// the wrong model. Set the target here (before the load is kicked off)
-    /// and the cold-load binds it directly. Validated against the allowlist
-    /// so an unknown id throws `AthenaError.modelNotAvailable` (400) BEFORE a
-    /// doomed multi-GB load starts; `nil`/empty clears the override so the
-    /// cold-load uses the default. Default no-op for conformers whose slot
-    /// can't swap.
-    func selectColdLoadModel(_ id: String?) async throws
 }
 
 extension LLMModule {
@@ -99,8 +86,6 @@ extension LLMModule {
     public var servesVision: Bool { get async { false } }
 
     public func preflightPromptCache(prompt: String) async throws {}
-
-    public func selectColdLoadModel(_ id: String?) async throws {}
 
     public func countPromptTokens(
         messages: [ChatTurn],

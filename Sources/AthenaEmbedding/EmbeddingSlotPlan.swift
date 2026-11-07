@@ -21,5 +21,7 @@ struct EmbeddingSlotPlan: Equatable {
         coldTarget = nil
     }
 
-    mutating func loadFailed() { coldTarget = nil }
+    mutating func loadFailed() { clearColdTarget() }
+
+    mutating func clearColdTarget() { coldTarget = nil }
 }
