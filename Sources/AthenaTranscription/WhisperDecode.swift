@@ -1,6 +1,7 @@
 import Foundation
 import MLX
 import MLXLMCommon
+import zlib
 
 /// Greedy KV-cached Whisper decoding with language auto-detect and
 /// timestamps (M4.2c → M4.2e). Timestamps are always decoded; the
@@ -12,6 +13,7 @@ public enum WhisperDecode {
     static let sot = 50_258  // <|startoftranscript|>
     static let langBase = 50_259  // <|en|> ; lang i → langBase+i
     static let transcribe = 50_360
+    static let noSpeech = 50_363
     static let noTimestamps = 50_364
     static let timestampBegin = 50_365  // <|0.00|> ; step 0.02 s
     static let timeStep = 0.02
@@ -79,6 +81,26 @@ public enum WhisperDecode {
         var m = [Float](repeating: 0, count: vocab)
         for i in (eot + 1) ..< timestampBegin { m[i] = -1e9 }
         return MLXArray(m)
+    }
+
+    /// Softmax probability of `<|nospeech|>` over one position's raw logits.
+    static func noSpeechProb(_ logits: [Float]) -> Double? {
+        guard noSpeech < logits.count, let mx = logits.max() else { return nil }
+        var sum = 0.0
+        for l in logits { sum += Double(exp(l - mx)) }
+        return Double(exp(logits[noSpeech] - mx)) / sum
+    }
+
+    /// UTF-8 byte length / zlib-compressed byte length; nil for empty text.
+    static func compressionRatio(_ text: String) -> Double? {
+        var src = [UInt8](text.utf8)
+        guard !src.isEmpty else { return nil }
+        var cap = compressBound(uLong(src.count))
+        var dst = [UInt8](repeating: 0, count: Int(cap))
+        guard compress(&dst, &cap, &src, uLong(src.count)) == Z_OK else {
+            return nil
+        }
+        return Double(src.count) / Double(cap)
     }
 
     /// A timestamp-delimited span before tokenizer decoding: its
@@ -152,6 +174,7 @@ public enum WhisperDecode {
         text: String, segments: [TranscriptionSegment],
         contentTokens: [Int], segmentRanges: [Range<Int>]
     ) {
+        var noSpeech: Double?
         let prefix = [sot, langTok, transcribe]
         var generated: [Int] = []
         var genLogprobs: [Double] = []
@@ -164,6 +187,10 @@ public enum WhisperDecode {
             let inp = MLXArray(ids.map { Int32($0) }, [1, ids.count])
             let lg = model.logits(
                 inp, audio: audio, offset: offset, cache: cache)
+            if offset == 0 {
+                noSpeech = noSpeechProb(
+                    lg[0, 0, 0...].asArray(Float.self))
+            }
             let last = lg[0..., -1, 0...] + mask
             let n = argMax(last, axis: -1).item(Int.self)
             // log-softmax of the chosen id under the decode distribution.
@@ -205,7 +232,8 @@ public enum WhisperDecode {
             segments.append(
                 TranscriptionSegment(
                     start: p.start, end: p.end, text: t,
-                    avgLogprob: p.avgLogprob))
+                    avgLogprob: p.avgLogprob, noSpeechProb: noSpeech,
+                    compressionRatio: compressionRatio(t)))
             segmentRanges.append(range)
         }
 
@@ -265,7 +293,9 @@ public enum WhisperDecode {
                 contentsOf: segs.map {
                     TranscriptionSegment(
                         start: $0.start + off, end: $0.end + off,
-                        text: $0.text, avgLogprob: $0.avgLogprob)
+                        text: $0.text, avgLogprob: $0.avgLogprob,
+                        noSpeechProb: $0.noSpeechProb,
+                        compressionRatio: $0.compressionRatio)
                 })
             segWords.append(contentsOf: segs.map { _ in [WordTiming]() })
             if wordTimestamps {
@@ -314,7 +344,8 @@ public enum WhisperDecode {
             ? allSegments.enumerated().map { i, s in
                 TranscriptionSegment(
                     start: s.start, end: s.end, text: s.text,
-                    avgLogprob: s.avgLogprob,
+                    avgLogprob: s.avgLogprob, noSpeechProb: s.noSpeechProb,
+                    compressionRatio: s.compressionRatio,
                     words: segWords[i].isEmpty ? nil : segWords[i])
             }
             : allSegments

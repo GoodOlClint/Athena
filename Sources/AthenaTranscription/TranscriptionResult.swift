@@ -28,17 +28,27 @@ public struct TranscriptionSegment: Sendable, Codable {
     /// span (M26.1). nil when not tracked (e.g. the stub). Surfaced only
     /// in the `verbose_json` response; other formats ignore it.
     public let avgLogprob: Double?
+    /// Probability of the `<|nospeech|>` token at the window's first decode
+    /// step (Whisper only; nil for other engines). Surfaced only in
+    /// `verbose_json`.
+    public let noSpeechProb: Double?
+    /// UTF-8 byte length / zlib-compressed byte length of `text` (Whisper
+    /// only; nil for other engines). Surfaced only in `verbose_json`.
+    public let compressionRatio: Double?
     /// Words whose timing falls within this span (M26.2). nil when word
     /// timestamps were not requested; surfaced only in `verbose_json`.
     public let words: [WordTiming]?
     public init(
         start: Double, end: Double, text: String,
-        avgLogprob: Double? = nil, words: [WordTiming]? = nil
+        avgLogprob: Double? = nil, noSpeechProb: Double? = nil,
+        compressionRatio: Double? = nil, words: [WordTiming]? = nil
     ) {
         self.start = start
         self.end = end
         self.text = text
         self.avgLogprob = avgLogprob
+        self.noSpeechProb = noSpeechProb
+        self.compressionRatio = compressionRatio
         self.words = words
     }
 }
@@ -53,15 +63,25 @@ public struct TranscriptionResult: Sendable {
     /// All aligned words across the audio (M26.2), empty unless word
     /// timestamps were requested. Surfaced only in `verbose_json`.
     public let words: [WordTiming]
+    /// Resident model id that produced this result; nil when unknown.
+    public let model: String?
     public init(
         text: String, language: String, duration: Double,
-        segments: [TranscriptionSegment], words: [WordTiming] = []
+        segments: [TranscriptionSegment], words: [WordTiming] = [],
+        model: String? = nil
     ) {
         self.text = text
         self.language = language
         self.duration = duration
         self.segments = segments
         self.words = words
+        self.model = model
+    }
+
+    public func withModel(_ model: String?) -> TranscriptionResult {
+        TranscriptionResult(
+            text: text, language: language, duration: duration,
+            segments: segments, words: words, model: model)
     }
 }
 

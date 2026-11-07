@@ -118,6 +118,6 @@ public actor StubTranscriptionModule: TranscriptionModule, ModelSelectable {
                     text: "[athena stub transcription]",
                     words: wordTimestamps ? words : nil)
             ],
-            words: words)
+            words: words, model: residentId)
     }
 }

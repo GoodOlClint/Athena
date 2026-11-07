@@ -51,13 +51,17 @@ Whisper stays the default when `model` is omitted.
 
 ## Timestamps
 
-Both engines populate `verbose_json` `segments` (with `start`/`end`/`text`/
-`avg_logprob`) and, when `timestamp_granularities[]=word` is set, top-level and
-per-segment `words`. SRT/VTT render the same segments. For Parakeet the timing
-comes from the **TDT durations** (`time_ratio` = 0.08 s per encoder frame):
-each emitted token carries a start + duration, grouped into words (at the `▁`
-SentencePiece boundary) and sentences (at terminal punctuation). `avg_logprob`
-is the mean per-token log-probability over the segment.
+Both engines populate `verbose_json` `segments` (with `start`/`end`/`text`)
+and a top-level `model` (the resident model id), and, when
+`timestamp_granularities[]=word` is set, top-level and per-segment `words`.
+Segments carry `avg_logprob` (mean per-token log-probability; Parakeet derives
+it from token confidence). Whisper segments also carry `no_speech_prob` (probability of the `<|nospeech|>` token at the window's first
+decode step, shared by the segments of a 30 s window) and `compression_ratio`
+(UTF-8 bytes / zlib-compressed bytes of the segment text); Parakeet omits
+those two. SRT/VTT render the same segments. For Parakeet the timing comes from the
+**TDT durations** (`time_ratio` = 0.08 s per encoder frame): each emitted token
+carries a start + duration, grouped into words (at the `▁` SentencePiece
+boundary) and sentences (at terminal punctuation).
 
 ## Long audio
 

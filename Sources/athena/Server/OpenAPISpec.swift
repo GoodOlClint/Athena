@@ -244,7 +244,7 @@ enum OpenAPISpec {
               "post": {
                 "tags": ["Audio"],
                 "summary": "Transcribe audio.",
-                "description": "OpenAI-compatible multipart upload. `response_format` of `json` (default), `text`, `srt`, `vtt`, or `verbose_json`; `timestamp_granularities[]=word` adds word timings; `diarize=true` adds per-segment speaker ids in verbose_json. `diarized_json` is an **Athena-native** alias (ADR 013 #3) that *implies* diarization (no `diarize` flag needed) and returns the verbose envelope with every segment speaker-labeled — speaker is Athena's integer id, not OpenAI's string label. The engine is chosen by the resident model's class (ADR 020): Whisper (default) or Parakeet-TDT (multilingual; word/segment timestamps from TDT durations). Max upload size = `max_audio_upload_bytes` (default 100 MiB) over the raw multipart body; over it ⇒ 413 payload_too_large. Requires `inference`.",
+                "description": "OpenAI-compatible multipart upload. `response_format` of `json` (default), `text`, `srt`, `vtt`, or `verbose_json`; `timestamp_granularities[]=word` adds word timings; `diarize=true` adds per-segment speaker ids in verbose_json. `verbose_json` carries the resident `model` id on the response (both engines); segments carry `avg_logprob` (both engines); Whisper segments also carry `no_speech_prob` (probability of the `<|nospeech|>` token at the window's first decode step, shared by every segment of a 30 s window) and `compression_ratio` (UTF-8 bytes / zlib-compressed bytes of the segment text; high values flag repetition loops). `no_speech_prob` and `compression_ratio` are Whisper-only: Parakeet segments omit them (omitted, never zero). `diarized_json` is an **Athena-native** alias (ADR 013 #3) that *implies* diarization (no `diarize` flag needed) and returns the verbose envelope with every segment speaker-labeled — speaker is Athena's integer id, not OpenAI's string label. The engine is chosen by the resident model's class (ADR 020): Whisper (default) or Parakeet-TDT (multilingual; word/segment timestamps from TDT durations). Max upload size = `max_audio_upload_bytes` (default 100 MiB) over the raw multipart body; over it ⇒ 413 payload_too_large. Requires `inference`.",
                 "requestBody": {
                   "required": true,
                   "content": { "multipart/form-data": { "schema": {
@@ -276,7 +276,7 @@ enum OpenAPISpec {
               "post": {
                 "tags": ["Video"],
                 "summary": "Transcribe a video's audio track.",
-                "description": "**Athena-native, NOT OpenAI-compatible** (OpenAI has no video API). Multipart upload of a video container (mp4/mov/…); Athena demuxes the audio track and transcribes it via the same Whisper/Parakeet tenant as `/v1/audio/transcriptions`, returning the identical response shapes (`json` default, `text`, `srt`, `vtt`, `verbose_json`; `timestamp_granularities[]=word`). `model` selects the resident transcription model. A video with no audio track ⇒ 400 video_no_audio_track; sub-0.1 s or undecodable audio ⇒ 400 (shared decode floor). diarization on video is not yet wired ⇒ 501 not_implemented for both `diarize=true` and `response_format=diarized_json` (transcribe, then POST the extracted audio to /v1/audio/diarizations). Max upload size = `max_video_upload_bytes` (default 1 GiB); over it ⇒ 413 payload_too_large. Requires `inference`.",
+                "description": "**Athena-native, NOT OpenAI-compatible** (OpenAI has no video API). Multipart upload of a video container (mp4/mov/…); Athena demuxes the audio track and transcribes it via the same Whisper/Parakeet tenant as `/v1/audio/transcriptions`, returning the identical response shapes (`json` default, `text`, `srt`, `vtt`, `verbose_json`; `timestamp_granularities[]=word`). `verbose_json` adds `model` and, for Whisper only, per-segment `no_speech_prob` and `compression_ratio` as on `/v1/audio/transcriptions`. `model` selects the resident transcription model. A video with no audio track ⇒ 400 video_no_audio_track; sub-0.1 s or undecodable audio ⇒ 400 (shared decode floor). diarization on video is not yet wired ⇒ 501 not_implemented for both `diarize=true` and `response_format=diarized_json` (transcribe, then POST the extracted audio to /v1/audio/diarizations). Max upload size = `max_video_upload_bytes` (default 1 GiB); over it ⇒ 413 payload_too_large. Requires `inference`.",
                 "requestBody": {
                   "required": true,
                   "content": { "multipart/form-data": { "schema": {
@@ -961,7 +961,24 @@ enum OpenAPISpec {
                   "language": { "type": "string" },
                   "duration": { "type": "number" },
                   "text": { "type": "string" },
-                  "segments": { "type": "array", "items": { "type": "object" } },
+                  "model": { "type": "string", "description": "Resident transcription model id that produced the transcript (both engines)." },
+                  "segments": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": { "type": "integer" },
+                        "start": { "type": "number" },
+                        "end": { "type": "number" },
+                        "text": { "type": "string" },
+                        "avg_logprob": { "type": "number", "description": "Mean per-token log-probability of the segment (Whisper and Parakeet); omitted when not tracked." },
+                        "no_speech_prob": { "type": "number", "description": "Whisper only; probability of the <|nospeech|> token at the window's first decode step. Omitted otherwise, never zero." },
+                        "compression_ratio": { "type": "number", "description": "Whisper only; UTF-8 bytes / zlib-compressed bytes of the segment text. Omitted otherwise, never zero." },
+                        "speaker": { "type": "integer" },
+                        "words": { "type": "array", "items": { "type": "object" } }
+                      }
+                    }
+                  },
                   "words": { "type": "array", "items": { "type": "object" } }
                 }
               },
