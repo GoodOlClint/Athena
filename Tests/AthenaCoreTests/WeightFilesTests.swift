@@ -97,6 +97,12 @@ final class WeightFilesTests: XCTestCase {
         XCTAssertTrue(left.isEmpty, "no store entry may remain, found \(left)")
     }
 
+    func testGenericListingWithoutSafetensorsIsRejected() {
+        XCTAssertNotNil(
+            WeightFiles.listingProblem(
+                files: ["config.json", "weights.npz"], modality: nil))
+    }
+
     // (d)
     func testSafetensorsListingsAreAccepted() {
         XCTAssertNil(

@@ -1188,7 +1188,7 @@ struct AthenaServer {
             status=\(e.httpStatus) code=\(e.code) \(e.serverDetail ?? e.message)
             """)
         var message = e.message
-        if case .moduleLoadFailed = e, let model, !model.isEmpty {
+        if case .moduleLoadFailed(_, _, nil) = e, let model, !model.isEmpty {
             message = "Module \(module.rawValue) failed to load model '\(model)'."
         }
         return error(
