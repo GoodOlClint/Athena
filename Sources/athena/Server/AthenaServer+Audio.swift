@@ -190,15 +190,6 @@ extension AthenaServer {
                 status: .ok, headers: headers,
                 body: ResponseBody(byteBuffer: buf))
         }
-        func words(_ ws: [WordTiming]?) -> [WordTimestamp]? {
-            ws.map {
-                $0.map {
-                    WordTimestamp(
-                        word: $0.word, start: $0.start, end: $0.end,
-                        probability: $0.probability)
-                }
-            }
-        }
         switch format {
         case "text":
             return plain(result.text, "text/plain; charset=utf-8")
@@ -212,22 +203,14 @@ extension AthenaServer {
                 "text/vtt; charset=utf-8")
         case "verbose_json":
             return Self.json(
-                VerboseTranscriptionResponse(
-                    task: "transcribe", language: result.language,
-                    duration: result.duration, text: result.text,
-                    segments: result.segments.enumerated().map {
-                        VerboseSegment(
-                            id: $0.offset, start: $0.element.start,
-                            end: $0.element.end, text: $0.element.text,
-                            avg_logprob: $0.element.avgLogprob,
-                            speaker: turns.isEmpty
-                                ? nil
-                                : Self.speaker(
-                                    start: $0.element.start,
-                                    end: $0.element.end, turns: turns),
-                            words: words($0.element.words))
-                    },
-                    words: wantWords ? words(result.words) : nil))
+                VerboseTranscriptionResponse.make(
+                    result, wantWords: wantWords,
+                    speaker: {
+                        turns.isEmpty
+                            ? nil
+                            : Self.speaker(
+                                start: $0.start, end: $0.end, turns: turns)
+                    }))
         default:  // "json" / nil
             return Self.json(TranscriptionResponse(text: result.text))
         }
