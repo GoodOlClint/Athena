@@ -80,4 +80,6 @@ Known gap: only `model.safetensors` and `model.safetensors.index.json` are inspe
 
 Rejected: remapping the keys inside Athena so the un-prefixed export loads. The substrate owns the weight-key mapping for its model classes, and a second mapping in Athena would drift from it and duplicate a substrate responsibility (ADR 016's stance that arch coverage is inherited). Refusing with a clear 400 is the right layer; support for the original export, if wanted, belongs upstream.
 
-Operator-approved 2026-11-07. Refs #205, #251, #254.
+Second outbound note (#252, #247, #250): the pull preflight also lists the repo's files on Hugging Face (`HubClient.listFiles`, one tree request) so it can refuse a repo with no loadable weight file before any download. This is still Hugging Face model-weight metadata, inside the passive-oracle carve-out, but it is a request beyond the config-only fetch, so decision 4's "no new outbound surface" sentence no longer holds literally. If the listing fails (offline, gated repo), the preflight falls back to the config-only behaviour.
+
+Operator-approved 2026-11-07 (both notes). Refs #205, #251, #252, #254.
