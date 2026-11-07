@@ -8,7 +8,7 @@ import MLXNN
 import Tokenizers
 
 /// Downloads an `mlx-community/whisper-*` checkpoint (config.json +
-/// weights.safetensors) via the substrate Hub downloader and loads it
+/// weights.safetensors or model.safetensors) via the substrate Hub downloader and loads it
 /// into a `WhisperModel`. The checkpoint key layout matches the module
 /// property keys exactly, so the safetensors map is applied directly
 /// (only the non-parameter `alignment_heads` tensor is dropped). M4.2b.
@@ -56,9 +56,9 @@ public enum WhisperLoader {
             throw LoadError.badConfig(String(describing: error))
         }
 
-        let weightsURL = dir.appending(component: "weights.safetensors")
-        guard FileManager.default.fileExists(atPath: weightsURL.path)
-        else { throw LoadError.missingFile("weights.safetensors") }
+        guard let weightsURL = WeightFiles.whisper(in: dir) else {
+            throw LoadError.missingFile(WeightFiles.whisperNames.joined(separator: " or "))
+        }
 
         var weights = try MLX.loadArrays(url: weightsURL)
         // `alignment_heads` is a non-parameter `[k, 2]` Int table of the

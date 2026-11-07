@@ -8,6 +8,30 @@ import MLXLMCommon
 /// `storeRoot/<name>`, so `serve --model <name>` and `athena list`
 /// pick it up without a multi-GB copy. M6-cli-3.
 public enum ModelPull {
+    /// A pull refused before any download or store write.
+    public enum PullError: Error, LocalizedError {
+        case noLoadableWeights(id: String, problem: String)
+        public var errorDescription: String? {
+            switch self {
+            case let .noLoadableWeights(id, problem):
+                return "'\(id)' has \(problem); Athena loads *.safetensors weights only"
+            }
+        }
+    }
+
+    /// Repo-relative file paths of `id`; the default asks the Hub.
+    public typealias FileLister =
+        @Sendable (_ id: String, _ revision: String?) async throws -> [String]
+
+    public static let hubFileLister: FileLister = { id, revision in
+        guard let repo = HuggingFace.Repo.ID(rawValue: id) else {
+            throw ModelStoreOps.OpError.invalidName(id)
+        }
+        let client = HuggingFace.HubClient(session: AthenaProxy.proxiedURLSession())
+        return try await client.listFiles(in: repo, revision: revision ?? "main")
+            .filter { $0.type == .file }.map(\.path)
+    }
+
     /// `progress` (0…1 download fraction) is optional — default nil
     /// keeps the daemon/queue callers unchanged; the CLI passes a
     /// renderer.
@@ -24,6 +48,7 @@ public enum ModelPull {
         id: String, revision: String? = nil, into storeRoot: URL,
         progress: (@Sendable (ModelOpProgress) -> Void)? = nil,
         maxAttempts: Int = 5,
+        listFiles: FileLister = ModelPull.hubFileLister,
         onRetry: (
             @Sendable (
                 _ attempt: Int, _ maxAttempts: Int,
@@ -41,6 +66,13 @@ public enum ModelPull {
             session: AthenaProxy.proxiedURLSession())
         guard let repo = HuggingFace.Repo.ID(rawValue: id) else {
             throw ModelStoreOps.OpError.invalidName(id)
+        }
+        // Best-effort: a listing failure (offline/gated) is left to the download
+        // below, which has its own retry and error reporting.
+        if let files = try? await listFiles(id, revision),
+            let problem = WeightFiles.listingProblem(files: files, modality: nil)
+        {
+            throw PullError.noLoadableWeights(id: id, problem: problem)
         }
         while true {
             do {

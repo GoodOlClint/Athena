@@ -47,6 +47,13 @@ public enum ModelHealth {
         problems += safetensorsProblems(dir)
 
         let support = ModelSupport.detect(in: dir)
+        if case .transcription(.whisper) = support.modality,
+            WeightFiles.whisper(in: dir) == nil
+        {
+            problems.append(
+                "no \(WeightFiles.whisperNames.joined(separator: " or ")) "
+                    + "(the Whisper loader opens only these)")
+        }
         // The packaging verdict, not just the modality: a checkpoint whose
         // fields the loader needs are missing (e.g. a non-large-v3 Whisper
         // vocab, or a transformers-format Parakeet export with no

@@ -139,6 +139,10 @@ struct Pull: AsyncParsableCommand {
                 })
             r.finish()
             print("pulled \(id) → \(dest.path)")
+        } catch let e as ModelPull.PullError {
+            r.finish()
+            print("error: \(ModelPull.friendlyError(e)). Nothing was downloaded.")
+            throw ExitCode.failure
         } catch {
             r.finish()
             print("error: pull failed — \(ModelPull.friendlyError(error))")

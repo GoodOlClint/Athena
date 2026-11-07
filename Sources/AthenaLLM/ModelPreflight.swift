@@ -50,7 +50,8 @@ public enum ModelPreflight {
     /// `convert`'s pre-fetch grabs, so sentence-transformers markers (which
     /// live outside `config.json`) are available to the classifier (R4).
     public static func check(
-        id: String, revision: String? = nil
+        id: String, revision: String? = nil,
+        listFiles: ModelPull.FileLister = ModelPull.hubFileLister
     ) async throws -> ModelSupport {
         let downloader = #hubDownloader(
             HuggingFace.HubClient(
@@ -64,6 +65,25 @@ public enum ModelPreflight {
             ],
             useLatest: false,
             progressHandler: { _ in })
-        return ModelSupport.detect(in: meta)
+        let support = ModelSupport.detect(in: meta)
+        guard let files = try? await listFiles(id, revision) else { return support }
+        return applyListing(support, files: files)
+    }
+
+    /// Downgrades a verdict to `.unsupported` when the repo listing carries no
+    /// weights the loader opens (#247).
+    public static func applyListing(
+        _ support: ModelSupport, files: [String]
+    ) -> ModelSupport {
+        if case .unsupported = support.loadability { return support }
+        guard
+            let problem = WeightFiles.listingProblem(
+                files: files, modality: support.modality)
+        else { return support }
+        return ModelSupport(
+            modality: support.modality,
+            loadability: .unsupported(
+                reason: problem,
+                guidance: "Athena loads *.safetensors weights only (.npz is not converted)"))
     }
 }

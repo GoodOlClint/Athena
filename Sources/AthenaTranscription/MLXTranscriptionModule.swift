@@ -150,7 +150,8 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
             residentId = nil
             throw AthenaError.moduleLoadFailed(
                 .transcription,
-                reason: "whisper \(canonical): \(error)")
+                reason: "whisper \(canonical): \(error)",
+                cause: (error as? WhisperLoader.LoadError)?.description)
         }
         // ND2: the decoder's special-token ids (eot/sot/langBase/transcribe/
         // timestampBegin) are pinned to the whisper-large-v3 family
