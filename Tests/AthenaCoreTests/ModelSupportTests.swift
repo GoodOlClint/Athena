@@ -21,7 +21,8 @@ final class ModelSupportTests: XCTestCase {
         hasVisionConfig: Bool = false,
         stMarkers: Bool = false,
         nVocab: Int? = nil,
-        hasJointVocabulary: Bool = false
+        hasJointVocabulary: Bool = false,
+        embedderWeightsUnprefixed: Bool = false
     ) -> ModelSupport.Probe {
         ModelSupport.Probe(
             info: ModelConfigInfo(
@@ -31,7 +32,8 @@ final class ModelSupportTests: XCTestCase {
                 target: target, decodingModelType: decodingModelType),
             hasSentenceTransformerMarkers: stMarkers,
             whisperNVocab: nVocab,
-            hasJointVocabulary: hasJointVocabulary)
+            hasJointVocabulary: hasJointVocabulary,
+            embedderWeightsUnprefixed: embedderWeightsUnprefixed)
     }
 
     // MARK: transcription — Whisper
@@ -206,6 +208,10 @@ final class ModelSupportTests: XCTestCase {
             .classify(
                 probe(modelType: "parakeet_tdt", hasJointVocabulary: false)),
             .classify(probe()),
+            .classify(
+                probe(
+                    modelType: "gemma3_text", stMarkers: true,
+                    embedderWeightsUnprefixed: true)),
         ]
         for v in verdicts {
             guard case let .unsupported(reason, guidance) = v.loadability else {
@@ -273,5 +279,67 @@ final class ModelSupportTests: XCTestCase {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("ms-missing-\(UUID().uuidString)")
         XCTAssertEqual(ModelSupport.detect(in: dir).modality, .unsupported)
+    }
+
+    // MARK: #205 — embedder weight-key layout
+
+    func testUnprefixedEmbedderExportIsRefusedWithAStructuralReason() {
+        let s = ModelSupport.classify(
+            probe(
+                modelType: "gemma3_text", stMarkers: true,
+                embedderWeightsUnprefixed: true))
+        XCTAssertEqual(s.modality, .embedding)
+        guard case let .unsupported(reason, _) = s.loadability else {
+            return XCTFail("expected .unsupported, got \(s.loadability)")
+        }
+        XCTAssertTrue(reason.contains("model. key prefix"))
+        XCTAssertEqual(
+            ModelSupport.classify(
+                probe(modelType: "gemma3_text", stMarkers: true)
+            ).loadability, .loadable)
+    }
+
+    func testWeightKeyLayoutDecision() {
+        XCTAssertTrue(
+            EmbedderWeightLayout.lacksModelPrefix(
+                keys: ["embed_tokens.weight", "layers.0.mlp.up_proj.weight"]))
+        XCTAssertFalse(
+            EmbedderWeightLayout.lacksModelPrefix(
+                keys: ["model.embed_tokens.weight", "dense.0.weight"]))
+    }
+
+    /// Reads a real safetensors header off disk, store-entry symlink included.
+    func testDetectRefusesAnUnprefixedGemma3EmbedderOnDisk() throws {
+        func snapshot(keys: [String]) throws -> URL {
+            let dir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("embw-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(
+                at: dir, withIntermediateDirectories: true)
+            try Data("{\"model_type\":\"gemma3_text\"}".utf8)
+                .write(to: dir.appendingPathComponent("config.json"))
+            try Data("[]".utf8)
+                .write(to: dir.appendingPathComponent("modules.json"))
+            let header = try JSONSerialization.data(
+                withJSONObject: Dictionary(
+                    uniqueKeysWithValues: keys.map {
+                        ($0, ["dtype": "F32", "shape": [1], "data_offsets": [0, 4]])
+                    }))
+            var len = UInt64(header.count).littleEndian
+            var blob = Data(bytes: &len, count: 8)
+            blob.append(header)
+            blob.append(Data(count: 4))
+            try blob.write(to: dir.appendingPathComponent("model.safetensors"))
+            return dir
+        }
+        let bare = try snapshot(keys: ["embed_tokens.weight", "norm.weight"])
+        let prefixed = try snapshot(keys: ["model.embed_tokens.weight"])
+        defer {
+            try? FileManager.default.removeItem(at: bare)
+            try? FileManager.default.removeItem(at: prefixed)
+        }
+        guard case .unsupported = ModelSupport.detect(in: bare).loadability
+        else { return XCTFail("bare layout must be unsupported") }
+        XCTAssertEqual(
+            ModelSupport.detect(in: prefixed).loadability, .loadable)
     }
 }

@@ -266,4 +266,12 @@ final class PromptCacheCapTests: XCTestCase {
                 module: .textEmbedding, tokens: 1, maxTokens: 0
             ).failedModel)
     }
+
+    func testUnsupportedEmbeddingModelIsA400WithItsOwnCode() {
+        let e = AthenaError.unsupportedEmbeddingModel(
+            model: "m", detail: "no model. key prefix")
+        XCTAssertEqual(e.httpStatus, 400)
+        XCTAssertEqual(e.code, "unsupported_embedding_model")
+        XCTAssertTrue(e.message.contains("no model. key prefix"))
+    }
 }

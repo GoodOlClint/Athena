@@ -127,6 +127,10 @@ public enum AthenaError: Error, Sendable, Equatable {
     /// is free of any model id / HF repo (ADR 021 D5). `model`/`detail` are
     /// client-safe.
     case unsupportedTranscriptionArch(model: String, detail: String)
+    /// An embedding checkpoint in the store whose PACKAGING the loader cannot
+    /// read (#205, ADR 021). A 400 naming the structural requirement, not a
+    /// deep `keyNotFound` 500. `detail` is client-safe and repo-id-free.
+    case unsupportedEmbeddingModel(model: String, detail: String)
 
     /// The resident model finished a successful load and decode, but its output
     /// held a tool call the substrate rejected and whose preview was truncated,
@@ -162,6 +166,7 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .notImplemented: return 501
         case .unsupportedTranscriptionArch: return 400
         case .rejectedToolCall: return 502
+        case .unsupportedEmbeddingModel: return 400
         }
     }
 
@@ -199,6 +204,7 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .notImplemented: return "not_implemented"
         case .unsupportedTranscriptionArch: return "unsupported_transcription_arch"
         case .rejectedToolCall: return "rejected_tool_call"
+        case .unsupportedEmbeddingModel: return "unsupported_embedding_model"
         }
     }
 
@@ -310,6 +316,8 @@ public enum AthenaError: Error, Sendable, Equatable {
         case let .rejectedToolCall(reason, byteCount):
             return "The model produced a tool call that could not be used "
                 + "(\(reason), \(byteCount) bytes). Retry the request."
+        case let .unsupportedEmbeddingModel(model, detail):
+            return "Embedding model '\(model)' cannot be loaded: \(detail)."
         }
     }
 

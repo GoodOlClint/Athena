@@ -196,6 +196,13 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
                     + "it first (operator action); inference does not "
                     + "auto-download")
         }
+        if case let .unsupported(reason, guidance) =
+            ModelSupport.detect(in: dir).loadability
+        {
+            plan.loadFailed()
+            throw AthenaError.unsupportedEmbeddingModel(
+                model: id, detail: "\(reason); \(guidance)")
+        }
         do {
             let loaded =
                 try await EmbedderModelFactory.shared.loadContainer(
