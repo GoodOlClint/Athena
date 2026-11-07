@@ -32,4 +32,19 @@ final class EmbeddingInputCeilingTests: XCTestCase {
         XCTAssertEqual(
             MLXEmbeddingModule.inputCeiling(maxPositionEmbeddings: nil), 32_768)
     }
+
+    /// RoBERTa numbers positions from pad_token_id + 1: 514 entries, pad 1.
+    func testPaddingAwarePositionTableReservesItsOffset() throws {
+        let reserved = MLXEmbeddingModule.reservedPositions(
+            modelType: "roberta", padTokenId: 1)
+        XCTAssertEqual(reserved, 2)
+        try MLXEmbeddingModule.checkInputLengths(
+            [512], maxPositionEmbeddings: 514, reservedPositions: reserved)
+        XCTAssertThrowsError(
+            try MLXEmbeddingModule.checkInputLengths(
+                [513], maxPositionEmbeddings: 514, reservedPositions: reserved))
+        XCTAssertEqual(
+            MLXEmbeddingModule.reservedPositions(
+                modelType: "bert", padTokenId: 0), 0)
+    }
 }

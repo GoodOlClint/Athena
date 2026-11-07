@@ -255,8 +255,36 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
     /// Positions past the model's position table have no trained embedding
     /// (BERT-family: 512), so an input longer than it is not a valid
     /// embedding of its text (#235).
-    static func inputCeiling(maxPositionEmbeddings: Int?) -> Int {
-        min(maxInputTokens, maxPositionEmbeddings ?? maxInputTokens)
+    ///
+    /// RoBERTa-family models number positions from `pad_token_id + 1`, so
+    /// their usable length is the table size minus `reservedPositions`.
+    static func inputCeiling(
+        maxPositionEmbeddings: Int?, reservedPositions: Int = 0
+    ) -> Int {
+        min(
+            maxInputTokens,
+            maxPositionEmbeddings.map { $0 - reservedPositions }
+                ?? maxInputTokens)
+    }
+
+    static func reservedPositions(modelType: String?, padTokenId: Int?) -> Int {
+        switch modelType?.lowercased() {
+        case "roberta", "xlm-roberta": return (padTokenId ?? 1) + 1
+        default: return 0
+        }
+    }
+
+    private func reservedPositions(for id: String) -> Int {
+        guard let dir = localDirectory(for: id),
+            let data = try? Data(
+                contentsOf: dir.resolvingSymlinksInPath()
+                    .appendingPathComponent("config.json")),
+            let obj = try? JSONSerialization.jsonObject(with: data)
+                as? [String: Any]
+        else { return 0 }
+        return Self.reservedPositions(
+            modelType: obj["model_type"] as? String,
+            padTokenId: (obj["pad_token_id"] as? NSNumber)?.intValue)
     }
 
     static func inputCeiling(for model: any EmbeddingModel) -> Int {
@@ -264,9 +292,12 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
     }
 
     static func checkInputLengths(
-        _ lengths: [Int], maxPositionEmbeddings: Int?
+        _ lengths: [Int], maxPositionEmbeddings: Int?,
+        reservedPositions: Int = 0
     ) throws {
-        let cap = inputCeiling(maxPositionEmbeddings: maxPositionEmbeddings)
+        let cap = inputCeiling(
+            maxPositionEmbeddings: maxPositionEmbeddings,
+            reservedPositions: reservedPositions)
         if let longest = lengths.max(), longest > cap {
             throw AthenaError.inputTooLong(
                 module: .textEmbedding, tokens: longest, maxTokens: cap)
@@ -362,6 +393,7 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
             return EmbeddingBatch(
                 vectors: [], promptTokens: 0, model: target)
         }
+        let reserved = reservedPositions(for: target)
         return try await liveContainer.perform { ctx in
             let tokenizer = ctx.tokenizer
             let encoded = texts.map {
@@ -376,7 +408,8 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
             // returning a silently-truncated vector.
             try Self.checkInputLengths(
                 encoded.map(\.count),
-                maxPositionEmbeddings: ctx.model.maxPositionEmbeddings)
+                maxPositionEmbeddings: ctx.model.maxPositionEmbeddings,
+                reservedPositions: reserved)
             let promptTokens = encoded.reduce(0) { $0 + $1.count }
             let pad = tokenizer.eosTokenId ?? 0
 
