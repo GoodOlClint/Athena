@@ -227,7 +227,7 @@ enum OpenAPISpec {
               "post": {
                 "tags": ["Embeddings"],
                 "summary": "Create embeddings.",
-                "description": "OpenAI-compatible. `input` is a string or array of strings. Requires `inference`.",
+                "description": "OpenAI-compatible. `input` is a string or array of strings. Each input must fit the model position table (e.g. 512 tokens for BERT-family models), capped at 32768 tokens; longer input is rejected with 400 `input_too_long` naming the limit rather than silently truncated. A stored embedding checkpoint whose packaging the loader cannot read (e.g. backbone weights without the `model.` key prefix) is refused with 400 `unsupported_embedding_model` naming the requirement. Requires `inference`.",
                 "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmbeddingRequest" } } } },
                 "responses": {
                   "200": { "description": "Embeddings.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmbeddingResponse" } } } },
