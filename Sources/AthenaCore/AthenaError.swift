@@ -16,7 +16,10 @@ public enum AthenaError: Error, Sendable, Equatable {
     /// A module load failed in the substrate.
     /// `model`, when set, is the model whose load failed; only genuine load
     /// failures carry it, so the client message names it for those alone.
-    case moduleLoadFailed(ModuleID, model: String? = nil, reason: String)
+    /// `cause` is a client-safe, path-free reason shown in the response body;
+    /// `reason` stays server-log only (NE7).
+    case moduleLoadFailed(
+        ModuleID, model: String? = nil, reason: String, cause: String? = nil)
     /// No module is registered under this id.
     case moduleNotRegistered(ModuleID)
     /// An MLX/Metal allocation failed (genuine device OOM, distinct
@@ -220,11 +223,12 @@ public enum AthenaError: Error, Sendable, Equatable {
             return "Model \(model ?? module.rawValue) needs \(weights) B of weights"
                 + "\(kv), more than the \(budget) B memory budget; it can never "
                 + "be loaded. Raise budget_bytes or choose a smaller model."
-        case let .moduleLoadFailed(module, _, _):
+        case let .moduleLoadFailed(module, _, _, cause):
             // NE7: the substrate `reason` (filesystem paths, repo ids,
             // internal state) is for the server log only — see
-            // `serverDetail`. Keep the client body stable and detail-free.
-            return "Module \(module.rawValue) failed to load."
+            // `serverDetail`. Only the explicit path-free `cause` is shown.
+            return "Module \(module.rawValue) failed to load"
+                + (cause.map { ": \($0)" } ?? ".")
         case let .moduleNotRegistered(module):
             return "No module registered for \(module.rawValue)."
         case let .metalOutOfMemory(module, _):
@@ -323,8 +327,17 @@ public enum AthenaError: Error, Sendable, Equatable {
 
     /// The model a `moduleLoadFailed` names, if any.
     public var failedModel: String? {
-        if case let .moduleLoadFailed(_, model, _) = self { return model }
+        if case let .moduleLoadFailed(_, model, _, _) = self { return model }
         return nil
+    }
+
+    /// The client body text: a load failure that names its model and carries
+    /// no safe `cause` names the model; one with a `cause` keeps the cause.
+    public var clientMessage: String {
+        if case .moduleLoadFailed(let module, let model?, _, nil) = self, !model.isEmpty {
+            return "Module \(module.rawValue) failed to load model '\(model)'."
+        }
+        return message
     }
 
     /// Full, potentially-sensitive detail (substrate paths, repo ids,
@@ -332,7 +345,7 @@ public enum AthenaError: Error, Sendable, Equatable {
     /// nil when `message` is already safe to return verbatim (NE7).
     public var serverDetail: String? {
         switch self {
-        case let .moduleLoadFailed(_, _, reason): return reason
+        case let .moduleLoadFailed(_, _, reason, _): return reason
         case let .metalOutOfMemory(_, detail): return detail
         case let .noChatTemplate(_, detail): return detail
         case let .invalidAudio(_, detail): return detail

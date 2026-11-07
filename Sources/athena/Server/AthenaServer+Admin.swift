@@ -725,6 +725,13 @@ extension AthenaServer {
                             name: dest.lastPathComponent, path: dest.path)),
                     nil
                 )
+            } catch let e as ModelPull.PullError {
+                return (
+                    nil,
+                    .init(
+                        message: "pull refused: \(ModelPull.friendlyError(e))",
+                        type: "invalid_request_error", code: "no_loadable_weights")
+                )
             } catch {
                 return (
                     nil,

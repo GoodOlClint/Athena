@@ -1187,10 +1187,7 @@ struct AthenaServer {
             governed request failed module=\(module) \
             status=\(e.httpStatus) code=\(e.code) \(e.serverDetail ?? e.message)
             """)
-        var message = e.message
-        if let model = e.failedModel, !model.isEmpty {
-            message = "Module \(module.rawValue) failed to load model '\(model)'."
-        }
+        let message = e.clientMessage
         return error(
             status: HTTPResponse.Status(code: e.httpStatus),
             message: message, type: e.type, code: e.code)

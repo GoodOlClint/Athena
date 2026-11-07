@@ -358,7 +358,7 @@ public enum ModelStoreOps {
             guard looksLikeModel(e, isSymlink: isSymlink) else {
                 continue
             }
-            let problems = ModelHealth.check(e)
+            let problems = ModelHealth.check(e, loaderRules: false)
             if !problems.isEmpty {
                 victims.append(
                     Victim(

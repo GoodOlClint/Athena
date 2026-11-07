@@ -5,12 +5,13 @@ import MLXHuggingFace
 import MLXLMCommon
 
 /// ADR 021 S4 — the `pull` preflight: answer *"will this model work before I
-/// pull it?"* from a **config-only** Hugging Face metadata fetch, for every
-/// modality Athena serves. It reuses the same sanctioned, passive-oracle
-/// metadata egress `convert` already performs (`matching: ["config.json", …]`)
-/// — no new outbound surface — and classifies with the shared `ModelSupport`
-/// predicate, so the preflight verdict can never disagree with what the loader
-/// or `convert` would decide (ADR 021 D3).
+/// pull it?"* from a Hugging Face **metadata-only** fetch (config files plus a
+/// repo file listing; no weights), for every modality Athena serves. The
+/// config fetch is the same passive-oracle egress `convert` performs
+/// (`matching: ["config.json", …]`); the listing is a Hugging Face request
+/// too. It classifies with the shared `ModelSupport` predicate, so the
+/// preflight verdict can never disagree with what the loader or `convert`
+/// would decide (ADR 021 D3).
 ///
 /// Honesty boundary (ADR 021 D4): the verdict proves routing + packaging —
 /// *"Athena will route this and the loader's required fields are present"* —
@@ -45,11 +46,22 @@ public enum ModelPreflight {
         }
     }
 
-    /// Config-only HF pre-fetch + classify. Downloads metadata only (no
-    /// weights), then returns the `ModelSupport` verdict. The same file set
+    /// Metadata-only HF pre-fetch (config files + repo file listing) +
+    /// classify. Downloads no weights, then returns the `ModelSupport`
+    /// verdict. The config file set
     /// `convert`'s pre-fetch grabs, so sentence-transformers markers (which
     /// live outside `config.json`) are available to the classifier (R4).
     public static func check(
+        id: String, revision: String? = nil,
+        listFiles: ModelPull.FileLister = ModelPull.hubFileLister
+    ) async throws -> ModelSupport {
+        let support = try await classify(id: id, revision: revision)
+        guard let files = try? await listFiles(id, revision) else { return support }
+        return applyListing(support, files: files)
+    }
+
+    /// Config-only fetch + classify (no weights, no file listing).
+    public static func classify(
         id: String, revision: String? = nil
     ) async throws -> ModelSupport {
         let downloader = #hubDownloader(
@@ -65,5 +77,22 @@ public enum ModelPreflight {
             useLatest: false,
             progressHandler: { _ in })
         return ModelSupport.detect(in: meta)
+    }
+
+    /// Downgrades a verdict to `.unsupported` when the repo listing carries no
+    /// weights the loader opens (#247).
+    public static func applyListing(
+        _ support: ModelSupport, files: [String]
+    ) -> ModelSupport {
+        if case .unsupported = support.loadability { return support }
+        guard
+            let problem = WeightFiles.listingProblem(
+                files: files, modality: support.modality)
+        else { return support }
+        return ModelSupport(
+            modality: support.modality,
+            loadability: .unsupported(
+                reason: problem,
+                guidance: "Athena loads *.safetensors weights only (.npz is not converted)"))
     }
 }
