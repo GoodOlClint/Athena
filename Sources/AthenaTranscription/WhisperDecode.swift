@@ -174,7 +174,7 @@ public enum WhisperDecode {
         text: String, segments: [TranscriptionSegment],
         contentTokens: [Int], segmentRanges: [Range<Int>]
     ) {
-        var noSpeech: Double?
+        var windowNoSpeech: Double?
         let prefix = [sot, langTok, transcribe]
         var generated: [Int] = []
         var genLogprobs: [Double] = []
@@ -188,7 +188,7 @@ public enum WhisperDecode {
             let lg = model.logits(
                 inp, audio: audio, offset: offset, cache: cache)
             if offset == 0 {
-                noSpeech = noSpeechProb(
+                windowNoSpeech = noSpeechProb(
                     lg[0, 0, 0...].asArray(Float.self))
             }
             let last = lg[0..., -1, 0...] + mask
@@ -232,7 +232,7 @@ public enum WhisperDecode {
             segments.append(
                 TranscriptionSegment(
                     start: p.start, end: p.end, text: t,
-                    avgLogprob: p.avgLogprob, noSpeechProb: noSpeech,
+                    avgLogprob: p.avgLogprob, noSpeechProb: windowNoSpeech,
                     compressionRatio: compressionRatio(t)))
             segmentRanges.append(range)
         }

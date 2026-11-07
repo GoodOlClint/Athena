@@ -58,7 +58,9 @@ Segments carry `avg_logprob` (mean per-token log-probability; Parakeet derives
 it from token confidence). Whisper segments also carry `no_speech_prob` (probability of the `<|nospeech|>` token at the window's first
 decode step, shared by the segments of a 30 s window) and `compression_ratio`
 (UTF-8 bytes / zlib-compressed bytes of the segment text); Parakeet omits
-those two. SRT/VTT render the same segments. For Parakeet the timing comes from the
+those two. `compression_ratio` is computed per segment, whereas the reference
+Whisper implementation computes it per decode window, so the usual 2.4
+repetition threshold is a weaker signal on short segments. SRT/VTT render the same segments. For Parakeet the timing comes from the
 **TDT durations** (`time_ratio` = 0.08 s per encoder frame): each emitted token
 carries a start + duration, grouped into words (at the `▁` SentencePiece
 boundary) and sentences (at terminal punctuation).
