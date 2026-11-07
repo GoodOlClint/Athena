@@ -45,6 +45,23 @@ public protocol ModelSelectable: Actor {
     /// `memoryEstimate()`.
     func admissionEstimate(forModel id: String?) throws
         -> (model: String, bytes: Int)
+
+    /// M62 — choose the model the NEXT governor cold-load will bind, WITHOUT
+    /// loading now: the non-blocking cold-load path (`beginLoadIfNeeded`)
+    /// drives the actual load under the governor's reservation, and a cold
+    /// slot would otherwise always bind the DEFAULT — so a request for a
+    /// non-default model on a just-restarted/evicted slot silently served
+    /// the wrong model. Set the target here (before the load is kicked off)
+    /// and the cold-load binds it directly. Validated against the allowlist
+    /// so an unknown id throws `AthenaError.modelNotAvailable` (400) BEFORE a
+    /// doomed multi-GB load starts; `nil`/empty clears the override so the
+    /// cold-load uses the default. Default no-op for conformers whose slot
+    /// can't swap.
+    func selectColdLoadModel(_ id: String?) async throws
+}
+
+extension ModelSelectable {
+    public func selectColdLoadModel(_ id: String?) async throws {}
 }
 
 extension ModelSelectable where Self: InferenceModule {

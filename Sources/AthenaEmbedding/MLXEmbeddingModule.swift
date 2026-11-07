@@ -169,7 +169,10 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
     /// the target by triggering a fresh load — same fixed governor reservation).
     public func rebind(to id: String?) async throws {
         let target = try resolve(id)
-        if residentId == target, container != nil { return }
+        if residentId == target, container != nil {
+            plan.clearColdTarget()
+            return
+        }
         container = nil
         residentId = nil
         weightBytes = nil
@@ -186,11 +189,19 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
         // inference NEVER auto-downloads: a model absent from the store is
         // a hard error (operator pulls it at startup / allowlist-add).
         guard let dir = localDirectory(for: id) else {
+            plan.loadFailed()
             throw AthenaError.moduleLoadFailed(
-                .textEmbedding,
+                .textEmbedding, model: id,
                 reason: "model '\(id)' is not in the model store — pull "
                     + "it first (operator action); inference does not "
                     + "auto-download")
+        }
+        if case let .unsupported(reason, guidance) =
+            ModelSupport.detect(in: dir).loadability
+        {
+            plan.loadFailed()
+            throw AthenaError.unsupportedEmbeddingModel(
+                model: id, detail: "\(reason); \(guidance)")
         }
         do {
             let loaded =
@@ -219,7 +230,7 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
             weightBytes = nil
             plan.loadFailed()
             throw AthenaError.moduleLoadFailed(
-                .textEmbedding,
+                .textEmbedding, model: id,
                 reason: "embedding model \(id): \(error)")
         }
     }
@@ -241,15 +252,52 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
     /// driving an unbounded O(L²) forward pass via a singleton bucket.
     static let maxInputTokens = 32_768
 
-    /// EmbeddingGemma 2 slices its input to its context length, so a longer
-    /// input would embed only its prefix while usage counts all of it.
-    // ponytail: scoped to EmbeddingGemma 2. BERT-family models also report a
-    // smaller `maxPositionEmbeddings` (512) and accept longer input today;
-    // applying the cap to every model is a client-visible change (#235).
-    static func inputCeiling(for model: any EmbeddingModel) -> Int {
-        guard model is EmbeddingGemma2, let limit = model.maxPositionEmbeddings
-        else { return maxInputTokens }
-        return min(maxInputTokens, limit)
+    /// Positions past the model's position table have no trained embedding
+    /// (BERT-family: 512), so an input longer than it is not a valid
+    /// embedding of its text (#235).
+    ///
+    /// RoBERTa-family models number positions from `pad_token_id + 1`, so
+    /// their usable length is the table size minus `reservedPositions`.
+    static func inputCeiling(
+        maxPositionEmbeddings: Int?, reservedPositions: Int = 0
+    ) -> Int {
+        min(
+            maxInputTokens,
+            maxPositionEmbeddings.map { $0 - reservedPositions }
+                ?? maxInputTokens)
+    }
+
+    static func reservedPositions(modelType: String?, padTokenId: Int?) -> Int {
+        switch modelType?.lowercased() {
+        case "roberta", "xlm-roberta": return (padTokenId ?? 1) + 1
+        default: return 0
+        }
+    }
+
+    private func reservedPositions(for id: String) -> Int {
+        guard let dir = localDirectory(for: id),
+            let data = try? Data(
+                contentsOf: dir.resolvingSymlinksInPath()
+                    .appendingPathComponent("config.json")),
+            let obj = try? JSONSerialization.jsonObject(with: data)
+                as? [String: Any]
+        else { return 0 }
+        return Self.reservedPositions(
+            modelType: obj["model_type"] as? String,
+            padTokenId: (obj["pad_token_id"] as? NSNumber)?.intValue)
+    }
+
+    static func checkInputLengths(
+        _ lengths: [Int], maxPositionEmbeddings: Int?,
+        reservedPositions: Int = 0
+    ) throws {
+        let cap = inputCeiling(
+            maxPositionEmbeddings: maxPositionEmbeddings,
+            reservedPositions: reservedPositions)
+        if let longest = lengths.max(), longest > cap {
+            throw AthenaError.inputTooLong(
+                module: .textEmbedding, tokens: longest, maxTokens: cap)
+        }
     }
 
     public func embed(_ texts: [String], model: String? = nil) async throws
@@ -341,6 +389,7 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
             return EmbeddingBatch(
                 vectors: [], promptTokens: 0, model: target)
         }
+        let reserved = reservedPositions(for: target)
         return try await liveContainer.perform { ctx in
             let tokenizer = ctx.tokenizer
             let encoded = texts.map {
@@ -353,11 +402,10 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
             // O(L²) forward pass on a RoPE embedder (remote OOM/compute
             // DoS); OpenAI likewise 400s over-length input rather than
             // returning a silently-truncated vector.
-            let cap = Self.inputCeiling(for: ctx.model)
-            if let longest = encoded.map(\.count).max(), longest > cap {
-                throw AthenaError.inputTooLong(
-                    module: .textEmbedding, tokens: longest, maxTokens: cap)
-            }
+            try Self.checkInputLengths(
+                encoded.map(\.count),
+                maxPositionEmbeddings: ctx.model.maxPositionEmbeddings,
+                reservedPositions: reserved)
             let promptTokens = encoded.reduce(0) { $0 + $1.count }
             let pad = tokenizer.eosTokenId ?? 0
 

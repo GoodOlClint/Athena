@@ -23,7 +23,7 @@ public struct EmbeddingBatch: Sendable {
 
 /// Typed inference contract for the text-embedding module. The serve path
 /// holds this; the MLX-backed implementation is `MLXEmbeddingModule`.
-public protocol EmbeddingModule: InferenceModule {
+public protocol EmbeddingModule: InferenceModule, ModelSelectable {
     /// Embed each input string into its vector, order preserved, with the
     /// total input token count for usage accounting (M27.1).
     ///
@@ -33,9 +33,6 @@ public protocol EmbeddingModule: InferenceModule {
     /// fallback. The returned batch reports the id actually served.
     func embed(_ texts: [String], model: String?) async throws
         -> EmbeddingBatch
-    /// M62 / #236 — stage the model the next cold load binds (the requested
-    /// one), validating it first so an unknown id is a 400 before any load.
-    func selectColdLoadModel(_ id: String?) async throws
 }
 
 /// M0 placeholder, still used by `--engine stub`. Returns a deterministic
@@ -51,9 +48,7 @@ public actor StubEmbeddingModule: EmbeddingModule, ModelSelectable {
     /// nil ⇒ unloaded. The stub has no real container; the value tracks
     /// which id is "resident" for M39/M41 selection + rebind semantics.
     private var residentId: String?
-    /// NI3 parity — staged selection honored on (re)load, mirroring the MLX
-    /// module so the stub reflects production evict→reload behavior.
-    private var desiredName: String?
+    private var plan = EmbeddingSlotPlan()
 
     /// - Parameters:
     ///   - modelIds: the stand-in store set (the stub has no disk). The stub
@@ -77,12 +72,16 @@ public actor StubEmbeddingModule: EmbeddingModule, ModelSelectable {
     public var residentBytes: Int { residentId == nil ? 0 : reserveBytes }
     public func memoryEstimate() -> Int { reserveBytes }
     public func load(reservation: MemoryReservation) async throws {
-        if residentId == nil { residentId = try desiredName ?? resolve(nil) }
+        if residentId == nil {
+            let name = try plan.loadTarget(defaultModel: { try resolve(nil) })
+            residentId = name
+            plan.loadSucceeded(name)
+        }
     }
     public func unload() async { residentId = nil }
 
     public func selectColdLoadModel(_ id: String?) async throws {
-        desiredName = try resolve(id)
+        plan.stageColdTarget(try resolve(id))
     }
 
     public func allowedModelIds() -> [String] { modelIds }
@@ -93,7 +92,7 @@ public actor StubEmbeddingModule: EmbeddingModule, ModelSelectable {
     public func residentModelId() -> String? { residentId }
     public func rebind(to id: String?) async throws {
         let target = try resolve(id)
-        desiredName = target
+        plan.loadSucceeded(target)
         residentId = target
     }
 
@@ -154,7 +153,7 @@ public actor StubEmbeddingModule: EmbeddingModule, ModelSelectable {
         // M41: per-request selection rebinds the slot's "resident" id in the
         // stub too, so /api/models/resident reflects what an embed call
         // would actually serve. NI3 parity: also stage it for reload.
-        desiredName = served
+        plan.loadSucceeded(served)
         residentId = served
         let vectors = texts.map { Self.stubVector(text: $0, model: served) }
         let tokens = texts.reduce(0) { acc, t in

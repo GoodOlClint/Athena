@@ -56,4 +56,31 @@ final class EmbeddingSlotPlanTests: XCTestCase {
             plan.loadTarget(defaultModel: { dflt }), "bge",
             "NI3: a governor reload restores the last model that loaded")
     }
+
+    /// #241 item 2 — a staged target that never loaded (no-op rebind, pruned
+    /// dir) must not be bound by a later evict→reload.
+    func testClearedStageIsNotBoundByLaterReload() {
+        var plan = EmbeddingSlotPlan()
+        XCTAssertEqual(
+            coldRequest(&plan, model: "bge", loads: ["bge"]), "bge")
+        plan.stageColdTarget("never-loaded")
+        plan.clearColdTarget()
+        XCTAssertEqual(plan.loadTarget(defaultModel: { dflt }), "bge")
+    }
+
+    /// #241 item 4 — no re-staging: the reload after a successful load must
+    /// bind what loaded, and a stale stage must not survive a load success.
+    func testLoadSuccessConsumesTheStage() {
+        var plan = EmbeddingSlotPlan()
+        plan.stageColdTarget("requested")
+        plan.loadSucceeded("other")
+        XCTAssertEqual(plan.loadTarget(defaultModel: { dflt }), "other")
+    }
+
+    func testLoadFailureConsumesTheStageWithoutRestaging() {
+        var plan = EmbeddingSlotPlan()
+        plan.stageColdTarget("broken")
+        plan.loadFailed()
+        XCTAssertEqual(plan.loadTarget(defaultModel: { dflt }), dflt)
+    }
 }
