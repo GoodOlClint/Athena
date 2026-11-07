@@ -53,6 +53,15 @@ public enum ModelPreflight {
         id: String, revision: String? = nil,
         listFiles: ModelPull.FileLister = ModelPull.hubFileLister
     ) async throws -> ModelSupport {
+        let support = try await classify(id: id, revision: revision)
+        guard let files = try? await listFiles(id, revision) else { return support }
+        return applyListing(support, files: files)
+    }
+
+    /// Config-only fetch + classify (no weights, no file listing).
+    public static func classify(
+        id: String, revision: String? = nil
+    ) async throws -> ModelSupport {
         let downloader = #hubDownloader(
             HuggingFace.HubClient(
                 session: AthenaProxy.proxiedURLSession()))
@@ -65,9 +74,7 @@ public enum ModelPreflight {
             ],
             useLatest: false,
             progressHandler: { _ in })
-        let support = ModelSupport.detect(in: meta)
-        guard let files = try? await listFiles(id, revision) else { return support }
-        return applyListing(support, files: files)
+        return ModelSupport.detect(in: meta)
     }
 
     /// Downgrades a verdict to `.unsupported` when the repo listing carries no

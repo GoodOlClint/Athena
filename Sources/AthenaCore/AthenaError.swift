@@ -314,6 +314,15 @@ public enum AthenaError: Error, Sendable, Equatable {
         }
     }
 
+    /// The client body text for a request that names `model`: a load failure
+    /// without a safe `cause` names the model; one with a `cause` keeps it.
+    public func clientMessage(model: String?) -> String {
+        if case .moduleLoadFailed(let module, _, nil) = self, let model, !model.isEmpty {
+            return "Module \(module.rawValue) failed to load model '\(model)'."
+        }
+        return message
+    }
+
     /// Full, potentially-sensitive detail (substrate paths, repo ids,
     /// internal state) for the SERVER LOG ONLY — never the client body.
     /// nil when `message` is already safe to return verbatim (NE7).

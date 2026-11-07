@@ -87,7 +87,8 @@ final class WeightFilesTests: XCTestCase {
         do {
             _ = try await ModelPull.pull(
                 id: "org/whisper-npz", into: root,
-                listFiles: { _, _ in ["config.json", "weights.npz"] })
+                listFiles: { _, _ in ["config.json", "weights.npz"] },
+                modality: { _, _ in nil })
             XCTFail("pull must refuse")
         } catch let e as ModelPull.PullError {
             XCTAssertTrue("\(e)".contains("weights.npz"))
@@ -101,6 +102,22 @@ final class WeightFilesTests: XCTestCase {
         XCTAssertNotNil(
             WeightFiles.listingProblem(
                 files: ["config.json", "weights.npz"], modality: nil))
+    }
+
+    func testPullRefusesWhisperRepoWithOnlyUnrelatedSafetensors() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("wfstore-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        do {
+            _ = try await ModelPull.pull(
+                id: "org/whisper-foo", into: root,
+                listFiles: { _, _ in ["config.json", "foo.safetensors"] },
+                modality: { _, _ in .transcription(.whisper) })
+            XCTFail("pull must refuse")
+        } catch let e as ModelPull.PullError {
+            XCTAssertTrue("\(e)".contains("weights.safetensors"))
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
     }
 
     // (d)
@@ -136,6 +153,17 @@ final class WeightFilesTests: XCTestCase {
         XCTAssertEqual(e.httpStatus, 500)
         XCTAssertEqual(e.code, "module_load_failed")
         XCTAssertEqual(e.type, "server_error")
+    }
+
+    func testClientMessageKeepsCauseWhenModelNamed() {
+        let e = AthenaError.moduleLoadFailed(
+            .transcription, reason: "/secret/path", cause: "whisper: missing weights.safetensors")
+        let m = e.clientMessage(model: "whisper-large-v3-fp16")
+        XCTAssertTrue(m.contains("missing weights.safetensors"))
+        XCTAssertFalse(m.contains("/secret/path"))
+        XCTAssertEqual(
+            AthenaError.moduleLoadFailed(.llm, reason: "x").clientMessage(model: "m"),
+            "Module llm failed to load model 'm'.")
     }
 
     func testModuleLoadFailedWithoutCauseIsUnchanged() {

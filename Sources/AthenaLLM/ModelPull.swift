@@ -23,6 +23,14 @@ public enum ModelPull {
     public typealias FileLister =
         @Sendable (_ id: String, _ revision: String?) async throws -> [String]
 
+    /// The checkpoint's modality, or nil when it cannot be determined.
+    public typealias ModalityProbe =
+        @Sendable (_ id: String, _ revision: String?) async -> ModelModality?
+
+    public static let hubModality: ModalityProbe = { id, revision in
+        try? await ModelPreflight.classify(id: id, revision: revision).modality
+    }
+
     public static let hubFileLister: FileLister = { id, revision in
         guard let repo = HuggingFace.Repo.ID(rawValue: id) else {
             throw ModelStoreOps.OpError.invalidName(id)
@@ -49,6 +57,7 @@ public enum ModelPull {
         progress: (@Sendable (ModelOpProgress) -> Void)? = nil,
         maxAttempts: Int = 5,
         listFiles: FileLister = ModelPull.hubFileLister,
+        modality: ModalityProbe = ModelPull.hubModality,
         onRetry: (
             @Sendable (
                 _ attempt: Int, _ maxAttempts: Int,
@@ -70,7 +79,10 @@ public enum ModelPull {
         // Best-effort: a listing failure (offline/gated) is left to the download
         // below, which has its own retry and error reporting.
         if let files = try? await listFiles(id, revision),
-            let problem = WeightFiles.listingProblem(files: files, modality: nil)
+            let problem = WeightFiles.listingProblem(
+                files: files,
+                modality: WeightFiles.listingProblem(files: files, modality: nil) == nil
+                    ? await modality(id, revision) : nil)
         {
             throw PullError.noLoadableWeights(id: id, problem: problem)
         }
