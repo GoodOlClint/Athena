@@ -23,7 +23,7 @@ public struct EmbeddingBatch: Sendable {
 
 /// Typed inference contract for the text-embedding module. The serve path
 /// holds this; the MLX-backed implementation is `MLXEmbeddingModule`.
-public protocol EmbeddingModule: InferenceModule {
+public protocol EmbeddingModule: InferenceModule, ModelSelectable {
     /// Embed each input string into its vector, order preserved, with the
     /// total input token count for usage accounting (M27.1).
     ///
@@ -33,9 +33,6 @@ public protocol EmbeddingModule: InferenceModule {
     /// fallback. The returned batch reports the id actually served.
     func embed(_ texts: [String], model: String?) async throws
         -> EmbeddingBatch
-    /// M62 / #236 — stage the model the next cold load binds (the requested
-    /// one), validating it first so an unknown id is a 400 before any load.
-    func selectColdLoadModel(_ id: String?) async throws
 }
 
 /// M0 placeholder, still used by `--engine stub`. Returns a deterministic
