@@ -24,6 +24,7 @@ final class VersionGuardTests: XCTestCase {
     func testGluedPrereleaseIdentifiers() {
         XCTAssertLessThan(VersionGuard.compare("0.12.0-dev1", "0.12.0"), 0)
         XCTAssertLessThan(VersionGuard.compare("0.12.0-dev1", "0.12.0-dev2"), 0)
+        XCTAssertGreaterThan(VersionGuard.compare("0.12.0-dev1", "0.12.0-dev.9"), 0)
     }
 
     func testPrereleaseOfNextCoreAboveOlderRelease() {

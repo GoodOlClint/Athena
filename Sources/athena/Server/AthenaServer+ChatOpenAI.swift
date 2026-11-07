@@ -358,7 +358,7 @@ extension AthenaServer {
             // `.error` chunk the module yielded (e.g. rejected tool call, 502).
             return Self.error(
                 status: HTTPResponse.Status(code: e.httpStatus),
-                message: e.message, type: "server_error", code: e.code)
+                message: e.message, type: e.type, code: e.code)
         } catch {
             return Self.classified(error, module: .llm)
         }
