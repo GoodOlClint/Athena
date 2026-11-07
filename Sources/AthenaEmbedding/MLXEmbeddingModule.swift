@@ -241,15 +241,25 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
     /// driving an unbounded O(L²) forward pass via a singleton bucket.
     static let maxInputTokens = 32_768
 
-    /// EmbeddingGemma 2 slices its input to its context length, so a longer
-    /// input would embed only its prefix while usage counts all of it.
-    // ponytail: scoped to EmbeddingGemma 2. BERT-family models also report a
-    // smaller `maxPositionEmbeddings` (512) and accept longer input today;
-    // applying the cap to every model is a client-visible change (#235).
+    /// Positions past the model's position table have no trained embedding
+    /// (BERT-family: 512), so an input longer than it is not a valid
+    /// embedding of its text (#235).
+    static func inputCeiling(maxPositionEmbeddings: Int?) -> Int {
+        min(maxInputTokens, maxPositionEmbeddings ?? maxInputTokens)
+    }
+
     static func inputCeiling(for model: any EmbeddingModel) -> Int {
-        guard model is EmbeddingGemma2, let limit = model.maxPositionEmbeddings
-        else { return maxInputTokens }
-        return min(maxInputTokens, limit)
+        inputCeiling(maxPositionEmbeddings: model.maxPositionEmbeddings)
+    }
+
+    static func checkInputLengths(
+        _ lengths: [Int], maxPositionEmbeddings: Int?
+    ) throws {
+        let cap = inputCeiling(maxPositionEmbeddings: maxPositionEmbeddings)
+        if let longest = lengths.max(), longest > cap {
+            throw AthenaError.inputTooLong(
+                module: .textEmbedding, tokens: longest, maxTokens: cap)
+        }
     }
 
     public func embed(_ texts: [String], model: String? = nil) async throws
@@ -353,11 +363,9 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
             // O(L²) forward pass on a RoPE embedder (remote OOM/compute
             // DoS); OpenAI likewise 400s over-length input rather than
             // returning a silently-truncated vector.
-            let cap = Self.inputCeiling(for: ctx.model)
-            if let longest = encoded.map(\.count).max(), longest > cap {
-                throw AthenaError.inputTooLong(
-                    module: .textEmbedding, tokens: longest, maxTokens: cap)
-            }
+            try Self.checkInputLengths(
+                encoded.map(\.count),
+                maxPositionEmbeddings: ctx.model.maxPositionEmbeddings)
             let promptTokens = encoded.reduce(0) { $0 + $1.count }
             let pad = tokenizer.eosTokenId ?? 0
 
