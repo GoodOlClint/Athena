@@ -126,6 +126,14 @@ public enum AthenaError: Error, Sendable, Equatable {
     /// client-safe.
     case unsupportedTranscriptionArch(model: String, detail: String)
 
+    /// The resident model finished a successful load and decode, but its output
+    /// held a tool call the substrate rejected and whose preview was truncated,
+    /// so it cannot be returned as content. A model-output failure after a
+    /// healthy load: 502 (the model is the upstream that answered badly), NOT
+    /// `moduleLoadFailed`. Carries the reason and byte count only — never the
+    /// model's text, which may hold argument values.
+    case rejectedToolCall(reason: String, rawTextByteCount: Int)
+
     /// HTTP status the serve path should return for this error.
     public var httpStatus: Int {
         switch self {
@@ -151,6 +159,7 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .diarizationMethodInvalid: return 400
         case .notImplemented: return 501
         case .unsupportedTranscriptionArch: return 400
+        case .rejectedToolCall: return 502
         }
     }
 
@@ -187,6 +196,7 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .diarizationMethodInvalid: return "invalid_method"
         case .notImplemented: return "not_implemented"
         case .unsupportedTranscriptionArch: return "unsupported_transcription_arch"
+        case .rejectedToolCall: return "rejected_tool_call"
         }
     }
 
@@ -295,6 +305,9 @@ public enum AthenaError: Error, Sendable, Equatable {
             // served); the cause-naming `detail` carries the structural
             // requirement the checkpoint fails (ADR 021).
             return "Transcription model '\(model)' cannot be loaded: \(detail)."
+        case let .rejectedToolCall(reason, byteCount):
+            return "The model produced a tool call that could not be used "
+                + "(\(reason), \(byteCount) bytes). Retry the request."
         }
     }
 
@@ -308,6 +321,8 @@ public enum AthenaError: Error, Sendable, Equatable {
         case let .noChatTemplate(_, detail): return detail
         case let .invalidAudio(_, detail): return detail
         case let .audioFormatUnsupported(_, detail): return detail
+        case let .rejectedToolCall(reason, byteCount):
+            return "reason=\(reason) raw_bytes=\(byteCount)"
         default: return nil
         }
     }
