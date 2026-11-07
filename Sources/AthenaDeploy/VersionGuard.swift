@@ -44,7 +44,9 @@ public enum VersionGuard {
         let noBuild = v.split(separator: "+", maxSplits: 1, omittingEmptySubsequences: false)[0]
         let parts = noBuild.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
         let core = parts[0].split(separator: ".").map { Int($0) ?? 0 }
-        let pre = parts.count > 1 ? parts[1].split(separator: ".", omittingEmptySubsequences: false) : nil
+        let pre =
+            parts.count > 1
+            ? parts[1].split(separator: ".", omittingEmptySubsequences: false) : nil
         return (core, pre)
     }
 
