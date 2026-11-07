@@ -169,7 +169,10 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
     /// the target by triggering a fresh load — same fixed governor reservation).
     public func rebind(to id: String?) async throws {
         let target = try resolve(id)
-        if residentId == target, container != nil { return }
+        if residentId == target, container != nil {
+            plan.clearColdTarget()
+            return
+        }
         container = nil
         residentId = nil
         weightBytes = nil
@@ -186,6 +189,7 @@ public actor MLXEmbeddingModule: EmbeddingModule, ModelSelectable {
         // inference NEVER auto-downloads: a model absent from the store is
         // a hard error (operator pulls it at startup / allowlist-add).
         guard let dir = localDirectory(for: id) else {
+            plan.loadFailed()
             throw AthenaError.moduleLoadFailed(
                 .textEmbedding,
                 reason: "model '\(id)' is not in the model store — pull "
