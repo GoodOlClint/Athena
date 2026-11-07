@@ -257,11 +257,13 @@ final class PromptCacheCapTests: XCTestCase {
             .textEmbedding, model: "bge", reason: "boom")
         XCTAssertEqual(named.failedModel, "bge")
         XCTAssertEqual(named.httpStatus, 500)
-        XCTAssertEqual(named.message, "Module text_embedding failed to load.")
+        XCTAssertEqual(named.message, "Module textEmbedding failed to load.")
         XCTAssertNil(
             AthenaError.moduleLoadFailed(.textEmbedding, reason: "slot lost")
                 .failedModel)
-        XCTAssertNil(AthenaError.inputTooLong(
-            module: .textEmbedding, tokens: 1, maxTokens: 0).failedModel)
+        XCTAssertNil(
+            AthenaError.inputTooLong(
+                module: .textEmbedding, tokens: 1, maxTokens: 0
+            ).failedModel)
     }
 }
