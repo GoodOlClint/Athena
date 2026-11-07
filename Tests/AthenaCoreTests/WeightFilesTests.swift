@@ -75,10 +75,11 @@ final class WeightFilesTests: XCTestCase {
             ModelSupport(
                 modality: .transcription(.whisper), loadability: .loadable),
             files: files)
-        guard case let .unsupported(reason, _) = support.loadability else {
+        guard case let .unsupported(reason, guidance) = support.loadability else {
             return XCTFail("expected unsupported, got \(support.loadability)")
         }
         XCTAssertTrue(reason.contains("weights.npz"))
+        XCTAssertTrue(guidance.contains("weights.safetensors or model.safetensors"))
     }
 
     func testPullRefusesNpzOnlyRepoAndLeavesNoStoreEntry() async throws {
@@ -117,6 +118,9 @@ final class WeightFilesTests: XCTestCase {
             XCTFail("pull must refuse")
         } catch let e as ModelPull.PullError {
             XCTAssertTrue("\(e)".contains("weights.safetensors"))
+            XCTAssertFalse(
+                "\(e)".contains("*.safetensors weights only"),
+                "must name the Whisper filename requirement, got \(e)")
         }
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
     }

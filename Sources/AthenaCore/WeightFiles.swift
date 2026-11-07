@@ -17,6 +17,15 @@ public enum WeightFiles {
             .first { FileManager.default.fileExists(atPath: $0.path) }
     }
 
+    /// What Athena needs instead, for the modality whose listing failed.
+    public static func guidance(modality: ModelModality?) -> String {
+        if case .transcription(.whisper)? = modality {
+            return
+                "the Whisper loader opens only \(whisperNames.joined(separator: " or ")) (.npz is not converted)"
+        }
+        return "Athena loads *.safetensors weights only (.npz is not converted)"
+    }
+
     /// Why a repo file listing carries no weights Athena can load, or nil when
     /// it does. `files` are repo-relative paths.
     public static func listingProblem(

@@ -93,6 +93,6 @@ public enum ModelPreflight {
             modality: support.modality,
             loadability: .unsupported(
                 reason: problem,
-                guidance: "Athena loads *.safetensors weights only (.npz is not converted)"))
+                guidance: WeightFiles.guidance(modality: support.modality)))
     }
 }

@@ -10,11 +10,11 @@ import MLXLMCommon
 public enum ModelPull {
     /// A pull refused before any download or store write.
     public enum PullError: Error, LocalizedError {
-        case noLoadableWeights(id: String, problem: String)
+        case noLoadableWeights(id: String, problem: String, guidance: String)
         public var errorDescription: String? {
             switch self {
-            case let .noLoadableWeights(id, problem):
-                return "'\(id)' has \(problem); Athena loads *.safetensors weights only"
+            case let .noLoadableWeights(id, problem, guidance):
+                return "'\(id)' has \(problem); \(guidance)"
             }
         }
     }
@@ -78,13 +78,16 @@ public enum ModelPull {
         }
         // Best-effort: a listing failure (offline/gated) is left to the download
         // below, which has its own retry and error reporting.
-        if let files = try? await listFiles(id, revision),
-            let problem = WeightFiles.listingProblem(
-                files: files,
-                modality: WeightFiles.listingProblem(files: files, modality: nil) == nil
-                    ? await modality(id, revision) : nil)
-        {
-            throw PullError.noLoadableWeights(id: id, problem: problem)
+        if let files = try? await listFiles(id, revision) {
+            let generic = WeightFiles.listingProblem(files: files, modality: nil)
+            let probed = generic == nil ? await modality(id, revision) : nil
+            if let problem = generic
+                ?? WeightFiles.listingProblem(files: files, modality: probed)
+            {
+                throw PullError.noLoadableWeights(
+                    id: id, problem: problem,
+                    guidance: WeightFiles.guidance(modality: probed))
+            }
         }
         while true {
             do {
