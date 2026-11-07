@@ -263,7 +263,8 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
             // carries timed segments for verbose_json/srt/vtt.
             return WhisperDecode.transcribeResult(
                 model: model, pcm: pcm, tokenizer: tokenizer,
-                language: language, wordTimestamps: wordTimestamps)
+                language: language, wordTimestamps: wordTimestamps
+            ).withModel(residentId)
         case .parakeet(let model):
             // Whole-file greedy TDT decode. Segment/word timestamps come from
             // the TDT durations (0.08 s/encoder frame) via the MLX-free
@@ -287,7 +288,7 @@ public actor MLXTranscriptionModule: TranscriptionModule, ModelSelectable {
                 wordTimestamps ? ParakeetAlignment.words(from: r.tokens) : []
             return TranscriptionResult(
                 text: text, language: language ?? "auto", duration: duration,
-                segments: segments, words: words)
+                segments: segments, words: words, model: residentId)
         }
     }
 }
