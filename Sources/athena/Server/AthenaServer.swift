@@ -757,12 +757,12 @@ struct AthenaServer {
         } catch {
             // issue #6: classify (correct 4xx + type, OOM→503, no leak)
             // instead of a catch-all 500.
-            return .fail(Self.classified(error, module: module, model: model))
+            return .fail(Self.classified(error, module: module))
         }
         do {
             return .ok(try await embedding.embed(inputs, model: model))
         } catch {
-            return .fail(Self.classified(error, module: module, model: model))
+            return .fail(Self.classified(error, module: module))
         }
     }
 
@@ -1177,7 +1177,7 @@ struct AthenaServer {
     }
 
     static func classified(
-        _ err: any Error, module: ModuleID, model: String? = nil
+        _ err: any Error, module: ModuleID
     ) -> Response {
         let e = AthenaError.classify(err, module: module)
         // NE7: log the FULL detail (substrate paths/ids/state) to os_log,
@@ -1187,7 +1187,7 @@ struct AthenaServer {
             governed request failed module=\(module) \
             status=\(e.httpStatus) code=\(e.code) \(e.serverDetail ?? e.message)
             """)
-        let message = e.clientMessage(model: model)
+        let message = e.clientMessage
         return error(
             status: HTTPResponse.Status(code: e.httpStatus),
             message: message, type: e.type, code: e.code)

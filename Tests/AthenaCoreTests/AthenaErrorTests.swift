@@ -250,4 +250,28 @@ final class PromptCacheCapTests: XCTestCase {
         let s = await gov.snapshot()
         XCTAssertEqual(s.promptCacheCapBytes, 2_500)
     }
+
+    /// #241 item 3 — only a load failure that names its model carries one.
+    func testFailedModelIsOnlyTheNamedLoadFailure() {
+        let named = AthenaError.moduleLoadFailed(
+            .textEmbedding, model: "bge", reason: "boom")
+        XCTAssertEqual(named.failedModel, "bge")
+        XCTAssertEqual(named.httpStatus, 500)
+        XCTAssertEqual(named.message, "Module textEmbedding failed to load.")
+        XCTAssertNil(
+            AthenaError.moduleLoadFailed(.textEmbedding, reason: "slot lost")
+                .failedModel)
+        XCTAssertNil(
+            AthenaError.inputTooLong(
+                module: .textEmbedding, tokens: 1, maxTokens: 0
+            ).failedModel)
+    }
+
+    func testUnsupportedEmbeddingModelIsA400WithItsOwnCode() {
+        let e = AthenaError.unsupportedEmbeddingModel(
+            model: "m", detail: "no model. key prefix")
+        XCTAssertEqual(e.httpStatus, 400)
+        XCTAssertEqual(e.code, "unsupported_embedding_model")
+        XCTAssertTrue(e.message.contains("no model. key prefix"))
+    }
 }

@@ -14,9 +14,12 @@ public enum AthenaError: Error, Sendable, Equatable {
         module: ModuleID, model: String?, weightBytes: Int, headroomBytes: Int,
         budgetBytes: Int)
     /// A module load failed in the substrate.
+    /// `model`, when set, is the model whose load failed; only genuine load
+    /// failures carry it, so the client message names it for those alone.
     /// `cause` is a client-safe, path-free reason shown in the response body;
     /// `reason` stays server-log only (NE7).
-    case moduleLoadFailed(ModuleID, reason: String, cause: String? = nil)
+    case moduleLoadFailed(
+        ModuleID, model: String? = nil, reason: String, cause: String? = nil)
     /// No module is registered under this id.
     case moduleNotRegistered(ModuleID)
     /// An MLX/Metal allocation failed (genuine device OOM, distinct
@@ -127,6 +130,10 @@ public enum AthenaError: Error, Sendable, Equatable {
     /// is free of any model id / HF repo (ADR 021 D5). `model`/`detail` are
     /// client-safe.
     case unsupportedTranscriptionArch(model: String, detail: String)
+    /// An embedding checkpoint in the store whose PACKAGING the loader cannot
+    /// read (#205, ADR 021). A 400 naming the structural requirement, not a
+    /// deep `keyNotFound` 500. `detail` is client-safe and repo-id-free.
+    case unsupportedEmbeddingModel(model: String, detail: String)
 
     /// The resident model finished a successful load and decode, but its output
     /// held a tool call the substrate rejected and whose preview was truncated,
@@ -162,6 +169,7 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .notImplemented: return 501
         case .unsupportedTranscriptionArch: return 400
         case .rejectedToolCall: return 502
+        case .unsupportedEmbeddingModel: return 400
         }
     }
 
@@ -199,6 +207,7 @@ public enum AthenaError: Error, Sendable, Equatable {
         case .notImplemented: return "not_implemented"
         case .unsupportedTranscriptionArch: return "unsupported_transcription_arch"
         case .rejectedToolCall: return "rejected_tool_call"
+        case .unsupportedEmbeddingModel: return "unsupported_embedding_model"
         }
     }
 
@@ -214,7 +223,7 @@ public enum AthenaError: Error, Sendable, Equatable {
             return "Model \(model ?? module.rawValue) needs \(weights) B of weights"
                 + "\(kv), more than the \(budget) B memory budget; it can never "
                 + "be loaded. Raise budget_bytes or choose a smaller model."
-        case let .moduleLoadFailed(module, _, cause):
+        case let .moduleLoadFailed(module, _, _, cause):
             // NE7: the substrate `reason` (filesystem paths, repo ids,
             // internal state) is for the server log only — see
             // `serverDetail`. Only the explicit path-free `cause` is shown.
@@ -311,13 +320,21 @@ public enum AthenaError: Error, Sendable, Equatable {
         case let .rejectedToolCall(reason, byteCount):
             return "The model produced a tool call that could not be used "
                 + "(\(reason), \(byteCount) bytes). Retry the request."
+        case let .unsupportedEmbeddingModel(model, detail):
+            return "Embedding model '\(model)' cannot be loaded: \(detail)."
         }
     }
 
-    /// The client body text for a request that names `model`: a load failure
-    /// without a safe `cause` names the model; one with a `cause` keeps it.
-    public func clientMessage(model: String?) -> String {
-        if case .moduleLoadFailed(let module, _, nil) = self, let model, !model.isEmpty {
+    /// The model a `moduleLoadFailed` names, if any.
+    public var failedModel: String? {
+        if case let .moduleLoadFailed(_, model, _, _) = self { return model }
+        return nil
+    }
+
+    /// The client body text: a load failure that names its model and carries
+    /// no safe `cause` names the model; one with a `cause` keeps the cause.
+    public var clientMessage: String {
+        if case .moduleLoadFailed(let module, let model?, _, nil) = self, !model.isEmpty {
             return "Module \(module.rawValue) failed to load model '\(model)'."
         }
         return message
@@ -328,7 +345,7 @@ public enum AthenaError: Error, Sendable, Equatable {
     /// nil when `message` is already safe to return verbatim (NE7).
     public var serverDetail: String? {
         switch self {
-        case let .moduleLoadFailed(_, reason, _): return reason
+        case let .moduleLoadFailed(_, _, reason, _): return reason
         case let .metalOutOfMemory(_, detail): return detail
         case let .noChatTemplate(_, detail): return detail
         case let .invalidAudio(_, detail): return detail

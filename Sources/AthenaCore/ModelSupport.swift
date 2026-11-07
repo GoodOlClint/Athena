@@ -142,19 +142,24 @@ extension ModelSupport {
         /// the discriminator between a loadable NeMo-format Parakeet export and
         /// a transformers-format Parakeet checkpoint the loader cannot read.
         public var hasJointVocabulary: Bool
+        /// Whether an embedding checkpoint's weights sit at the top level
+        /// with no `model.` prefix, which the substrate loader requires (#205).
+        public var embedderWeightsUnprefixed: Bool
 
         public init(
             info: ModelConfigInfo = ModelConfigInfo(),
             transcription: TranscriptionArch.Config = .init(),
             hasSentenceTransformerMarkers: Bool = false,
             whisperNVocab: Int? = nil,
-            hasJointVocabulary: Bool = false
+            hasJointVocabulary: Bool = false,
+            embedderWeightsUnprefixed: Bool = false
         ) {
             self.info = info
             self.transcription = transcription
             self.hasSentenceTransformerMarkers = hasSentenceTransformerMarkers
             self.whisperNVocab = whisperNVocab
             self.hasJointVocabulary = hasJointVocabulary
+            self.embedderWeightsUnprefixed = embedderWeightsUnprefixed
         }
     }
 
@@ -227,7 +232,10 @@ extension ModelSupport {
         case .embedding:
             // A positive embedding signal (ST markers / embedder-only type) is
             // exactly what the serve path's `EmbedderModelFactory` routes on.
-            return ModelSupport(modality: .embedding, loadability: .loadable)
+            return ModelSupport(
+                modality: .embedding,
+                loadability: probe.embedderWeightsUnprefixed
+                    ? embedderUnprefixedLoadability : .loadable)
         case .generative:
             // Best-effort: any named `model_type` classifies as generative, but
             // arch coverage is inherited from the substrate (ADR 016) — don't
@@ -278,6 +286,18 @@ extension ModelSupport {
                 + "transformers-format Parakeet checkpoint is not loadable")
     }
 
+    /// An embedding export whose backbone weights carry no `model.` key prefix
+    /// (the upstream sentence-transformers layout): the loader looks them up
+    /// under that prefix and fails deep with `keyNotFound` (#205).
+    static let embedderUnprefixedLoadability: Loadability = .unsupported(
+        reason:
+            "the checkpoint stores its backbone weights at the top level "
+            + "(embed_tokens.weight, layers.N.*) with no model. key prefix, "
+            + "which the embedding loader looks them up under",
+        guidance:
+            "use an MLX-converted export whose weight keys carry the model. "
+            + "prefix; the original sentence-transformers export is not loadable")
+
     /// The modalities Athena serves, named without any slash so the
     /// guidance-rule pin (no `org/name` repo id) stays trivially satisfiable.
     static let serveListGuidance =
@@ -309,10 +329,17 @@ extension ModelSupport {
         let joint = dict["joint"] as? [String: Any]
         let hasJoint = (joint?["vocabulary"] as? [Any])?.isEmpty == false
 
+        let unprefixed =
+            ModelClass.classify(
+                info: info, hasSentenceTransformerMarkers: hasST) == .embedding
+            && EmbedderWeightLayout.isUnprefixedExport(
+                modelType: info.modelType, in: resolved)
+
         return classify(
             Probe(
                 info: info, transcription: ta,
                 hasSentenceTransformerMarkers: hasST,
-                whisperNVocab: nVocab, hasJointVocabulary: hasJoint))
+                whisperNVocab: nVocab, hasJointVocabulary: hasJoint,
+                embedderWeightsUnprefixed: unprefixed))
     }
 }

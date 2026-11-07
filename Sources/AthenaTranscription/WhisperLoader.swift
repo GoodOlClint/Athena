@@ -16,6 +16,12 @@ public enum WhisperLoader {
     public enum LoadError: Error, CustomStringConvertible {
         case missingFile(String)
         case badConfig(String)
+        /// Short fixed text safe for a client body; nil when the failure
+        /// carries free-form detail that stays in the server log.
+        public var clientCause: String? {
+            if case .missingFile = self { return description }
+            return nil
+        }
         public var description: String {
             switch self {
             case .missingFile(let f): return "whisper: missing \(f)"

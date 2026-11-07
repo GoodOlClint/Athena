@@ -1,4 +1,5 @@
 import AthenaCore
+import AthenaTranscription
 import Foundation
 import XCTest
 
@@ -157,12 +158,13 @@ final class WeightFilesTests: XCTestCase {
 
     func testClientMessageKeepsCauseWhenModelNamed() {
         let e = AthenaError.moduleLoadFailed(
-            .transcription, reason: "/secret/path", cause: "whisper: missing weights.safetensors")
-        let m = e.clientMessage(model: "whisper-large-v3-fp16")
+            .transcription, model: "whisper-large-v3-fp16", reason: "/secret/path",
+            cause: "whisper: missing weights.safetensors")
+        let m = e.clientMessage
         XCTAssertTrue(m.contains("missing weights.safetensors"))
         XCTAssertFalse(m.contains("/secret/path"))
         XCTAssertEqual(
-            AthenaError.moduleLoadFailed(.llm, reason: "x").clientMessage(model: "m"),
+            AthenaError.moduleLoadFailed(.llm, model: "m", reason: "x").clientMessage,
             "Module llm failed to load model 'm'.")
     }
 
@@ -170,5 +172,45 @@ final class WeightFilesTests: XCTestCase {
         XCTAssertEqual(
             AthenaError.moduleLoadFailed(.llm, reason: "x").message,
             "Module llm failed to load.")
+    }
+}
+
+extension WeightFilesTests {
+    func testBadConfigHasNoClientCauseButMissingFileDoes() {
+        XCTAssertNil(WhisperLoader.LoadError.badConfig("keyNotFound(\"n_vocab\")").clientCause)
+        XCTAssertEqual(
+            WhisperLoader.LoadError.missingFile("weights.safetensors").clientCause,
+            "whisper: missing weights.safetensors")
+    }
+
+    func testPruneKeepsWhisperDirsThatOnlyVerifyFlags() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("wfprune-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fm = FileManager.default
+        for name in ["foo-only", "sharded"] {
+            let d = root.appendingPathComponent(name, isDirectory: true)
+            try fm.createDirectory(at: d, withIntermediateDirectories: true)
+            try Data(#"{"model_type":"whisper","n_vocab":51866}"#.utf8)
+                .write(to: d.appendingPathComponent("config.json"))
+        }
+        try writeSafetensors(
+            to: root.appendingPathComponent("foo-only/foo.safetensors"))
+        try writeSafetensors(
+            to: root.appendingPathComponent("sharded/model-00001-of-00002.safetensors"))
+        try writeSafetensors(
+            to: root.appendingPathComponent("sharded/model-00002-of-00002.safetensors"))
+        try Data(
+            #"{"weight_map":{"a":"model-00001-of-00002.safetensors","b":"model-00002-of-00002.safetensors"}}"#
+                .utf8
+        ).write(to: root.appendingPathComponent("sharded/model.safetensors.index.json"))
+
+        XCTAssertFalse(
+            ModelHealth.check(root.appendingPathComponent("foo-only")).isEmpty,
+            "verify still flags it")
+        let r = try ModelStoreOps.prune(root: root, dryRun: false)
+        XCTAssertTrue(r.victims.isEmpty, "prune must not newly select \(r.victims)")
+        XCTAssertTrue(fm.fileExists(atPath: root.appendingPathComponent("foo-only").path))
+        XCTAssertTrue(fm.fileExists(atPath: root.appendingPathComponent("sharded").path))
     }
 }

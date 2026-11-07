@@ -227,7 +227,7 @@ enum OpenAPISpec {
               "post": {
                 "tags": ["Embeddings"],
                 "summary": "Create embeddings.",
-                "description": "OpenAI-compatible. `input` is a string or array of strings. Requires `inference`.",
+                "description": "OpenAI-compatible. `input` is a string or array of strings. Each input must fit the model position table (e.g. 512 tokens for BERT-family models), capped at 32768 tokens; longer input is rejected with 400 `input_too_long` naming the limit rather than silently truncated. A stored embedding checkpoint whose packaging the loader cannot read (e.g. backbone weights without the `model.` key prefix) is refused with 400 `unsupported_embedding_model` naming the requirement. Requires `inference`.",
                 "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmbeddingRequest" } } } },
                 "responses": {
                   "200": { "description": "Embeddings.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmbeddingResponse" } } } },
@@ -540,7 +540,7 @@ enum OpenAPISpec {
               "post": {
                 "tags": ["Model store"],
                 "summary": "Pull a model from Hugging Face (synchronous, SSE progress).",
-                "description": "Athena-native (ADR 025 S2): runs synchronously and streams Server-Sent Events directly — no async queue, no job id. Frames (all additive; unknown `event`s are ignored by older clients): aggregate `{\"event\":\"progress\",\"fraction\":F,\"bytes\":B,\"total\":T}`, per-shard `{\"event\":\"file\",\"name\",\"index\",\"count\",\"bytes\",\"total\",\"done\"}` (throttled ~500ms/1% per file), then a terminal `{\"event\":\"done\",\"result\":{…}}` or `{\"event\":\"error\",\"error\":{message,type,code}}`, ending with `[DONE]`. Requires `model.write`. A repo whose file listing has no weights Athena can load (no `*.safetensors`, or for Whisper neither `weights.safetensors` nor `model.safetensors`; e.g. `.npz`-only) is refused before any download: the terminal `error` event names the cause and no store entry is written.",
+                "description": "Athena-native (ADR 025 S2): runs synchronously and streams Server-Sent Events directly — no async queue, no job id. Frames (all additive; unknown `event`s are ignored by older clients): aggregate `{\"event\":\"progress\",\"fraction\":F,\"bytes\":B,\"total\":T}`, per-shard `{\"event\":\"file\",\"name\",\"index\",\"count\",\"bytes\",\"total\",\"done\"}` (throttled ~500ms/1% per file), then a terminal `{\"event\":\"done\",\"result\":{…}}` or `{\"event\":\"error\",\"error\":{message,type,code}}`, ending with `[DONE]`. Requires `model.write`. A repo whose file listing has no weights Athena can load (no `*.safetensors`, or for Whisper neither `weights.safetensors` nor `model.safetensors`; e.g. `.npz`-only) is refused before any download: the terminal `error` event (`type` `invalid_request_error`, `code` `no_loadable_weights`) names the cause and no store entry is written.",
                 "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ModelPullRequest" } } } },
                 "responses": {
                   "200": { "description": "SSE stream of progress + terminal event.", "content": { "text/event-stream": { "schema": { "type": "string" } } } },

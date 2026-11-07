@@ -29,7 +29,7 @@ a packaging check, distinct from family, that asks whether the fields the
 | transcription / whisper | `model_type: whisper` **and** `n_vocab == 51866` (the decoder is pinned to the large-v3 family) |
 | transcription / parakeet | the NeMo `joint.vocabulary` array is present (a transformers-format Parakeet without it is **not** loadable) |
 | diarization | a Sortformer or pyannote-segmentation `model_type` |
-| embedding | sentence-transformers markers or an embedder-only `model_type` |
+| embedding | sentence-transformers markers or an embedder-only `model_type`; a `gemma3_text` export must also carry its backbone weights under the `model.` key prefix (the upstream sentence-transformers layout stores them at the top level and is **not** loadable: `400 unsupported_embedding_model`). `pull --check` is config-only and cannot see weight keys, so this one is refused at load, not at preflight |
 | speaker-embedding | a WeSpeaker `model_type` |
 | generative / vision | **best-effort** — classified, but architecture coverage is inherited from the substrate, so loadability is `unknown` (the loader is the authority) |
 
