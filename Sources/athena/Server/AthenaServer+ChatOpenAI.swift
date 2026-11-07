@@ -354,8 +354,8 @@ extension AthenaServer {
                 llm.generateMetered(native)
             }
         } catch let e as AthenaError {
-            // M33.1: the only AthenaError collectMetered raises is the
-            // per-request timeout → classified 504.
+            // Classified errors: the M33.1 per-request timeout (504) and any
+            // `.error` chunk the module yielded (e.g. rejected tool call, 502).
             return Self.error(
                 status: HTTPResponse.Status(code: e.httpStatus),
                 message: e.message, type: "server_error", code: e.code)
